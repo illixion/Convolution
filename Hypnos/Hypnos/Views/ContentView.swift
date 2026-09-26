@@ -160,6 +160,8 @@ struct ContentView: View {
             VideosTabView()
         case .albums:
             AlbumsTabView()
+        case .library:
+            LibraryHomePlaceholderView()
         case .filters:
             FiltersTabView()
         case .windows:

@@ -43,21 +43,41 @@ final class FilmSession {
 
     private init() {}
 
+    /// Whether a Jellyfin server is configured at all — the gate for
+    /// showing the Library tab (hidden until this is true, per the Library
+    /// feature's decision #3) on every platform.
+    var isConfigured: Bool {
+        !server.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// Jellyfin's `X-Emby-Token` header accepts a signed-in session's access
+    /// token exactly the same way it accepts a plain API key, so a signed-in
+    /// user needs no separate token here — prefer that session (it's what
+    /// makes watch-progress reporting work at all, see
+    /// `JellyfinServerSection`'s header comment) and fall back to the manual
+    /// API key.
+    private var effectiveToken: String? {
+        if let sessionToken = JellyfinAuth.shared.session?.accessToken, !sessionToken.isEmpty {
+            return sessionToken
+        }
+        return apiKey.isEmpty ? nil : apiKey
+    }
+
     private var serverURL: URL? {
         let trimmed = server.trimmingCharacters(in: .whitespaces)
-        guard !apiKey.isEmpty,
+        guard effectiveToken != nil,
               let url = URL(string: trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed),
               url.scheme != nil else { return nil }
         return url
     }
 
     func search(_ term: String) async {
-        guard let serverURL else {
-            error = "Set the Jellyfin server URL and API key first."
+        guard let serverURL, let token = effectiveToken else {
+            error = "Set the Jellyfin server URL, then sign in or set an API key."
             return
         }
         do {
-            searchResults = try await FilmServerClient.search(baseURL: serverURL, token: apiKey, term: term)
+            searchResults = try await FilmServerClient.search(baseURL: serverURL, token: token, term: term)
             error = searchResults.isEmpty ? "No items match “\(term)”." : nil
         } catch {
             self.error = error.localizedDescription
@@ -66,11 +86,11 @@ final class FilmSession {
 
     /// Loads `item` into the player. True when its picture is ready to play.
     func load(_ item: FilmLibraryItem) async -> Bool {
-        guard let serverURL, !isLoading else { return false }
+        guard let serverURL, let token = effectiveToken, !isLoading else { return false }
         isLoading = true
         error = nil
         defer { isLoading = false }
-        await player.load(FilmServerClient(baseURL: serverURL, token: apiKey, itemID: item.id))
+        await player.load(FilmServerClient(baseURL: serverURL, token: token, itemID: item.id))
         guard player.video.index != nil else {
             error = player.video.status
             return false
@@ -78,5 +98,13 @@ final class FilmSession {
         loadedItem = item
         AppLogger.filmPlayer.info("Loaded \(item.name, privacy: .public): \(self.player.video.formatSummary, privacy: .public); audio \(self.player.audioStatus, privacy: .public)")
         return true
+    }
+
+    /// Loads a Library-tab item directly by its Jellyfin id, without going
+    /// through `search` first — the Library detail page knows exactly which
+    /// item to play. `name`/`productionYear` are for display only (the
+    /// tuning section's title, the log line above).
+    func load(itemId: String, name: String, productionYear: Int?) async -> Bool {
+        await load(FilmLibraryItem(id: itemId, name: name, productionYear: productionYear))
     }
 }

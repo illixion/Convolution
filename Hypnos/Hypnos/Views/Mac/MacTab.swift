@@ -17,7 +17,7 @@ enum MacTab: String, CaseIterable, Identifiable {
     case pictures = "Pictures"
     case videos = "Videos"
     case albums = "Albums"
-    case films = "Films"
+    case library = "Library"
     case settings = "Settings"
 
     var id: String { rawValue }
@@ -27,7 +27,7 @@ enum MacTab: String, CaseIterable, Identifiable {
         case .pictures: return "photo.on.rectangle.angled"
         case .videos: return "video"
         case .albums: return "square.stack"
-        case .films: return "film"
+        case .library: return "rectangle.stack.badge.play"
         case .settings: return "gearshape"
         }
     }

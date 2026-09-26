@@ -8,7 +8,7 @@
  Deliberately not a port of `ContentView`: that view's tabs, ornament and
  gestures are all touch/gaze-shaped (see `Hypnos/CLAUDE.md` "tvOS" for what's
  excluded and why). This is a fresh, small root built for a Siri Remote:
- five tabs (Pictures, Videos, Albums, Films, Settings), no developer tabs,
+ five tabs (Pictures, Videos, Albums, Library, Settings), no developer tabs,
  no Windows tab (nothing to summon — tvOS has one scene), no Filters tab
  (nothing there to filter by yet on a remote-driven grid).
  */
@@ -42,9 +42,16 @@ struct TVRootView: View {
         #endif
     }
 
+    /// Hidden until a Jellyfin server is configured — see the Library
+    /// feature's decision #3, same gate `MainTabCatalog` applies on
+    /// visionOS/iOS.
+    private var visibleTabs: [TVTab] {
+        TVTab.allCases.filter { $0 != .library || FilmSession.shared.isConfigured }
+    }
+
     var body: some View {
         TabView(selection: $selectedTab) {
-            ForEach(TVTab.allCases) { tab in
+            ForEach(visibleTabs) { tab in
                 tabContent(tab)
                     .tag(tab)
                     .tabItem {
@@ -69,8 +76,8 @@ struct TVRootView: View {
             TVVideosTabView()
         case .albums:
             TVAlbumsTabView(selectedTab: $selectedTab)
-        case .films:
-            TVFilmsTabView()
+        case .library:
+            LibraryHomePlaceholderView()
         case .settings:
             TVSettingsView()
         }

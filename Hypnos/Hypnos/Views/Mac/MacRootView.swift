@@ -39,9 +39,15 @@ struct MacRootView: View {
         #endif
     }
 
+    /// Hidden until a Jellyfin server is configured — see the Library
+    /// feature's decision #3, same gate tvOS/visionOS/iOS apply.
+    private var visibleTabs: [MacTab] {
+        MacTab.allCases.filter { $0 != .library || FilmSession.shared.isConfigured }
+    }
+
     var body: some View {
         NavigationSplitView {
-            List(MacTab.allCases, selection: $selection) { tab in
+            List(visibleTabs, selection: $selection) { tab in
                 Label(tab.rawValue, systemImage: tab.systemImage)
                     .tag(tab)
             }
@@ -70,8 +76,8 @@ struct MacRootView: View {
             MacVideosView()
         case .albums:
             MacAlbumsView(selection: $selection)
-        case .films:
-            MacFilmsView()
+        case .library:
+            LibraryHomePlaceholderView()
         case .settings:
             MacSettingsView()
         }

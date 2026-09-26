@@ -18,7 +18,7 @@ enum TVTab: String, CaseIterable, Identifiable {
     case pictures = "Pictures"
     case videos = "Videos"
     case albums = "Albums"
-    case films = "Films"
+    case library = "Library"
     case settings = "Settings"
 
     var id: String { rawValue }
@@ -28,7 +28,7 @@ enum TVTab: String, CaseIterable, Identifiable {
         case .pictures: return "photo.stack"
         case .videos: return "video"
         case .albums: return "rectangle.stack"
-        case .films: return "film"
+        case .library: return "rectangle.stack.badge.play"
         case .settings: return "gearshape"
         }
     }

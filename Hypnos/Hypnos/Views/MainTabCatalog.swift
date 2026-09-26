@@ -11,12 +11,16 @@ import SwiftUI
 @MainActor
 enum MainTabCatalog {
     /// Display order of every tab, before per-state filtering.
-    static let orderedTabs: [Tab] = [.pictures, .videos, .albums, .remote, .filters, .windows, .console, .settings]
+    static let orderedTabs: [Tab] = [.pictures, .videos, .albums, .library, .remote, .filters, .windows, .console, .settings]
 
     /// The tabs to show for the current app state.
     static func visibleTabs(appModel: AppModel) -> [Tab] {
         orderedTabs.filter { tab in
             switch tab {
+            case .library:
+                // Hidden until a Jellyfin server is configured — see the
+                // Library feature's decision #3.
+                return FilmSession.shared.isConfigured
             case .remote:
                 return appModel.enableRemoteViewer
             case .console:
@@ -73,7 +77,7 @@ enum MainTabCatalog {
         // button belongs there rather than here. That includes the Local
         // library's folder browser, which offers its own per-folder
         // "Play Slideshow" control in context instead.
-        case .albums, .filters, .windows, .settings, .remote, .console:
+        case .albums, .library, .filters, .windows, .settings, .remote, .console:
             return nil
         }
     }

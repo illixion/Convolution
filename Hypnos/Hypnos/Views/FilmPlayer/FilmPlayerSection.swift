@@ -1,10 +1,16 @@
 /*
- Hypnos - Film Player (Settings → Developer)
+ Hypnos - Film Player tuning (Settings → Developer)
 
- Finds a film on a Jellyfin server running the Atmos Objects plugin and
- opens `FilmPlayerView`: its own window on visionOS, with tuning kept here
- beside it, or a tool sheet on iOS (via `IOSWindowRouter`) that holds the
- tuning itself.
+ The server address, sign-in and film search that used to live here moved to
+ `JellyfinServerSection` (server config) and the Library tab (browsing and
+ opening a film) once those existed — see decision #3 in the Library
+ feature's brief: "the Film Player tuning controls that live in
+ FilmPlayerSection should move somewhere sensible... don't lose them." What's
+ left is exactly that: the listener-distance/map tuning
+ (`FilmTuning`/`FilmTelemetry`) for whichever film the Library tab has open,
+ plus a manual Open/Close in case a window needs recovering. `FilmSession`
+ itself (the loaded item, the player) is unchanged — this view just no
+ longer decides what gets loaded into it.
  */
 
 import RAVEFilm
@@ -12,80 +18,43 @@ import SwiftUI
 
 struct FilmPlayerSection: View {
     @Bindable private var session = FilmSession.shared
-    @State private var searchTerm = ""
     @OpenWindowProxy private var openWindow
     @DismissWindowProxy private var dismissWindow
 
     var body: some View {
-        Section("Film Player") {
-            TextField("Server (https://host/jellyfin)", text: $session.server)
-                .textContentType(.URL)
-                #if !os(macOS)
-                .keyboardType(.URL)
-                #endif
-                #if !os(macOS)
-                .textInputAutocapitalization(.never)
-                #endif
-                .autocorrectionDisabled()
-            SecureField("API key", text: $session.apiKey)
-            HStack {
-                TextField("Search films", text: $searchTerm)
-                    .autocorrectionDisabled()
-                    .onSubmit { Task { await session.search(searchTerm) } }
-                Button("Search") { Task { await session.search(searchTerm) } }
-                    .disabled(searchTerm.isEmpty)
-            }
-            ForEach(session.searchResults) { item in
-                Button {
-                    Task { await open(item) }
-                } label: {
-                    HStack {
-                        Text(item.name)
-                        if let year = item.productionYear {
-                            Text(String(year)).foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        if session.loadedItem == item {
-                            Image(systemName: "play.rectangle.fill")
-                        }
+        Section("Film Player Tuning") {
+            if let item = session.loadedItem {
+                HStack {
+                    Text(item.name)
+                    Spacer()
+                    Button {
+                        session.isPlayerOpen ? closePlayer() : openPlayer()
+                    } label: {
+                        Label(session.isPlayerOpen ? "Close Player" : "Open Player",
+                              systemImage: session.isPlayerOpen ? "xmark.circle" : "play.rectangle")
                     }
                 }
-                .disabled(session.isLoading)
+
+                #if os(visionOS)
+                if session.isPlayerOpen {
+                    FilmTuning()
+                    FilmTelemetry(player: session.player)
+                }
+                #endif
+            } else {
+                Text("Play a film from the Library tab to tune it here.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
-            if session.isLoading {
-                Text("Loading…").font(.caption.monospaced()).foregroundColor(.secondary)
-            }
             if let error = session.error {
                 Text(error).font(.caption).foregroundColor(.red)
             }
 
-            if session.loadedItem != nil {
-                Button {
-                    session.isPlayerOpen ? closePlayer() : openPlayer()
-                } label: {
-                    Label(session.isPlayerOpen ? "Close Player" : "Open Player",
-                          systemImage: session.isPlayerOpen ? "xmark.circle" : "play.rectangle")
-                }
-            }
-
-            #if os(visionOS)
-            if session.isPlayerOpen {
-                FilmTuning()
-                FilmTelemetry(player: session.player)
-            }
-            #endif
-
-            Text("Plays the film's picture (HDR and Dolby Vision through the system decoder) with its Atmos objects as spatial sources in a virtual room around you, the screen as its front wall, on one clock. Needs the Atmos Objects plugin on the Jellyfin server; films without an Atmos track play picture only.")
+            Text("Plays the film's picture (HDR and Dolby Vision through the system decoder) with its Atmos objects as spatial sources in a virtual room around you, the screen as its front wall, on one clock. Needs the Atmos Objects plugin on the Jellyfin server; films without an Atmos track play through the Library's own generic player instead.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
-    }
-
-    private func open(_ item: FilmLibraryItem) async {
-        closePlayer()
-        guard await session.load(item) else { return }
-        openPlayer()
     }
 
     private func openPlayer() {

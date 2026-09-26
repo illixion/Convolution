@@ -243,6 +243,8 @@ struct SettingsTabView: View {
                     windowGroupsSection
                 }
 
+                JellyfinServerSection()
+
                 Section("Photo Library") {
                     switch PhotosAuthorization.status {
                     case .authorized:

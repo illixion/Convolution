@@ -35,6 +35,8 @@ struct TVSettingsView: View {
                     }
                 }
 
+                JellyfinServerSection()
+
                 Section {
                     Text("Browse and convert files placed in this app's Documents folder. Always available alongside Photos and any media server.")
                         .font(.caption)

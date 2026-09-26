@@ -201,7 +201,7 @@ struct TabBarOrnament: View {
         // button belongs there rather than here. That includes the Local
         // library's folder browser, which offers its own per-folder
         // "Play Slideshow" control in context instead.
-        case .albums, .filters, .windows, .settings, .remote, .console:
+        case .albums, .library, .filters, .windows, .settings, .remote, .console:
             return nil
         }
     }
