@@ -119,7 +119,13 @@ public sealed partial class AtmosSceneService
 
     private string CompletePath(Guid itemId) => Path.Combine(ItemDirectory(itemId), "complete");
 
-    private string UnsupportedPath(Guid itemId) => Path.Combine(ItemDirectory(itemId), "unsupported.txt");
+    /// <summary>
+    /// The cached "no Atmos here" verdict. The name carries the set of decoders
+    /// that reached it, so a plugin that learns a new format retries instead of
+    /// trusting an older verdict: <c>unsupported.txt</c> was written when only
+    /// TrueHD was decoded, and marked every EAC3-only film unsupported.
+    /// </summary>
+    private string UnsupportedPath(Guid itemId) => Path.Combine(ItemDirectory(itemId), "unsupported-truehd-eac3.txt");
 
     // MARK: Client entry points
 

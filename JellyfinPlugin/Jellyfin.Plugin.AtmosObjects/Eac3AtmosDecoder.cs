@@ -82,9 +82,10 @@ public sealed partial class AtmosSceneService
         using var ffmpeg = StartProcess(_mediaEncoder.EncoderPath, ffmpegArgs, redirectInput: false);
         using var kill = ct.Register(() => TryKill(ffmpeg));
         var ffmpegErr = ffmpeg.StandardError.ReadToEndAsync(CancellationToken.None);
+        var cut = new FullReadStream(ffmpeg.StandardOutput.BaseStream);
         try
         {
-            var outcome = await DecodeEac3Async(itemId, state, source, session, ffmpeg.StandardOutput.BaseStream, landingMs, atStreamStart, targetSeconds, segmentFrames, ct)
+            var outcome = await DecodeEac3Async(itemId, state, source, session, cut, landingMs, atStreamStart, targetSeconds, segmentFrames, ct)
                 .ConfigureAwait(false);
             _logger.LogInformation("Atmos (EAC3) session for {ItemId}: {Outcome} at segment {Segment}", itemId, outcome, session.NextSegment);
 
@@ -95,6 +96,14 @@ public sealed partial class AtmosSceneService
             }
 
             await ffmpeg.WaitForExitAsync(ct).ConfigureAwait(false);
+            if (outcome == AudioOutcome.NoObjects && cut.BytesRead == 0)
+            {
+                // An empty cut means ffmpeg never produced the track (a missing
+                // file, say), which Cavern also reports as no objects. That is an
+                // error to retry later, not a verdict to cache.
+                throw new InvalidOperationException($"ffmpeg produced no EAC3 data (exit {ffmpeg.ExitCode}): {(await ffmpegErr.ConfigureAwait(false)).Trim()}");
+            }
+
             if (outcome == AudioOutcome.Finished && ffmpeg.ExitCode != 0)
             {
                 // A failed cut also ends the pipe early, which would otherwise read as the end of the film.
@@ -118,14 +127,14 @@ public sealed partial class AtmosSceneService
     /// discarding <see cref="Eac3PrerollSeconds"/> of warm-up audio first.
     /// </summary>
     private async Task<AudioOutcome> DecodeEac3Async(
-        Guid itemId, ItemState state, ItemSource source, LiveSession session, Stream ec3,
+        Guid itemId, ItemState state, ItemSource source, LiveSession session, FullReadStream ec3,
         double landingMs, bool atStreamStart, double targetSeconds, int segmentFrames, CancellationToken ct)
     {
         // Built directly rather than through AudioReader.Open, which wants a
         // seekable stream to size the file. Without a length the decoder can't
         // seek, which a live cut never needs, and reports its end through
         // Finished instead.
-        var decoder = new EnhancedAC3Decoder(BlockBuffer<byte>.Create(new FullReadStream(ec3), 4096));
+        var decoder = new EnhancedAC3Decoder(BlockBuffer<byte>.Create(ec3, 4096));
         var renderer = new EnhancedAC3Renderer(decoder);
 
         // Deliberately not `using (renderer)`: a plain (non-JOC) E-AC-3 track
@@ -362,6 +371,9 @@ public sealed class CavernEventStream : ISceneEventSource
 /// </summary>
 internal sealed class FullReadStream(Stream inner) : Stream
 {
+    /// <summary>Bytes returned so far; 0 after the decoder gave up means the input was empty.</summary>
+    public long BytesRead { get; private set; }
+
     public override bool CanRead => true;
 
     public override bool CanSeek => false;
@@ -390,6 +402,7 @@ internal sealed class FullReadStream(Stream inner) : Stream
             total += read;
         }
 
+        BytesRead += total;
         return total;
     }
 
