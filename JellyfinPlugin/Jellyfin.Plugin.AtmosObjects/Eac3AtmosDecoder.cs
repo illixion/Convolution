@@ -65,21 +65,26 @@ public sealed partial class AtmosSceneService
             "Atmos (EAC3) session for {ItemId}: segment {Segment}, seek {Seek:F1} s, to end {ToEnd}",
             itemId, session.FirstSegment, seekSeconds, session.ToEnd);
 
-        // ffprobe's own seek lands on the same packet ffmpeg's stream copy
-        // below will start from (same demuxer, same seek), so this is the
-        // exact container time the cut begins at. The raw .ec3 elementary
-        // stream ffmpeg writes carries no timestamps of its own to read this
-        // back from afterwards, unlike the Matroska cut the TrueHD path takes.
-        var landingMs = atStreamStart ? source.OriginMs : ProbePacketTimeMs(source.Path, source.StreamIndex, seekSeconds);
-
-        var ffmpegArgs = new List<string> { "-v", "error", "-nostdin" };
+        // The raw .ec3 stream ffmpeg writes carries no timestamps, so a first
+        // ffmpeg run with the same input arguments, stopped after one packet,
+        // reports where the cut lands. Both keep -copyts so they select the
+        // same packets; ffprobe can't stand in for this, as its -read_intervals
+        // seek read linearly through a 4K Matroska file on servo's USB disk
+        // (over 90 s for a seek to 34 minutes, against about 1 s here).
+        var inputArgs = new List<string> { "-v", "error", "-nostdin" };
         if (!atStreamStart)
         {
-            ffmpegArgs.AddRange(["-ss", seekSeconds.ToString("F3", CultureInfo.InvariantCulture)]);
+            inputArgs.AddRange(["-ss", seekSeconds.ToString("F3", CultureInfo.InvariantCulture)]);
         }
 
-        ffmpegArgs.AddRange(["-i", source.Path, "-map", $"0:{source.StreamIndex}", "-c", "copy", "-f", "eac3", "-"]);
-        using var ffmpeg = StartProcess(_mediaEncoder.EncoderPath, ffmpegArgs, redirectInput: false);
+        inputArgs.AddRange(["-copyts", "-i", source.Path, "-map", $"0:{source.StreamIndex}", "-c", "copy"]);
+        var landingMs = atStreamStart ? source.OriginMs : await ProbeCutStartMsAsync(inputArgs, ct).ConfigureAwait(false);
+        if (double.IsNaN(landingMs))
+        {
+            throw new InvalidOperationException($"ffmpeg reported no EAC3 packet after seeking to {seekSeconds:F1} s.");
+        }
+
+        using var ffmpeg = StartProcess(_mediaEncoder.EncoderPath, [.. inputArgs, "-f", "eac3", "-"], redirectInput: false);
         using var kill = ct.Register(() => TryKill(ffmpeg));
         var ffmpegErr = ffmpeg.StandardError.ReadToEndAsync(CancellationToken.None);
         var cut = new FullReadStream(ffmpeg.StandardOutput.BaseStream);
@@ -98,6 +103,9 @@ public sealed partial class AtmosSceneService
             await ffmpeg.WaitForExitAsync(ct).ConfigureAwait(false);
             if (outcome == AudioOutcome.NoObjects && cut.BytesRead == 0)
             {
+                // A newer seek cancelled this session and killed ffmpeg before it wrote anything.
+                ct.ThrowIfCancellationRequested();
+
                 // An empty cut means ffmpeg never produced the track (a missing
                 // file, say), which Cavern also reports as no objects. That is an
                 // error to retry later, not a verdict to cache.
@@ -120,6 +128,39 @@ public sealed partial class AtmosSceneService
             TryKill(ffmpeg);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Container time, in ms, of the first packet a cut with these input
+    /// arguments starts from, read from one packet of ffmpeg's framecrc output
+    /// (<c>#tb 0: num/den</c>, then <c>stream, dts, pts, duration, size, crc</c>).
+    /// NaN if ffmpeg printed no packet.
+    /// </summary>
+    private async Task<double> ProbeCutStartMsAsync(List<string> inputArgs, CancellationToken ct)
+    {
+        using var probe = StartProcess(_mediaEncoder.EncoderPath, [.. inputArgs, "-frames:0", "1", "-f", "framecrc", "-"], redirectInput: false);
+        using var kill = ct.Register(() => TryKill(probe));
+        var errors = probe.StandardError.ReadToEndAsync(CancellationToken.None);
+        var output = await probe.StandardOutput.ReadToEndAsync(ct).ConfigureAwait(false);
+        await probe.WaitForExitAsync(ct).ConfigureAwait(false);
+        _ = await errors.ConfigureAwait(false);
+
+        double timeBase = double.NaN;
+        foreach (var line in output.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (line.StartsWith("#tb 0:", StringComparison.Ordinal))
+            {
+                var parts = line[6..].Trim().Split('/');
+                timeBase = double.Parse(parts[0], CultureInfo.InvariantCulture) / double.Parse(parts[1], CultureInfo.InvariantCulture);
+            }
+            else if (!line.StartsWith('#') && !double.IsNaN(timeBase))
+            {
+                var fields = line.Split(',', StringSplitOptions.TrimEntries);
+                return double.Parse(fields[2], CultureInfo.InvariantCulture) * timeBase * 1000;
+            }
+        }
+
+        return double.NaN;
     }
 
     /// <summary>

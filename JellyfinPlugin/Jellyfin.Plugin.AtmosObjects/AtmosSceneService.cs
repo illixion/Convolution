@@ -994,26 +994,12 @@ public sealed partial class AtmosSceneService
     }
 
     /// <summary>Timestamp of the track's first packet: scene frame 0.</summary>
-    private double ProbeOriginMs(string mediaPath, int streamIndex) => ProbePacketTimeMs(mediaPath, streamIndex, 0);
-
-    /// <summary>
-    /// Timestamp of the first packet ffprobe reads after seeking to
-    /// <paramref name="seekSeconds"/>. ffmpeg's own <c>-ss</c> input seek (used to
-    /// cut the EAC3 stream for Cavern, see <c>Eac3AtmosDecoder.cs</c>) lands on the
-    /// same packet, since both go through the same demuxer's seek — this is how the
-    /// EAC3 path learns the container time its extract actually starts at, the way
-    /// <see cref="StartSolver"/> does it for TrueHD from packet timestamps instead.
-    /// </summary>
-    private double ProbePacketTimeMs(string mediaPath, int streamIndex, double seekSeconds)
+    private double ProbeOriginMs(string mediaPath, int streamIndex)
     {
-        // ffprobe has no -ss (it fails with "Option not found" and prints
-        // nothing); the seek goes in -read_intervals, which seeks the demuxer
-        // the same way ffmpeg's input -ss does.
-        var interval = (seekSeconds > 0 ? seekSeconds.ToString("F3", CultureInfo.InvariantCulture) : string.Empty) + "%+#1";
         var args = new List<string>
         {
             "-v", "error", "-i", mediaPath, "-select_streams", streamIndex.ToString(CultureInfo.InvariantCulture),
-            "-read_intervals", interval, "-show_entries", "packet=pts_time", "-of", "csv=p=0"
+            "-read_intervals", "%+#1", "-show_entries", "packet=pts_time", "-of", "csv=p=0"
         };
         using var process = StartProcess(_mediaEncoder.ProbePath, args, redirectInput: false);
         var output = process.StandardOutput.ReadToEnd();
