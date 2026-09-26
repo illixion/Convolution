@@ -126,6 +126,12 @@ private struct AtmosItemState: Decodable {
     let state: String  // none | partial | preparing | ready | unsupported | failed
 }
 
+/// Just enough of the Atmos Scene response to prove it decoded — used only
+/// to force a real has-objects probe (see `hasAtmosObjects`), never read.
+private struct AtmosSceneProbe: Decodable {
+    let sampleRate: Int
+}
+
 /// `MediaServerLibrary` backed by a Jellyfin server. Holds no UI state of
 /// its own — `server`/auth live in `FilmSession`/`JellyfinAuth`, which the
 /// app constructs this from.
@@ -172,11 +178,11 @@ actor JellyfinLibrary: MediaServerLibrary {
             .init(name: "userId", value: userId),
             .init(name: "Limit", value: "12"),
         ])
-        async let recentMovies = fetchItems(path: "Users/\(userId)/Items/Latest", query: [
+        async let recentMovies = fetchLatestItems(userId: userId, query: [
             .init(name: "IncludeItemTypes", value: "Movie"),
             .init(name: "Limit", value: "16"),
         ])
-        async let recentShows = fetchItems(path: "Users/\(userId)/Items/Latest", query: [
+        async let recentShows = fetchLatestItems(userId: userId, query: [
             .init(name: "IncludeItemTypes", value: "Series"),
             .init(name: "Limit", value: "16"),
         ])
@@ -280,13 +286,50 @@ actor JellyfinLibrary: MediaServerLibrary {
 
     // MARK: - Playback routing
 
+    /// Whether the Atmos Objects plugin can serve object audio for `itemId`.
+    ///
+    /// `GET /AtmosObjects/{id}`'s state stays `"none"` until something has
+    /// actually asked the plugin to look — confirmed directly against the
+    /// dev instance: an untouched item (Atmos or not) always reads back
+    /// `"none"`, so trusting that passive state alone would route *every*
+    /// unprobed item to the Atmos player, Atmos or not. `"none"` therefore
+    /// forces one real probe (`GET .../Scene?startSeconds=0`, confirmed cheap
+    /// — ~0.1s on the dev instance either way, since a real decode only
+    /// starts once a video segment is actually requested): 422 means the
+    /// track has no objects, 200 means it does, and either way the plugin
+    /// remembers the result so this item never needs re-probing. A
+    /// non-`"none"` state (`partial`/`preparing`/`ready`) is trusted as-is;
+    /// `"unsupported"` and `"failed"` both fall back to the generic player —
+    /// `"failed"` too, since handing playback to a path that already failed
+    /// once is worse than a safe fallback.
+    private func hasAtmosObjects(itemId: String) async -> Bool {
+        guard let state = try? await get("AtmosObjects/\(itemId)", as: AtmosItemState.self) else {
+            return false
+        }
+        switch state.state {
+        case "none":
+            do {
+                _ = try await get("AtmosObjects/\(itemId)/Scene", query: [.init(name: "startSeconds", value: "0")]) as AtmosSceneProbe
+                return true
+            } catch {
+                return false
+            }
+        case "unsupported", "failed":
+            return false
+        default:
+            return true
+        }
+    }
+
     func playbackRoute(for item: LibraryItem) async throws -> PlaybackRoute {
-        if let atmosState = try? await get("AtmosObjects/\(item.id)", as: AtmosItemState.self),
-           atmosState.state != "unsupported" {
+        if await hasAtmosObjects(itemId: item.id) {
             return .atmosFilmPlayer
         }
 
-        let directURL = baseURL.appending(path: "Items/\(item.id)/stream")
+        // Confirmed directly against the dev instance: `/Items/{id}/stream`
+        // (as opposed to `/Videos/{id}/stream`) is a flat 404 — Jellyfin's
+        // direct-play route lives under `Videos`, not `Items`.
+        let directURL = baseURL.appending(path: "Videos/\(item.id)/stream")
             .appending(queryItems: [
                 .init(name: "static", value: "true"),
                 .init(name: "api_key", value: authHeaderToken),
@@ -374,6 +417,16 @@ actor JellyfinLibrary: MediaServerLibrary {
     private func fetchItems(path: String, query: [URLQueryItem]) async throws -> [LibraryItem] {
         let page: JFPage = try await get(path, query: query)
         return page.Items.map(LibraryItem.init)
+    }
+
+    /// `Users/{id}/Items/Latest` is the one item-listing endpoint that
+    /// doesn't share the `{"Items": [...]}` envelope every other one uses —
+    /// confirmed directly against the dev instance, it's a bare JSON array.
+    /// Decoding it as `JFPage` throws a "found an array, expected a
+    /// dictionary" error, so it gets its own fetch.
+    private func fetchLatestItems(userId: String, query: [URLQueryItem]) async throws -> [LibraryItem] {
+        let items: [JFItem] = try await get("Users/\(userId)/Items/Latest", query: query)
+        return items.map(LibraryItem.init)
     }
 
     private func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {

@@ -926,6 +926,70 @@ Jellyfin's own startup-wizard endpoints (`/Startup/*`) are flaky for a few secon
 
 Coordinate mapping and end-to-end verification against this dev instance (TrueHD vs EAC3, elevated-object positions, decode speed) are written up in `JellyfinPlugin/README.md`.
 
+## Library feature dev data (movies, a TV show, genres, watch state)
+
+Beyond the three Atmos-plugin items above, `seed_synthetic_library` (called
+from `seed_media`) seeds a second, fully offline slice of the same instance
+for the Library feature: four more movies (`Crimson Tide Station`/Action,
+`Paper Moon Diner`/Comedy, `The Quiet Ledger`/Drama, `Wide Static Field`/
+Sci-Fi — deliberately a WebM/VP9 mux, since AVFoundation can't parse that
+*container* at all regardless of codec, so this is the one item guaranteed
+to force Hypnos's HLS-transcode fallback rather than direct play) and one
+series, **Nebula Drift** (2 seasons × 3 episodes). Each gets a real Kodi-style
+NFO (`write_movie_nfo`/`write_tvshow_nfo`/`write_episode_nfo`) plus generated
+poster/fanart/logo art (`gen_art`) — flat color cards with the title via
+ImageMagick's `magick`, not ffmpeg's `drawtext`: **this Homebrew ffmpeg build
+has no libfreetype/drawtext support** (`No such filter: 'drawtext'`), even
+though `freetype` is installed as a separate formula — confirmed directly,
+so don't reach for ffmpeg text overlays here again without checking first.
+Movies live under `data/movies/<Title> (<year>)/`, the show under
+`data/tvshows/Nebula Drift/Season 0N/`.
+
+Two libraries are created (not one): **Movies** scoped to `/media/movies`
+and **TV Shows** scoped to `/media/tvshows`, both with
+`EnableInternetProviders:false` — a single library rooted at `/media` (the
+original shape, before the TV library existed) would otherwise try to
+interpret every episode as its own movie. With providers off, local NFO is
+the *only* metadata source in this whole instance; nothing here ever calls
+out to the internet.
+
+After the scan-completion wait, `seed_collection_and_watch_state` (idempotent
+— safe on every `up`, not just first-time setup) creates a **BoxSet**
+("Station Saga", grouping Crimson Tide Station + The Quiet Ledger) and seeds
+watch state for the dev user: The Quiet Ledger marked fully played
+(`POST /Users/{id}/PlayedItems/{id}`, which works fine against a plain API
+key), Crimson Tide Station and Nebula Drift S1E1 left ~35%/~50% through via
+`report_partial_progress` — the real `/Sessions/Playing` → `.../Progress` →
+`.../Stopped` sequence `JellyfinLibrary`'s progress reporting uses, so this
+doubles as a standing proof that call sequence actually moves watch state.
+
+**Two real findings from getting that sequence to work, both worth knowing
+before touching progress reporting again:**
+
+- **`/Sessions/Playing*` silently no-ops against a plain admin-issued API
+  key.** Confirmed directly: sending the exact same start/progress/stopped
+  sequence with `X-Emby-Token: <api key>` left `PlayCount`/
+  `PlaybackPositionTicks` completely unchanged (no error, just nothing
+  happened), while the identical calls with a real `/Users/AuthenticateByName`
+  session token worked. Jellyfin's session manager looks up an actual session
+  object for the caller, and a bare `/Auth/Keys`-issued key doesn't have one
+  the way a signed-in session does. `report_partial_progress` therefore
+  authenticates its own throwaway session (`session_token()`) rather than
+  reusing `$key`. **This is not just a seeding-script quirk** — it means a
+  Hypnos install configured with only a Jellyfin API key (no sign-in) will
+  see the same silent no-op for real playback-progress reporting; username/
+  password sign-in (`JellyfinAuth`) isn't just a nicety, it's what makes
+  progress sync work at all.
+- **`MinResumeDurationSeconds` defaults to 300 (5 minutes).** Any item
+  shorter than that — every synthetic clip here, all well under a minute —
+  never gets a resume point or a partial `PlayedPercentage` no matter what
+  position is reported; Jellyfin just marks a stopped item fully played
+  instead once you cross its own small minimum. Confirmed directly (a 35%
+  stop report left `PlaybackPositionTicks: 0, Played: true` at the default,
+  a real 35% at `MinResumeDurationSeconds: 3`). `setup_and_scan` lowers it via
+  `PUT /System/Configuration` on every `up`, so Continue Watching/Next Up
+  have something to show against these short clips.
+
 # Stash GraphQL API
 
 You can find the Stash GraphQL API documentation in `internal_docs/Stash_Api_Docs`. **Important:** Claude Code prevents access to this folder while it is in .gitignore, therefore you must temporarily remove it from .gitignore to access the documentation and for your search tool to be able to see it. Undo changes to .gitignore after you are done.

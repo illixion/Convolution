@@ -46,6 +46,12 @@ devuser=dev
 devpass=dev12345
 auth_hdr='X-Emby-Authorization: MediaBrowser Client="hypnos-dev-jellyfin", Device="script", DeviceId="hypnos-dev-jellyfin", Version="10.11.11"'
 
+# A bold system font for the generated poster/fanart/logo art (see gen_art
+# below) — this Homebrew ffmpeg has no drawtext/libfreetype, so art is
+# rendered with ImageMagick instead, which does.
+font="/System/Library/Fonts/Supplemental/Arial Bold.ttf"
+[[ -f "$font" ]] || font="/System/Library/Fonts/Helvetica.ttc"
+
 api() { curl -s "$@"; }
 
 wait_for_server() {
@@ -149,6 +155,143 @@ build_truehdd_linux() {
     chmod +x "$root/truehdd/truehdd"
 }
 
+# Poster (portrait), fanart (backdrop) and a transparent logo for one item,
+# written into $1. Deliberately not photoreal — a flat color card with the
+# title is enough to prove artwork round-trips (image URLs return real image
+# data, tags differ between items) without needing real assets.
+gen_art() {
+    local dir="$1" title="$2" color="$3"
+    mkdir -p "$dir"
+    [[ -f "$dir/poster.jpg" ]] || magick -size 1000x1500 xc:"$color" -gravity center \
+        -pointsize 80 -fill white -font "$font" -annotate 0 "$title" "$dir/poster.jpg"
+    [[ -f "$dir/fanart.jpg" ]] || magick -size 1920x1080 xc:"$color" -gravity center \
+        -pointsize 60 -fill '#ffffffaa' -font "$font" -annotate 0 "$title" "$dir/fanart.jpg"
+    [[ -f "$dir/logo.png" ]] || magick -size 1600x400 xc:none -gravity center \
+        -pointsize 100 -fill white -font "$font" -annotate 0 "$title" "$dir/logo.png"
+}
+
+# A short silent-pattern H.264/AAC clip at $1, $2 seconds long. $3 (optional)
+# overrides the lavfi source pattern; used once below to render a WebM/VP9
+# clip instead, which AVFoundation can't parse at all (wrong container, not
+# just an exotic codec) — the one item that's guaranteed to force Hypnos's
+# transcode fallback rather than direct play.
+gen_clip() {
+    local path="$1" duration="$2" webm="${3:-}"
+    [[ -f "$path" ]] && return
+    if [[ "$webm" == "webm" ]]; then
+        ffmpeg -loglevel error -y -f lavfi -i "testsrc2=size=960x540:rate=24:duration=$duration" \
+            -f lavfi -i "sine=frequency=300:duration=$duration" \
+            -c:v libvpx-vp9 -pix_fmt yuv420p -c:a libopus "$path"
+    else
+        ffmpeg -loglevel error -y -f lavfi -i "testsrc2=size=1280x720:rate=24:duration=$duration" \
+            -f lavfi -i "sine=frequency=300:duration=$duration" \
+            -c:v libx264 -pix_fmt yuv420p -c:a aac "$path"
+    fi
+}
+
+# Kodi/Jellyfin-style local NFOs — enough fields for genres, rating, plot and
+# runtime to show up without any internet metadata provider ever running
+# (each library is created below with EnableInternetProviders:false, so NFO
+# is the only metadata source in this whole instance).
+write_movie_nfo() {
+    local path="$1" title="$2" year="$3" genre="$4" plot="$5" rating="$6"
+    cat > "$path" <<XML
+<?xml version="1.0" encoding="utf-8"?>
+<movie>
+  <title>$title</title>
+  <year>$year</year>
+  <genre>$genre</genre>
+  <plot>$plot</plot>
+  <rating>$rating</rating>
+  <mpaa>PG-13</mpaa>
+</movie>
+XML
+}
+
+write_tvshow_nfo() {
+    local path="$1" title="$2" year="$3" genre="$4" plot="$5"
+    cat > "$path" <<XML
+<?xml version="1.0" encoding="utf-8"?>
+<tvshow>
+  <title>$title</title>
+  <year>$year</year>
+  <genre>$genre</genre>
+  <plot>$plot</plot>
+</tvshow>
+XML
+}
+
+write_episode_nfo() {
+    local path="$1" title="$2" season="$3" episode="$4" plot="$5"
+    cat > "$path" <<XML
+<?xml version="1.0" encoding="utf-8"?>
+<episodedetails>
+  <title>$title</title>
+  <season>$season</season>
+  <episode>$episode</episode>
+  <plot>$plot</plot>
+</episodedetails>
+XML
+}
+
+# The 3 existing Atmos-plugin test items, plus a small synthetic movie and TV
+# library spanning several genres and both watch-state paths (see
+# seed_watch_state), so every Library home shelf has something in it:
+# Continue Watching/Next Up need real progress, Recently Added needs several
+# items, genres need Genre tags, and Collections needs a BoxSet.
+seed_synthetic_library() {
+    # Movies, Kodi-style folder-per-item so each gets its own NFO + art.
+    local m
+    m="$root/data/movies/Crimson Tide Station (2021)"
+    mkdir -p "$m"
+    gen_clip "$m/Crimson Tide Station (2021).mp4" 20
+    write_movie_nfo "$m/Crimson Tide Station (2021).nfo" "Crimson Tide Station" 2021 "Action" \
+        "A derelict orbital station drifts back into a crowded shipping lane." 7.2
+    gen_art "$m" "CRIMSON TIDE STATION" "#7a1f2b"
+
+    m="$root/data/movies/Paper Moon Diner (2019)"
+    mkdir -p "$m"
+    gen_clip "$m/Paper Moon Diner (2019).mp4" 18
+    write_movie_nfo "$m/Paper Moon Diner (2019).nfo" "Paper Moon Diner" 2019 "Comedy" \
+        "A roadside diner's night shift gets stranger with every customer." 6.8
+    gen_art "$m" "PAPER MOON DINER" "#c07a1e"
+
+    m="$root/data/movies/The Quiet Ledger (2022)"
+    mkdir -p "$m"
+    gen_clip "$m/The Quiet Ledger (2022).mp4" 22
+    write_movie_nfo "$m/The Quiet Ledger (2022).nfo" "The Quiet Ledger" 2022 "Drama" \
+        "An auditor uncovers a decades-old debt no one wants repaid." 7.6
+    gen_art "$m" "THE QUIET LEDGER" "#2b3a55"
+
+    # Deliberately WebM/VP9: AVFoundation cannot parse the container at all,
+    # so this is the one library item guaranteed to route to the HLS
+    # transcode fallback rather than direct play.
+    m="$root/data/movies/Wide Static Field (2020)"
+    mkdir -p "$m"
+    gen_clip "$m/Wide Static Field (2020).webm" 16 webm
+    write_movie_nfo "$m/Wide Static Field (2020).nfo" "Wide Static Field" 2020 "Sci-Fi" \
+        "A signal from an abandoned relay repeats a message no one can place." 6.5
+    gen_art "$m" "WIDE STATIC FIELD" "#264026"
+
+    # One series, 2 seasons x 3 episodes, Kodi TV layout.
+    local show="$root/data/tvshows/Nebula Drift"
+    mkdir -p "$show"
+    write_tvshow_nfo "$show/tvshow.nfo" "Nebula Drift" 2021 "Sci-Fi" \
+        "A salvage crew chases a signal deeper into the drift than anyone has come back from."
+    gen_art "$show" "NEBULA DRIFT" "#1f2b3a"
+    local season ep title
+    for season in 1 2; do
+        local sdir="$show/Season 0$season"
+        mkdir -p "$sdir"
+        for ep in 1 2 3; do
+            title="Nebula Drift S0${season}E0${ep}"
+            gen_clip "$sdir/$title.mp4" 12
+            write_episode_nfo "$sdir/$title.nfo" "Episode $ep" "$season" "$ep" \
+                "The crew pushes further into the drift, season $season, part $ep."
+        done
+    done
+}
+
 seed_media() {
     mkdir -p "$root/data/movies"
     if [[ ! -f "$demo" ]]; then
@@ -182,6 +325,9 @@ seed_media() {
         -f lavfi -i "testsrc2=size=1280x720:rate=24:duration=20" \
         -f lavfi -i "sine=frequency=400:duration=20" \
         -c:v libx264 -pix_fmt yuv420p -c:a eac3 -ac 6 "$root/data/movies/NoAtmosTest.mkv"
+
+    mkdir -p "$root/data/tvshows"
+    seed_synthetic_library
 }
 
 install_plugin_config() {
@@ -256,9 +402,18 @@ setup_and_scan() {
             exit 1
         fi
 
+        # Scoped to /media/movies (not the whole /media tree), now that
+        # /media/tvshows exists too — a Movies library rooted at /media would
+        # otherwise try to interpret every episode as its own movie.
+        # EnableInternetProviders:false on both libraries is what keeps this
+        # instance fully offline and deterministic: with it off, local NFO is
+        # the only metadata source Jellyfin ever consults for these items.
         api -X POST "$base/Library/VirtualFolders?name=Movies&collectionType=movies&refreshLibrary=true" \
             -H "X-Emby-Token: $token" -H 'Content-Type: application/json' \
-            -d '{"LibraryOptions":{"PathInfos":[{"Path":"/media"}],"EnablePhotos":false,"EnableRealtimeMonitor":false,"EnableInternetProviders":false}}' >/dev/null
+            -d '{"LibraryOptions":{"PathInfos":[{"Path":"/media/movies"}],"EnablePhotos":false,"EnableRealtimeMonitor":false,"EnableInternetProviders":false}}' >/dev/null
+        api -X POST "$base/Library/VirtualFolders?name=TV%20Shows&collectionType=tvshows&refreshLibrary=true" \
+            -H "X-Emby-Token: $token" -H 'Content-Type: application/json' \
+            -d '{"LibraryOptions":{"PathInfos":[{"Path":"/media/tvshows"}],"EnablePhotos":false,"EnableRealtimeMonitor":false,"EnableInternetProviders":false}}' >/dev/null
 
         api -X POST "$base/Auth/Keys?App=hypnos-dev" -H "X-Emby-Token: $token" >/dev/null
         local key
@@ -283,7 +438,128 @@ setup_and_scan() {
         [[ "$running" == "False" ]] && break
         sleep 3
     done
+
+    # MinResumeDurationSeconds defaults to 300 (5 min) — Jellyfin won't create
+    # a resume point or a partial PlayedPercentage for anything shorter, it
+    # just marks a stopped item fully played instead. Every synthetic clip
+    # here is far under that, so watch-state seeding (and Continue Watching/
+    # Next Up generally) would silently do nothing without this. Confirmed
+    # directly: with the default 300 in force, reporting a 35%-through stop
+    # left PlaybackPositionTicks at 0 and Played=true; after lowering this to
+    # 3s, the same call left a real PlayedPercentage/resume point.
+    api "$base/System/Configuration" -H "X-Emby-Token: $key" \
+        | python3 -c 'import json,sys; d=json.load(sys.stdin); d["MinResumeDurationSeconds"]=3; print(json.dumps(d))' \
+        | api -X POST "$base/System/Configuration" -H "X-Emby-Token: $key" -H 'Content-Type: application/json' --data-binary @- >/dev/null
+
+    seed_collection_and_watch_state "$key"
     echo "dev-jellyfin: http://127.0.0.1:$port"
+}
+
+# A BoxSet grouping two of the synthetic movies, and watch state for the dev
+# user: one movie marked fully played, one movie and one episode left
+# partway through. The partial-watch calls go through the exact same
+# /Sessions/Playing* endpoints JellyfinLibrary's progress reporting uses
+# (start → progress → stopped), so seeding this way doubles as a first proof
+# that those calls work. Idempotent: safe to call on every `up`, not just the
+# first-time setup.
+find_item_id() {
+    # $1: base URL, $2: API key, $3: IncludeItemTypes, $4: exact name to match
+    api "$1/Items" -H "X-Emby-Token: $2" \
+        --data-urlencode "IncludeItemTypes=$3" --data-urlencode "Recursive=true" \
+        --data-urlencode "SearchTerm=$4" -G \
+        | python3 -c "
+import json,sys
+items=json.loads(sys.stdin.buffer.read().decode('utf-8-sig')).get('Items', [])
+for i in items:
+    if i.get('Name') == sys.argv[1]:
+        print(i['Id']); break
+" "$4" 2>/dev/null
+}
+
+seed_collection_and_watch_state() {
+    local key="$1"
+    local userId
+    userId=$(api "$base/Users" -H "X-Emby-Token: $key" \
+        | python3 -c 'import json,sys; u=json.loads(sys.stdin.buffer.read().decode("utf-8-sig")); print(u[0]["Id"] if u else "")')
+    [[ -z "$userId" ]] && { echo "dev-jellyfin: no user found, skipping watch-state seed" >&2; return; }
+
+    local crimson quiet
+    crimson=$(find_item_id "$base" "$key" Movie "Crimson Tide Station")
+    quiet=$(find_item_id "$base" "$key" Movie "The Quiet Ledger")
+
+    if [[ -n "$crimson" && -n "$quiet" ]]; then
+        local existing
+        existing=$(api "$base/Items" -H "X-Emby-Token: $key" \
+            --data-urlencode "IncludeItemTypes=BoxSet" --data-urlencode "Recursive=true" -G \
+            | python3 -c 'import json,sys; print(",".join(i["Name"] for i in json.loads(sys.stdin.buffer.read().decode("utf-8-sig")).get("Items", [])))')
+        if [[ "$existing" != *"Station Saga"* ]]; then
+            api -X POST "$base/Collections" -H "X-Emby-Token: $key" -G \
+                --data-urlencode "Name=Station Saga" --data-urlencode "Ids=$crimson,$quiet" >/dev/null
+        fi
+    fi
+
+    # Fully played: The Quiet Ledger.
+    if [[ -n "$quiet" ]]; then
+        api -X POST "$base/Users/$userId/PlayedItems/$quiet" -H "X-Emby-Token: $key" >/dev/null
+    fi
+
+    # Partially watched (~35%): Crimson Tide Station, via the real playback
+    # session endpoints so Continue Watching has real data to show.
+    if [[ -n "$crimson" ]]; then
+        report_partial_progress "$key" "$userId" "$crimson" 0.35
+    fi
+
+    # Partially watched (~50%): season 1 episode 1 of Nebula Drift, so
+    # Continue Watching *and* Next Up both have something once this resumes.
+    local seriesId seasonId ep
+    seriesId=$(find_item_id "$base" "$key" Series "Nebula Drift")
+    if [[ -n "$seriesId" ]]; then
+        seasonId=$(api "$base/Shows/$seriesId/Seasons" -H "X-Emby-Token: $key" --data-urlencode "userId=$userId" -G \
+            | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(next((s["Id"] for s in d["Items"] if s.get("IndexNumber")==1), ""))')
+        if [[ -n "$seasonId" ]]; then
+            ep=$(api "$base/Shows/$seriesId/Episodes" -H "X-Emby-Token: $key" \
+                --data-urlencode "userId=$userId" --data-urlencode "seasonId=$seasonId" -G \
+                | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(next((e["Id"] for e in d["Items"] if e.get("IndexNumber")==1), ""))')
+            [[ -n "$ep" ]] && report_partial_progress "$key" "$userId" "$ep" 0.5
+        fi
+    fi
+}
+
+# /Sessions/Playing* silently no-ops against a plain admin-issued API key —
+# confirmed directly: PlayCount/PlaybackPositionTicks never moved when these
+# calls were sent with the `X-Emby-Token: <api key>` header instead of a real
+# signed-in session's access token. Jellyfin's session manager looks up an
+# actual session object for the caller, and a bare API key doesn't have one
+# the way `/Users/AuthenticateByName` does. So this authenticates as the dev
+# user for its own session token, same as JellyfinAuth/JellyfinLibrary do —
+# which also means an app configured with only an API key (no sign-in) will
+# see the same silent no-op for progress reporting; that's a real, documented
+# constraint of this feature, not just a seeding-script wrinkle.
+session_token() {
+    api -X POST "$base/Users/AuthenticateByName" -H "$auth_hdr" -H 'Content-Type: application/json' \
+        -d "{\"Username\":\"$devuser\",\"Pw\":\"$devpass\"}" \
+        | python3 -c 'import json,sys; print(json.loads(sys.stdin.buffer.read().decode("utf-8-sig"))["AccessToken"])'
+}
+
+# Reports a play session at `$4` (0..1) of $3's runtime, exactly the
+# start/progress/stopped sequence JellyfinLibrary.reportPlaybackStarted/
+# Progress/Stopped issues, so this leaves the item with a real resume point
+# and PlayedPercentage instead of one poked in directly.
+report_partial_progress() {
+    local key="$1" userId="$2" itemId="$3" fraction="$4"
+    local runtimeTicks ticks sessionId token
+    runtimeTicks=$(api "$base/Users/$userId/Items/$itemId" -H "X-Emby-Token: $key" \
+        | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("RunTimeTicks") or 0)')
+    [[ "$runtimeTicks" -le 0 ]] && return
+    ticks=$(python3 -c "print(int($runtimeTicks * $fraction))")
+    sessionId=$(python3 -c 'import uuid; print(uuid.uuid4())')
+    token=$(session_token)
+    api -X POST "$base/Sessions/Playing" -H "X-Emby-Token: $token" -H 'Content-Type: application/json' \
+        -d "{\"ItemId\":\"$itemId\",\"PlaySessionId\":\"$sessionId\",\"PositionTicks\":0,\"IsPaused\":false,\"CanSeek\":true}" >/dev/null
+    api -X POST "$base/Sessions/Playing/Progress" -H "X-Emby-Token: $token" -H 'Content-Type: application/json' \
+        -d "{\"ItemId\":\"$itemId\",\"PlaySessionId\":\"$sessionId\",\"PositionTicks\":$ticks,\"IsPaused\":false,\"CanSeek\":true}" >/dev/null
+    api -X POST "$base/Sessions/Playing/Stopped" -H "X-Emby-Token: $token" -H 'Content-Type: application/json' \
+        -d "{\"ItemId\":\"$itemId\",\"PlaySessionId\":\"$sessionId\",\"PositionTicks\":$ticks}" >/dev/null
 }
 
 case "${1:-up}" in

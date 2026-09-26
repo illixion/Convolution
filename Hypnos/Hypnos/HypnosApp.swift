@@ -35,6 +35,9 @@ struct HypnosApp: App {
         #if DEBUG
         UITestingConfiguration.applyIfNeeded()
         #endif
+        #if DEBUG && os(macOS)
+        LibraryHarness.runIfRequested()
+        #endif
         _appModel = State(initialValue: AppModel())
         #if os(tvOS) || os(macOS)
         // AVFoundation only decodes VP9/AV1 once the app opts in to the
