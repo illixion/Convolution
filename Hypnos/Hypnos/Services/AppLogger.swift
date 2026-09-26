@@ -114,6 +114,9 @@ enum AppLogger {
     /// Atmos object-audio spike (Settings → Developer)
     static let filmPlayer = Logger(subsystem: subsystem, category: "FilmPlayer")
 
+    /// Library feature: home/detail browsing, playback routing, progress sync
+    static let library = Logger(subsystem: subsystem, category: "Library")
+
     // The fake-3D signposter moved to RAVEMedia (`RAVEMediaLog.signposter`)
     // with the pipeline it instruments. Its subsystem is still this app's
     // bundle id, so Instruments and the in-app console see it unchanged; only

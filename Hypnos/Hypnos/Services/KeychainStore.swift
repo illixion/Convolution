@@ -25,6 +25,11 @@ enum KeychainStore {
         case stashAPIKey
         case nextcloudAppPassword
         case jellyfinAPIKey
+        /// Access token from `/Users/AuthenticateByName` (username/password
+        /// sign-in) — distinct from `jellyfinAPIKey`, which is a
+        /// server-issued API key with no associated user. See
+        /// `JellyfinAuth.swift`.
+        case jellyfinAccessToken
     }
 
     // MARK: - Reading
