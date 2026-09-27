@@ -166,7 +166,13 @@ gen_art() {
         -pointsize 80 -fill white -font "$font" -annotate 0 "$title" "$dir/poster.jpg"
     [[ -f "$dir/fanart.jpg" ]] || magick -size 1920x1080 xc:"$color" -gravity center \
         -pointsize 60 -fill '#ffffffaa' -font "$font" -annotate 0 "$title" "$dir/fanart.jpg"
-    [[ -f "$dir/logo.png" ]] || magick -size 1600x400 xc:none -gravity center \
+    # Opaque, not a transparent PNG with white text: confirmed directly that
+    # this Jellyfin version's image endpoint flattens alpha onto a *white*
+    # matte even for the untouched original (no resize params at all), which
+    # made a transparent-background/white-text logo invisible end to end —
+    # not a client bug, the served bytes really are blank white. An opaque
+    # colored card reads correctly regardless of how the server handles alpha.
+    [[ -f "$dir/logo.png" ]] || magick -size 1600x400 xc:"$color" -gravity center \
         -pointsize 100 -fill white -font "$font" -annotate 0 "$title" "$dir/logo.png"
 }
 

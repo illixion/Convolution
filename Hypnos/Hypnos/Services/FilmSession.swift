@@ -25,7 +25,15 @@ final class FilmSession {
         ?? UserDefaults.standard.string(forKey: "atmosSpike.jellyfinServer") ?? "" {
         didSet { UserDefaults.standard.set(server, forKey: "filmPlayer.jellyfinServer") }
     }
-    var apiKey: String = KeychainStore.string(for: .jellyfinAPIKey) ?? "" {
+    var apiKey: String = {
+        // Same UserDefaults→Keychain migration shape as the Stash API key
+        // (see `scripts/dev-stash.sh auth`'s use of `stashAPIKey`): a plain
+        // Keychain secret has no `-UITestDefault key=value` route in from a
+        // launch argument, so DEBUG-only test/harness runs seed it through
+        // this legacy UserDefaults key instead, migrated in on first read.
+        KeychainStore.migrateFromUserDefaults(legacyKey: "filmPlayer.jellyfinAPIKeyLegacy", to: .jellyfinAPIKey)
+        return KeychainStore.string(for: .jellyfinAPIKey) ?? ""
+    }() {
         didSet { KeychainStore.set(apiKey, for: .jellyfinAPIKey) }
     }
 

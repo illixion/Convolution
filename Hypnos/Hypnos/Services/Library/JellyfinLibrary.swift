@@ -414,8 +414,18 @@ actor JellyfinLibrary: MediaServerLibrary {
 
     // MARK: - Transport
 
+    /// Every list endpoint (as opposed to the single-item
+    /// `Users/{id}/Items/{id}`) omits `Overview` and `Genres` unless asked
+    /// for — confirmed directly against the dev instance: a shelf/search
+    /// item came back with `Genres: null` and no `Overview` key at all,
+    /// which would otherwise leave every hero/shelf card's overview blank
+    /// and its genre chips empty. Every `fetchItems`/`fetchLatestItems` call
+    /// asks for both so home/search/similar don't need a follow-up
+    /// `item(id:)` just to show a synopsis.
+    private static let listFields = URLQueryItem(name: "Fields", value: "Overview,Genres")
+
     private func fetchItems(path: String, query: [URLQueryItem]) async throws -> [LibraryItem] {
-        let page: JFPage = try await get(path, query: query)
+        let page: JFPage = try await get(path, query: query + [Self.listFields])
         return page.Items.map(LibraryItem.init)
     }
 
@@ -425,7 +435,7 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// Decoding it as `JFPage` throws a "found an array, expected a
     /// dictionary" error, so it gets its own fetch.
     private func fetchLatestItems(userId: String, query: [URLQueryItem]) async throws -> [LibraryItem] {
-        let items: [JFItem] = try await get("Users/\(userId)/Items/Latest", query: query)
+        let items: [JFItem] = try await get("Users/\(userId)/Items/Latest", query: query + [Self.listFields])
         return items.map(LibraryItem.init)
     }
 

@@ -77,7 +77,7 @@ struct TVRootView: View {
         case .albums:
             TVAlbumsTabView(selectedTab: $selectedTab)
         case .library:
-            LibraryHomePlaceholderView()
+            TVLibraryTabView()
         case .settings:
             TVSettingsView()
         }

@@ -50,7 +50,10 @@ enum LibraryHarness {
         // Home: shelves + hero.
         do {
             let home = try await library.home()
-            log("home.hero=\(home.hero?.title ?? "nil")")
+            log("home.hero=\(home.hero?.title ?? "nil") images=\(home.hero?.images ?? [])")
+            if let hero = home.hero {
+                log("home.hero.logoURL=\(library.imageURL(item: hero, kind: .logo, size: .thumbnail)?.absoluteString ?? "nil")")
+            }
             for shelf in home.shelves {
                 log("home.shelf[\(shelf.id)]=\"\(shelf.title)\" count=\(shelf.items.count) style=\(shelf.style)")
             }
@@ -75,7 +78,9 @@ enum LibraryHarness {
                 let results = try await library.search(term)
                 log("search(\"\(term)\").count=\(results.count) first=\(results.first?.title ?? "nil") kind=\(results.first?.kind.rawValue ?? "-")")
                 switch term {
-                case "Crimson Tide": crimson = results.first
+                case "Crimson Tide":
+                    crimson = results.first
+                    log("search result overview=\(results.first?.overview ?? "nil") genres=\(results.first?.genres ?? [])")
                 case "Quiet Ledger": quietLedger = results.first
                 case "Wide Static": wideStatic = results.first
                 case "DolbyElement4K": atmosDemo = results.first

@@ -34,6 +34,7 @@ struct HypnosApp: App {
     init() {
         #if DEBUG
         UITestingConfiguration.applyIfNeeded()
+        DevJellyfinSignIn.performIfRequested()
         #endif
         #if DEBUG && os(macOS)
         LibraryHarness.runIfRequested()
