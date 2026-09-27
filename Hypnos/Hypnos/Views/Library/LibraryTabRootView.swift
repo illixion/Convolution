@@ -30,9 +30,24 @@ struct LibraryTabRootView: View {
                 .navigationDestination(for: LibraryItem.self) { item in
                     LibraryDetailView(item: item, playback: playback)
                 }
+                .navigationDestination(for: LibraryBrowseRequest.self) { request in
+                    LibraryBrowseView(request: request)
+                }
                 .navigationTitle("Library")
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            path.append(LibraryBrowseRequest(kind: nil))
+                        } label: {
+                            Label("Browse & Search", systemImage: "magnifyingglass")
+                        }
+                    }
+                }
                 #if os(iOS)
-                .toolbar(.hidden, for: .navigationBar)
+                // Transparent, not hidden: the Browse & Search button still
+                // needs to be reachable, floating over the hero art the same
+                // way the real Apple TV app's search icon does.
+                .toolbarBackground(.hidden, for: .navigationBar)
                 #elseif os(macOS)
                 .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
                 #endif

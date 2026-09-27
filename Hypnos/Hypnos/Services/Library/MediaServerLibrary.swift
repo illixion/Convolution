@@ -83,6 +83,12 @@ protocol MediaServerLibrary: PlaybackProgressReporting {
     /// Free-text search across movies and series.
     func search(_ term: String) async throws -> [LibraryItem]
 
+    /// A page of the library, browsed rather than searched: `kind` nil lists
+    /// movies and shows together, sorted by title. `startIndex`/`limit` are
+    /// the server's own pagination params; a returned count under `limit`
+    /// means there is no next page.
+    func browse(kind: LibraryItemKind?, startIndex: Int, limit: Int) async throws -> [LibraryItem]
+
     /// A URL for one item's artwork at the requested kind/size. Nil if the
     /// item has no image of that kind.
     func imageURL(item: LibraryItem, kind: LibraryImageKind, size: LibraryImageSize) -> URL?

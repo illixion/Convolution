@@ -332,6 +332,22 @@ actor JellyfinLibrary: MediaServerLibrary {
         ])
     }
 
+    func browse(kind: LibraryItemKind?, startIndex: Int, limit: Int) async throws -> [LibraryItem] {
+        let userId = try await resolveUserId()
+        let includeItemTypes: String = switch kind {
+        case .movie: "Movie"
+        case .series: "Series"
+        default: "Movie,Series"
+        }
+        return try await fetchItems(path: "Users/\(userId)/Items", query: [
+            .init(name: "IncludeItemTypes", value: includeItemTypes),
+            .init(name: "Recursive", value: "true"),
+            .init(name: "SortBy", value: "SortName"),
+            .init(name: "StartIndex", value: String(startIndex)),
+            .init(name: "Limit", value: String(limit)),
+        ])
+    }
+
     // MARK: - Images
 
     nonisolated func imageURL(item: LibraryItem, kind: LibraryImageKind, size: LibraryImageSize) -> URL? {

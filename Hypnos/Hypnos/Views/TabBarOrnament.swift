@@ -19,25 +19,12 @@ struct TabBarOrnament: View {
     /// (see `libraryMenu` below) instead of routing through `Menu`.
     @State private var showLibraryPicker = false
 
+    /// Delegates to `MainTabCatalog`, the same source of truth iOS's tab bar
+    /// uses, rather than keeping a second hand-maintained list here — a
+    /// second list is exactly what let `.library` go missing from this
+    /// ornament after it was added to the catalog.
     private var visibleTabs: [Tab] {
-        let orderedTabs: [Tab] = [.pictures, .videos, .albums, .remote, .filters, .windows, .console, .settings]
-        return orderedTabs.filter { tab in
-            switch tab {
-            case .remote:
-                return appModel.enableRemoteViewer
-            case .console:
-                return appModel.showDebugConsole
-            case .filters:
-                // Nothing to filter by in a file-tree library — no tags,
-                // albums or galleries. See ContentView for the redirect if
-                // this tab was already open when the library changed.
-                return appModel.effectiveLibrarySource.offersFilters
-            case .albums:
-                return appModel.effectiveLibrarySource.offersAlbums
-            default:
-                return true
-            }
-        }
+        MainTabCatalog.visibleTabs(appModel: appModel)
     }
 
     var body: some View {
