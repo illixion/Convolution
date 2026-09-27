@@ -12,7 +12,8 @@
  so no server or token is built in:
    -FilmToken <key> -FilmItem <id> [-FilmServer <url>] [-FilmStart <s>]
  `TVLab/check-tv.sh` passes them. `-YouTube <id>` runs the on-device
- YouTube spike instead (YouTubeLab.swift).
+ YouTube spike instead (YouTubeLab.swift), `-SpatialProbe 1` the spatial
+ audio probe (SpatialProbe.swift).
  */
 
 import AVFoundation
@@ -24,7 +25,9 @@ import SwiftUI
 struct FilmLabTVApp: App {
     var body: some Scene {
         WindowGroup {
-            if let id = UserDefaults.standard.string(forKey: "YouTube") {
+            if UserDefaults.standard.bool(forKey: "SpatialProbe") {
+                SpatialProbeView()
+            } else if let id = UserDefaults.standard.string(forKey: "YouTube") {
                 YouTubeLabView(videoID: id)
             } else {
                 LabView()
