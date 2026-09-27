@@ -11,7 +11,19 @@ import SwiftUI
 @MainActor
 @Observable
 class MainWindowModel {
-    var selectedTab: Tab = .pictures
+    // DEBUG-only, mirroring tvOS's `tvInitialTab`/macOS's `macInitialTab`
+    // (`Support/UITestingConfiguration.swift`): `-UITestDefault
+    // mainInitialTab=Library` opens straight to a given tab, since there's
+    // no remote-button-style shortcut into a specific visionOS/iOS tab
+    // otherwise.
+    var selectedTab: Tab = {
+        #if DEBUG
+        if let raw = UserDefaults.standard.string(forKey: "mainInitialTab"), let tab = Tab(rawValue: raw) {
+            return tab
+        }
+        #endif
+        return .pictures
+    }()
 
     /// Tracks the last content tab (pictures or videos) for filter context
     var lastContentTab: Tab = .pictures

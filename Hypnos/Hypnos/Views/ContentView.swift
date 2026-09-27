@@ -161,7 +161,7 @@ struct ContentView: View {
         case .albums:
             AlbumsTabView()
         case .library:
-            LibraryHomePlaceholderView()
+            LibraryTabRootView()
         case .filters:
             FiltersTabView()
         case .windows:
@@ -203,7 +203,7 @@ struct ContentView: View {
     private func iosTabPage(_ tab: Tab) -> some View {
         Group {
             switch tab {
-            case .filters, .remote, .settings:
+            case .filters, .remote, .settings, .library:
                 tabContent(tab)
             default:
                 NavigationStack {

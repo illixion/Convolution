@@ -77,7 +77,7 @@ struct MacRootView: View {
         case .albums:
             MacAlbumsView(selection: $selection)
         case .library:
-            LibraryHomePlaceholderView()
+            LibraryTabRootView()
         case .settings:
             MacSettingsView()
         }
