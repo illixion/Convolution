@@ -156,24 +156,31 @@ build_truehdd_linux() {
 }
 
 # Poster (portrait), fanart (backdrop) and a transparent logo for one item,
-# written into $1. Deliberately not photoreal — a flat color card with the
-# title is enough to prove artwork round-trips (image URLs return real image
-# data, tags differ between items) without needing real assets.
+# written into $1. Not photoreal, but shaped like real artwork so the Library
+# UI can be judged against it: the fanart is a soft textless color field
+# (real backdrops carry no title, the logo does), the poster has its title
+# at the bottom, and the logo is white text on a transparent background, as
+# fanart.tv/TMDB clear logos are. The .art-v2 stamp regenerates art written
+# by the earlier flat-title-card version of this function.
 gen_art() {
     local dir="$1" title="$2" color="$3"
     mkdir -p "$dir"
-    [[ -f "$dir/poster.jpg" ]] || magick -size 1000x1500 xc:"$color" -gravity center \
-        -pointsize 80 -fill white -font "$font" -annotate 0 "$title" "$dir/poster.jpg"
-    [[ -f "$dir/fanart.jpg" ]] || magick -size 1920x1080 xc:"$color" -gravity center \
-        -pointsize 60 -fill '#ffffffaa' -font "$font" -annotate 0 "$title" "$dir/fanart.jpg"
-    # Opaque, not a transparent PNG with white text: confirmed directly that
-    # this Jellyfin version's image endpoint flattens alpha onto a *white*
-    # matte even for the untouched original (no resize params at all), which
-    # made a transparent-background/white-text logo invisible end to end —
-    # not a client bug, the served bytes really are blank white. An opaque
-    # colored card reads correctly regardless of how the server handles alpha.
-    [[ -f "$dir/logo.png" ]] || magick -size 1600x400 xc:"$color" -gravity center \
-        -pointsize 100 -fill white -font "$font" -annotate 0 "$title" "$dir/logo.png"
+    [[ -f "$dir/.art-v2" ]] && return
+    local field="$dir/.field.png"
+    # Two-tone plasma, heavily blurred: reads as an out-of-focus scene.
+    magick -size 480x270 "plasma:$color-#0a0a12" -blur 0x18 \
+        -resize 1920x1080\! -modulate 100,140 "$field"
+    magick "$field" \( -size 1920x1080 radial-gradient:'#00000000-#000000b0' \) \
+        -compose over -composite -quality 90 "$dir/fanart.jpg"
+    magick "$field" -gravity center -crop 608x1080+0+0 +repage -resize 1000x1500\! \
+        \( -size 1000x1500 gradient:'#00000000-#000000d0' \) -compose over -composite \
+        -gravity south -pointsize 88 -fill white -font "$font" \
+        -annotate +0+140 "$(printf '%s' "$title" | fold -s -w 14)" -quality 90 "$dir/poster.jpg"
+    magick -background none -fill white -font "$font" -pointsize 150 label:"$title" \
+        \( +clone -background black -shadow 60x6+0+4 \) +swap -background none -layers merge \
+        +repage -trim "$dir/logo.png"
+    rm -f "$field"
+    touch "$dir/.art-v2"
 }
 
 # A short silent-pattern H.264/AAC clip at $1, $2 seconds long. $3 (optional)
