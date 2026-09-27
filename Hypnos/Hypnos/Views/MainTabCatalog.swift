@@ -20,7 +20,7 @@ enum MainTabCatalog {
             case .library:
                 // Hidden until a Jellyfin server is configured — see the
                 // Library feature's decision #3.
-                return FilmSession.shared.isConfigured
+                return LibraryService.isAvailable
             case .remote:
                 return appModel.enableRemoteViewer
             case .console:

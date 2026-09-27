@@ -24,8 +24,13 @@ final class LibraryHomeViewModel {
     /// gracefully rather than crash.
     private var library: JellyfinLibrary?
 
+    /// (Re)loads against whatever server and credentials are current. Call
+    /// from `.task(id: LibraryService.configurationKey)` so it re-runs when a
+    /// sign-in completes or the server changes.
     func start() async {
-        library = LibraryService.current()
+        let fresh = LibraryService.current()
+        if fresh?.baseURL != library?.baseURL { home = nil }
+        library = fresh
         await refresh()
     }
 
@@ -39,6 +44,9 @@ final class LibraryHomeViewModel {
         defer { isLoading = false }
         do {
             home = try await library.home()
+        } catch is CancellationError {
+            // Superseded by a newer load (configuration changed); not an error.
+        } catch let urlError as URLError where urlError.code == .cancelled {
         } catch {
             self.error = error.localizedDescription
         }

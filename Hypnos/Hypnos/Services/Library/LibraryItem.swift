@@ -54,6 +54,10 @@ struct LibraryImageRef: Hashable, Sendable {
     /// Opaque cache-busting tag from the server (Jellyfin's `ImageTags`);
     /// folded into the cache key so a replaced poster doesn't serve stale.
     var tag: String?
+    /// The item the artwork actually belongs to, when inherited: an episode
+    /// has no backdrop or logo of its own and shows its series'. Nil means
+    /// the item itself.
+    var ownerId: String? = nil
 }
 
 /// Per-user state for an item: resume position, played/unplayed, favorite.
@@ -71,6 +75,15 @@ struct LibraryUserData: Hashable, Sendable {
     }
     /// 0...100, Jellyfin's own resume-percentage convention.
     var playedPercentage: Double?
+
+    /// Where Resume starts, or nil when there is nothing to resume. Jellyfin
+    /// reports a position of 0 (not null) for an untouched item, and keeps
+    /// the last position on an item it has since marked played, so the raw
+    /// ticks alone would offer "Resume" on everything.
+    var resumeSeconds: Double? {
+        guard !isPlayed, let seconds = playbackPositionSeconds, seconds >= 1 else { return nil }
+        return seconds
+    }
 
     static let empty = LibraryUserData()
 }
@@ -113,6 +126,16 @@ struct LibraryItem: Identifiable, Hashable, Sendable {
         guard kind == .episode, let seasonNumber, let episodeNumber else { return nil }
         return "S\(seasonNumber) E\(episodeNumber)"
     }
+
+    /// Whether this can be handed to a player directly (a series or season
+    /// plays through one of its episodes instead).
+    var isPlayable: Bool { kind == .movie || kind == .episode }
+
+    /// Seconds left to watch from the resume point, when resumable.
+    var remainingSeconds: Double? {
+        guard let resume = userData.resumeSeconds, let runtimeSeconds, runtimeSeconds > resume else { return nil }
+        return runtimeSeconds - resume
+    }
 }
 
 /// A horizontally-scrolling row of items on the Library home screen —
@@ -134,9 +157,9 @@ struct LibraryShelf: Identifiable, Hashable, Sendable {
     }
 }
 
-/// What the Library home screen renders: an optional hero pick (movie/show
-/// to feature full-bleed) plus the shelves below it.
+/// What the Library home screen renders: the featured picks the hero cycles
+/// through (movies/shows with backdrop art) plus the shelves below it.
 struct LibraryHome: Sendable {
-    var hero: LibraryItem?
+    var featured: [LibraryItem]
     var shelves: [LibraryShelf]
 }

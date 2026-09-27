@@ -16,6 +16,21 @@ enum LibraryService {
     /// `JellyfinLibrary` is a cheap actor wrapper around a URL and a token,
     /// and rebuilding picks up a server/sign-in change immediately with no
     /// invalidation logic to get wrong.
+    /// Whether the Library tab should exist at all: a server address plus
+    /// something to authenticate with (a sign-in or an API key). Reads only
+    /// observable state, so a tab bar built from it appears the moment a
+    /// sign-in lands.
+    static var isAvailable: Bool { current() != nil }
+
+    /// Changes whenever the server or credentials do. Library screens key
+    /// their load on it (`.task(id:)`) so a sign-in finishing after the tab
+    /// appeared (first launch) reloads instead of leaving a stale error.
+    static var configurationKey: String {
+        let session = FilmSession.shared
+        return [session.server, JellyfinAuth.shared.session?.accessToken ?? "", session.apiKey]
+            .joined(separator: "\u{1F}")
+    }
+
     static func current() -> JellyfinLibrary? {
         let session = FilmSession.shared
         let trimmed = session.server.trimmingCharacters(in: .whitespaces)

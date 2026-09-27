@@ -62,6 +62,13 @@ private struct JFItem: Decodable {
     let ParentIndexNumber: Int?  // season number, on an episode
     let IndexNumber: Int?        // episode/season number
     let ItemIds: [String]?       // BoxSet members, when queried with Fields=ItemIds
+    // Artwork an episode/season inherits from its series.
+    let ParentBackdropItemId: String?
+    let ParentBackdropImageTags: [String]?
+    let ParentLogoItemId: String?
+    let ParentLogoImageTag: String?
+    let ParentThumbItemId: String?
+    let ParentThumbImageTag: String?
 
     var kind: LibraryItemKind {
         switch `Type` {
@@ -108,6 +115,17 @@ private extension LibraryItem {
         }
         if let tag = dto.BackdropImageTags?.first {
             images.append(LibraryImageRef(kind: .backdrop, blurhash: nil, tag: tag))
+        }
+        // Inherited art goes after the item's own, so `image(_:)` (first
+        // match) prefers the item's.
+        if let owner = dto.ParentBackdropItemId, let tag = dto.ParentBackdropImageTags?.first {
+            images.append(LibraryImageRef(kind: .backdrop, blurhash: nil, tag: tag, ownerId: owner))
+        }
+        if let owner = dto.ParentLogoItemId, let tag = dto.ParentLogoImageTag {
+            images.append(LibraryImageRef(kind: .logo, blurhash: nil, tag: tag, ownerId: owner))
+        }
+        if let owner = dto.ParentThumbItemId, let tag = dto.ParentThumbImageTag {
+            images.append(LibraryImageRef(kind: .thumb, blurhash: nil, tag: tag, ownerId: owner))
         }
         self.images = images
 
@@ -193,13 +211,16 @@ actor JellyfinLibrary: MediaServerLibrary {
         ])
 
         var shelves: [LibraryShelf] = []
+        // One "Up Next" row, as in the Apple TV app: in-progress items first,
+        // then each show's next episode. Jellyfin's NextUp also returns an
+        // episode that is already in progress, so separate rows showed the
+        // same episode twice.
         let resumeItems = try await resume
-        if !resumeItems.isEmpty {
-            shelves.append(LibraryShelf(id: "continue-watching", title: "Continue Watching", items: resumeItems, style: .landscape))
-        }
         let nextUpItems = try await nextUp
-        if !nextUpItems.isEmpty {
-            shelves.append(LibraryShelf(id: "next-up", title: "Next Up", items: nextUpItems, style: .landscape))
+        let resumeIds = Set(resumeItems.map(\.id))
+        let upNext = resumeItems + nextUpItems.filter { !resumeIds.contains($0.id) }
+        if !upNext.isEmpty {
+            shelves.append(LibraryShelf(id: "up-next", title: "Up Next", items: upNext, style: .landscape))
         }
         let recentMovieItems = try await recentMovies
         if !recentMovieItems.isEmpty {
@@ -214,11 +235,21 @@ actor JellyfinLibrary: MediaServerLibrary {
             shelves.append(LibraryShelf(id: "collections", title: "Collections", items: collectionItems))
         }
 
-        // A hero pick: the most recently added movie or show, so home always
-        // has something to feature full-bleed even on a very small library.
-        let hero = recentMovieItems.first ?? recentShowItems.first ?? nextUpItems.first
+        // Featured picks for the hero: recently added movies and shows,
+        // alternating, keeping only those with backdrop art (the hero is
+        // full-bleed, and a flat placeholder there looks broken). A library
+        // with no backdrops at all still features its newest item.
+        var interleaved: [LibraryItem] = []
+        for index in 0..<max(recentMovieItems.count, recentShowItems.count) {
+            if index < recentMovieItems.count { interleaved.append(recentMovieItems[index]) }
+            if index < recentShowItems.count { interleaved.append(recentShowItems[index]) }
+        }
+        var featured = Array(interleaved.filter { $0.image(.backdrop) != nil }.prefix(6))
+        if featured.isEmpty, let first = interleaved.first ?? nextUpItems.first {
+            featured = [first]
+        }
 
-        return LibraryHome(hero: hero, shelves: shelves)
+        return LibraryHome(featured: featured, shelves: shelves)
     }
 
     // MARK: - Detail
@@ -242,6 +273,44 @@ actor JellyfinLibrary: MediaServerLibrary {
             .init(name: "userId", value: userId),
             .init(name: "seasonId", value: seasonId),
         ])
+    }
+
+    func nextUp(seriesId: String) async throws -> LibraryItem? {
+        let userId = try await resolveUserId()
+        // Resume first: Shows/NextUp skips an episode that is only partly
+        // watched once a later one has been started.
+        let resumable = try await fetchItems(path: "Users/\(userId)/Items/Resume", query: [
+            .init(name: "ParentId", value: seriesId),
+            .init(name: "Recursive", value: "true"),
+            .init(name: "Limit", value: "1"),
+        ])
+        if let episode = resumable.first { return episode }
+        // Jellyfin's NextUp already falls back to the first episode for a
+        // series nobody has started (disableFirstEpisode defaults to false).
+        let next = try await fetchItems(path: "Shows/NextUp", query: [
+            .init(name: "userId", value: userId),
+            .init(name: "seriesId", value: seriesId),
+            .init(name: "Limit", value: "1"),
+        ])
+        if let episode = next.first { return episode }
+        // Every episode watched: start the series over.
+        return try await fetchItems(path: "Shows/\(seriesId)/Episodes", query: [
+            .init(name: "userId", value: userId),
+            .init(name: "Limit", value: "1"),
+        ]).first
+    }
+
+    func episode(after episode: LibraryItem) async throws -> LibraryItem? {
+        guard episode.kind == .episode, let seriesId = episode.seriesId else { return nil }
+        let userId = try await resolveUserId()
+        // startItemId lists from this episode onward, across seasons.
+        let run = try await fetchItems(path: "Shows/\(seriesId)/Episodes", query: [
+            .init(name: "userId", value: userId),
+            .init(name: "startItemId", value: episode.id),
+            .init(name: "Limit", value: "2"),
+        ])
+        guard run.first?.id == episode.id, run.count > 1 else { return nil }
+        return run[1]
     }
 
     func similar(itemId: String) async throws -> [LibraryItem] {
@@ -274,7 +343,7 @@ actor JellyfinLibrary: MediaServerLibrary {
         case .logo: jellyfinType = "Logo"
         case .thumb: jellyfinType = "Thumb"
         }
-        var url = baseURL.appending(path: "Items/\(item.id)/Images/\(jellyfinType)")
+        var url = baseURL.appending(path: "Items/\(ref.ownerId ?? item.id)/Images/\(jellyfinType)")
         var query: [URLQueryItem] = []
         if let maxWidth = size.maxWidth { query.append(.init(name: "maxWidth", value: String(maxWidth))) }
         if let maxHeight = size.maxHeight { query.append(.init(name: "fillHeight", value: String(maxHeight))) }
@@ -334,7 +403,7 @@ actor JellyfinLibrary: MediaServerLibrary {
                 .init(name: "static", value: "true"),
                 .init(name: "api_key", value: authHeaderToken),
             ])
-        let resumeSeconds = item.userData.playbackPositionSeconds
+        let resumeSeconds = item.userData.resumeSeconds
 
         if await NativeVideoDecodeProbe.canPlayNatively(url: directURL, timeout: 5) {
             return .genericPlayer(GenericPlaybackPlan(method: .direct, streamURL: directURL, resumeSeconds: resumeSeconds))

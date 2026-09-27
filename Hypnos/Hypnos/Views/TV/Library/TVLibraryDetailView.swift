@@ -1,358 +1,416 @@
 /*
  Hypnos - tvOS Library detail page
 
- Backdrop, logo/title, metadata, overview, Play/Resume, Mark Played,
- Favorite. A series additionally gets a season picker + episode list
- (thumb, S×E, title, runtime, progress/played state, synopsis) in place of
- the plain Play row. Playback itself (what "Play" actually does) is wired up
- in a later phase — the button and the resolved `PlaybackRoute` already
- exist so that phase only has to act on it.
+ Laid out like an Apple TV app product page:
+
+ - The backdrop fills the screen and stays put; the page scrolls over it,
+   and it darkens as the page scrolls so shelves further down stay legible.
+ - The first screen is the item itself: logo or title, facts line,
+   overview, and the action row bottom-left. Play/Resume (for a series,
+   "Play S1 E2" for its Next Up episode), Start Over when there is a resume
+   point, and round Played and Favorite toggles.
+ - Below, for a series: season buttons (focusing one switches to it, as on
+   the Apple TV app) over a row of episode lockups that play on select.
+   Then More Like This, then an About block.
+
+ No navigation title: the logo is the title, and a nav bar would sit on
+ top of the art.
  */
 
 #if os(tvOS)
 
-import RAVEFilm
 import SwiftUI
 
 struct TVLibraryDetailView: View {
     let item: LibraryItem
+    let playback: LibraryPlayback
 
     @State private var detail: LibraryItem?
+    @State private var nextEpisode: LibraryItem?
     @State private var seasons: [LibraryItem] = []
     @State private var selectedSeasonId: String?
     @State private var episodes: [LibraryItem] = []
     @State private var similar: [LibraryItem] = []
-    @State private var isLoading = true
-    @State private var error: String?
-    @State private var isResolvingPlayback = false
-    @State private var showResumeChoice = false
-    @State private var showFilmPlayer = false
-    @State private var presentedVideo: GalleryVideo?
-    @State private var progressReporter: GenericProgressReporter?
+    @State private var actionError: String?
+    @State private var scrollOffset: CGFloat = 0
+    @State private var resumeChoice: LibraryItem?
+    @FocusState private var focus: Action?
 
+    private enum Action: Hashable { case play, startOver, played, favorite }
+
+    private var shown: LibraryItem { detail ?? item }
     private var library: JellyfinLibrary? { LibraryService.current() }
-
-    private var effectiveItem: LibraryItem { detail ?? item }
+    /// What Play actually starts: the item, or a series' next episode.
+    private var playTarget: LibraryItem? { shown.kind == .series ? nextEpisode : shown }
 
     var body: some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 50) {
-                header
-                    .focusSection()
+        GeometryReader { geometry in
+            ZStack(alignment: .top) {
+                TVLibraryBackdrop(item: shown)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .overlay(Color.black.opacity(min(scrollOffset / 500, 1) * 0.7))
 
-                if effectiveItem.kind == .series {
-                    seasonEpisodeSection
-                        .focusSection()
+                ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 70) {
+                        hero
+                            .frame(height: geometry.size.height - 120, alignment: .bottomLeading)
+                            .focusSection()
+
+                        if shown.kind == .series {
+                            seasonsSection.focusSection().id("seasons")
+                        }
+                        if !similar.isEmpty {
+                            TVLibraryShelfRow(shelf: LibraryShelf(id: "similar", title: "More Like This", items: similar),
+                                              playback: playback)
+                                .focusSection()
+                        }
+                        about
+                    }
+                    .padding(.bottom, 90)
                 }
-
-                if !similar.isEmpty {
-                    TVLibraryShelfRow(shelf: LibraryShelf(id: "similar", title: "More Like This", items: similar))
-                        .focusSection()
+                .scrollClipDisabled()
+                .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { _, offset in
+                    scrollOffset = max(offset, 0)
+                }
+                #if DEBUG
+                // Same hook as the home screen's: `tvLibraryScrollToShelf=1`
+                // scrolls to the season/episode rows for a screenshot.
+                .onChange(of: episodes.isEmpty) { _, empty in
+                    guard !empty, UserDefaults.standard.integer(forKey: "tvLibraryScrollToShelf") > 0 else { return }
+                    Task {
+                        try? await Task.sleep(for: .seconds(1))
+                        proxy.scrollTo("seasons", anchor: .top)
+                    }
+                }
+                #endif
                 }
             }
-            .padding(.bottom, 80)
         }
-        .task { await load() }
-        .navigationTitle(effectiveItem.title)
-        // tvOS has no Window scenes, unlike visionOS/macOS's real
-        // `Window("Film Player", id: FilmPlayerView.windowID)` — a
-        // fullScreenCover is this platform's presentation, matching
-        // `TVVideosTabView`'s existing `TVVideoPlayerView` pattern.
-        .fullScreenCover(isPresented: $showFilmPlayer) { FilmPlayerView() }
-        .fullScreenCover(item: $presentedVideo) { video in
-            TVVideoPlayerView(video: video) { position, _, isPaused in
-                progressReporter?.report(currentTime: position, isPaused: isPaused)
-            }
+        .ignoresSafeArea()
+        .background(Color.black)
+        .toolbar(.hidden, for: .navigationBar)
+        .defaultFocus($focus, .play)
+        .task(id: LibraryService.configurationKey) { await load() }
+        .onChange(of: playback.finishedCount) {
+            Task { await reloadWatchState() }
         }
-        .onChange(of: presentedVideo) { oldValue, newValue in
-            if newValue == nil, oldValue != nil {
-                progressReporter?.finish()
-                progressReporter = nil
+        .confirmationDialog(resumeChoice.map { $0.episodeLabel ?? $0.title } ?? "",
+                            isPresented: Binding(get: { resumeChoice != nil }, set: { if !$0 { resumeChoice = nil } }),
+                            titleVisibility: .visible) {
+            if let episode = resumeChoice {
+                Button("Resume") { Task { await playback.play(episode) } }
+                Button("Start Over") { Task { await playback.play(episode, fromStart: true) } }
+                Button("Cancel", role: .cancel) {}
             }
         }
     }
 
-    // MARK: - Header
+    // MARK: - First screen
 
-    private var header: some View {
+    private var hero: some View {
         VStack(alignment: .leading, spacing: 20) {
-            ZStack(alignment: .bottomLeading) {
-                backdrop
-                    .aspectRatio(16.0 / 6.0, contentMode: .fill)
-                    .frame(maxWidth: .infinity)
-                    .clipped()
-                    .overlay(LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .center, endPoint: .bottom))
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(effectiveItem.title).font(.system(size: 40, weight: .bold))
-                    metadataRow
-                }
-                .padding(40)
+            LibraryLogo(item: shown, maxWidth: 700, maxHeight: 230, titleFont: .system(size: 84, weight: .heavy))
+            if shown.kind == .episode {
+                Text(shown.title)
+                    .font(.title3.weight(.semibold))
             }
-
-            if let overview = effectiveItem.overview, !overview.isEmpty {
-                Text(overview).font(.body).frame(maxWidth: 900, alignment: .leading).padding(.horizontal, 60)
+            LibraryFactsLine(item: shown)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.white.opacity(0.75))
+            if let overview = shown.overview, !overview.isEmpty {
+                Text(overview)
+                    .font(.body)
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(4)
+                    .frame(maxWidth: 940, alignment: .leading)
             }
+            actions.padding(.top, 12)
+            if let error = actionError ?? playback.error {
+                Text(error).font(.caption).foregroundStyle(.red)
+            }
+        }
+        .padding(.horizontal, 90)
+    }
 
-            HStack(spacing: 24) {
-                if effectiveItem.kind != .series {
-                    Button {
-                        if effectiveItem.userData.playbackPositionSeconds != nil {
-                            showResumeChoice = true
-                        } else {
-                            Task { await play(fromStart: true) }
-                        }
-                    } label: {
-                        if isResolvingPlayback {
-                            ProgressView()
-                        } else {
-                            Label(effectiveItem.userData.playedPercentage.map { _ in "Resume" } ?? "Play", systemImage: "play.fill")
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isResolvingPlayback)
-                    .confirmationDialog("Resume Playback?", isPresented: $showResumeChoice, titleVisibility: .visible) {
-                        Button("Resume") { Task { await play(fromStart: false) } }
-                        Button("Start Over") { Task { await play(fromStart: true) } }
-                        Button("Cancel", role: .cancel) {}
-                    }
-                }
+    private var actions: some View {
+        HStack(spacing: 28) {
+            Button {
+                if let target = playTarget { Task { await playback.play(target) } }
+            } label: {
+                TVPlayButtonLabel(item: playTarget ?? shown, title: playTitle,
+                                  isResolving: playback.resolvingItemId == playTarget?.id)
+            }
+            .focused($focus, equals: .play)
+            .disabled(playTarget == nil)
 
+            if let target = playTarget, target.userData.resumeSeconds != nil {
                 Button {
-                    Task { await togglePlayed() }
+                    Task { await playback.play(target, fromStart: true) }
                 } label: {
-                    Label(effectiveItem.userData.isPlayed ? "Mark Unplayed" : "Mark Played",
-                          systemImage: effectiveItem.userData.isPlayed ? "checkmark.circle.fill" : "checkmark.circle")
+                    Label("Start Over", systemImage: "arrow.counterclockwise")
                 }
-                .buttonStyle(.bordered)
-
-                Button {
-                    Task { await toggleFavorite() }
-                } label: {
-                    Label(effectiveItem.userData.isFavorite ? "Unfavorite" : "Favorite",
-                          systemImage: effectiveItem.userData.isFavorite ? "heart.fill" : "heart")
-                }
-                .buttonStyle(.bordered)
+                .focused($focus, equals: .startOver)
             }
-            .padding(.horizontal, 60)
 
-            if let error {
-                Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 60)
+            Button {
+                Task { await togglePlayed() }
+            } label: {
+                Image(systemName: shown.userData.isPlayed ? "checkmark.circle.fill" : "checkmark.circle")
             }
+            .buttonBorderShape(.circle)
+            .focused($focus, equals: .played)
+            .accessibilityLabel(shown.userData.isPlayed ? "Mark as Unwatched" : "Mark as Watched")
+
+            Button {
+                Task { await toggleFavorite() }
+            } label: {
+                Image(systemName: shown.userData.isFavorite ? "heart.fill" : "heart")
+            }
+            .buttonBorderShape(.circle)
+            .focused($focus, equals: .favorite)
+            .accessibilityLabel(shown.userData.isFavorite ? "Remove from Favorites" : "Add to Favorites")
         }
     }
 
-    private var metadataRow: some View {
-        HStack(spacing: 10) {
-            if let year = effectiveItem.year { Text(String(year)) }
-            if let rating = effectiveItem.officialRating { Text(rating) }
-            if let runtime = effectiveItem.runtimeSeconds, effectiveItem.kind != .series {
-                Text(Self.runtimeFormatter.string(from: runtime) ?? "")
-            }
-            if !effectiveItem.genres.isEmpty { Text(effectiveItem.genres.joined(separator: ", ")) }
-        }
-        .font(.callout)
-        .foregroundStyle(.secondary)
+    /// A series names the episode Play will start; a movie or an episode
+    /// uses the default Play/Resume label.
+    private var playTitle: String? {
+        guard shown.kind == .series else { return nil }
+        guard let next = nextEpisode, let label = next.episodeLabel else { return "Play" }
+        return next.userData.resumeSeconds != nil ? "Resume \(label)" : "Play \(label)"
     }
 
-    @ViewBuilder
-    private var backdrop: some View {
-        if let url = library?.imageURL(item: effectiveItem, kind: .backdrop, size: .backdropFull) {
-            AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Rectangle().fill(.gray.opacity(0.25)) }
-        } else {
-            Rectangle().fill(.gray.opacity(0.25))
-        }
-    }
+    // MARK: - Seasons and episodes
 
-    // MARK: - Seasons/episodes
-
-    private var seasonEpisodeSection: some View {
-        VStack(alignment: .leading, spacing: 24) {
+    private var seasonsSection: some View {
+        VStack(alignment: .leading, spacing: 26) {
             if seasons.count > 1 {
-                Picker("Season", selection: Binding(
-                    get: { selectedSeasonId ?? seasons.first?.id },
-                    set: { newValue in
-                        selectedSeasonId = newValue
-                        Task { await loadEpisodes() }
+                ScrollView(.horizontal) {
+                    HStack(spacing: 20) {
+                        ForEach(seasons) { season in
+                            TVSeasonButton(title: season.title, isSelected: season.id == selectedSeasonId) {
+                                selectSeason(season.id)
+                            }
+                        }
                     }
-                )) {
-                    ForEach(seasons) { season in
-                        Text(season.title).tag(Optional(season.id))
-                    }
+                    .padding(.horizontal, 90)
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 60)
+                .scrollClipDisabled()
+                .scrollIndicators(.hidden)
+                .focusSection()
+            } else {
+                Text(seasons.first?.title ?? "Episodes")
+                    .font(.title3.weight(.semibold))
+                    .padding(.horizontal, 90)
             }
 
-            if isLoading && episodes.isEmpty {
-                ProgressView().padding(.horizontal, 60)
-            } else {
-                VStack(spacing: 16) {
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 44) {
                     ForEach(episodes) { episode in
-                        TVLibraryEpisodeRow(episode: episode)
+                        Button {
+                            if episode.userData.resumeSeconds != nil {
+                                resumeChoice = episode
+                            } else {
+                                Task { await playback.play(episode) }
+                            }
+                        } label: {
+                            TVEpisodeLockup(episode: episode, isResolving: playback.resolvingItemId == episode.id)
+                        }
+                        .buttonStyle(.borderless)
                     }
                 }
-                .padding(.horizontal, 60)
+                .padding(.horizontal, 90)
             }
+            .scrollClipDisabled()
+            .scrollIndicators(.hidden)
+            .focusSection()
+        }
+    }
+
+    // MARK: - About
+
+    private var about: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("About")
+                .font(.title3.weight(.semibold))
+            HStack(alignment: .top, spacing: 80) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(shown.seriesName ?? shown.title).font(.headline)
+                    if let overview = shown.overview, !overview.isEmpty {
+                        Text(overview)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: 900, alignment: .leading)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 14) {
+                    if !shown.genres.isEmpty { aboutFact("Genre", shown.genres.joined(separator: ", ")) }
+                    if let year = shown.year { aboutFact("Released", String(year)) }
+                    if shown.kind != .series, let runtime = shown.runtimeSeconds, runtime > 0 {
+                        aboutFact("Runtime", LibraryFormat.runtime(runtime))
+                    }
+                    if let rating = shown.officialRating { aboutFact("Rated", rating) }
+                    if let score = shown.communityRating {
+                        aboutFact("Rating", String(format: "%.1f / 10", score))
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 90)
+    }
+
+    private func aboutFact(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            Text(value).font(.callout)
         }
     }
 
     // MARK: - Loading
 
     private func load() async {
-        guard let library else {
-            error = "No Jellyfin server configured."
-            isLoading = false
-            return
-        }
-        isLoading = true
-        defer { isLoading = false }
+        guard let library else { return }
         do {
-            detail = try await library.item(id: item.id)
-            if effectiveItem.kind == .series {
-                seasons = try await library.seasons(seriesId: item.id)
-                selectedSeasonId = seasons.first?.id
+            let fresh = try await library.item(id: item.id)
+            detail = fresh
+            if fresh.kind == .series {
+                async let next = library.nextUp(seriesId: fresh.id)
+                seasons = try await library.seasons(seriesId: fresh.id)
+                nextEpisode = try await next
+                let initial = seasons.first { $0.seasonNumber == nextEpisode?.seasonNumber && $0.seasonNumber != nil }
+                    ?? seasons.first { season in nextEpisode?.seasonId == season.id }
+                    ?? seasons.first
+                selectedSeasonId = initial?.id
                 await loadEpisodes()
             }
-            similar = try await library.similar(itemId: item.id)
+            similar = (try? await library.similar(itemId: fresh.seriesId ?? fresh.id)) ?? []
         } catch {
-            self.error = error.localizedDescription
+            actionError = error.localizedDescription
         }
         #if DEBUG
         // Mirrors `tvLibraryAutoOpenItemId` (`TVLibraryTabView`): with no
         // remote-button injection on the tvOS simulator, this is the only
-        // way to drive a real tap of the Play button for verification.
-        if UserDefaults.standard.bool(forKey: "tvLibraryAutoPlay"), effectiveItem.kind != .series {
-            await play(fromStart: true)
+        // way to drive a press of Play for verification.
+        if UserDefaults.standard.bool(forKey: "tvLibraryAutoPlay"), let target = playTarget {
+            await playback.play(target)
         }
         #endif
     }
 
-    private func loadEpisodes() async {
-        guard let library, let seasonId = selectedSeasonId else { return }
-        do {
-            episodes = try await library.episodes(seasonId: seasonId)
-        } catch {
-            self.error = error.localizedDescription
+    /// After playback: resume points, played state and Next Up all moved.
+    private func reloadWatchState() async {
+        guard let library else { return }
+        detail = (try? await library.item(id: item.id)) ?? detail
+        if shown.kind == .series {
+            nextEpisode = (try? await library.nextUp(seriesId: shown.id)) ?? nextEpisode
+            await loadEpisodes()
         }
     }
 
-    /// Same routing as `LibraryDetailView.play(fromStart:)`, presented via
-    /// `fullScreenCover` instead of a `Window` (see the header comment).
-    private func play(fromStart: Bool) async {
-        guard let library else { return }
-        isResolvingPlayback = true
-        defer { isResolvingPlayback = false }
-        do {
-            let route = try await library.playbackRoute(for: effectiveItem)
-            switch route {
-            case .atmosFilmPlayer:
-                _ = await FilmSession.shared.load(itemId: effectiveItem.id, name: effectiveItem.title, productionYear: effectiveItem.year)
-                if !fromStart, let resumeSeconds = effectiveItem.userData.playbackPositionSeconds {
-                    FilmSession.shared.player.seek(to: resumeSeconds)
-                }
-                FilmSession.shared.player.play()
-                showFilmPlayer = true
-            case .genericPlayer(let plan):
-                let video = LibraryPlaybackCoordinator.makeGalleryVideo(item: effectiveItem, plan: plan, library: library)
-                progressReporter = GenericProgressReporter(video: video)
-                presentedVideo = video
-            }
-        } catch {
-            self.error = error.localizedDescription
+    private func selectSeason(_ id: String) {
+        guard id != selectedSeasonId else { return }
+        selectedSeasonId = id
+        Task { await loadEpisodes() }
+    }
+
+    private func loadEpisodes() async {
+        guard let library, let seasonId = selectedSeasonId else { return }
+        if let loaded = try? await library.episodes(seasonId: seasonId), seasonId == selectedSeasonId {
+            episodes = loaded
         }
     }
 
     private func togglePlayed() async {
         guard let library else { return }
         do {
-            try await library.setPlayed(itemId: item.id, played: !effectiveItem.userData.isPlayed)
-            detail = try await library.item(id: item.id)
+            try await library.setPlayed(itemId: shown.id, played: !shown.userData.isPlayed)
+            await reloadWatchState()
         } catch {
-            self.error = error.localizedDescription
+            actionError = error.localizedDescription
         }
     }
 
     private func toggleFavorite() async {
         guard let library else { return }
         do {
-            try await library.setFavorite(itemId: item.id, favorite: !effectiveItem.userData.isFavorite)
-            detail = try await library.item(id: item.id)
+            try await library.setFavorite(itemId: shown.id, favorite: !shown.userData.isFavorite)
+            detail = try await library.item(id: shown.id)
         } catch {
-            self.error = error.localizedDescription
+            actionError = error.localizedDescription
         }
     }
-
-    private static let runtimeFormatter: DateComponentsFormatter = {
-        let formatter = DateComponentsFormatter()
-        formatter.unitsStyle = .abbreviated
-        formatter.allowedUnits = [.hour, .minute]
-        return formatter
-    }()
 }
 
-/// One row in a series' episode list: thumb, S×E + title, runtime,
-/// progress/played state, a one-line synopsis.
-private struct TVLibraryEpisodeRow: View {
-    let episode: LibraryItem
-    private var library: JellyfinLibrary? { LibraryService.current() }
+/// A season tab: selects on focus, like the Apple TV app's season row.
+private struct TVSeasonButton: View {
+    let title: String
+    let isSelected: Bool
+    let select: () -> Void
+    @FocusState private var isFocused: Bool
 
     var body: some View {
-        Button {
-            // Playback wiring: a later phase.
-        } label: {
-            HStack(alignment: .top, spacing: 20) {
-                ZStack(alignment: .bottom) {
-                    thumb.frame(width: 220, height: 124).clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    if let pct = episode.userData.playedPercentage, pct > 0 {
-                        GeometryReader { geometry in
-                            ZStack(alignment: .leading) {
-                                Rectangle().fill(.white.opacity(0.3))
-                                Rectangle().fill(.red).frame(width: geometry.size.width * pct / 100)
-                            }
-                        }
-                        .frame(height: 4)
-                    }
-                }
+        Button(action: select) {
+            Text(title)
+                .fontWeight(isSelected ? .semibold : .regular)
+                .foregroundStyle(isSelected || isFocused ? .primary : .secondary)
+        }
+        .buttonStyle(.borderless)
+        .focused($isFocused)
+        .onChange(of: isFocused) { _, focused in
+            if focused { select() }
+        }
+    }
+}
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(episode.episodeLabel ?? "").foregroundStyle(.secondary)
-                        Text(episode.title).font(.headline)
-                        Spacer()
-                        if episode.userData.isPlayed {
-                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                        }
-                        if let runtime = episode.runtimeSeconds {
-                            Text(Self.runtimeFormatter.string(from: runtime) ?? "").foregroundStyle(.secondary)
-                        }
-                    }
-                    if let overview = episode.overview, !overview.isEmpty {
-                        Text(overview).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+/// An episode in a season row: still with resume bar, then "EPISODE 3",
+/// title, a two-line synopsis and the runtime or time left.
+private struct TVEpisodeLockup: View {
+    let episode: LibraryItem
+    var isResolving = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            LibraryArtwork(item: episode, slot: .landscape, size: LibraryImageSize(maxWidth: 960, maxHeight: nil, quality: 90))
+                .frame(width: TVLandscapeLockup.size.width, height: TVLandscapeLockup.size.height)
+                .overlay(alignment: .bottom) {
+                    if let fraction = episode.resumeFraction {
+                        LibraryProgressBar(fraction: fraction, height: 6)
+                            .padding(.horizontal, 18)
+                            .padding(.bottom, 16)
                     }
                 }
-                Spacer()
+                .overlay(alignment: .topTrailing) {
+                    if episode.userData.isPlayed { TVPlayedBadge().padding(12) }
+                }
+                .overlay { if isResolving { ProgressView() } }
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .hoverEffect(.highlight)
+
+            VStack(alignment: .leading, spacing: 4) {
+                if let number = episode.episodeNumber {
+                    Text("EPISODE \(number)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                Text(episode.title)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+                if let overview = episode.overview, !overview.isEmpty {
+                    Text(overview)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2, reservesSpace: true)
+                }
+                if let remaining = episode.remainingSeconds {
+                    Text(LibraryFormat.remaining(remaining)).font(.caption2).foregroundStyle(.secondary)
+                } else if let runtime = episode.runtimeSeconds, runtime > 0 {
+                    Text(LibraryFormat.runtime(runtime)).font(.caption2).foregroundStyle(.secondary)
+                }
             }
-            .padding(16)
-        }
-        .buttonStyle(.card)
-    }
-
-    @ViewBuilder
-    private var thumb: some View {
-        if let url = library?.imageURL(item: episode, kind: .primary, size: .thumbnail) {
-            AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Rectangle().fill(.gray.opacity(0.25)) }
-        } else {
-            Rectangle().fill(.gray.opacity(0.25))
+            .frame(width: TVLandscapeLockup.size.width, alignment: .leading)
         }
     }
-
-    private static let runtimeFormatter: DateComponentsFormatter = {
-        let formatter = DateComponentsFormatter()
-        formatter.unitsStyle = .abbreviated
-        formatter.allowedUnits = [.minute]
-        return formatter
-    }()
 }
 
 #endif

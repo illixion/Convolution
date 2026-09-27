@@ -55,7 +55,7 @@ protocol PlaybackProgressReporting: Sendable {
 /// Everything the Library UI needs from a media server: browsing, detail,
 /// artwork, search, playback routing, and progress/favorite/played state.
 protocol MediaServerLibrary: PlaybackProgressReporting {
-    /// Home screen: hero pick + shelves (Continue Watching, Next Up,
+    /// Home screen: featured picks + shelves (Continue Watching, Next Up,
     /// Recently Added Movies/Shows, per-genre, collections).
     func home() async throws -> LibraryHome
 
@@ -67,6 +67,15 @@ protocol MediaServerLibrary: PlaybackProgressReporting {
 
     /// A season's episodes, in order.
     func episodes(seasonId: String) async throws -> [LibraryItem]
+
+    /// The episode a series' Play button should start: the next unwatched
+    /// one after the last watched (or the in-progress one), else the first.
+    /// Nil for a series with no episodes.
+    func nextUp(seriesId: String) async throws -> LibraryItem?
+
+    /// The episode after `episode` in airing order, crossing into the next
+    /// season; nil after the last one. Drives autoplay of the next episode.
+    func episode(after episode: LibraryItem) async throws -> LibraryItem?
 
     /// "More Like This" for a given item.
     func similar(itemId: String) async throws -> [LibraryItem]

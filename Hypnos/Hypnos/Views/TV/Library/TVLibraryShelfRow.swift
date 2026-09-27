@@ -1,8 +1,14 @@
 /*
- Hypnos - tvOS Library shelf: a horizontally-scrolling row of lockups
+ Hypnos - tvOS Library shelf: a horizontally scrolling row of lockups
 
- Landscape thumbnails with a progress bar for Continue Watching/Next Up,
- poster lockups everywhere else — `LibraryShelf.style` picks which.
+ Lockups are `.borderless` buttons, the tvOS system lockup: the artwork
+ lifts and tilts with focus (`.hoverEffect(.highlight)`) and the caption
+ under it slides clear, with no custom focus drawing.
+
+ - `.landscape` shelves (Continue Watching, Next Up) show 16:9 art with a
+   resume bar and a two-line caption, and play on select.
+ - `.poster` shelves show 2:3 key art with no caption (the art carries the
+   title, as on the Apple TV app) and open the detail page.
  */
 
 #if os(tvOS)
@@ -11,95 +17,108 @@ import SwiftUI
 
 struct TVLibraryShelfRow: View {
     let shelf: LibraryShelf
+    let playback: LibraryPlayback
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: 22) {
             Text(shelf.title)
                 .font(.title3.weight(.semibold))
-                .padding(.leading, 60)
+                .foregroundStyle(.white)
+                .padding(.leading, 90)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 40) {
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 44) {
                     ForEach(shelf.items) { item in
-                        NavigationLink(value: item) {
-                            TVLibraryLockup(item: item, style: shelf.style)
+                        switch shelf.style {
+                        case .landscape:
+                            Button {
+                                Task { await playback.play(item) }
+                            } label: {
+                                TVLandscapeLockup(item: item, isResolving: playback.resolvingItemId == item.id)
+                            }
+                            .buttonStyle(.borderless)
+                        case .poster:
+                            NavigationLink(value: item) {
+                                TVPosterLockup(item: item)
+                            }
+                            .buttonStyle(.borderless)
                         }
-                        .buttonStyle(.card)
                     }
                 }
-                .padding(.horizontal, 60)
+                .padding(.horizontal, 90)
             }
+            .scrollClipDisabled()
+            .scrollIndicators(.hidden)
         }
     }
 }
 
-/// One poster or landscape-thumb card, with the item's title beneath it and
-/// (for a landscape/in-progress lockup) a resume-position progress bar.
-struct TVLibraryLockup: View {
+struct TVPosterLockup: View {
     let item: LibraryItem
-    let style: LibraryShelf.Style
-
-    private var library: JellyfinLibrary? { LibraryService.current() }
-
-    private var size: CGSize {
-        switch style {
-        case .poster: return CGSize(width: 220, height: 330)
-        case .landscape: return CGSize(width: 380, height: 214)
-        }
-    }
+    static let size = CGSize(width: 260, height: 390)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ZStack(alignment: .bottom) {
-                artwork
-                    .frame(width: size.width, height: size.height)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
+        LibraryArtwork(item: item, slot: .poster, size: .poster)
+            .frame(width: Self.size.width, height: Self.size.height)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(alignment: .topTrailing) {
                 if item.userData.isPlayed {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.white, .green)
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .topTrailing)
+                    TVPlayedBadge().padding(12)
                 }
+            }
+            .hoverEffect(.highlight)
+            .accessibilityLabel(item.title)
+    }
+}
 
-                if let pct = item.userData.playedPercentage, pct > 0 {
-                    GeometryReader { geometry in
-                        ZStack(alignment: .leading) {
-                            Rectangle().fill(.white.opacity(0.3))
-                            Rectangle().fill(.red).frame(width: geometry.size.width * pct / 100)
-                        }
+struct TVLandscapeLockup: View {
+    let item: LibraryItem
+    var isResolving = false
+    static let size = CGSize(width: 480, height: 270)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            LibraryArtwork(item: item, slot: .landscape, size: LibraryImageSize(maxWidth: 960, maxHeight: nil, quality: 90))
+                .frame(width: Self.size.width, height: Self.size.height)
+                .overlay(alignment: .bottom) {
+                    if let fraction = item.resumeFraction {
+                        LibraryProgressBar(fraction: fraction, height: 6)
+                            .padding(.horizontal, 18)
+                            .padding(.bottom, 16)
+                            .shadow(color: .black.opacity(0.5), radius: 4)
                     }
-                    .frame(height: 4)
+                }
+                .overlay {
+                    if isResolving { ProgressView() }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .hoverEffect(.highlight)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.seriesName ?? item.title)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+                if let subtitle = LibraryFormat.lockupSubtitle(for: item) {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
-
-            Text(displayTitle)
-                .font(.caption)
-                .lineLimit(1)
-                .frame(width: size.width, alignment: .leading)
+            .frame(width: Self.size.width, alignment: .leading)
         }
     }
+}
 
-    private var displayTitle: String {
-        if let label = item.episodeLabel {
-            return "\(item.seriesName ?? item.title) · \(label)"
-        }
-        return item.title
-    }
-
-    @ViewBuilder
-    private var artwork: some View {
-        let kind: LibraryImageKind = style == .landscape ? .thumb : .primary
-        if let url = library?.imageURL(item: item, kind: kind, size: .thumbnail) ?? library?.imageURL(item: item, kind: .primary, size: .thumbnail) {
-            AsyncImage(url: url) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                Rectangle().fill(.gray.opacity(0.25))
-            }
-        } else {
-            Rectangle().fill(.gray.opacity(0.25))
-                .overlay(Text(item.title).font(.caption2).padding(4))
-        }
+/// The played checkmark on a lockup's corner.
+struct TVPlayedBadge: View {
+    var body: some View {
+        Image(systemName: "checkmark")
+            .font(.caption.weight(.bold))
+            .foregroundStyle(.black)
+            .padding(8)
+            .background(.white, in: Circle())
+            .shadow(radius: 4)
     }
 }
 

@@ -1,99 +1,188 @@
 /*
  Hypnos - Library shelf (visionOS, iOS, macOS)
 
- Cross-platform counterpart to `Views/TV/Library/TVLibraryShelfRow.swift`:
- same landscape-with-progress/poster split by `LibraryShelf.style`, ordinary
- `NavigationLink`s instead of tvOS's focus-engine cards.
+ Counterpart to `Views/TV/Library/TVLibraryShelfRow.swift`, sized for
+ touch, pointer and gaze instead of the focus engine: the same split of
+ landscape lockups (Continue Watching, Next Up; play on tap, show a resume
+ bar and caption) and poster lockups (open the detail page, art only), laid
+ out by `LibraryMetrics` so an iPhone gets a denser row than a Mac window
+ or a visionOS window.
  */
 
 import SwiftUI
 
+/// Layout scale for the non-tvOS Library screens, from the width they
+/// actually have (a narrow Mac window is laid out like a phone).
+struct LibraryMetrics: Equatable {
+    var width: CGFloat = 1000
+
+    var isCompact: Bool { width < 640 }
+    /// Leading/trailing inset for text and the first lockup in a row.
+    var gutter: CGFloat { isCompact ? 16 : 32 }
+    var poster: CGSize { isCompact ? CGSize(width: 116, height: 174) : CGSize(width: 164, height: 246) }
+    var landscape: CGSize { isCompact ? CGSize(width: 250, height: 141) : CGSize(width: 320, height: 180) }
+    var lockupSpacing: CGFloat { isCompact ? 12 : 20 }
+    /// The hero: wide screens get a cinematic band, phones a taller card
+    /// so the logo and buttons fit over the art.
+    var heroHeight: CGFloat { isCompact ? min(width * 1.25, 560) : min(max(width * 0.5, 420), 680) }
+}
+
+private struct LibraryMetricsKey: EnvironmentKey {
+    static let defaultValue = LibraryMetrics()
+}
+
+extension EnvironmentValues {
+    var libraryMetrics: LibraryMetrics {
+        get { self[LibraryMetricsKey.self] }
+        set { self[LibraryMetricsKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// Measures this view's width and publishes matching `LibraryMetrics`
+    /// to everything inside it.
+    func measuresLibraryMetrics() -> some View {
+        modifier(LibraryMetricsReader())
+    }
+}
+
+private struct LibraryMetricsReader: ViewModifier {
+    @State private var metrics = LibraryMetrics()
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.libraryMetrics, metrics)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                if abs(width - metrics.width) > 1 { metrics = LibraryMetrics(width: width) }
+            }
+    }
+}
+
 struct LibraryShelfRow: View {
     let shelf: LibraryShelf
+    let playback: LibraryPlayback
+    @Environment(\.libraryMetrics) private var metrics
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(shelf.title)
-                .font(.headline)
-                .padding(.horizontal, 20)
+                .font(.title3.weight(.bold))
+                .padding(.horizontal, metrics.gutter)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: metrics.lockupSpacing) {
                     ForEach(shelf.items) { item in
-                        NavigationLink(value: item) {
-                            LibraryLockup(item: item, style: shelf.style)
+                        switch shelf.style {
+                        case .landscape:
+                            Button {
+                                Task { await playback.play(item) }
+                            } label: {
+                                LibraryLandscapeLockup(item: item, isResolving: playback.resolvingItemId == item.id)
+                            }
+                            .buttonStyle(.plain)
+                        case .poster:
+                            NavigationLink(value: item) {
+                                LibraryPosterLockup(item: item)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
-                        #if !os(tvOS) && !os(macOS)
-                        .hoverEffect(.highlight)
-                        #endif
                     }
                 }
-                .padding(.horizontal, 20)
+                .scrollTargetLayout()
+                .padding(.horizontal, metrics.gutter)
             }
+            .scrollIndicators(.hidden)
+            .scrollTargetBehavior(.viewAligned)
+            .scrollClipDisabled()
         }
     }
 }
 
-struct LibraryLockup: View {
+struct LibraryPosterLockup: View {
     let item: LibraryItem
-    let style: LibraryShelf.Style
-    private var library: JellyfinLibrary? { LibraryService.current() }
-
-    private var size: CGSize {
-        switch style {
-        case .poster: return CGSize(width: 130, height: 195)
-        case .landscape: return CGSize(width: 220, height: 124)
-        }
-    }
+    @Environment(\.libraryMetrics) private var metrics
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ZStack(alignment: .bottom) {
-                artwork
-                    .frame(width: size.width, height: size.height)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        LibraryArtwork(item: item, slot: .poster, size: .poster)
+            .frame(width: metrics.poster.width, height: metrics.poster.height)
+            .clipShape(.rect(cornerRadius: 10, style: .continuous))
+            .overlay(alignment: .topTrailing) {
+                if item.userData.isPlayed { LibraryPlayedBadge().padding(8) }
+            }
+            .contentShape(.rect(cornerRadius: 10, style: .continuous))
+            .libraryLockupHover()
+            .accessibilityLabel(item.title)
+    }
+}
 
-                if item.userData.isPlayed {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.white, .green)
-                        .padding(6)
-                        .frame(maxWidth: .infinity, alignment: .topTrailing)
-                }
+struct LibraryLandscapeLockup: View {
+    let item: LibraryItem
+    var isResolving = false
+    @Environment(\.libraryMetrics) private var metrics
 
-                if let pct = item.userData.playedPercentage, pct > 0 {
-                    GeometryReader { geometry in
-                        ZStack(alignment: .leading) {
-                            Rectangle().fill(.white.opacity(0.3))
-                            Rectangle().fill(.red).frame(width: geometry.size.width * pct / 100)
-                        }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LibraryArtwork(item: item, slot: .landscape, size: LibraryImageSize(maxWidth: 720, maxHeight: nil, quality: 90))
+                .frame(width: metrics.landscape.width, height: metrics.landscape.height)
+                .overlay(alignment: .bottom) {
+                    if let fraction = item.resumeFraction {
+                        LibraryProgressBar(fraction: fraction, height: 4)
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 10)
+                            .shadow(color: .black.opacity(0.5), radius: 3)
                     }
-                    .frame(height: 3)
+                }
+                .overlay {
+                    if isResolving {
+                        ProgressView().controlSize(.large)
+                    } else {
+                        Image(systemName: "play.fill")
+                            .font(.title2)
+                            .foregroundStyle(.white)
+                            .padding(14)
+                            .background(.black.opacity(0.35), in: Circle())
+                    }
+                }
+                .clipShape(.rect(cornerRadius: 10, style: .continuous))
+                .contentShape(.rect(cornerRadius: 10, style: .continuous))
+                .libraryLockupHover()
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.seriesName ?? item.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                if let subtitle = LibraryFormat.lockupSubtitle(for: item) {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
-
-            Text(displayTitle)
-                .font(.caption)
-                .lineLimit(1)
-                .frame(width: size.width, alignment: .leading)
+            .frame(width: metrics.landscape.width, alignment: .leading)
         }
     }
+}
 
-    private var displayTitle: String {
-        if let label = item.episodeLabel {
-            return "\(item.seriesName ?? item.title) · \(label)"
-        }
-        return item.title
+struct LibraryPlayedBadge: View {
+    var body: some View {
+        Image(systemName: "checkmark")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.black)
+            .padding(5)
+            .background(.white, in: Circle())
+            .shadow(radius: 3)
     }
+}
 
+extension View {
+    /// The platform's pointer/gaze highlight for a lockup: a lift on
+    /// visionOS and iPad, nothing extra on macOS (no hover effects there).
     @ViewBuilder
-    private var artwork: some View {
-        let kind: LibraryImageKind = style == .landscape ? .thumb : .primary
-        if let url = library?.imageURL(item: item, kind: kind, size: .thumbnail) ?? library?.imageURL(item: item, kind: .primary, size: .thumbnail) {
-            AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Rectangle().fill(.gray.opacity(0.25)) }
-        } else {
-            Rectangle().fill(.gray.opacity(0.25))
-                .overlay(Text(item.title).font(.caption2).padding(4))
-        }
+    func libraryLockupHover() -> some View {
+        #if os(macOS) || os(tvOS)
+        self
+        #else
+        self.hoverEffect(.lift)
+        #endif
     }
 }

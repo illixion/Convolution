@@ -42,7 +42,7 @@ struct MacRootView: View {
     /// Hidden until a Jellyfin server is configured — see the Library
     /// feature's decision #3, same gate tvOS/visionOS/iOS apply.
     private var visibleTabs: [MacTab] {
-        MacTab.allCases.filter { $0 != .library || FilmSession.shared.isConfigured }
+        MacTab.allCases.filter { $0 != .library || LibraryService.isAvailable }
     }
 
     var body: some View {

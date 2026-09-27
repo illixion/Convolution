@@ -937,7 +937,13 @@ Sci-Fi — deliberately a WebM/VP9 mux, since AVFoundation can't parse that
 to force Hypnos's HLS-transcode fallback rather than direct play) and one
 series, **Nebula Drift** (2 seasons × 3 episodes). Each gets a real Kodi-style
 NFO (`write_movie_nfo`/`write_tvshow_nfo`/`write_episode_nfo`) plus generated
-poster/fanart/logo art (`gen_art`) — flat color cards with the title via
+poster/fanart/logo art (`gen_art`) — shaped like real artwork so the
+Library UI can be judged against it: a soft *textless* backdrop (real
+fanart has no title; the logo carries it), a poster with its title at the
+bottom, and a white-on-transparent clear logo. Jellyfin serves the logo's
+alpha intact (verified; an earlier note here claimed it flattened alpha
+onto white, which was wrong). A `.art-v2` stamp file in each item folder
+regenerates art from the older flat-title-card version. Rendered with
 ImageMagick's `magick`, not ffmpeg's `drawtext`: **this Homebrew ffmpeg build
 has no libfreetype/drawtext support** (`No such filter: 'drawtext'`), even
 though `freetype` is installed as a separate formula — confirmed directly,
@@ -989,6 +995,28 @@ before touching progress reporting again:**
   a real 35% at `MinResumeDurationSeconds: 3`). `setup_and_scan` lowers it via
   `PUT /System/Configuration` on every `up`, so Continue Watching/Next Up
   have something to show against these short clips.
+
+## Library UI: driving it without a remote or taps
+
+DEBUG-only `-UITestDefault` hooks, since the tvOS simulator takes no
+remote-button injection and the Xcode device-interaction tool can't press
+tvOS buttons:
+
+- `tvLibraryAutoOpenItemId=<id>` (tvOS) / `libraryAutoOpenItemId=<id>`
+  (visionOS, iOS, macOS): push that item's detail page on launch.
+- `tvLibraryScrollToShelf=N` (tvOS): scroll the home screen to shelf N, or
+  a series detail page to its season/episode rows.
+- `tvLibraryAutoPlay=1` (tvOS, with the auto-open): press Play on the
+  detail page — the resume seek and next-episode autoplay are verified this
+  way.
+
+Pair them with `HYPNOS_DEV_JELLYFIN_SIGNIN_USER`/`_PASS` (env, `SIMCTL_CHILD_`
+prefixed for `simctl launch`) and `-UITestDefault
+filmPlayer.jellyfinServer=http://127.0.0.1:8097`. On iOS also pass
+`-UITestDefault hasCompletedWelcome=1`, or the onboarding card covers the
+app. For a macOS run, build with a throwaway
+`PRODUCT_BUNDLE_IDENTIFIER` so `-UITestDefault` writes land in a disposable
+container rather than the real app's settings.
 
 # Stash GraphQL API
 

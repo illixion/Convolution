@@ -38,6 +38,8 @@ struct VideoWindowView: View {
     /// this window's live geometry. Debounced because a resize drag emits a
     /// geometry change per frame and each write hits UserDefaults.
     @State private var sizeWritebackTask: Task<Void, Never>?
+    /// Whether the Library resume seek has run (see `applyStartPositionIfNeeded`).
+    @State private var appliedStartPosition = false
 
     /// True once a group-restored size has been consumed by the aspect lock.
     /// The lock runs again on every prev/next, and after the first video the
@@ -433,11 +435,32 @@ struct VideoWindowView: View {
         // the coordinator's doc comment for the exact start/progress/stopped
         // sequence this drives.
         .task(id: video.identity) {
+            await applyStartPositionIfNeeded()
             await LibraryPlaybackCoordinator.reportGenericPlaybackProgress(
                 video: video,
                 currentTime: { windowModel.currentTime },
                 isPaused: { windowModel.isPaused }
             )
+        }
+    }
+
+    /// Seeks to `windowValue.startSeconds` (the Library's Resume) once the
+    /// renderer is ready to take a seek, for the video the window opened
+    /// with only. Gives up quietly after 30 s: a player that never became
+    /// ready has bigger problems than a missed resume point.
+    private func applyStartPositionIfNeeded() async {
+        guard !appliedStartPosition,
+              let start = windowValue.startSeconds, start > 0,
+              video.identity == windowValue.video.identity
+        else { return }
+        appliedStartPosition = true
+        for _ in 0..<120 {
+            if windowModel.duration > 0, let seek = windowModel.seekCommand {
+                seek(start)
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(250))
+            if Task.isCancelled { return }
         }
     }
 

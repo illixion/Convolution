@@ -41,13 +41,22 @@ struct MacVideoPlayerWindow: View {
     let video: GalleryVideo
     @State private var player: AVPlayer?
     @State private var failureMessage: String?
+    /// Library (Jellyfin) videos only: watch progress back to the server.
+    @State private var progressReporter: GenericProgressReporter?
+    @State private var timeObserver: Any?
 
     var body: some View {
         Group {
             if let player {
                 MacAVPlayerView(player: player)
-                    .onAppear { player.play() }
-                    .onDisappear { player.pause() }
+                    .task { await startPlayback(player) }
+                    .onDisappear {
+                        player.pause()
+                        if let timeObserver { player.removeTimeObserver(timeObserver) }
+                        timeObserver = nil
+                        progressReporter?.finish()
+                        progressReporter = nil
+                    }
             } else if let failureMessage {
                 ContentUnavailableView(
                     "Can't Play This Video",
@@ -65,6 +74,25 @@ struct MacVideoPlayerWindow: View {
         .onReceive(NotificationCenter.default.publisher(for: .hypnosTogglePlayPause)) { _ in
             guard let player else { return }
             player.timeControlStatus == .playing ? player.pause() : player.play()
+        }
+    }
+
+    /// Seeks to a Library resume point if one was handed over, starts
+    /// playback, and wires progress reporting for a Library video.
+    private func startPlayback(_ player: AVPlayer) async {
+        if let start = LibraryResumePoints.take(for: video.identity), start > 0 {
+            await player.seek(to: CMTime(seconds: start, preferredTimescale: 600),
+                              toleranceBefore: .zero, toleranceAfter: .positiveInfinity)
+        }
+        player.play()
+        guard timeObserver == nil, let reporter = GenericProgressReporter(video: video) else { return }
+        progressReporter = reporter
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 5, preferredTimescale: 1),
+                                                      queue: .main) { [weak player] time in
+            guard let player else { return }
+            MainActor.assumeIsolated {
+                reporter.report(currentTime: time.seconds, isPaused: player.rate == 0)
+            }
         }
     }
 

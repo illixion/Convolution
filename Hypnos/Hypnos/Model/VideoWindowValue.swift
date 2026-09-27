@@ -43,6 +43,10 @@ struct VideoWindowValue: Identifiable, Codable, Hashable {
     /// the user left it at. `nil` on ordinary opens.
     var restoredSize: RAVECodableSize?
 
+    /// Where to start playing, in seconds: the Library's Resume. Applied
+    /// once, to `video` only (not to siblings navigated to afterwards).
+    var startSeconds: Double?
+
     init(
         video: GalleryVideo,
         galleryVideos: [GalleryVideo]? = nil,

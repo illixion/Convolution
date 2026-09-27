@@ -44,6 +44,12 @@ struct TVVideoPlayerView: View {
     /// `TVVideoPlayerView(video:)`); the Library tab wires it to
     /// `GenericProgressReporter` for a Jellyfin-sourced video.
     var onProgress: (Double, Double, Bool) -> Void = { _, _, _ in }
+    /// Where to start, in seconds (the Library's Resume); nil plays from
+    /// the beginning.
+    var startSeconds: Double?
+    /// Called once when playback reaches the end (the Library autoplays the
+    /// next episode from here). Nil leaves the player on its last frame.
+    var onPlayedToEnd: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var resolvedURL: URL?
     @State private var failureMessage: String?
@@ -51,7 +57,8 @@ struct TVVideoPlayerView: View {
     var body: some View {
         Group {
             if let resolvedURL {
-                TVAVPlayerViewControllerRepresentable(url: resolvedURL, onProgress: onProgress) {
+                TVAVPlayerViewControllerRepresentable(url: resolvedURL, startSeconds: startSeconds,
+                                                      onProgress: onProgress, onPlayedToEnd: onPlayedToEnd) {
                     failureMessage = "This video's format isn't supported on Apple TV."
                     self.resolvedURL = nil
                 }
@@ -113,7 +120,9 @@ struct TVVideoPlayerView: View {
 
 private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresentable {
     let url: URL
+    var startSeconds: Double?
     var onProgress: (Double, Double, Bool) -> Void = { _, _, _ in }
+    var onPlayedToEnd: (() -> Void)?
     var onPlaybackFailed: () -> Void = {}
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
@@ -137,10 +146,28 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         ) { [weak coordinator] _ in
             coordinator?.onPlaybackFailed()
         }
-        coordinator.statusObservation = item.observe(\.status, options: [.new]) { [weak coordinator] observedItem, _ in
-            guard observedItem.status == .failed else { return }
-            DispatchQueue.main.async {
-                coordinator?.onPlaybackFailed()
+        let startSeconds = startSeconds ?? 0
+        coordinator.statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak coordinator, weak player] observedItem, _ in
+            switch observedItem.status {
+            case .failed:
+                DispatchQueue.main.async {
+                    coordinator?.onPlaybackFailed()
+                }
+            case .readyToPlay:
+                // Resume: a seek issued before the item is ready is dropped,
+                // so it waits for readiness, and playback starts after it so
+                // the resume point is the first frame shown.
+                DispatchQueue.main.async {
+                    guard let coordinator, let player, !coordinator.didStart else { return }
+                    coordinator.didStart = true
+                    guard startSeconds > 0 else { player.play(); return }
+                    player.seek(to: CMTime(seconds: startSeconds, preferredTimescale: 600),
+                                toleranceBefore: .zero, toleranceAfter: .positiveInfinity) { _ in
+                        player.play()
+                    }
+                }
+            default:
+                break
             }
         }
         // Library-feature progress sync: every ~5s, report (position,
@@ -156,22 +183,35 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
             coordinator.onProgress(time.seconds, duration.isFinite ? duration : 0, player.rate == 0)
         }
 
-        player.play()
+        coordinator.endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak coordinator] _ in
+            coordinator?.onPlayedToEnd?()
+        }
+
         return controller
     }
 
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
         context.coordinator.onPlaybackFailed = onPlaybackFailed
         context.coordinator.onProgress = onProgress
+        context.coordinator.onPlayedToEnd = onPlayedToEnd
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onPlaybackFailed: onPlaybackFailed, onProgress: onProgress)
+        let coordinator = Coordinator(onPlaybackFailed: onPlaybackFailed, onProgress: onProgress)
+        coordinator.onPlayedToEnd = onPlayedToEnd
+        return coordinator
     }
 
     static func dismantleUIViewController(_ uiViewController: AVPlayerViewController, coordinator: Coordinator) {
         coordinator.statusObservation?.invalidate()
         if let observer = coordinator.failureObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = coordinator.endObserver {
             NotificationCenter.default.removeObserver(observer)
         }
         if let timeObserver = coordinator.timeObserver {
@@ -189,7 +229,11 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
     final class Coordinator: @unchecked Sendable {
         var onPlaybackFailed: () -> Void
         var onProgress: (Double, Double, Bool) -> Void
+        var onPlayedToEnd: (() -> Void)?
+        /// Set once the first play (after any resume seek) has been issued.
+        var didStart = false
         var failureObserver: NSObjectProtocol?
+        var endObserver: NSObjectProtocol?
         var statusObservation: NSKeyValueObservation?
         var timeObserver: Any?
 

@@ -50,9 +50,9 @@ enum LibraryHarness {
         // Home: shelves + hero.
         do {
             let home = try await library.home()
-            log("home.hero=\(home.hero?.title ?? "nil") images=\(home.hero?.images ?? [])")
-            if let hero = home.hero {
-                log("home.hero.logoURL=\(library.imageURL(item: hero, kind: .logo, size: .thumbnail)?.absoluteString ?? "nil")")
+            log("home.featured=\(home.featured.map(\.title)) images=\(home.featured.first?.images ?? [])")
+            if let hero = home.featured.first {
+                log("home.featured[0].logoURL=\(library.imageURL(item: hero, kind: .logo, size: .thumbnail)?.absoluteString ?? "nil")")
             }
             for shelf in home.shelves {
                 log("home.shelf[\(shelf.id)]=\"\(shelf.title)\" count=\(shelf.items.count) style=\(shelf.style)")
@@ -201,7 +201,7 @@ enum LibraryHarness {
             }
             do {
                 let home = try await library.home()
-                let continueWatching = home.shelves.first(where: { $0.id == "continue-watching" })
+                let continueWatching = home.shelves.first(where: { $0.id == "up-next" })
                 log("continueWatching.containsCrimson=\(continueWatching?.items.contains(where: { $0.id == crimson.id }) ?? false)")
             } catch {
                 log("home re-check FAILED: \(error)")

@@ -46,7 +46,7 @@ struct TVRootView: View {
     /// feature's decision #3, same gate `MainTabCatalog` applies on
     /// visionOS/iOS.
     private var visibleTabs: [TVTab] {
-        TVTab.allCases.filter { $0 != .library || FilmSession.shared.isConfigured }
+        TVTab.allCases.filter { $0 != .library || LibraryService.isAvailable }
     }
 
     var body: some View {
