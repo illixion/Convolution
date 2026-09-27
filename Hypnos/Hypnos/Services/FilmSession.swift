@@ -48,8 +48,67 @@ final class FilmSession {
     /// assumed to sit. A window can't see the head, so this is a guess.
     var listenerDistance: Float = 1.5
     var showMap = false
+    /// tvOS: whether PHASE turns the listener with the wearer's head
+    /// (AirPods). Persisted with the rest of the sound settings.
+    var headTracking = true
+    /// Bumped by a Recenter button; the stage recentres on each change.
+    var recenterRequest = 0
 
-    private init() {}
+    private init() {
+        restoreSound()
+    }
+
+    // MARK: Sound settings
+
+    /// The player's sound tuning as saved between launches. Not every
+    /// platform uses every field: the reverb preset and head tracking are
+    /// the tvOS PHASE stage's; RealityKit's stage reads only the level.
+    private struct SoundSettings: Codable {
+        var masterGainDB: Float
+        var lfeGainDB: Float
+        var reverbDB: Float
+        var reverbPreset: RAVEReverbPreset
+        var roomHalfWidth: Float
+        var roomHalfDepth: Float
+        var roomHeight: Float
+        var avOffsetMs: Double
+        var headTracking: Bool
+    }
+
+    private static let soundKey = "filmPlayer.sound"
+
+    func saveSound() {
+        let settings = SoundSettings(
+            masterGainDB: player.masterGainDB, lfeGainDB: player.lfeGainDB, reverbDB: player.reverbDB,
+            reverbPreset: player.reverbPreset, roomHalfWidth: player.roomHalfWidth,
+            roomHalfDepth: player.roomHalfDepth, roomHeight: player.roomHeight,
+            avOffsetMs: player.avOffsetMs, headTracking: headTracking
+        )
+        if let data = try? JSONEncoder().encode(settings) {
+            UserDefaults.standard.set(data, forKey: Self.soundKey)
+        }
+    }
+
+    private func restoreSound() {
+        guard let data = UserDefaults.standard.data(forKey: Self.soundKey),
+              let settings = try? JSONDecoder().decode(SoundSettings.self, from: data) else {
+            #if os(tvOS)
+            // PHASE's send is linear: 0 dB would be fully wet. RealityKit's
+            // per-source level keeps its own 0 dB default elsewhere.
+            player.reverbDB = -12
+            #endif
+            return
+        }
+        player.masterGainDB = settings.masterGainDB
+        player.lfeGainDB = settings.lfeGainDB
+        player.reverbDB = settings.reverbDB
+        player.reverbPreset = settings.reverbPreset
+        player.roomHalfWidth = settings.roomHalfWidth
+        player.roomHalfDepth = settings.roomHalfDepth
+        player.roomHeight = settings.roomHeight
+        player.avOffsetMs = settings.avOffsetMs
+        headTracking = settings.headTracking
+    }
 
     /// Whether a Jellyfin server is configured at all — the gate for
     /// showing the Library tab (hidden until this is true, per the Library

@@ -40,4 +40,21 @@ enum AudioSessionConfig {
         }
         #endif
     }
+
+    #if os(tvOS) || os(iOS)
+    /// The film player's session while it is showing: not mixable, because
+    /// only a non-mixable session can be the Now Playing app — without that,
+    /// AirPods' play/pause went to Music, which then took the session and
+    /// cut the film off (tvOS, 2026-09-27). `configureMixedPlayback()`
+    /// restores the app-wide policy when the player closes.
+    static func configureFilmPlayback() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .moviePlayback)
+            try session.setActive(true)
+        } catch {
+            AppLogger.filmPlayer.error("Failed to set film audio session: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+    #endif
 }

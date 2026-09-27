@@ -162,14 +162,35 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   `#elseif os(tvOS)` branch (added alongside the visionOS/iOS ones): the
   picture only, no `FilmStageView`, and a `Slider`-free transport
   (`TVFilmTransport`, `Views/FilmPlayer/FilmPlayerView.swift`).
-  **Atmos object audio is out of scope on tvOS and is a known gap**: the
-  object-audio engine (`RAVEFilm`'s `AtmosObjectAudio`) needs headphone or
-  AVP head tracking to place objects around a listener, which means nothing
-  for a TV pointed at a fixed listening position, and a real
-  speaker-array/soundbar passthrough is a separate project. The tvOS branch
-  never mounts `FilmStageView` at all, so nothing ever consumes
-  `FilmPlayer.audio` — a film with Atmos objects plays its picture in
-  silence rather than through any real or fake spatialisation.
+  Atmos object audio plays through RAVEFilm's `FilmPhaseStageView`
+  (RAVESDK's `RAVESpatialAudio`, a PHASE stage), not RealityKit's
+  `FilmStageView`: PHASE is one of the engines the system gives AirPods
+  head tracking and the listener's personalized spatial audio profile to,
+  and RealityKit isn't. Both need entitlements
+  (`com.apple.developer.coremotion.head-pose`,
+  `com.apple.developer.spatial-audio.profile-access`), which only the tvOS
+  profile ("my atv prof") carries; iOS/visionOS stay on the wildcard profile
+  on purpose (the VisionVNC app identity breaks Now Playing there). Output
+  is forced binaural: on a HomePod mini stereo pair PHASE's automatic mode
+  chose plain panning, which heard as stereo. Apps can't send real Atmos
+  (AVAudioEngine and PHASE output is ≤ 7.1 PCM; only AVPlayer passes EAC3
+  JOC through), and an AirPlay HomePod pair offers the app 2 channels
+  anyway. The transport's Sound button opens `TVFilmSoundSettings` (room
+  preset, reverb, room size, bass, head tracking, picture offset), saved
+  by `FilmSession.saveSound()`. Measured with the FilmLabTV bench
+  (`TVLab/`, `-FilmAudio 1`, and `-SpatialProbe 1` for the engine
+  comparison): the Dolby demo plays with 12 elements, no underruns, and
+  the picture within ~20 ms of the sound (AirPlay and AirPods Max).
+  While the player shows it claims Now Playing (RAVEFilm's
+  `FilmNowPlaying`, with a non-mixable session from
+  `AudioSessionConfig.configureFilmPlayback()`): without that, an AirPods
+  pause press went to Music, which took the session and silenced the
+  film. The PHASE engine pauses with the film, because tvOS picks
+  play-or-pause for the remote/AirPods from whether the app makes sound.
+  The stage rebuilds after interruptions and output-device changes
+  (pausing when the output goes away), and recentres on every resume and
+  on the transport's Recenter button. Show Objects overlays
+  `FilmObjectMapPanel` (top and front views, overhead count).
 - **`TVSettingsView`** — a remote-friendly subset of `SettingsTabView`:
   library source, Stash server + test connection, a Local Files note,
   `NextcloudSettingsSection` and `CacheSettingsSection` reused verbatim

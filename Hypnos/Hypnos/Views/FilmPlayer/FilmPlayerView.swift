@@ -10,17 +10,23 @@
  sheet (`IOSWindowRouter`), with AirPods head tracking and tuning below the
  picture.
 
- tvOS: picture only, no `FilmStageView`. Atmos object audio is built for
- headphone tracking (AirPods) or the AVP's own head tracking — neither
- means anything for a TV pointed at a fixed listening position, and doing
- it properly (a real speaker-array or soundbar passthrough) is out of scope
- for this port. So the tvOS branch never mounts the stage at all: nothing
- ever consumes `FilmPlayer.audio`, so a film with Atmos objects plays its
- picture silently rather than through any real or fake spatialisation. See
- Hypnos/CLAUDE.md "tvOS" for the gap.
+ tvOS: the objects play through RAVEFilm's `FilmPhaseStageView` (PHASE)
+ rather than RealityKit's stage, because PHASE is what the system gives
+ AirPods head tracking and the listener's personalized spatial audio
+ profile to (the app is signed with the head-pose and profile-access
+ entitlements). It renders binaural, which is right for AirPods and, as
+ heard on a HomePod mini stereo pair, for HomePods too. The listener faces
+ the TV; the Sound panel off the transport sets the room, reverb, bass,
+ head tracking and the picture's offset, saved between launches. Recenter
+ (transport and Sound panel) makes the way the wearer faces the front, and
+ the stage recentres by itself whenever playback resumes. The objects
+ button overlays RAVEFilm's `FilmObjectMapPanel` (top and front views,
+ overhead count). iOS's AirPods
+ tracker recentres on resume the same way.
  */
 
 import RAVEFilm
+import simd
 import SwiftUI
 
 struct FilmPlayerView: View {
@@ -28,14 +34,38 @@ struct FilmPlayerView: View {
 
     @Bindable private var session = FilmSession.shared
     private var player: FilmPlayer { session.player }
+    #if os(tvOS) || os(iOS)
+    @State private var nowPlaying: FilmNowPlaying?
+    #endif
 
     var body: some View {
         content
-            .onAppear { session.isPlayerOpen = true }
+            .onAppear {
+                session.isPlayerOpen = true
+                #if os(tvOS) || os(iOS)
+                // Claim Now Playing so the remote's and AirPods' play/pause
+                // reach this player (see RAVEFilm's FilmNowPlaying).
+                AudioSessionConfig.configureFilmPlayback()
+                let nowPlaying = FilmNowPlaying(player: player, title: session.loadedItem?.name ?? "Film")
+                nowPlaying.activate()
+                self.nowPlaying = nowPlaying
+                #endif
+            }
             .onDisappear {
                 player.pause()
                 session.isPlayerOpen = false
+                session.saveSound()
+                #if os(tvOS) || os(iOS)
+                nowPlaying?.deactivate()
+                nowPlaying = nil
+                AudioSessionConfig.configureMixedPlayback()
+                #endif
             }
+            #if os(tvOS) || os(iOS)
+            .onChange(of: session.loadedItem?.name) { _, name in
+                if let name { nowPlaying?.setTitle(name) }
+            }
+            #endif
             // Library-feature progress sync for the Atmos/FilmPlayer route —
             // a no-op unless the item currently loaded came from the Library
             // tab (i.e. `session.loadedItem`'s id is a real Jellyfin item;
@@ -87,8 +117,8 @@ struct FilmPlayerView: View {
                         .frame(depth: 0)
                 }
             if session.showMap {
-                FilmObjectMap(player: player)
-                    .frame(width: 280, height: 280)
+                FilmObjectMapPanel(player: player)
+                    .frame(width: 520)
                     .padding(24)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
@@ -103,6 +133,16 @@ struct FilmPlayerView: View {
         ZStack(alignment: .bottom) {
             Color.black.ignoresSafeArea()
             FilmVideoView(player: player.video)
+                .background {
+                    FilmPhaseStageView(player: player, headTracking: session.headTracking,
+                                       recenterRequest: session.recenterRequest)
+                }
+            if session.showMap {
+                FilmObjectMapPanel(player: player)
+                    .frame(width: 760)
+                    .padding(60)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            }
             TVFilmTransport(player: player)
                 .padding(.bottom, 40)
         }
@@ -122,13 +162,17 @@ struct FilmPlayerView: View {
             }
             Section("Head Tracking") { FilmHeadTrackingRow() }
             Section("Objects") {
-                FilmObjectMap(player: player).aspectRatio(1, contentMode: .fit)
+                FilmObjectMapPanel(player: player)
             }
             Section("Tuning") { FilmTuning() }
             Section("Telemetry") { FilmTelemetry(player: player) }
         }
         .onAppear { HeadphoneHeadTracker.shared.start() }
         .onDisappear { HeadphoneHeadTracker.shared.stop() }
+        // Someone who paused and turned away comes back facing the picture.
+        .onChange(of: player.isPlaying) { _, playing in
+            if playing { HeadphoneHeadTracker.shared.recenter() }
+        }
         #else
         // macOS: picture plus Atmos object audio, same as iOS, but without
         // AirPods head tracking (`HeadphoneHeadTracker` is iOS-only — there's
@@ -148,55 +192,12 @@ struct FilmPlayerView: View {
                 FilmTransport(player: player)
             }
             Section("Objects") {
-                FilmObjectMap(player: player).aspectRatio(1, contentMode: .fit)
+                FilmObjectMapPanel(player: player)
             }
             Section("Tuning") { FilmTuning() }
             Section("Telemetry") { FilmTelemetry(player: player) }
         }
         #endif
-    }
-}
-
-/// Objects seen from above, front (the screen) at the top. The dot at the
-/// centre is the listener; each object's colour follows its height (blue at
-/// ear level, red at the ceiling) and its size follows its level.
-struct FilmObjectMap: View {
-    let player: FilmPlayer
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30)) { _ in
-            Canvas { context, size in
-                let halfWidth = CGFloat(player.roomHalfWidth)
-                let halfDepth = CGFloat(player.roomHalfDepth)
-                let scale = min(size.width / (2 * halfWidth), size.height / (2 * halfDepth)) * 0.9
-                let centre = CGPoint(x: size.width / 2, y: size.height / 2)
-                let room = CGRect(x: centre.x - halfWidth * scale, y: centre.y - halfDepth * scale,
-                                  width: 2 * halfWidth * scale, height: 2 * halfDepth * scale)
-                context.fill(Path(roundedRect: room, cornerRadius: 8), with: .color(.black.opacity(0.35)))
-                context.stroke(Path(roundedRect: room, cornerRadius: 8), with: .color(.secondary.opacity(0.5)), lineWidth: 1)
-                var screen = Path()
-                screen.move(to: CGPoint(x: room.minX + room.width * 0.2, y: room.minY))
-                screen.addLine(to: CGPoint(x: room.maxX - room.width * 0.2, y: room.minY))
-                context.stroke(screen, with: .color(.primary), lineWidth: 4)
-                context.fill(Path(ellipseIn: CGRect(x: centre.x - 5, y: centre.y - 5, width: 10, height: 10)),
-                             with: .color(.primary))
-
-                let frame = player.currentFrame
-                for element in player.elements where !element.isBed {
-                    let p = player.state(of: element, frame: frame).pos
-                    let point = CGPoint(x: centre.x + CGFloat(p.x) * halfWidth * scale,
-                                        y: centre.y - CGFloat(p.y) * halfDepth * scale)
-                    let level = player.levels.indices.contains(element.channel) ? CGFloat(player.levels[element.channel]) : 0
-                    let radius = 4 + min(level * 60, 18)
-                    let height = player.flattenHeights ? 0 : Double(max(0, min(p.z, 1)))
-                    context.fill(
-                        Path(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius, width: 2 * radius, height: 2 * radius)),
-                        with: .color(Color(hue: 0.62 * (1 - height), saturation: 0.8, brightness: 1).opacity(0.35 + min(level * 8, 0.65)))
-                    )
-                }
-            }
-        }
-        .allowsHitTesting(false)
     }
 }
 
@@ -206,6 +207,8 @@ struct FilmObjectMap: View {
 /// button is wired separately via `.onPlayPauseCommand` on the container.
 struct TVFilmTransport: View {
     let player: FilmPlayer
+    @Bindable private var session = FilmSession.shared
+    @State private var showsSound = false
 
     var body: some View {
         HStack(spacing: 24) {
@@ -220,10 +223,116 @@ struct TVFilmTransport: View {
             Button { player.seek(to: player.currentTime + 10) } label: {
                 Label("+10s", systemImage: "goforward.10")
             }
+            if player.audio != nil {
+                if session.headTracking {
+                    Button { session.recenterRequest += 1 } label: {
+                        Label("Recenter", systemImage: "scope")
+                    }
+                }
+                Button { showsSound = true } label: {
+                    Label("Sound", systemImage: "speaker.wave.2")
+                }
+                Button { session.showMap.toggle() } label: {
+                    Label(session.showMap ? "Hide Objects" : "Show Objects", systemImage: "circle.grid.cross")
+                }
+            }
         }
         .labelStyle(.iconOnly)
         .padding(24)
         .background(.ultraThinMaterial, in: Capsule())
+        .sheet(isPresented: $showsSound) { TVFilmSoundSettings() }
+    }
+}
+
+/// The object audio's tuning with the remote: pickers and steps instead of
+/// the other platforms' sliders. Every change applies live and is saved.
+struct TVFilmSoundSettings: View {
+    @Bindable private var session = FilmSession.shared
+
+    /// Room dimensions (half-width, half-depth, ceiling above the ears).
+    private enum RoomSize: String, CaseIterable, Identifiable {
+        case small = "Small", medium = "Medium", large = "Large"
+        var id: String { rawValue }
+        var dimensions: SIMD3<Float> {
+            switch self {
+            case .small: SIMD3(1.5, 1.8, 1.2)
+            case .medium: SIMD3(2.0, 2.5, 1.6)
+            case .large: SIMD3(3.0, 3.5, 2.2)
+            }
+        }
+    }
+
+    private static let reverbLevels: [(title: String, db: Float)] = [
+        ("Off", -40), ("Low", -24), ("Medium", -12), ("High", -6), ("Very High", -2),
+    ]
+    private static let bassLevels: [Float] = [-12, -6, -3, 0, 3, 6]
+
+    var body: some View {
+        @Bindable var player = session.player
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Room", selection: $player.reverbPreset) {
+                        ForEach(RAVEReverbPreset.allCases) { Text($0.title).tag($0) }
+                    }
+                    Picker("Reverb", selection: $player.reverbDB) {
+                        ForEach(Self.reverbLevels, id: \.db) { Text($0.title).tag($0.db) }
+                        if !Self.reverbLevels.contains(where: { $0.db == player.reverbDB }) {
+                            Text(String(format: "%.0f dB", player.reverbDB)).tag(player.reverbDB)
+                        }
+                    }
+                    Picker("Room Size", selection: roomSize) {
+                        ForEach(RoomSize.allCases) { Text($0.rawValue).tag(Optional($0)) }
+                        if roomSize.wrappedValue == nil { Text("Custom").tag(RoomSize?.none) }
+                    }
+                } footer: {
+                    Text("The room the film's sound plays in: its reverb and how far away its speakers seem.")
+                }
+                Section {
+                    Picker("Bass", selection: $player.lfeGainDB) {
+                        ForEach(Self.bassLevels, id: \.self) { Text(String(format: "%+.0f dB", $0)).tag($0) }
+                        if !Self.bassLevels.contains(player.lfeGainDB) {
+                            Text(String(format: "%+.0f dB", player.lfeGainDB)).tag(player.lfeGainDB)
+                        }
+                    }
+                    Toggle("Head Tracking", isOn: $session.headTracking)
+                    Button("Recenter") { session.recenterRequest += 1 }
+                        .disabled(!session.headTracking)
+                } footer: {
+                    Text("Head tracking keeps the sound at the TV as you turn your head, on AirPods that support it. Recenter while facing the TV if the sound drifts to one side; it also recentres whenever you resume playback.")
+                }
+                Section {
+                    LabeledContent("Picture Offset", value: String(format: "%+.0f ms", player.avOffsetMs))
+                    HStack {
+                        Button("Earlier") { player.avOffsetMs -= 10 }
+                        Button("Later") { player.avOffsetMs += 10 }
+                        Button("Reset") { player.avOffsetMs = 0 }
+                    }
+                } footer: {
+                    Text("Moves the picture against the sound if speech looks out of step.")
+                }
+            }
+            .navigationTitle("Sound")
+        }
+        .onChange(of: player.reverbPreset) { session.saveSound() }
+        .onChange(of: player.reverbDB) { session.saveSound() }
+        .onChange(of: player.lfeGainDB) { session.saveSound() }
+        .onChange(of: player.avOffsetMs) { session.saveSound() }
+        .onChange(of: session.headTracking) { session.saveSound() }
+    }
+
+    private var roomSize: Binding<RoomSize?> {
+        let player = session.player
+        return Binding {
+            let current = SIMD3(player.roomHalfWidth, player.roomHalfDepth, player.roomHeight)
+            return RoomSize.allCases.first { simd_length($0.dimensions - current) < 0.01 }
+        } set: { size in
+            guard let size else { return }
+            player.roomHalfWidth = size.dimensions.x
+            player.roomHalfDepth = size.dimensions.y
+            player.roomHeight = size.dimensions.z
+            session.saveSound()
+        }
     }
 }
 #endif

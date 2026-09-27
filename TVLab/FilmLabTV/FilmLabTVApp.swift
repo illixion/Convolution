@@ -13,7 +13,8 @@
    -FilmToken <key> -FilmItem <id> [-FilmServer <url>] [-FilmStart <s>]
  `TVLab/check-tv.sh` passes them. `-YouTube <id>` runs the on-device
  YouTube spike instead (YouTubeLab.swift), `-SpatialProbe 1` the spatial
- audio probe (SpatialProbe.swift).
+ audio probe (SpatialProbe.swift), `-FilmAudio 1` the whole player with
+ PHASE object audio (FilmAudioLab.swift).
  */
 
 import AVFoundation
@@ -27,6 +28,8 @@ struct FilmLabTVApp: App {
         WindowGroup {
             if UserDefaults.standard.bool(forKey: "SpatialProbe") {
                 SpatialProbeView()
+            } else if UserDefaults.standard.bool(forKey: "FilmAudio") {
+                FilmAudioLabView()
             } else if let id = UserDefaults.standard.string(forKey: "YouTube") {
                 YouTubeLabView(videoID: id)
             } else {
