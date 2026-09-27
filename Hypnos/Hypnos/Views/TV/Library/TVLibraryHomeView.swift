@@ -10,6 +10,7 @@
 
 #if os(tvOS)
 
+import RAVEFilm
 import SwiftUI
 
 struct TVLibraryHomeView: View {
@@ -48,6 +49,12 @@ struct TVLibraryHomeView: View {
 /// (logo or title, year · rating · runtime · genre, overview, Play).
 private struct TVLibraryHeroView: View {
     let item: LibraryItem
+
+    @State private var isResolvingPlayback = false
+    @State private var error: String?
+    @State private var showFilmPlayer = false
+    @State private var presentedVideo: GalleryVideo?
+    @State private var progressReporter: GenericProgressReporter?
 
     private var library: JellyfinLibrary? { LibraryService.current() }
 
@@ -88,16 +95,57 @@ private struct TVLibraryHeroView: View {
                         .frame(maxWidth: 900, alignment: .leading)
                 }
 
-                Button {
-                    // Playback wiring is a later phase; the button and its
-                    // resolved route already exist so that phase only needs
-                    // to act on it.
-                } label: {
-                    Label(item.userData.playedPercentage.map { _ in "Resume" } ?? "Play", systemImage: "play.fill")
+                if item.kind != .series {
+                    Button {
+                        Task { await play() }
+                    } label: {
+                        if isResolvingPlayback {
+                            ProgressView()
+                        } else {
+                            Label(item.userData.playedPercentage.map { _ in "Resume" } ?? "Play", systemImage: "play.fill")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isResolvingPlayback)
                 }
-                .buttonStyle(.borderedProminent)
+                if let error {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                }
             }
             .padding(60)
+        }
+        .fullScreenCover(isPresented: $showFilmPlayer) { FilmPlayerView() }
+        .fullScreenCover(item: $presentedVideo) { video in
+            TVVideoPlayerView(video: video) { position, _, isPaused in
+                progressReporter?.report(currentTime: position, isPaused: isPaused)
+            }
+        }
+        .onChange(of: presentedVideo) { oldValue, newValue in
+            if newValue == nil, oldValue != nil {
+                progressReporter?.finish()
+                progressReporter = nil
+            }
+        }
+    }
+
+    private func play() async {
+        guard let library else { return }
+        isResolvingPlayback = true
+        defer { isResolvingPlayback = false }
+        do {
+            let route = try await library.playbackRoute(for: item)
+            switch route {
+            case .atmosFilmPlayer:
+                _ = await FilmSession.shared.load(itemId: item.id, name: item.title, productionYear: item.year)
+                FilmSession.shared.player.play()
+                showFilmPlayer = true
+            case .genericPlayer(let plan):
+                let video = LibraryPlaybackCoordinator.makeGalleryVideo(item: item, plan: plan, library: library)
+                progressReporter = GenericProgressReporter(video: video)
+                presentedVideo = video
+            }
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 

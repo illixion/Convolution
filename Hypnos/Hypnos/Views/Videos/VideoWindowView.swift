@@ -424,6 +424,21 @@ struct VideoWindowView: View {
             )
             windowModel.handleScenePhaseChange(from: oldPhase, to: newPhase)
         }
+        // Library-feature progress sync: a no-op for every other source
+        // (Stash/Nextcloud/Photos/Local) — gated on the synthetic
+        // "jellyfin:" identity `LibraryPlaybackCoordinator.makeGalleryVideo`
+        // stamps onto a Jellyfin item's adapter `GalleryVideo`. Restarts
+        // (and reports a stop for the previous video) whenever `video`
+        // changes, and reports a final stop when the window closes — see
+        // the coordinator's doc comment for the exact start/progress/stopped
+        // sequence this drives.
+        .task(id: video.identity) {
+            await LibraryPlaybackCoordinator.reportGenericPlaybackProgress(
+                video: video,
+                currentTime: { windowModel.currentTime },
+                isPaused: { windowModel.isPaused }
+            )
+        }
     }
 
     // MARK: - Ornament

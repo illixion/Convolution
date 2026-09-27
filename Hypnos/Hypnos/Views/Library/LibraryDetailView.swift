@@ -9,6 +9,7 @@
  phase only has to act on it.
  */
 
+import RAVEFilm
 import SwiftUI
 
 struct LibraryDetailView: View {
@@ -21,6 +22,10 @@ struct LibraryDetailView: View {
     @State private var similar: [LibraryItem] = []
     @State private var isLoading = true
     @State private var error: String?
+    @State private var isResolvingPlayback = false
+    @State private var showResumeChoice = false
+
+    @OpenWindowProxy private var openWindow
 
     private var library: JellyfinLibrary? { LibraryService.current() }
     private var effectiveItem: LibraryItem { detail ?? item }
@@ -86,11 +91,25 @@ struct LibraryDetailView: View {
         HStack(spacing: 16) {
             if effectiveItem.kind != .series {
                 Button {
-                    // Playback wiring is a later phase.
+                    if effectiveItem.userData.playbackPositionSeconds != nil {
+                        showResumeChoice = true
+                    } else {
+                        Task { await play(fromStart: true) }
+                    }
                 } label: {
-                    Label(effectiveItem.userData.playedPercentage.map { _ in "Resume" } ?? "Play", systemImage: "play.fill")
+                    if isResolvingPlayback {
+                        ProgressView()
+                    } else {
+                        Label(effectiveItem.userData.playedPercentage.map { _ in "Resume" } ?? "Play", systemImage: "play.fill")
+                    }
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(isResolvingPlayback)
+                .confirmationDialog("Resume Playback?", isPresented: $showResumeChoice, titleVisibility: .visible) {
+                    Button("Resume") { Task { await play(fromStart: false) } }
+                    Button("Start Over") { Task { await play(fromStart: true) } }
+                    Button("Cancel", role: .cancel) {}
+                }
             }
 
             Button {
@@ -176,6 +195,37 @@ struct LibraryDetailView: View {
         guard let library, let seasonId = selectedSeasonId else { return }
         do {
             episodes = try await library.episodes(seasonId: seasonId)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// Resolves `playbackRoute(for:)` and opens whichever player it names —
+    /// `FilmPlayerView`'s existing window (Atmos objects) or the app's
+    /// generic video player via a synthetic `GalleryVideo`
+    /// (`LibraryPlaybackCoordinator`, the same adapter shape
+    /// `IncomingURLHandler` already uses for an arbitrary stream URL with no
+    /// Stash backing). `fromStart` clears the resume position rather than
+    /// actually seeking on the generic route — see the coordinator's header
+    /// comment on why Resume is currently FilmPlayer-only.
+    private func play(fromStart: Bool) async {
+        guard let library else { return }
+        isResolvingPlayback = true
+        defer { isResolvingPlayback = false }
+        do {
+            let route = try await library.playbackRoute(for: effectiveItem)
+            switch route {
+            case .atmosFilmPlayer:
+                _ = await FilmSession.shared.load(itemId: effectiveItem.id, name: effectiveItem.title, productionYear: effectiveItem.year)
+                if !fromStart, let resumeSeconds = effectiveItem.userData.playbackPositionSeconds {
+                    FilmSession.shared.player.seek(to: resumeSeconds)
+                }
+                FilmSession.shared.player.play()
+                openWindow(id: FilmPlayerView.windowID)
+            case .genericPlayer(let plan):
+                let video = LibraryPlaybackCoordinator.makeGalleryVideo(item: effectiveItem, plan: plan, library: library)
+                openWindow(id: "video-detail", value: VideoWindowValue(video: video, galleryVideos: [video]))
+            }
         } catch {
             self.error = error.localizedDescription
         }

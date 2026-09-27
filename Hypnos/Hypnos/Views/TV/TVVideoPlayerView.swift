@@ -39,6 +39,11 @@ import SwiftUI
 
 struct TVVideoPlayerView: View {
     let video: GalleryVideo
+    /// Optional periodic (position, duration, paused) callback — a no-op
+    /// for every existing caller (`TVVideosTabView`'s plain
+    /// `TVVideoPlayerView(video:)`); the Library tab wires it to
+    /// `GenericProgressReporter` for a Jellyfin-sourced video.
+    var onProgress: (Double, Double, Bool) -> Void = { _, _, _ in }
     @Environment(\.dismiss) private var dismiss
     @State private var resolvedURL: URL?
     @State private var failureMessage: String?
@@ -46,7 +51,7 @@ struct TVVideoPlayerView: View {
     var body: some View {
         Group {
             if let resolvedURL {
-                TVAVPlayerViewControllerRepresentable(url: resolvedURL) {
+                TVAVPlayerViewControllerRepresentable(url: resolvedURL, onProgress: onProgress) {
                     failureMessage = "This video's format isn't supported on Apple TV."
                     self.resolvedURL = nil
                 }
@@ -108,6 +113,7 @@ struct TVVideoPlayerView: View {
 
 private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresentable {
     let url: URL
+    var onProgress: (Double, Double, Bool) -> Void = { _, _, _ in }
     var onPlaybackFailed: () -> Void = {}
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
@@ -137,6 +143,18 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
                 coordinator?.onPlaybackFailed()
             }
         }
+        // Library-feature progress sync: every ~5s, report (position,
+        // duration, paused) up to the SwiftUI view — a no-op for every
+        // caller that doesn't pass `onProgress` (see `TVVideoPlayerView`'s
+        // default).
+        coordinator.timeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 5, preferredTimescale: 1),
+            queue: .main
+        ) { [weak coordinator, weak player] time in
+            guard let coordinator, let player else { return }
+            let duration = player.currentItem?.duration.seconds ?? 0
+            coordinator.onProgress(time.seconds, duration.isFinite ? duration : 0, player.rate == 0)
+        }
 
         player.play()
         return controller
@@ -144,16 +162,20 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
 
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
         context.coordinator.onPlaybackFailed = onPlaybackFailed
+        context.coordinator.onProgress = onProgress
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onPlaybackFailed: onPlaybackFailed)
+        Coordinator(onPlaybackFailed: onPlaybackFailed, onProgress: onProgress)
     }
 
     static func dismantleUIViewController(_ uiViewController: AVPlayerViewController, coordinator: Coordinator) {
         coordinator.statusObservation?.invalidate()
         if let observer = coordinator.failureObserver {
             NotificationCenter.default.removeObserver(observer)
+        }
+        if let timeObserver = coordinator.timeObserver {
+            uiViewController.player?.removeTimeObserver(timeObserver)
         }
         uiViewController.player?.pause()
         uiViewController.player = nil
@@ -166,11 +188,14 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
     /// `SendableTexture` elsewhere in the app.
     final class Coordinator: @unchecked Sendable {
         var onPlaybackFailed: () -> Void
+        var onProgress: (Double, Double, Bool) -> Void
         var failureObserver: NSObjectProtocol?
         var statusObservation: NSKeyValueObservation?
+        var timeObserver: Any?
 
-        init(onPlaybackFailed: @escaping () -> Void) {
+        init(onPlaybackFailed: @escaping () -> Void, onProgress: @escaping (Double, Double, Bool) -> Void) {
             self.onPlaybackFailed = onPlaybackFailed
+            self.onProgress = onProgress
         }
     }
 }

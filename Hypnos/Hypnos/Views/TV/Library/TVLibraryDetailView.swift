@@ -11,6 +11,7 @@
 
 #if os(tvOS)
 
+import RAVEFilm
 import SwiftUI
 
 struct TVLibraryDetailView: View {
@@ -23,6 +24,11 @@ struct TVLibraryDetailView: View {
     @State private var similar: [LibraryItem] = []
     @State private var isLoading = true
     @State private var error: String?
+    @State private var isResolvingPlayback = false
+    @State private var showResumeChoice = false
+    @State private var showFilmPlayer = false
+    @State private var presentedVideo: GalleryVideo?
+    @State private var progressReporter: GenericProgressReporter?
 
     private var library: JellyfinLibrary? { LibraryService.current() }
 
@@ -48,6 +54,22 @@ struct TVLibraryDetailView: View {
         }
         .task { await load() }
         .navigationTitle(effectiveItem.title)
+        // tvOS has no Window scenes, unlike visionOS/macOS's real
+        // `Window("Film Player", id: FilmPlayerView.windowID)` — a
+        // fullScreenCover is this platform's presentation, matching
+        // `TVVideosTabView`'s existing `TVVideoPlayerView` pattern.
+        .fullScreenCover(isPresented: $showFilmPlayer) { FilmPlayerView() }
+        .fullScreenCover(item: $presentedVideo) { video in
+            TVVideoPlayerView(video: video) { position, _, isPaused in
+                progressReporter?.report(currentTime: position, isPaused: isPaused)
+            }
+        }
+        .onChange(of: presentedVideo) { oldValue, newValue in
+            if newValue == nil, oldValue != nil {
+                progressReporter?.finish()
+                progressReporter = nil
+            }
+        }
     }
 
     // MARK: - Header
@@ -75,11 +97,25 @@ struct TVLibraryDetailView: View {
             HStack(spacing: 24) {
                 if effectiveItem.kind != .series {
                     Button {
-                        // Playback wiring: a later phase.
+                        if effectiveItem.userData.playbackPositionSeconds != nil {
+                            showResumeChoice = true
+                        } else {
+                            Task { await play(fromStart: true) }
+                        }
                     } label: {
-                        Label(effectiveItem.userData.playedPercentage.map { _ in "Resume" } ?? "Play", systemImage: "play.fill")
+                        if isResolvingPlayback {
+                            ProgressView()
+                        } else {
+                            Label(effectiveItem.userData.playedPercentage.map { _ in "Resume" } ?? "Play", systemImage: "play.fill")
+                        }
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(isResolvingPlayback)
+                    .confirmationDialog("Resume Playback?", isPresented: $showResumeChoice, titleVisibility: .visible) {
+                        Button("Resume") { Task { await play(fromStart: false) } }
+                        Button("Start Over") { Task { await play(fromStart: true) } }
+                        Button("Cancel", role: .cancel) {}
+                    }
                 }
 
                 Button {
@@ -182,12 +218,46 @@ struct TVLibraryDetailView: View {
         } catch {
             self.error = error.localizedDescription
         }
+        #if DEBUG
+        // Mirrors `tvLibraryAutoOpenItemId` (`TVLibraryTabView`): with no
+        // remote-button injection on the tvOS simulator, this is the only
+        // way to drive a real tap of the Play button for verification.
+        if UserDefaults.standard.bool(forKey: "tvLibraryAutoPlay"), effectiveItem.kind != .series {
+            await play(fromStart: true)
+        }
+        #endif
     }
 
     private func loadEpisodes() async {
         guard let library, let seasonId = selectedSeasonId else { return }
         do {
             episodes = try await library.episodes(seasonId: seasonId)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// Same routing as `LibraryDetailView.play(fromStart:)`, presented via
+    /// `fullScreenCover` instead of a `Window` (see the header comment).
+    private func play(fromStart: Bool) async {
+        guard let library else { return }
+        isResolvingPlayback = true
+        defer { isResolvingPlayback = false }
+        do {
+            let route = try await library.playbackRoute(for: effectiveItem)
+            switch route {
+            case .atmosFilmPlayer:
+                _ = await FilmSession.shared.load(itemId: effectiveItem.id, name: effectiveItem.title, productionYear: effectiveItem.year)
+                if !fromStart, let resumeSeconds = effectiveItem.userData.playbackPositionSeconds {
+                    FilmSession.shared.player.seek(to: resumeSeconds)
+                }
+                FilmSession.shared.player.play()
+                showFilmPlayer = true
+            case .genericPlayer(let plan):
+                let video = LibraryPlaybackCoordinator.makeGalleryVideo(item: effectiveItem, plan: plan, library: library)
+                progressReporter = GenericProgressReporter(video: video)
+                presentedVideo = video
+            }
         } catch {
             self.error = error.localizedDescription
         }

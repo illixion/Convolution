@@ -36,6 +36,38 @@ struct FilmPlayerView: View {
                 player.pause()
                 session.isPlayerOpen = false
             }
+            // Library-feature progress sync for the Atmos/FilmPlayer route —
+            // a no-op unless the item currently loaded came from the Library
+            // tab (i.e. `session.loadedItem`'s id is a real Jellyfin item;
+            // `FilmPlayer`'s own `currentTime`/`duration`/`isPlaying` are
+            // plain `@Observable` properties with no publisher, so this
+            // polls rather than subscribes — see `LibraryPlaybackCoordinator`'s
+            // header comment for the equivalent generic-player version).
+            .task(id: session.loadedItem?.id) {
+                await reportFilmPlaybackProgress()
+            }
+    }
+
+    private func reportFilmPlaybackProgress() async {
+        guard let itemId = session.loadedItem?.id, let library = LibraryService.current() else { return }
+        var started = false
+        var lastPosition: Double = 0
+        defer {
+            if started {
+                Task { await library.reportPlaybackStopped(itemId: itemId, positionSeconds: lastPosition) }
+            }
+        }
+        while !Task.isCancelled {
+            let position = player.currentTime
+            if !started, position > 0 {
+                started = true
+                await library.reportPlaybackStarted(itemId: itemId, positionSeconds: position)
+            } else if started {
+                await library.reportPlaybackProgress(itemId: itemId, positionSeconds: position, isPaused: !player.isPlaying)
+            }
+            lastPosition = position
+            try? await Task.sleep(for: .seconds(10))
+        }
     }
 
     @ViewBuilder
