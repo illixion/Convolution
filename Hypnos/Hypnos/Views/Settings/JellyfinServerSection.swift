@@ -36,12 +36,20 @@ struct JellyfinServerSection: View {
                 .autocorrectionDisabled()
 
             if let user = auth.session {
+                #if os(tvOS)
+                // Its own row: a trailing button is off the focus engine's
+                // path when moving down the list.
+                Label("Signed in as \(user.userName)", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Button("Sign Out") { auth.signOut() }
+                #else
                 HStack {
                     Label("Signed in as \(user.userName)", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                     Spacer()
                     Button("Sign Out") { auth.signOut() }
                 }
+                #endif
             } else {
                 TextField("Username", text: $username)
                     .autocorrectionDisabled()

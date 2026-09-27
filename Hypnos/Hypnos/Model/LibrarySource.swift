@@ -27,12 +27,34 @@ enum LibrarySource: String, Codable, CaseIterable, Sendable {
         switch self {
         case .photos: return "photo.artframe"
         case .stash:  return "archivebox"
-        // Matches the Files app's icon for "On My Apple Vision Pro" — the
-        // same on-device-storage idea this source is.
-        case .local:  return "vision.pro"
+        // Matches the Files app's "On My <device>" icon — the same
+        // on-device-storage idea this source is.
+        case .local:  return Self.thisDeviceSymbol
         case .nextcloud: return "cloud"
         }
     }
+
+    /// The SF Symbol for the device the app is running on.
+    ///
+    /// iPhone and iPad share a binary, so the model identifier tells them
+    /// apart; that keeps this off the main actor, unlike `UIDevice`.
+    private static let thisDeviceSymbol: String = {
+        #if os(visionOS)
+        return "vision.pro"
+        #elseif os(tvOS)
+        return "appletv"
+        #elseif os(macOS)
+        return "desktopcomputer"
+        #else
+        var model = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? ""
+        if model.isEmpty {
+            var info = utsname()
+            uname(&info)
+            model = withUnsafeBytes(of: &info.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        }
+        return model.hasPrefix("iPad") ? "ipad" : "iphone"
+        #endif
+    }()
 
     var displayName: String {
         switch self {

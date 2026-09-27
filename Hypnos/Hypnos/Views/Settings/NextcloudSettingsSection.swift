@@ -150,12 +150,27 @@ struct NextcloudSettingsSection: View {
                 ProgressView().controlSize(.small)
             }
         } else {
+            #if os(tvOS)
+            // Checkmarked rows rather than a Picker, as in `TVSettingsView`.
+            ForEach([""] + rootOptions, id: \.self) { path in
+                Button {
+                    appModel.nextcloudRoot = path
+                } label: {
+                    HStack {
+                        Text(path.isEmpty ? "All files" : label(forFolder: path))
+                        Spacer()
+                        if path == appModel.nextcloudRoot { Image(systemName: "checkmark") }
+                    }
+                }
+            }
+            #else
             Picker("Library Folder", selection: $appModel.nextcloudRoot) {
                 Text("All files").tag("")
                 ForEach(rootOptions, id: \.self) { path in
                     Text(label(forFolder: path)).tag(path)
                 }
             }
+            #endif
         }
 
         Text("Only this folder is searched. Pointing at the whole account pulls in anything else that happens to be an image — album art from a music library, most commonly.")

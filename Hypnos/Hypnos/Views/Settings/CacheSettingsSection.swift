@@ -28,6 +28,52 @@ struct CacheSettingsSection: View {
     ]
 
     var body: some View {
+        #if os(tvOS)
+        // Checkmarked rows and whole-row Clear buttons: a menu pill and
+        // trailing Clear buttons leave the focus engine nothing directly
+        // below to move to, so it got stuck on the pill.
+        Section {
+            ForEach(CacheSizePreset.allCases) { option in
+                Button {
+                    preset = option
+                } label: {
+                    HStack {
+                        Text("\(option.label) (\(formatBytes(totalAllowance(option))))")
+                        Spacer()
+                        if option == preset { Image(systemName: "checkmark") }
+                    }
+                }
+            }
+        } header: {
+            Text("Cache Size")
+        } footer: {
+            footer
+        }
+        .onChange(of: preset) { _, newValue in applyPreset(newValue) }
+        .task { await refresh() }
+
+        Section {
+            ForEach(Self.domains, id: \.self) { domain in
+                Button {
+                    clearDomain(domain)
+                } label: {
+                    HStack {
+                        rowLabel(for: domain)
+                        Spacer()
+                        if clearing.contains(domain) {
+                            ProgressView()
+                        } else {
+                            Text("Clear").foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .disabled((stats[domain]?.totalSize ?? 0) == 0 || clearing.contains(domain))
+            }
+            totalRow
+        } header: {
+            Text("Usage")
+        }
+        #else
         Section {
             Picker("Cache Size", selection: $preset) {
                 ForEach(CacheSizePreset.allCases) { preset in
@@ -35,59 +81,77 @@ struct CacheSettingsSection: View {
                 }
             }
             .pickerStyle(.menu)
-            .onChange(of: preset) { _, newValue in
-                CacheBudget.preset = newValue
-                Task {
-                    await enforceAllBudgets()
-                    await refresh()
-                }
-            }
+            .onChange(of: preset) { _, newValue in applyPreset(newValue) }
 
             ForEach(Self.domains, id: \.self) { domain in
                 row(for: domain)
             }
 
-            HStack {
-                Text("Total")
-                    .fontWeight(.medium)
-                Spacer()
-                Text(formatBytes(totalUsage))
-                    .foregroundColor(.secondary)
-                    .fontWeight(.medium)
-            }
+            totalRow
         } header: {
             Text("Cache")
         } footer: {
-            Text("Caches use up to \(formatBytes(totalAllowance(preset))) (\(Int(preset.fractionOfCapacity * 100))% of this device's storage), always leave at least \(formatBytes(CacheBudget.freeSpaceFloor)) free, and shrink automatically when the disk fills. Least-recently-used entries are removed first. Free space: \(formatBytes(freeSpace)).")
+            footer
         }
         .task { await refresh() }
+        #endif
+    }
+
+    private var footer: some View {
+        Text("Caches use up to \(formatBytes(totalAllowance(preset))) (\(Int(preset.fractionOfCapacity * 100))% of this device's storage), always leave at least \(formatBytes(CacheBudget.freeSpaceFloor)) free, and shrink automatically when the disk fills. Least-recently-used entries are removed first. Free space: \(formatBytes(freeSpace)).")
+    }
+
+    private var totalRow: some View {
+        HStack {
+            Text("Total")
+                .fontWeight(.medium)
+            Spacer()
+            Text(formatBytes(totalUsage))
+                .foregroundColor(.secondary)
+                .fontWeight(.medium)
+        }
+    }
+
+    private func applyPreset(_ newValue: CacheSizePreset) {
+        CacheBudget.preset = newValue
+        Task {
+            await enforceAllBudgets()
+            await refresh()
+        }
+    }
+
+    private func clearDomain(_ domain: CacheBudget.Domain) {
+        clearing.insert(domain)
+        Task {
+            await clear(domain)
+            await refresh()
+            clearing.remove(domain)
+        }
+    }
+
+    private func rowLabel(for domain: CacheBudget.Domain) -> some View {
+        let domainStats = stats[domain] ?? DomainStats()
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(domain.label)
+            Text("\(domainStats.fileCount) items · \(formatBytes(domainStats.totalSize)) of \(formatBytes(CacheBudget.nominalCap(for: domain)))")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
     }
 
     @ViewBuilder
     private func row(for domain: CacheBudget.Domain) -> some View {
         let domainStats = stats[domain] ?? DomainStats()
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(domain.label)
-                Text("\(domainStats.fileCount) items · \(formatBytes(domainStats.totalSize)) of \(formatBytes(CacheBudget.nominalCap(for: domain)))")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
+            rowLabel(for: domain)
             Spacer()
             if clearing.contains(domain) {
                 ProgressView()
                     .scaleEffect(0.8)
             } else {
-                Button("Clear", role: .destructive) {
-                    clearing.insert(domain)
-                    Task {
-                        await clear(domain)
-                        await refresh()
-                        clearing.remove(domain)
-                    }
-                }
-                .buttonStyle(.borderless)
-                .disabled(domainStats.totalSize == 0)
+                Button("Clear", role: .destructive) { clearDomain(domain) }
+                    .buttonStyle(.borderless)
+                    .disabled(domainStats.totalSize == 0)
             }
         }
     }
