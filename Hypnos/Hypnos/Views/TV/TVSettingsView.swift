@@ -27,7 +27,7 @@ import SwiftUI
 
 struct TVSettingsView: View {
     private enum Page: Hashable {
-        case librarySource, jellyfin, stash, nextcloud, cache
+        case librarySource, jellyfin, stash, nextcloud, cache, developer
     }
 
     @Environment(AppModel.self) private var appModel
@@ -52,6 +52,7 @@ struct TVSettingsView: View {
                 }
                 Section {
                     row(.cache, "Cache", systemImage: "internaldrive", value: cachePreset.label)
+                    row(.developer, "Developer", systemImage: "hammer", value: "")
                 }
             }
             .navigationTitle("Settings")
@@ -91,6 +92,7 @@ struct TVSettingsView: View {
         case .stash: "Stash"
         case .nextcloud: "Nextcloud"
         case .cache: "Cache"
+        case .developer: "Developer"
         }
     }
 
@@ -102,6 +104,29 @@ struct TVSettingsView: View {
         case .stash: TVStashServerSection()
         case .nextcloud: NextcloudSettingsSection()
         case .cache: CacheSettingsSection()
+        case .developer: TVDeveloperSection()
+        }
+    }
+}
+
+private struct TVDeveloperSection: View {
+    @Environment(AppModel.self) private var appModel
+    @Bindable private var film = FilmSession.shared
+
+    var body: some View {
+        @Bindable var appModel = appModel
+        Section {
+            Toggle("Show Object Map", isOn: $film.showMap)
+        } header: {
+            Text("Film Player")
+        } footer: {
+            Text("Draws where a film's Atmos objects are, from above and from the front, with how many are sounding and overhead. The player's Show Objects button toggles the same setting.")
+        }
+        Section {
+            Toggle("Show Debug Console", isOn: $appModel.showDebugConsole)
+            Toggle("Respect System Memory Alerts", isOn: $appModel.respectMemoryAlerts)
+        } footer: {
+            Text("The console adds a tab showing the app's log messages as they arrive. With memory alerts ignored, the app won't unload images when the system is short of memory.")
         }
     }
 }

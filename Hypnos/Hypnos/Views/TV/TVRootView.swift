@@ -15,6 +15,7 @@
 
 #if os(tvOS)
 
+import RAVEConsole
 import SwiftUI
 
 struct TVRootView: View {
@@ -46,7 +47,13 @@ struct TVRootView: View {
     /// feature's decision #3, same gate `MainTabCatalog` applies on
     /// visionOS/iOS.
     private var visibleTabs: [TVTab] {
-        TVTab.allCases.filter { $0 != .library || LibraryService.isAvailable }
+        TVTab.allCases.filter { tab in
+            switch tab {
+            case .library: LibraryService.isAvailable
+            case .console: appModel.showDebugConsole
+            default: true
+            }
+        }
     }
 
     var body: some View {
@@ -80,6 +87,8 @@ struct TVRootView: View {
             TVLibraryTabView()
         case .settings:
             TVSettingsView()
+        case .console:
+            RAVEConsoleScreen()
         }
     }
 }

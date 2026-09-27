@@ -20,6 +20,8 @@ enum TVTab: String, CaseIterable, Identifiable {
     case albums = "Albums"
     case library = "Library"
     case settings = "Settings"
+    /// Only while Settings → Developer → Show Debug Console is on.
+    case console = "Console"
 
     var id: String { rawValue }
 
@@ -30,6 +32,7 @@ enum TVTab: String, CaseIterable, Identifiable {
         case .albums: return "rectangle.stack"
         case .library: return "rectangle.stack.badge.play"
         case .settings: return "gearshape"
+        case .console: return "terminal"
         }
     }
 }

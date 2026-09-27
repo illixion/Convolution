@@ -47,7 +47,11 @@ final class FilmSession {
     /// visionOS: how far in front of the player window the listener is
     /// assumed to sit. A window can't see the head, so this is a guess.
     var listenerDistance: Float = 1.5
-    var showMap = false
+    /// Whether the player overlays the object map. A developer setting,
+    /// remembered between launches.
+    var showMap = UserDefaults.standard.bool(forKey: "filmPlayer.showMap") {
+        didSet { UserDefaults.standard.set(showMap, forKey: "filmPlayer.showMap") }
+    }
     /// tvOS: whether PHASE turns the listener with the wearer's head
     /// (AirPods). Persisted with the rest of the sound settings.
     var headTracking = true
