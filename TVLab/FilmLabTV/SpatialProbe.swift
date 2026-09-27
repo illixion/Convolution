@@ -11,7 +11,8 @@
  - AVAudioEnvironmentNode rendering to the route's multichannel layout,
    with the app flagged multichannel, so the system's own spatial audio
    (AirPods) or the speakers (HomePods, a receiver) take it from there.
- - PHASE, a pull-stream source through a spatial mixer, listener
+ - PHASE, a pull-stream source through a spatial mixer (automatic output
+   mode, or forced binaural), listener
    head-tracked (`automaticHeadTrackingFlags`, tvOS 18). A pull stream's
    render block has the same shape as RAVEFilm's element reader, which is
    what makes it a candidate for film audio at all.
@@ -21,6 +22,11 @@
  (turn your head: with head tracking it should stay at the TV). The screen
  and the console report the route and what the render callbacks' time
  stamps carry, since the film's picture sync depends on host time.
+
+ Head tracking needs the `com.apple.developer.coremotion.head-pose`
+ entitlement (Head Pose capability) for all three engines; without it the
+ flags are accepted and silently do nothing, which is what the first run
+ on AirPods Max showed.
 
  Launch with `-SpatialProbe 1` (`xcrun devicectl device process launch
  --console … com.illixion.filmlab -- -SpatialProbe 1`); choose with the
@@ -106,6 +112,7 @@ enum ProbeBackend: String, CaseIterable, Identifiable {
     case environmentBinaural = "3D mixer, binaural (HRTF)"
     case environmentSpeakers = "3D mixer, route's speaker layout"
     case phase = "PHASE"
+    case phaseBinaural = "PHASE, always binaural"
 
     var id: String { rawValue }
 }
@@ -205,7 +212,10 @@ final class PhaseRenderer: ProbeRenderer {
     private let event: PHASESoundEvent
     private(set) var summary = ""
 
-    init(signal: ProbeSignal) throws {
+    init(signal: ProbeSignal, binaural: Bool) throws {
+        // Automatic picks speaker panning on an AirPlay stereo pair, which
+        // heard as plain stereo on HomePods; binaural matches the 3D mixer.
+        if binaural { engine.outputSpatializationMode = .alwaysUseBinaural }
         listener = PHASEListener(engine: engine)
         listener.transform = matrix_identity_float4x4
         try engine.rootObject.addChild(listener)
@@ -411,7 +421,8 @@ struct SpatialProbeView: View {
             let made: any ProbeRenderer = switch candidate {
             case .environmentBinaural: try EnvironmentRenderer(signal: signal, speakers: false)
             case .environmentSpeakers: try EnvironmentRenderer(signal: signal, speakers: true)
-            case .phase: try PhaseRenderer(signal: signal)
+            case .phase: try PhaseRenderer(signal: signal, binaural: false)
+            case .phaseBinaural: try PhaseRenderer(signal: signal, binaural: true)
             }
             made.setHeadTracking(headTracking)
             renderer = made
