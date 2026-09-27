@@ -84,6 +84,8 @@ struct MacSettingsView: View {
 
             NextcloudSettingsSection()
 
+            DeviceSetupSendSection()
+
             CacheSettingsSection()
         }
         .formStyle(.grouped)

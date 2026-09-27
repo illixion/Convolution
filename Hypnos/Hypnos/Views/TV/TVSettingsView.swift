@@ -23,22 +23,79 @@
 
 #if os(tvOS)
 
+import RAVEDeviceSetup
 import SwiftUI
 
-struct TVSettingsView: View {
-    private enum Page: Hashable {
-        case librarySource, jellyfin, stash, nextcloud, cache, developer
+enum TVSettingsPage: String, Hashable {
+    case deviceSetup, librarySource, jellyfin, stash, nextcloud, cache, developer
+}
+
+/// Settings state that has to outlive the view. When the tab bar gains or
+/// loses a tab (Library appears once Jellyfin is configured) tvOS rebuilds
+/// the other tabs' content, and view `@State` goes with it: a pushed page
+/// went blank with no way back (tvOS 27). Kept here, a rebuild lands back
+/// on the same page — including Set Up from Another Device's result, whose
+/// payload is exactly what adds the Library tab.
+@MainActor
+@Observable
+final class TVSettingsState {
+    static let shared = TVSettingsState()
+
+    var path: [TVSettingsPage] = [] {
+        didSet {
+            if !path.contains(.deviceSetup) { endDeviceSetup() }
+        }
     }
+
+    /// The setup page's receiver and what it received, while that page is
+    /// in `path`.
+    private(set) var setupReceiver: RAVESetupReceiver<DeviceSetupPayload>?
+    private(set) var setupReceived: DeviceSetupPayload?
+
+    private init() {
+        // DEBUG-only, like `tvInitialTab`: `-UITestDefault
+        // tvSettingsInitialPage=deviceSetup` opens that page, since the
+        // simulator takes no remote presses.
+        #if DEBUG
+        if let raw = UserDefaults.standard.string(forKey: "tvSettingsInitialPage"), let page = TVSettingsPage(rawValue: raw) {
+            path = [page]
+        }
+        #endif
+    }
+
+    /// Starts listening unless a receiver is already up or has finished.
+    func beginDeviceSetup(applying apply: @escaping @MainActor (DeviceSetupPayload) -> Void) {
+        guard setupReceiver == nil, setupReceived == nil else { return }
+        let receiver = RAVESetupReceiver<DeviceSetupPayload>(service: DeviceSetup.service) { [weak self] payload in
+            apply(payload)
+            self?.setupReceived = payload
+        }
+        receiver.start()
+        setupReceiver = receiver
+    }
+
+    private func endDeviceSetup() {
+        setupReceiver?.stop()
+        setupReceiver = nil
+        setupReceived = nil
+    }
+}
+
+struct TVSettingsView: View {
+    private typealias Page = TVSettingsPage
 
     @Environment(AppModel.self) private var appModel
     @Bindable private var film = FilmSession.shared
     @Bindable private var jellyfin = JellyfinAuth.shared
-    @State private var path: [Page] = []
+    @Bindable private var state = TVSettingsState.shared
     @State private var cachePreset = CacheBudget.preset
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack(path: $state.path) {
             Form {
+                Section {
+                    row(.deviceSetup, "Set Up from Another Device", systemImage: "qrcode", value: "")
+                }
                 Section {
                     row(.librarySource, "Library Source", systemImage: appModel.effectiveLibrarySource.symbolName,
                         value: appModel.effectiveLibrarySource.displayName)
@@ -57,8 +114,13 @@ struct TVSettingsView: View {
             }
             .navigationTitle("Settings")
             .navigationDestination(for: Page.self) { page in
-                Form { content(for: page) }
-                    .navigationTitle(title(for: page))
+                if page == .deviceSetup {
+                    // A QR code and instructions, not a list.
+                    TVDeviceSetupView()
+                } else {
+                    Form { content(for: page) }
+                        .navigationTitle(title(for: page))
+                }
             }
             // The preset isn't observable; pick up a change made on the
             // Cache page when coming back.
@@ -87,6 +149,7 @@ struct TVSettingsView: View {
 
     private func title(for page: Page) -> String {
         switch page {
+        case .deviceSetup: "Set Up from Another Device"
         case .librarySource: "Library Source"
         case .jellyfin: "Jellyfin"
         case .stash: "Stash"
@@ -99,7 +162,8 @@ struct TVSettingsView: View {
     @ViewBuilder
     private func content(for page: Page) -> some View {
         switch page {
-        case .librarySource: TVLibrarySourceSection { path.removeLast() }
+        case .deviceSetup: EmptyView()
+        case .librarySource: TVLibrarySourceSection { state.path.removeLast() }
         case .jellyfin: JellyfinServerSection()
         case .stash: TVStashServerSection()
         case .nextcloud: NextcloudSettingsSection()

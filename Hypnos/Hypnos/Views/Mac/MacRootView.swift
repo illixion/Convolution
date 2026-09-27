@@ -65,6 +65,7 @@ struct MacRootView: View {
             guard let tab = notification.object as? MacTab else { return }
             selection = tab
         }
+        .deviceSetupSheet(appModel: appModel)
     }
 
     @ViewBuilder

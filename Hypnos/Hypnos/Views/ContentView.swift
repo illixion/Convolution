@@ -55,6 +55,9 @@ struct ContentView: View {
         }
         .environment(appModel)
         .environment(windowModel)
+        #if !os(tvOS)
+        .deviceSetupSheet(appModel: appModel)
+        #endif
         #if os(visionOS)
         .ornament(
             // Nothing behind the welcome flow is useful yet, and a visible tab

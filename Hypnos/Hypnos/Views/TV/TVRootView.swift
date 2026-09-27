@@ -59,11 +59,9 @@ struct TVRootView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             ForEach(visibleTabs) { tab in
-                tabContent(tab)
-                    .tag(tab)
-                    .tabItem {
-                        Label(tab.rawValue, systemImage: tab.systemImage)
-                    }
+                SwiftUI.Tab(tab.rawValue, systemImage: tab.systemImage, value: tab) {
+                    tabContent(tab)
+                }
             }
         }
         .environment(appModel)

@@ -12,6 +12,7 @@
  */
 
 import os
+import RAVEDeviceSetup
 import SwiftUI
 
 struct IncomingURLHandler: ViewModifier {
@@ -59,6 +60,13 @@ struct IncomingURLHandler: ViewModifier {
                 await openStashImage(from: url)
             case "scene", "video":
                 await openStashScene(from: url)
+            case "setup":
+                // An Apple TV's setup code, read by the system Camera.
+                guard let code = RAVESetupCode(url: url, service: DeviceSetup.service) else {
+                    AppLogger.streamURL.error("Unreadable hypnos://setup link")
+                    return
+                }
+                DeviceSetup.shared.pending = code
             case "play", nil, "":
                 // hypnos://play?url=<percent-encoded URL>
                 guard let target = Self.playTargetURL(from: url) else {

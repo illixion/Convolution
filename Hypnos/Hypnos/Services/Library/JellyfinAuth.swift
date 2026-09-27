@@ -115,6 +115,14 @@ final class JellyfinAuth {
         }
     }
 
+    /// Adopts a session signed in on another device, sent by Apple TV setup
+    /// (`DeviceSetupPayload`).
+    func install(_ session: JellyfinSession) {
+        error = nil
+        self.session = session
+        persist(session)
+    }
+
     func signOut() {
         session = nil
         persist(nil)

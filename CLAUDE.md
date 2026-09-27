@@ -118,8 +118,9 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   Pictures, Videos, Albums, Films, Settings (`TVTab.swift`, a small tvOS-only
   enum — not an extra case on the shared `Tab`, which is keyed to
   `RAVEA11y`/`RAVETabItem` and the visionOS/iOS developer-tab rules). No
-  Windows tab (one scene, nothing to summon), no Filters tab, no Remote/
-  Console developer tabs.
+  Windows tab (one scene, nothing to summon), no Filters tab, no Remote
+  tab. A sixth, Console (RAVEConsole's live log), appears while Settings →
+  Developer → Show Debug Console is on.
 - **`TVPicturesTabView` / `TVVideosTabView`** — `LazyVGrid` over the same
   source/filter/pagination the visionOS/iOS grids use
   (`loadInitialGallery`/`loadNextPage`/`hasMorePages`, and the `Videos`
@@ -191,12 +192,47 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   (pausing when the output goes away), and recentres on every resume and
   on the transport's Recenter button. Show Objects overlays
   `FilmObjectMapPanel` (top and front views, overhead count).
-- **`TVSettingsView`** — a remote-friendly subset of `SettingsTabView`:
-  library source, Stash server + test connection, a Local Files note,
-  `NextcloudSettingsSection` and `CacheSettingsSection` reused verbatim
-  (neither uses a `Slider` or anything else touch-only). No display
+- **`TVSettingsView`** — a remote-friendly subset of `SettingsTabView`,
+  laid out like the tvOS Settings app: a short top page of rows showing
+  their current value (Set Up from Another Device, Library Source, the
+  three servers, Cache, Developer), each opening its own page. No display
   adjustments, depth models, or Backup import/export (no Files app on tvOS
-  to pick a file from or save one to). `Packages/NextcloudMedia/Package.swift`
+  to pick a file from or save one to). Two tvOS rules the pages follow,
+  both learned on hardware: **no `Picker`** — its default style pushes a
+  list that stalls on a blank page inside the tab bar ("_UIReplicantView
+  as a subview of UIHostingController.view"), and its menu style is a pill
+  sized to its label that focus skips from the tab bar and can't move past
+  — so choices are full-width checkmarked rows; and **no trailing buttons
+  in a row** (Clear, Sign Out), which moving down the list never reaches.
+  `CacheSettingsSection`, `NextcloudSettingsSection` and
+  `JellyfinServerSection` have `#if os(tvOS)` branches for both. Disabled
+  rows can't take focus either, so an all-empty cache list ends focus at
+  Cache Size. **A tab appearing or disappearing rebuilds the other tabs'
+  content** (the Library tab shows up once Jellyfin is configured), taking
+  view `@State` with it: with `.tag`/`.tabItem` tabs a pushed Settings page
+  went blank with no way back. `TVRootView` uses `Tab(value:)`, which stops
+  the blanking, and Settings keeps its navigation path and the setup
+  receiver in `TVSettingsState` rather than `@State`, so a rebuild lands on
+  the same page. (`Tab.hidden` would avoid the rebuild but is unavailable
+  on tvOS.) DEBUG `-UITestDefault tvSettingsInitialPage=<page>` opens a
+  Settings page directly; with it, a setup transfer can be driven in the
+  simulator by decoding the QR code from a `simctl io` screenshot with
+  `RAVESetupQRCode.codes(inImageData:service:)` and sending from a Mac
+  harness.
+- **Apple TV setup** (`Services/DeviceSetup/`, RAVESDK's
+  `RAVEDeviceSetup`) — Settings → Set Up from Another Device
+  (`TVDeviceSetupView`) shows a QR code; Hypnos on another device sends
+  its server addresses and credentials to it, encrypted to the key in the
+  code: the iPhone/iPad Camera opens the code's `hypnos://setup` link,
+  and Settings → Apple TV → Scan a Photo of the Code works everywhere
+  (`DeviceSetupSendSection`, then `DeviceSetupSendSheet` to pick servers).
+  Neither route asks for camera or photo access. `DeviceSetupPayload` is
+  what travels — Stash URL and API key, Nextcloud URL, user, app password
+  and root, Jellyfin server, API key and signed-in session
+  (`JellyfinAuth.install`) — deliberately not `SettingsBackup`, which
+  leaves every secret out. The keys are copied, so each server lists the
+  TV and the sender as one device. Needs `_hypnos-setup._tcp` in
+  `NSBonjourServices` (Info.plist). `Packages/NextcloudMedia/Package.swift`
   now declares `.tvOS(.v26)` (2026-09-24) — an undeclared platform gets
   SwiftPM's ancient default deployment floor, not an excluded one, so
   linking the package from the tvOS target needs the explicit entry.
@@ -340,8 +376,6 @@ doesn't exist there).
 
 ### Known gaps
 
-- **Atmos object audio** (Films tab) — see above; films play picture-only,
-  silently, on tvOS.
 - **Local library folder browsing** (Albums tab) — not ported; Local shows a
   placeholder on tvOS.
 - **Animated GIF/WebP/JXL** — render as a static first frame, not animated

@@ -18,6 +18,7 @@
 		AA09000000000000000000F3 /* RAVESlideshow in Frameworks */ = {isa = PBXBuildFile; productRef = AA09000000000000000000F2 /* RAVESlideshow */; };
 		AA10000000000000000000A3 /* NextcloudMedia in Frameworks */ = {isa = PBXBuildFile; productRef = AA10000000000000000000A2 /* NextcloudMedia */; };
 		AA11000000000000000000A3 /* RAVEFilm in Frameworks */ = {isa = PBXBuildFile; productRef = AA11000000000000000000A2 /* RAVEFilm */; };
+		AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */ = {isa = PBXBuildFile; productRef = AA12000000000000000000A2 /* RAVEDeviceSetup */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -68,6 +69,7 @@
 				AA09000000000000000000F3 /* RAVESlideshow in Frameworks */,
 				AA10000000000000000000A3 /* NextcloudMedia in Frameworks */,
 				AA11000000000000000000A3 /* RAVEFilm in Frameworks */,
+				AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -158,6 +160,7 @@
 				AA09000000000000000000F2 /* RAVESlideshow */,
 				AA10000000000000000000A2 /* NextcloudMedia */,
 				AA11000000000000000000A2 /* RAVEFilm */,
+				AA12000000000000000000A2 /* RAVEDeviceSetup */,
 			);
 			productName = Hypnos;
 			productReference = 0778651A2D811C5500BCF113 /* Hypnos.app */;
@@ -621,6 +624,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AA01000000000000000000A1 /* XCLocalSwiftPackageReference "../../RAVESDK" */;
 			productName = RAVEFilm;
+		};
+		AA12000000000000000000A2 /* RAVEDeviceSetup */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA01000000000000000000A1 /* XCLocalSwiftPackageReference "../../RAVESDK" */;
+			productName = RAVEDeviceSetup;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

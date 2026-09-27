@@ -338,6 +338,10 @@ struct SettingsTabView: View {
 
                 NextcloudSettingsSection()
 
+                #if !os(tvOS)
+                DeviceSetupSendSection()
+                #endif
+
                 Section("Gallery Statistics") {
                     HStack {
                         Text("Images Loaded")

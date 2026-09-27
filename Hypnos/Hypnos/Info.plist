@@ -7,7 +7,11 @@
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Hypnos shows your photos and videos, and on Apple Vision Pro converts them to 3D. Your library is read on this device only — nothing is uploaded.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Hypnos connects to media servers on your network so you can browse and stream your own libraries. Only the servers you configure are contacted — nothing is discovered or scanned for.</string>
+	<string>Hypnos connects to the media servers you configure so you can browse and stream your own libraries, and to your other devices running Hypnos when you set up an Apple TV from them.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_hypnos-setup._tcp</string>
+	</array>
 	<key>NSMotionUsageDescription</key>
 	<string>Hypnos follows your headphones’ head movement so spatial audio stays in place when you turn your head.</string>
 	<key>NSAppTransportSecurity</key>
