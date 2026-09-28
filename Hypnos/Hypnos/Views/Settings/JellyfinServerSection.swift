@@ -41,13 +41,13 @@ struct JellyfinServerSection: View {
                 // path when moving down the list.
                 Label("Signed in as \(user.userName)", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
-                Button("Sign Out") { auth.signOut() }
+                Button("Sign Out") { auth.signOut(revokingOn: URL(string: session.server)) }
                 #else
                 HStack {
                     Label("Signed in as \(user.userName)", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                     Spacer()
-                    Button("Sign Out") { auth.signOut() }
+                    Button("Sign Out") { auth.signOut(revokingOn: URL(string: session.server)) }
                 }
                 #endif
             } else {

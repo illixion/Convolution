@@ -123,7 +123,16 @@ final class JellyfinAuth {
         persist(session)
     }
 
-    func signOut() {
+    /// Forgets the session on this device. `revokingOn` also ends it on the
+    /// server (`POST /Sessions/Logout`, confirmed to 401 the token afterwards),
+    /// so a leaked token stops working; without it the token stays valid
+    /// server-side until deleted under Dashboard → Devices. Apple TV setup
+    /// copies the token, so revoking also signs out a device set up from this
+    /// one. That is why setup's own replace-the-session call passes nothing.
+    func signOut(revokingOn serverURL: URL? = nil) {
+        if let serverURL, let token = session?.accessToken {
+            Task { await Self.logout(serverURL: serverURL, token: token) }
+        }
         session = nil
         persist(nil)
     }
@@ -132,6 +141,19 @@ final class JellyfinAuth {
         UserDefaults.standard.set(session?.userId, forKey: "jellyfin.userId")
         UserDefaults.standard.set(session?.userName, forKey: "jellyfin.userName")
         KeychainStore.set(session?.accessToken, for: .jellyfinAccessToken)
+    }
+
+    private nonisolated static func logout(serverURL: URL, token: String) async {
+        var request = URLRequest(url: serverURL.appending(path: "Sessions/Logout"))
+        request.httpMethod = "POST"
+        request.setValue(JellyfinClientIdentity.authorizationHeader(token: token), forHTTPHeaderField: "Authorization")
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            AppLogger.app.info("Jellyfin sign-out: server logout returned HTTP \(status, privacy: .public)")
+        } catch {
+            AppLogger.app.error("Jellyfin sign-out couldn't reach the server to revoke the session: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     nonisolated static func authenticate(serverURL: URL, username: String, password: String) async throws -> JellyfinSession {
