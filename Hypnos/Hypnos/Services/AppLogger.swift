@@ -126,8 +126,12 @@ enum AppLogger {
 }
 
 extension URL {
+    /// Same names as RAVEMedia's `redactedForLogging`.
+    private static let redactedQueryNames: Set<String> = ["apikey", "api_key", "token", "access_token", "key", "password", "secret"]
+
     /// URL string safe to log at `privacy: .public`: sensitive query values
-    /// (the Stash apikey) are replaced with a placeholder. Needed because
+    /// (Stash's `apikey`, Jellyfin's `api_key`, web-yt-dlp's `token`) are
+    /// replaced with a placeholder. Needed because
     /// `.private` interpolation renders as `<private>` in Console, which made
     /// media-load failures undiagnosable on device.
     var loggableDescription: String {
@@ -135,7 +139,7 @@ extension URL {
               var items = components.queryItems, !items.isEmpty else {
             return absoluteString
         }
-        for index in items.indices where items[index].name.lowercased() == "apikey" {
+        for index in items.indices where Self.redactedQueryNames.contains(items[index].name.lowercased()) {
             items[index].value = "REDACTED"
         }
         components.queryItems = items

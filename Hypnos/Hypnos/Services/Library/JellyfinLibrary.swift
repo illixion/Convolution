@@ -425,9 +425,16 @@ actor JellyfinLibrary: MediaServerLibrary {
             return .genericPlayer(GenericPlaybackPlan(method: .direct, streamURL: directURL, resumeSeconds: resumeSeconds))
         }
 
+        // `MediaSourceId` is required: without it Jellyfin (10.11 confirmed)
+        // answers 400 "The mediaSourceId field is required.", which AVPlayer
+        // surfaces only as "resource unavailable". An item's default media
+        // source shares the item's id. `DeviceId` keys the server's
+        // transcode job, which `api_key` query auth otherwise leaves unset.
         var transcodeURL = baseURL.appending(path: "Videos/\(item.id)/master.m3u8")
         transcodeURL.append(queryItems: [
             .init(name: "api_key", value: authHeaderToken),
+            .init(name: "MediaSourceId", value: item.id),
+            .init(name: "DeviceId", value: JellyfinClientIdentity.deviceId),
             .init(name: "VideoCodec", value: "h264"),
             .init(name: "AudioCodec", value: "aac"),
         ])
