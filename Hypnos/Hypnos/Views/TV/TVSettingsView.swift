@@ -184,7 +184,7 @@ private struct TVDeveloperSection: View {
         } header: {
             Text("Film Player")
         } footer: {
-            Text("Draws where a film's Atmos objects are, from above and from the front, with how many are sounding and overhead. The player's Show Objects button toggles the same setting.")
+            Text("Draws where a film's sound objects are, from above and from the front, with how many are sounding and overhead. The player's Show Objects button toggles the same setting.")
         }
         Section {
             Toggle("Show Debug Console", isOn: $appModel.showDebugConsole)

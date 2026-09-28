@@ -79,7 +79,7 @@ struct JellyfinServerSection: View {
         } header: {
             Text("Jellyfin Server")
         } footer: {
-            Text("Powers the Library tab and Film Player. Needs the Atmos Objects plugin on the server for a film's object audio; other items play through direct/transcoded streaming.")
+            Text("Powers the Library tab and Film Player. Needs the Hypnos Object Audio plugin on the server for a film's object audio; other items play through direct/transcoded streaming.")
         }
     }
 
