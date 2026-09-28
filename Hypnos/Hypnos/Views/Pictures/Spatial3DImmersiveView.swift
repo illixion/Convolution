@@ -189,7 +189,7 @@ struct Spatial3DImmersiveView: View {
     @MainActor
     private func buildFallbackEntity() async -> Entity? {
         guard let sourceURL = await PhotoWindowModel.localFileURL(for: value.imageURL) else {
-            AppLogger.photoWindow.warning("Spatial3DImmersiveView: no local file for \(value.imageURL.absoluteString, privacy: .public)")
+            AppLogger.photoWindow.warning("Spatial3DImmersiveView: no local file for \(value.imageURL.loggableDescription, privacy: .public)")
             return nil
         }
 

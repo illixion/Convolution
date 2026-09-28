@@ -32,6 +32,11 @@ final class Spatial3DImageHandoff {
         /// The spatial-3D source cap the instance was generated at.
         /// Per-window (`spatial3DResolutionOverride`), so it is part of identity.
         let sourceDimension: Int
+
+        /// `imageURL` with credential query values redacted, for logs.
+        var loggableImageURL: String {
+            URL(string: imageURL)?.loggableDescription ?? "<unparseable URL>"
+        }
     }
 
     private struct Entry {
@@ -87,7 +92,7 @@ final class Spatial3DImageHandoff {
         }
         AppLogger.photoWindow.log(
             level: AppLogger.effectiveDebugLevel,
-            "[Handoff] deposit key=\(key.imageURL, privacy: .public)@\(key.sourceDimension, privacy: .public)"
+            "[Handoff] deposit key=\(key.loggableImageURL, privacy: .public)@\(key.sourceDimension, privacy: .public)"
         )
     }
 
@@ -99,7 +104,7 @@ final class Spatial3DImageHandoff {
             entries.removeValue(forKey: key)
             AppLogger.photoWindow.log(
                 level: AppLogger.effectiveDebugLevel,
-                "[Handoff] deposit expired unclaimed key=\(key.imageURL, privacy: .public)@\(key.sourceDimension, privacy: .public)"
+                "[Handoff] deposit expired unclaimed key=\(key.loggableImageURL, privacy: .public)@\(key.sourceDimension, privacy: .public)"
             )
         } else {
             entries[key] = entry
@@ -120,7 +125,7 @@ final class Spatial3DImageHandoff {
         entries[key] = entry
         AppLogger.photoWindow.log(
             level: AppLogger.effectiveDebugLevel,
-            "[Handoff] claim HIT refCount=\(entry.refCount, privacy: .public) key=\(key.imageURL, privacy: .public)@\(key.sourceDimension, privacy: .public)"
+            "[Handoff] claim HIT refCount=\(entry.refCount, privacy: .public) key=\(key.loggableImageURL, privacy: .public)@\(key.sourceDimension, privacy: .public)"
         )
         return (entry.image, entry.aspectRatio, entry.viewingMode)
     }
