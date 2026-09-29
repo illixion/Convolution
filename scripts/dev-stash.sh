@@ -50,10 +50,15 @@ seed_media() {
         -c:v libx265 -tag:v hvc1 -pix_fmt yuv420p10le -x265-params log-level=error videos/hevc-4k-test.mp4
     # Each photo must differ: Stash merges files with the same fingerprint
     # into one image, so identical frames would show up as a single photo.
+    # The sizes vary on purpose: the Pictures grid's original-aspect mode needs
+    # landscape, portrait, square, panoramic and tall sources to show anything.
+    # (Only missing files are generated — `rm` first to re-shape an old seed.)
+    local sizes=(2400x1600 1600x2400 2400x1350 1200x1200 3000x1000 1000x1500
+                 2000x1500 1350x2400 2400x1600 1500x1500 1800x1200 1200x1800)
     for i in $(seq 1 12); do
         f=$(printf 'images/photo-%02d.jpg' "$i")
         [[ -f $f ]] || ffmpeg -loglevel error -y \
-            -f lavfi -i "testsrc2=size=2400x1600:rate=1,hue=h=$((i * 30))" -ss "$i" -frames:v 1 "$f"
+            -f lavfi -i "testsrc2=size=${sizes[$((i - 1))]}:rate=1,hue=h=$((i * 30))" -ss "$i" -frames:v 1 "$f"
     done
 }
 
