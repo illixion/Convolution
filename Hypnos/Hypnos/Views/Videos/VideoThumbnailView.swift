@@ -4,7 +4,7 @@
  Individual video thumbnail with duration overlay.
  */
 
-import os
+import DebugTrace
 import SwiftUI
 
 struct VideoThumbnailView: View {

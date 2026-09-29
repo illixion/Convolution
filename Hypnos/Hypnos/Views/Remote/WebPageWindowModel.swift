@@ -14,8 +14,8 @@
 
 // tvOS has no WebKit.
 #if canImport(WebKit) && !os(macOS)
+import DebugTrace
 import Foundation
-import os
 import SwiftUI
 import WebKit
 

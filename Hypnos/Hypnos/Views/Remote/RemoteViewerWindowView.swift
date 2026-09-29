@@ -7,7 +7,7 @@
  */
 
 import Combine
-import os
+import DebugTrace
 import RAVEMedia
 import RAVESlideshow
 import RAVEUI
@@ -944,7 +944,7 @@ struct RemoteViewerWindowView: View {
             // A `.webPage` profile is built by WebPageWindowView, not here;
             // RemoteViewerSceneRoot routes on the same mode.
             AppLogger.remoteViewer.error(
-                "Website profile “\(config.name, privacy: .public)” reached the slideshow window"
+                "Website profile “\(config.name)” reached the slideshow window"
             )
             return
         }

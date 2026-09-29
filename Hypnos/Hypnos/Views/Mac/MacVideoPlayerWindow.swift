@@ -34,7 +34,7 @@
 #if os(macOS)
 
 import AVKit
-import os
+import DebugTrace
 import SwiftUI
 
 struct MacVideoPlayerWindow: View {
@@ -110,7 +110,7 @@ struct MacVideoPlayerWindow: View {
 
         let authenticated = MediaAuthorization.shared.authorizedURL(source)
         if await NativeVideoDecodeProbe.canPlayNatively(url: authenticated) {
-            AppLogger.videoWindow.info("[macOS] playing original: \(authenticated.loggableDescription, privacy: .public)")
+            AppLogger.videoWindow.info("[macOS] playing original: \(authenticated.loggableDescription)")
             player = AVPlayer(playerItem: AVPlayerItem(asset: MediaAuthorization.shared.asset(for: authenticated)))
             return
         }

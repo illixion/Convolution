@@ -4,8 +4,8 @@
  VideoSource implementation that fetches scenes from Stash server via GraphQL.
  */
 
+import DebugTrace
 import Foundation
-import os
 
 /// Video source that fetches from Stash GraphQL API
 final class GraphQLVideoSource: VideoSource, @unchecked Sendable {
@@ -22,7 +22,7 @@ final class GraphQLVideoSource: VideoSource, @unchecked Sendable {
     func fetchVideos(page: Int, pageSize: Int, filter: SceneFilterCriteria?) async throws -> VideoFetchResult {
         // Stash uses 1-indexed pages
         let stashPage = page + 1
-        AppLogger.graphQLVideo.log(level: AppLogger.effectiveDebugLevel, "Fetching videos page \(stashPage, privacy: .public), pageSize \(pageSize, privacy: .public), hasFilter: \(filter != nil, privacy: .public)")
+        AppLogger.graphQLVideo.debug("Fetching videos page \(stashPage, privacy: .public), pageSize \(pageSize, privacy: .public), hasFilter: \(filter != nil, privacy: .public)")
 
         // See GraphQLImageSource for why this is an id list and why an empty one
         // returns early instead of being sent.
@@ -36,7 +36,7 @@ final class GraphQLVideoSource: VideoSource, @unchecked Sendable {
         }
 
         let result = try await apiClient.findScenes(page: stashPage, perPage: pageSize, filter: filter, ids: convertedIds)
-        AppLogger.graphQLVideo.log(level: AppLogger.effectiveDebugLevel, "Got \(result.scenes.count, privacy: .public) scenes, total: \(result.count, privacy: .public)")
+        AppLogger.graphQLVideo.debug("Got \(result.scenes.count, privacy: .public) scenes, total: \(result.count, privacy: .public)")
 
         // Read live (default on) so toggling the setting takes effect on next fetch.
         // Mirrors AppModel.enableStashTranscoding.

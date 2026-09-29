@@ -6,7 +6,7 @@
  with optional swipe navigation and automatic window sizing.
  */
 
-import os
+import DebugTrace
 import RealityKit
 import SwiftUI
 #if canImport(UIKit)
@@ -1055,8 +1055,7 @@ struct PhotoDisplayView: View {
     private func requestVerifiedImmersiveResize(from preImmersiveSize: CGSize) {
         let intended = windowSize(for: windowModel.imageAspectRatio, within: immersiveWindowSize)
 
-        AppLogger.views.log(
-            level: AppLogger.effectiveDebugLevel,
+        AppLogger.views.debug(
             "Immersive resize: pre=\(Int(preImmersiveSize.width), privacy: .public)x\(Int(preImmersiveSize.height), privacy: .public) intended=\(Int(intended.width), privacy: .public)x\(Int(intended.height), privacy: .public) aspect=\(self.windowModel.imageAspectRatio, privacy: .public) fullyImmersiveMode=\(self.appModel.fullyImmersive3DMode, privacy: .public)"
         )
 
@@ -1113,8 +1112,7 @@ struct PhotoDisplayView: View {
                 let stillHeadingImmersive = ipc?.desiredViewingMode == .spatial3DImmersive
                 let granted = scene.effectiveGeometrySize
 
-                AppLogger.views.log(
-                    level: AppLogger.effectiveDebugLevel,
+                AppLogger.views.debug(
                     "Immersive resize readback #\(attempt, privacy: .public): granted=\(Int(granted.width), privacy: .public)x\(Int(granted.height), privacy: .public) mode=\(String(describing: ipc?.viewingMode), privacy: .public) desired=\(String(describing: ipc?.desiredViewingMode), privacy: .public) suppressed=\(self.suppressWindowResize, privacy: .public)"
                 )
 

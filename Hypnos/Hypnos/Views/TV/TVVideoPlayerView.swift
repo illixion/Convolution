@@ -34,7 +34,7 @@
 #if os(tvOS)
 
 import AVKit
-import os
+import DebugTrace
 import SwiftUI
 
 struct TVVideoPlayerView: View {
@@ -104,7 +104,7 @@ struct TVVideoPlayerView: View {
 
         let authenticated = MediaAuthorization.shared.authorizedURL(source)
         if await NativeVideoDecodeProbe.canPlayNatively(url: authenticated) {
-            AppLogger.videoWindow.info("[tvOS] playing original: \(authenticated.loggableDescription, privacy: .public)")
+            AppLogger.videoWindow.info("[tvOS] playing original: \(authenticated.loggableDescription)")
             resolvedURL = authenticated
             return
         }

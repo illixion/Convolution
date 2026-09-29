@@ -24,9 +24,9 @@
  answer to that is a full rebuild.
  */
 
+import DebugTrace
 import Foundation
 import Photos
-import os
 
 @MainActor
 @Observable

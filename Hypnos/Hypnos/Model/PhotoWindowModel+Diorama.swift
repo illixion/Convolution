@@ -11,9 +11,9 @@
  menu, mutually exclusive with the RealityKit-based 3D modes.
  */
 
+import DebugTrace
 import Foundation
 import Metal
-import os
 import RealityKit
 import SwiftUI
 
@@ -99,7 +99,7 @@ extension PhotoWindowModel {
                     self.dioramaBackdropTexture = await Self.uploadDioramaTexture(bg)
                 }
             } catch {
-                AppLogger.photoWindow.error("Diorama generation failed: \(error.localizedDescription, privacy: .public)")
+                AppLogger.photoWindow.error("Diorama generation failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             }
         }
         dioramaTask = task

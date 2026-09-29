@@ -11,8 +11,8 @@
  window kept in RAM, so a polling/observer setup would be overkill.
  */
 
+import DebugTrace
 import Foundation
-import os
 
 @MainActor
 @Observable
@@ -56,7 +56,7 @@ final class RemoteHistoryStore {
             lastError = nil
         } catch {
             lastError = error.localizedDescription
-            AppLogger.remoteViewer.error("History fetch failed: \(error.localizedDescription, privacy: .public)")
+            AppLogger.remoteViewer.error("History fetch failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 }

@@ -12,7 +12,7 @@
  way — destroy the scene, open a fresh one at the user.
  */
 
-import os
+import DebugTrace
 import RAVEUI
 import SwiftUI
 

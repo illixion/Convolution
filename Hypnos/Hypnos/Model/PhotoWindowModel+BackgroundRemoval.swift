@@ -5,10 +5,10 @@
  cache loading, resolution reloading, and state management.
  */
 
+import DebugTrace
 import Foundation
 import ImageIO
 import Metal
-import os
 import RealityKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -160,7 +160,7 @@ extension PhotoWindowModel {
                 }
             } catch {
                 if !Task.isCancelled {
-                    AppLogger.photoWindow.error("Background removal failed: \(error.localizedDescription, privacy: .public)")
+                    AppLogger.photoWindow.error("Background removal failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
                     self.backgroundRemovalState = .original
                 }
             }

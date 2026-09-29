@@ -25,6 +25,7 @@
  */
 
 import AVFoundation
+import DebugTrace
 import Foundation
 import Photos
 #if canImport(UIKit)
@@ -35,7 +36,6 @@ import AppKit
 #endif
 import Foundation
 import ImageIO
-import os
 
 enum PhotosAssetURL {
     static let scheme = "photos-asset"
@@ -224,7 +224,7 @@ actor PhotosAssetStore {
         }
 
         guard let boxed else {
-            AppLogger.localMedia.error("Photos video unavailable: \(identifier, privacy: .public)")
+            AppLogger.localMedia.error("Photos video unavailable: \(identifier, privacy: .private(mask: .hash))")
             return nil
         }
         if let urlAsset = boxed.asset as? AVURLAsset {
@@ -251,7 +251,7 @@ actor PhotosAssetStore {
             return destination
         } catch {
             AppLogger.localMedia.error(
-                "Photos video export failed for \(identifier, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                "Photos video export failed for \(identifier, privacy: .private(mask: .hash)): \(error.localizedDescription) (\(error.logCode, privacy: .public))"
             )
             return nil
         }
@@ -309,7 +309,7 @@ actor PhotosAssetStore {
 
     private func export(identifier: String) async -> URL? {
         guard let asset = Self.asset(for: identifier) else {
-            AppLogger.localMedia.error("Photos asset no longer resolves: \(identifier, privacy: .public)")
+            AppLogger.localMedia.error("Photos asset no longer resolves: \(identifier, privacy: .private(mask: .hash))")
             return nil
         }
 
@@ -330,7 +330,7 @@ actor PhotosAssetStore {
         }
 
         guard let payload else {
-            AppLogger.localMedia.error("Photos export produced no data: \(identifier, privacy: .public)")
+            AppLogger.localMedia.error("Photos export produced no data: \(identifier, privacy: .private(mask: .hash))")
             return nil
         }
 
@@ -350,7 +350,7 @@ actor PhotosAssetStore {
             return destination
         } catch {
             AppLogger.localMedia.error(
-                "Photos export failed to write \(identifier, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                "Photos export failed to write \(identifier, privacy: .private(mask: .hash)): \(error.localizedDescription) (\(error.logCode, privacy: .public))"
             )
             return nil
         }

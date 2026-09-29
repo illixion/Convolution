@@ -5,7 +5,7 @@ Abstract:
 The delegate class for the scene.
 */
 
-import os
+import DebugTrace
 import SwiftUI
 
 // macOS has no `UIScene`/`UIWindowSceneDelegate` at all — a `Window`/
@@ -121,7 +121,7 @@ extension SceneDelegate {
         pendingLock.unlock()
 
         for url in urls {
-            AppLogger.sharedMedia.info("SceneDelegate received shared URL: \(url.lastPathComponent, privacy: .public)")
+            AppLogger.sharedMedia.info("SceneDelegate received shared URL: \(url.lastPathComponent)")
             NotificationCenter.default.post(name: sharedURLNotification, object: url)
         }
     }

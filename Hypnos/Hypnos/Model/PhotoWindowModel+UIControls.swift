@@ -4,8 +4,8 @@
  Extension for UI interaction methods: share sheet, auto-hide timers, and image flip.
  */
 
+import DebugTrace
 import Foundation
-import os
 import SwiftUI
 
 extension PhotoWindowModel {
@@ -40,7 +40,7 @@ extension PhotoWindowModel {
                 presentShareSheet(url: ShareSheetHelper.prepareShareFile(from: cachedURL, title: shareName, originalURL: url))
             }
         } catch {
-            AppLogger.photoWindow.error("Failed to download image for sharing: \(error.localizedDescription, privacy: .public)")
+            AppLogger.photoWindow.error("Failed to download image for sharing: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 

@@ -21,8 +21,8 @@
 
 #if DEBUG
 
+import DebugTrace
 import Foundation
-import os
 
 @MainActor
 enum UITestingConfiguration {
@@ -62,7 +62,7 @@ enum UITestingConfiguration {
     /// baseline in `AppLauncher` sets every flag a test reads explicitly.
     /// Removing each key as well as the domain is still worth doing: it clears
     /// everything that *is* reachable, which is most of it.
-    private static func resetDefaults(logger: Logger) {
+    private static func resetDefaults(logger: DebugLogger) {
         let defaults = UserDefaults.standard
         guard let domain = Bundle.main.bundleIdentifier else { return }
         let persisted = defaults.persistentDomain(forName: domain) ?? [:]

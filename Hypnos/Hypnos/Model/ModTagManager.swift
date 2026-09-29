@@ -13,8 +13,8 @@
  synchronized across windows on the same RoboFrame instance.
  */
 
+import DebugTrace
 import Foundation
-import os
 
 @MainActor
 @Observable

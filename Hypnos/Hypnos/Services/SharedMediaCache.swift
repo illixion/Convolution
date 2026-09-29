@@ -6,8 +6,8 @@
  A UserDefaults manifest tracks cache entries for orphan cleanup.
  */
 
+import DebugTrace
 import Foundation
-import os
 
 actor SharedMediaCache {
     static let shared = SharedMediaCache()
@@ -52,7 +52,7 @@ actor SharedMediaCache {
         do {
             try fileManager.copyItem(at: sourceURL, to: cachedURL)
         } catch {
-            AppLogger.sharedMedia.error("Failed to cache shared file: \(error.localizedDescription, privacy: .public)")
+            AppLogger.sharedMedia.error("Failed to cache shared file: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             return nil
         }
 
@@ -74,7 +74,7 @@ actor SharedMediaCache {
         manifest.append(entry)
         saveManifest(manifest)
 
-        AppLogger.sharedMedia.info("Cached shared file: \(originalFileName, privacy: .public) as \(cachedFileName, privacy: .public)")
+        AppLogger.sharedMedia.info("Cached shared file: \(originalFileName) as \(cachedFileName, privacy: .public)")
         return (cachedURL, windowId)
     }
 
@@ -121,14 +121,14 @@ actor SharedMediaCache {
             let isTooOld = now.timeIntervalSince(entry.cachedDate) > maxAge
 
             if !fileExists {
-                AppLogger.sharedMedia.log(level: AppLogger.effectiveDebugLevel, "Removing manifest entry for missing file: \(entry.cachedFileName, privacy: .public)")
+                AppLogger.sharedMedia.debug("Removing manifest entry for missing file: \(entry.cachedFileName, privacy: .public)")
                 removedCount += 1
                 return true
             }
 
             if isTooOld {
                 try? fileManager.removeItem(at: fileURL)
-                AppLogger.sharedMedia.log(level: AppLogger.effectiveDebugLevel, "Removing expired cache entry: \(entry.cachedFileName, privacy: .public)")
+                AppLogger.sharedMedia.debug("Removing expired cache entry: \(entry.cachedFileName, privacy: .public)")
                 removedCount += 1
                 return true
             }
@@ -145,7 +145,7 @@ actor SharedMediaCache {
                 if !trackedFileNames.contains(fileName) {
                     let fileURL = cacheDirectory.appendingPathComponent(fileName)
                     try? fileManager.removeItem(at: fileURL)
-                    AppLogger.sharedMedia.log(level: AppLogger.effectiveDebugLevel, "Deleted untracked cache file: \(fileName, privacy: .public)")
+                    AppLogger.sharedMedia.debug("Deleted untracked cache file: \(fileName, privacy: .public)")
                     removedCount += 1
                 }
             }

@@ -12,8 +12,8 @@
  resolution override, window size and adjustments at each launch.
  */
 
+import DebugTrace
 import Foundation
-import os
 
 enum ViewingModePreference: String {
     case mono

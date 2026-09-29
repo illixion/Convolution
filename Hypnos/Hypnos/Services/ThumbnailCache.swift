@@ -7,8 +7,8 @@
  Disk size accounting and LRU eviction live in the shared LRUDiskCache engine.
  */
 
+import DebugTrace
 import Foundation
-import os
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -119,7 +119,7 @@ actor ThumbnailCache {
                 try data.write(to: fileURL)
                 engine.noteWrite(at: fileURL, replacing: replaced)
             } catch {
-                AppLogger.diskCache.error("Failed to save thumbnail: \(error.localizedDescription, privacy: .public)")
+                AppLogger.diskCache.error("Failed to save thumbnail: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             }
         }
     }

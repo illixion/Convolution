@@ -5,8 +5,8 @@
  Settings are stored in UserDefaults and automatically restored when the same video is opened.
  */
 
+import DebugTrace
 import Foundation
-import os
 
 actor Video3DSettingsTracker {
     static let shared = Video3DSettingsTracker()
@@ -78,10 +78,4 @@ actor Video3DSettingsTracker {
             UserDefaults.standard.set(data, forKey: userDefaultsKey)
         }
     }
-}
-
-// MARK: - Logger Extension
-
-extension AppLogger {
-    static let video3DSettings = Logger(subsystem: "com.hypnos", category: "Video3DSettings")
 }

@@ -12,8 +12,8 @@
 // window uses a plain AVKit `AVPlayerView` instead (`Views/Mac/`). See
 // Hypnos/CLAUDE.md "macOS" for the seam list and gaps.
 #if canImport(WebKit) && !os(macOS)
+import DebugTrace
 import Foundation
-import os
 import SwiftUI
 import WebKit
 

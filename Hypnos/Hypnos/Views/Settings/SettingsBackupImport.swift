@@ -15,7 +15,7 @@
  at a picker that closed and did nothing.
  */
 
-import os
+import DebugTrace
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -96,7 +96,7 @@ final class SettingsBackupImporter {
             }
             pendingData = try Data(contentsOf: newest)
             isConfirming = true
-            AppLogger.settings.info("Found settings backup in Documents: \(newest.lastPathComponent, privacy: .public)")
+            AppLogger.settings.info("Found settings backup in Documents: \(newest.lastPathComponent)")
         } catch {
             errorMessage = error.localizedDescription
         }

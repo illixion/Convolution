@@ -5,7 +5,7 @@
  and lightweight display transitions.
  */
 
-import os
+import DebugTrace
 import RealityKit
 import SwiftUI
 
@@ -17,7 +17,7 @@ extension PhotoWindowModel {
     /// Starts an inactivity timer when leaving active, restores on return.
     func handleScenePhaseChange(from oldPhase: ScenePhase, to newPhase: ScenePhase) {
         AppLogger.photoWindow.info(
-            "[\(self.displayName, privacy: .public)] scenePhase: \(Self.phaseLabel(oldPhase), privacy: .public) → \(Self.phaseLabel(newPhase), privacy: .public)"
+            "[\(self.displayName, privacy: .private(mask: .hash))] scenePhase: \(Self.phaseLabel(oldPhase), privacy: .public) → \(Self.phaseLabel(newPhase), privacy: .public)"
         )
 
         if newPhase == .active {
@@ -29,7 +29,7 @@ extension PhotoWindowModel {
             scenePhaseIdleTask = nil
 
             if isIdleDownscaled {
-                AppLogger.photoWindow.info("[\(self.displayName, privacy: .public)] Restoring from scene-phase idle downscale")
+                AppLogger.photoWindow.info("[\(self.displayName, privacy: .private(mask: .hash))] Restoring from scene-phase idle downscale")
                 Task {
                     await restoreFromIdleDownscale()
                 }
@@ -56,7 +56,7 @@ extension PhotoWindowModel {
             guard let self, !Task.isCancelled else { return }
             guard !self.isIdleDownscaled, !self.isRestoringFromIdle else { return }
 
-            AppLogger.photoWindow.info("[\(self.displayName, privacy: .public)] Idle downscaling after scene-phase timeout")
+            AppLogger.photoWindow.info("[\(self.displayName, privacy: .private(mask: .hash))] Idle downscaling after scene-phase timeout")
             await self.releaseMemoryForIdleDownscale()
             await self.applyIdleDownscaleThumbnail()
         }
@@ -170,7 +170,7 @@ extension PhotoWindowModel {
     func restoreFromIdleDownscale() async {
         guard isIdleDownscaled else { return }
 
-        AppLogger.photoWindow.info("[\(self.displayName, privacy: .public)] Restoring window from idle downscale")
+        AppLogger.photoWindow.info("[\(self.displayName, privacy: .private(mask: .hash))] Restoring window from idle downscale")
         isRestoringFromIdle = true
         isIdleDownscaled = false
         currentDisplayMaxDimension = 0

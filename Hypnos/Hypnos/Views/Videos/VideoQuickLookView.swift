@@ -29,8 +29,8 @@
  auto-hide, aspect lock) fire.
  */
 
+import DebugTrace
 import RAVEMedia
-import os
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
@@ -178,7 +178,7 @@ struct VideoQuickLookView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                 dismissEnabled = true
             }
-            AppLogger.videoWindow.info("Video quick look opened; preview URL: \(previewURL.loggableDescription, privacy: .public)")
+            AppLogger.videoWindow.info("Video quick look opened; preview URL: \(previewURL.loggableDescription)")
         }
         .task {
             await loadFullPoster()

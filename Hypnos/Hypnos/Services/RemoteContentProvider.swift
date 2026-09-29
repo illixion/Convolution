@@ -10,7 +10,7 @@
  */
 
 import CoreGraphics
-import os
+import DebugTrace
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -105,7 +105,7 @@ class RemoteContentProvider: SlideshowContentProvider {
                 }
                 return .still(image: image, data: data)
             } catch {
-                AppLogger.remoteViewer.error("Failed to load post \(post._id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                AppLogger.remoteViewer.error("Failed to load post \(post._id, privacy: .private(mask: .hash)): \(error.localizedDescription) (\(error.logCode, privacy: .public))")
                 return nil
             }
         }.value

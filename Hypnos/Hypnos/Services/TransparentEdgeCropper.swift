@@ -13,7 +13,7 @@
  */
 
 import CoreGraphics
-import os
+import DebugTrace
 
 enum TransparentEdgeCropper {
     /// Maximum dimension used for the alpha-bounds scan. Large images are

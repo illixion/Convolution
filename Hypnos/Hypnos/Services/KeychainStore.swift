@@ -1,5 +1,5 @@
+import DebugTrace
 import Foundation
-import os
 import Security
 
 /// The app's credential store.
@@ -265,7 +265,7 @@ enum KeychainStore {
                 try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
                 return true
             } catch {
-                AppLogger.app.error("Debug credential write failed for \(key.rawValue, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                AppLogger.app.error("Debug credential write failed for \(key.rawValue, privacy: .public): \(error.localizedDescription) (\(error.logCode, privacy: .public))")
                 return false
             }
         }

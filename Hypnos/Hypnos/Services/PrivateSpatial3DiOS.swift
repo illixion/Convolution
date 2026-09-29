@@ -10,8 +10,8 @@
 
 #if HYPNOS_PRIVATE_API && !os(visionOS)
 
+import DebugTrace
 import Foundation
-import os
 import RealityKit
 
 // MARK: - Why this file exists

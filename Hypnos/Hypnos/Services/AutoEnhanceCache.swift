@@ -9,9 +9,9 @@
  enhanced render is useless without its source).
  */
 
+import DebugTrace
 import Foundation
 import ImageIO
-import os
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -88,7 +88,7 @@ actor AutoEnhanceCache {
             tagOrigin(of: fileURL, for: url)
             engine.noteWrite(at: fileURL, replacing: replaced)
         } catch {
-            AppLogger.diskCache.error("Failed to save auto-enhanced image: \(error.localizedDescription, privacy: .public)")
+            AppLogger.diskCache.error("Failed to save auto-enhanced image: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 

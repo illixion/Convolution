@@ -6,9 +6,9 @@
  */
 
 import CoreImage
+import DebugTrace
 import ImageIO
 import Metal
-import os
 import RealityKit
 import SwiftUI
 
@@ -565,7 +565,7 @@ extension PhotoWindowModel {
                     }
                     self.updateExperimentalSpatial3DTuning()
                 } catch {
-                    AppLogger.visualAdjustments.error("Failed to reload ImagePresentationComponent: \(error.localizedDescription, privacy: .public)")
+                    AppLogger.visualAdjustments.error("Failed to reload ImagePresentationComponent: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
                     return
                 }
             }

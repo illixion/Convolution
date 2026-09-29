@@ -6,7 +6,7 @@
  Includes a Save button to persist the image to Documents/Photos/.
  */
 
-import os
+import DebugTrace
 import SwiftUI
 
 struct SharedPhotoWindowView: View {
@@ -104,7 +104,7 @@ struct SharedPhotoWindowView: View {
                 isSaved = true
             } catch {
                 saveError = error.localizedDescription
-                AppLogger.sharedMedia.error("Failed to save shared photo: \(error.localizedDescription, privacy: .public)")
+                AppLogger.sharedMedia.error("Failed to save shared photo: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             }
             isSaving = false
         }

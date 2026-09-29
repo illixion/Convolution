@@ -13,9 +13,9 @@
  `/Users` in that case (see its `resolveUserId`).
  */
 
+import DebugTrace
 import Foundation
 import Observation
-import os
 
 /// The `Authorization` header every Jellyfin request needs, built once and
 /// reused by both `JellyfinAuth` and `JellyfinLibrary` so the client
@@ -152,7 +152,7 @@ final class JellyfinAuth {
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
             AppLogger.app.info("Jellyfin sign-out: server logout returned HTTP \(status, privacy: .public)")
         } catch {
-            AppLogger.app.error("Jellyfin sign-out couldn't reach the server to revoke the session: \(error.localizedDescription, privacy: .public)")
+            AppLogger.app.error("Jellyfin sign-out couldn't reach the server to revoke the session: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 
@@ -176,7 +176,7 @@ final class JellyfinAuth {
         guard let decoded = try? JSONDecoder().decode(ResponseBody.self, from: data) else {
             throw JellyfinAuthError.decodeFailed
         }
-        AppLogger.app.info("Jellyfin sign-in succeeded for user \(decoded.User.Name, privacy: .public)")
+        AppLogger.app.info("Jellyfin sign-in succeeded for user \(decoded.User.Name)")
         return JellyfinSession(userId: decoded.User.Id, userName: decoded.User.Name, accessToken: decoded.AccessToken)
     }
 }

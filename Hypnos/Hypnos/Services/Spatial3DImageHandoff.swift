@@ -19,9 +19,9 @@
  "Open Copy" can share one instance between two windows that both stay open.
  */
 
+import DebugTrace
 import Foundation
 import RealityKit
-import os
 
 @MainActor
 final class Spatial3DImageHandoff {
@@ -90,9 +90,8 @@ final class Spatial3DImageHandoff {
             guard !Task.isCancelled else { return }
             self?.expireGrace(key: key)
         }
-        AppLogger.photoWindow.log(
-            level: AppLogger.effectiveDebugLevel,
-            "[Handoff] deposit key=\(key.loggableImageURL, privacy: .public)@\(key.sourceDimension, privacy: .public)"
+        AppLogger.photoWindow.debug(
+            "[Handoff] deposit key=\(key.loggableImageURL, privacy: .private(mask: .hash))@\(key.sourceDimension, privacy: .public)"
         )
     }
 
@@ -102,9 +101,8 @@ final class Spatial3DImageHandoff {
         entry.graceTask = nil
         if entry.refCount <= 0 {
             entries.removeValue(forKey: key)
-            AppLogger.photoWindow.log(
-                level: AppLogger.effectiveDebugLevel,
-                "[Handoff] deposit expired unclaimed key=\(key.loggableImageURL, privacy: .public)@\(key.sourceDimension, privacy: .public)"
+            AppLogger.photoWindow.debug(
+                "[Handoff] deposit expired unclaimed key=\(key.loggableImageURL, privacy: .private(mask: .hash))@\(key.sourceDimension, privacy: .public)"
             )
         } else {
             entries[key] = entry
@@ -123,9 +121,8 @@ final class Spatial3DImageHandoff {
         entry.graceTask?.cancel()
         entry.graceTask = nil
         entries[key] = entry
-        AppLogger.photoWindow.log(
-            level: AppLogger.effectiveDebugLevel,
-            "[Handoff] claim HIT refCount=\(entry.refCount, privacy: .public) key=\(key.loggableImageURL, privacy: .public)@\(key.sourceDimension, privacy: .public)"
+        AppLogger.photoWindow.debug(
+            "[Handoff] claim HIT refCount=\(entry.refCount, privacy: .public) key=\(key.loggableImageURL, privacy: .private(mask: .hash))@\(key.sourceDimension, privacy: .public)"
         )
         return (entry.image, entry.aspectRatio, entry.viewingMode)
     }

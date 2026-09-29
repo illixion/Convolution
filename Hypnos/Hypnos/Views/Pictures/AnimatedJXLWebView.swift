@@ -30,9 +30,9 @@
 // visionOS-only view on iOS: see Hypnos/CLAUDE.md "macOS" for the seam list
 // and the plan to give this a real NSViewRepresentable later.
 #if canImport(WebKit) && !os(macOS)
+import DebugTrace
 import SwiftUI
 import WebKit
-import os
 
 struct AnimatedJXLWebView: UIViewRepresentable {
     /// Raw JPEG XL bytes to decode and animate.

@@ -4,8 +4,8 @@
  Saves shared media files to the app's Documents/Photos or Documents/Videos folder.
  */
 
+import DebugTrace
 import Foundation
-import os
 
 enum SharedMediaSaver {
     /// Save a shared image to Documents/Photos/
@@ -16,7 +16,7 @@ enum SharedMediaSaver {
 
         let destinationURL = uniqueDestination(directory: photosDir, fileName: originalFileName)
         try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
-        AppLogger.sharedMedia.info("Saved shared photo to: \(destinationURL.lastPathComponent, privacy: .public)")
+        AppLogger.sharedMedia.info("Saved shared photo to: \(destinationURL.lastPathComponent)")
         return destinationURL
     }
 
@@ -28,7 +28,7 @@ enum SharedMediaSaver {
 
         let destinationURL = uniqueDestination(directory: videosDir, fileName: originalFileName)
         try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
-        AppLogger.sharedMedia.info("Saved shared video to: \(destinationURL.lastPathComponent, privacy: .public)")
+        AppLogger.sharedMedia.info("Saved shared video to: \(destinationURL.lastPathComponent)")
         return destinationURL
     }
 

@@ -6,7 +6,7 @@
  display sync, and remote API configuration management.
  */
 
-import os
+import DebugTrace
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
@@ -372,7 +372,7 @@ class RemoteViewerModel: SlideshowEngine {
         let off = !on
         guard off != remotePanelOff else { return }
         remotePanelOff = off
-        AppLogger.remoteViewer.info("displayState \(on ? "on" : "off", privacy: .public) for deviceId=\(self.slideshowDeviceId, privacy: .public)")
+        AppLogger.remoteViewer.info("displayState \(on ? "on" : "off", privacy: .public) for deviceId=\(self.slideshowDeviceId, privacy: .private(mask: .hash))")
         scheduleSceneStateReport(effectiveVisible)
         if effectiveVisible { rejoinReadinessBarrier() }
     }
@@ -418,10 +418,10 @@ class RemoteViewerModel: SlideshowEngine {
         Task {
             do {
                 let result = try await apiClient.save(baseURL: config.apiEndpoint, postId: post._id, accessToken: config.accessToken)
-                AppLogger.remoteViewer.info("Saved post \(post._id, privacy: .public): \(result, privacy: .public)")
+                AppLogger.remoteViewer.info("Saved post \(post._id, privacy: .private(mask: .hash)): \(result)")
                 showToast(result)
             } catch {
-                AppLogger.remoteViewer.error("Failed to save post: \(error.localizedDescription, privacy: .public)")
+                AppLogger.remoteViewer.error("Failed to save post: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
                 showToast("Save failed: \(error.localizedDescription)", isError: true)
             }
         }
@@ -626,7 +626,7 @@ class RemoteViewerModel: SlideshowEngine {
         if !isApplyingIncomingSync {
             reportImageReady(for: post)
         } else {
-            AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "imageReady suppressed for post \(post._id, privacy: .public) — applying incoming local sync")
+            AppLogger.remoteViewer.debug("imageReady suppressed for post \(post._id, privacy: .private(mask: .hash)) — applying incoming local sync")
         }
 
         // If the server advanced again while this image was loading, the
@@ -675,7 +675,7 @@ class RemoteViewerModel: SlideshowEngine {
             videoDurationTimeoutTask = nil
             spatial3DReadyTimeoutTask?.cancel()
             spatial3DReadyTimeoutTask = nil
-            AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "imageReady skipped for post \(post._id, privacy: .public) — session hidden")
+            AppLogger.remoteViewer.debug("imageReady skipped for post \(post._id, privacy: .private(mask: .hash)) — session hidden")
             return
         }
         if case .video = currentMediaType, knownDurationMs(for: post) == nil {
@@ -687,7 +687,7 @@ class RemoteViewerModel: SlideshowEngine {
             // the player (onVideoDurationKnown) — so the server can delay the
             // slideshow for a clip longer than the interval.
             pendingVideoImageReadyPost = post
-            AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "imageReady deferred for post \(post._id, privacy: .public) — waiting on video duration")
+            AppLogger.remoteViewer.debug("imageReady deferred for post \(post._id, privacy: .private(mask: .hash)) — waiting on video duration")
             // Watchdog: the duration can legitimately never arrive (load
             // failure after retries, non-finite duration on a stream). Don't
             // park the server's readiness barrier forever — report without a
@@ -701,15 +701,15 @@ class RemoteViewerModel: SlideshowEngine {
                 self.pendingVideoImageReadyPost = nil
                 self.videoDurationTimeoutTask = nil
                 guard self.effectiveVisible else {
-                    AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "imageReady (duration timeout) dropped for post \(post._id, privacy: .public) — session hidden")
+                    AppLogger.remoteViewer.debug("imageReady (duration timeout) dropped for post \(post._id, privacy: .private(mask: .hash)) — session hidden")
                     return
                 }
                 // Send directly — going back through reportImageReady would
                 // just re-enter the duration deferral and re-arm this timer.
                 if self.wsSession == nil {
-                    AppLogger.remoteViewer.warning("Video duration never reported for post \(post._id, privacy: .public) and wsSession is nil — imageReady not sent")
+                    AppLogger.remoteViewer.warning("Video duration never reported for post \(post._id, privacy: .private(mask: .hash)) and wsSession is nil — imageReady not sent")
                 } else {
-                    AppLogger.remoteViewer.warning("Video duration never reported for post \(post._id, privacy: .public) — sending imageReady without duration after 10 s")
+                    AppLogger.remoteViewer.warning("Video duration never reported for post \(post._id, privacy: .private(mask: .hash)) — sending imageReady without duration after 10 s")
                     self.wsSession?.sendImageReady(postId: pending._id, durationMs: nil)
                 }
             }
@@ -736,7 +736,7 @@ class RemoteViewerModel: SlideshowEngine {
             // imageReady forever and stall the channel (videos return above;
             // static photos generate and release — only animated got stuck).
             pendingImageReadyPost = post
-            AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "imageReady deferred for post \(post._id, privacy: .public) — waiting on 3D generation")
+            AppLogger.remoteViewer.debug("imageReady deferred for post \(post._id, privacy: .private(mask: .hash)) — waiting on 3D generation")
             spatial3DReadyTimeoutTask?.cancel()
             spatial3DReadyTimeoutTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(Self.spatial3DReadyGrace))
@@ -745,7 +745,7 @@ class RemoteViewerModel: SlideshowEngine {
                 self.pendingImageReadyPost = nil
                 self.spatial3DReadyTimeoutTask = nil
                 guard self.effectiveVisible else { return }
-                AppLogger.remoteViewer.warning("3D generation still pending for post \(post._id, privacy: .public) — reporting imageReady after \(Self.spatial3DReadyGrace, privacy: .public) s to stay inside the server's readiness budget")
+                AppLogger.remoteViewer.warning("3D generation still pending for post \(post._id, privacy: .private(mask: .hash)) — reporting imageReady after \(Self.spatial3DReadyGrace, privacy: .public) s to stay inside the server's readiness budget")
                 self.wsSession?.sendImageReady(postId: pending._id)
             }
         } else {
@@ -753,9 +753,9 @@ class RemoteViewerModel: SlideshowEngine {
             spatial3DReadyTimeoutTask?.cancel()
             spatial3DReadyTimeoutTask = nil
             if wsSession == nil {
-                AppLogger.remoteViewer.warning("imageReady not sent for post \(post._id, privacy: .public) — wsSession is nil")
+                AppLogger.remoteViewer.warning("imageReady not sent for post \(post._id, privacy: .private(mask: .hash)) — wsSession is nil")
             } else {
-                AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "imageReady sent for post \(post._id, privacy: .public)")
+                AppLogger.remoteViewer.debug("imageReady sent for post \(post._id, privacy: .private(mask: .hash))")
                 wsSession?.sendImageReady(postId: post._id, durationMs: knownDurationMs(for: post))
             }
         }
@@ -768,20 +768,20 @@ class RemoteViewerModel: SlideshowEngine {
     @MainActor
     func onVideoDurationKnown(_ seconds: Double, for post: RemotePost) {
         guard seconds.isFinite, seconds > 0 else {
-            AppLogger.remoteViewer.warning("Video duration unusable for post \(post._id, privacy: .public): \(seconds, privacy: .public)")
+            AppLogger.remoteViewer.warning("Video duration unusable for post \(post._id, privacy: .private(mask: .hash)): \(seconds, privacy: .public)")
             return
         }
         // A late callback from a torn-down player for a post we've moved past
         // is irrelevant — only the post on screen (or crossfading in as
         // `nextPost`, since loadedmetadata typically beats the commit) matters.
         guard currentPost?._id == post._id || nextPost?._id == post._id else {
-            AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "Stale video duration ignored for post \(post._id, privacy: .public)")
+            AppLogger.remoteViewer.debug("Stale video duration ignored for post \(post._id, privacy: .private(mask: .hash))")
             return
         }
         let ms = Int((seconds * 1000).rounded())
         currentVideoDurationMs = ms
         currentVideoDurationPostId = post._id
-        AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "Video duration known for post \(post._id, privacy: .public): \(ms, privacy: .public) ms")
+        AppLogger.remoteViewer.debug("Video duration known for post \(post._id, privacy: .private(mask: .hash)): \(ms, privacy: .public) ms")
         // Loop only if the clip fits inside the interval; a longer clip plays
         // through once and the server delays the advance until it ends.
         currentVideoLoops = Double(ms) <= delay * 1000
@@ -817,10 +817,10 @@ class RemoteViewerModel: SlideshowEngine {
         // Don't advance the channel for a session that went hidden (window
         // inactive or panel held off) while its 3D depth map was generating.
         guard effectiveVisible else {
-            AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "imageReady dropped for post \(pending._id, privacy: .public) — session hidden")
+            AppLogger.remoteViewer.debug("imageReady dropped for post \(pending._id, privacy: .private(mask: .hash)) — session hidden")
             return
         }
-        AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "imageReady released for post \(pending._id, privacy: .public) — 3D generation completed")
+        AppLogger.remoteViewer.debug("imageReady released for post \(pending._id, privacy: .private(mask: .hash)) — 3D generation completed")
         wsSession?.sendImageReady(postId: pending._id)
     }
 
@@ -1085,7 +1085,7 @@ class RemoteViewerModel: SlideshowEngine {
             handlePlaybackFrame(payload)
 
         case .searchEmpty(let query):
-            AppLogger.remoteViewer.warning("WS searchEmpty: refill returned zero rows for query \"\(query, privacy: .public)\"")
+            AppLogger.remoteViewer.warning("WS searchEmpty: refill returned zero rows for query \"\(query)\"")
             showToast("No images match: \(query)", isError: true)
 
         case .displayState(let target, let on):
@@ -1100,7 +1100,7 @@ class RemoteViewerModel: SlideshowEngine {
             // already halted reconnects; surface the reason so the user
             // can fix the Access Token instead of staring at a blank
             // viewer wondering why nothing is loading.
-            AppLogger.remoteViewer.error("WS auth rejected: \(reason, privacy: .public)")
+            AppLogger.remoteViewer.error("WS auth rejected: \(reason)")
             showToast(reason, isError: true)
         }
     }
@@ -1137,10 +1137,8 @@ class RemoteViewerModel: SlideshowEngine {
         let current = postFromPlaybackEntry(payload["current"])
         let next = postFromPlaybackEntry(payload["next"])
 
-        let curStr = current.map { "\($0._id).\($0.file_ext)" } ?? "nil"
-        let nxtStr = next.map { "\($0._id).\($0.file_ext)" } ?? "nil"
         let stateStr = "\(state)"
-        AppLogger.remoteViewer.info("playback: current=\(curStr, privacy: .public) next=\(nxtStr, privacy: .public) primary=\(self.serverPrimaryDeviceId ?? "nil", privacy: .public) myDevice=\(self.slideshowDeviceId, privacy: .public) engineState=\(stateStr, privacy: .public)")
+        AppLogger.remoteViewer.info("playback: current=\(current?._id, privacy: .private(mask: .hash)).\(current?.file_ext, privacy: .public) next=\(next?._id, privacy: .private(mask: .hash)).\(next?.file_ext, privacy: .public) primary=\(self.serverPrimaryDeviceId, privacy: .private(mask: .hash)) myDevice=\(self.slideshowDeviceId, privacy: .private(mask: .hash)) engineState=\(stateStr, privacy: .public)")
 
         // `upcoming` is the server's full look-ahead (typically 4 deep) and is
         // free to consume — the engine prefetches 3 ahead, so feeding it only
@@ -1204,7 +1202,7 @@ class RemoteViewerModel: SlideshowEngine {
         // Loop only if the clip fits inside the interval; a longer clip plays
         // through once and the server delays the advance until it ends.
         currentVideoLoops = Double(ms) <= delay * 1000
-        AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "Server-indexed duration for post \(postId, privacy: .public): \(ms, privacy: .public) ms")
+        AppLogger.remoteViewer.debug("Server-indexed duration for post \(postId, privacy: .private(mask: .hash)): \(ms, privacy: .public) ms")
         guard let pending = pendingVideoImageReadyPost, pending._id == postId else { return }
         videoDurationTimeoutTask?.cancel()
         videoDurationTimeoutTask = nil

@@ -4,9 +4,9 @@
  Settings view with server configuration and source selection.
  */
 
+import DebugTrace
 import Photos
 import RAVEMedia
-import os
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -674,7 +674,7 @@ struct SettingsTabView: View {
             AppLogger.settings.info("Connection successful, \(count, privacy: .public) images")
         } catch {
             connectionTestResult = .failure(error.localizedDescription)
-            AppLogger.settings.error("Connection failed: \(error.localizedDescription, privacy: .public)")
+            AppLogger.settings.error("Connection failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 

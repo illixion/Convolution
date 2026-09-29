@@ -16,8 +16,8 @@
  */
 
 import CoreImage
+import DebugTrace
 import ImageIO
-import os
 import RealityKit
 import SwiftUI
 #if canImport(UIKit)
@@ -438,7 +438,7 @@ struct SlideshowSpatial3DSlotView: View {
                 do {
                     try await heldSpatial.generate()
                 } catch {
-                    AppLogger.remoteViewer.warning("SlideshowSpatial3DView: spatial.generate() failed: \(error.localizedDescription, privacy: .public)")
+                    AppLogger.remoteViewer.warning("SlideshowSpatial3DView: spatial.generate() failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
                 }
                 onGenerated(generatedImage)
                 // Explicit reference so the optimizer doesn't release the
@@ -446,7 +446,7 @@ struct SlideshowSpatial3DSlotView: View {
                 _ = heldEntity
             }
         } catch {
-            AppLogger.remoteViewer.warning("SlideshowSpatial3DView: Spatial3DImage init failed: \(error.localizedDescription, privacy: .public)")
+            AppLogger.remoteViewer.warning("SlideshowSpatial3DView: Spatial3DImage init failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 

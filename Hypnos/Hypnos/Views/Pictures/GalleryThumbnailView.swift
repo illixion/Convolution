@@ -5,7 +5,7 @@
  and visionOS hover effects.
  */
 
-import os
+import DebugTrace
 import SwiftUI
 
 struct GalleryThumbnailView: View {

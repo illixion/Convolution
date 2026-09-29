@@ -5,9 +5,9 @@
  spatial 3D generation, viewing mode switching, and resolution override.
  */
 
+import DebugTrace
 import Foundation
 import ImageIO
-import os
 import RealityKit
 import SwiftUI
 
@@ -232,7 +232,7 @@ extension PhotoWindowModel {
             if effectiveRes > 0,
                let downsampledData = Self.createDownsampledImageData(from: sourceURL, maxDimension: CGFloat(effectiveRes)),
                let downsampledSource = CGImageSourceCreateWithData(downsampledData as CFData, nil) {
-                AppLogger.photoWindow.log(level: AppLogger.effectiveDebugLevel, "3D conversion using downsampled source (max \(effectiveRes, privacy: .public)px)")
+                AppLogger.photoWindow.debug("3D conversion using downsampled source (max \(effectiveRes, privacy: .public)px)")
                 spatial3DImage = try await ImagePresentationComponent.Spatial3DImage(imageSource: downsampledSource)
                 currentSpatial3DSourceDimension = effectiveRes
             } else {
@@ -240,7 +240,7 @@ extension PhotoWindowModel {
                 currentSpatial3DSourceDimension = Int(max(nativeImageDimensions?.width ?? 0, nativeImageDimensions?.height ?? 0))
             }
         } catch {
-            AppLogger.photoWindow.error("Unable to initialize spatial 3D image: \(error.localizedDescription, privacy: .public)")
+            AppLogger.photoWindow.error("Unable to initialize spatial 3D image: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
 
             // Enhanced error handling for network scenarios
             if let urlError = error as? URLError {
@@ -436,7 +436,7 @@ extension PhotoWindowModel {
                 }
             } catch {
                 if !Task.isCancelled {
-                    AppLogger.photoWindow.error("Error generating spatial 3D image: \(error.localizedDescription, privacy: .public)")
+                    AppLogger.photoWindow.error("Error generating spatial 3D image: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
                     self.spatial3DImageState = .notGenerated
                 }
             }
@@ -696,7 +696,7 @@ extension PhotoWindowModel {
         if !defaultIs3D,
            let lastMode = await ImageEnhancementTracker.shared.lastViewingMode(url: imageURL),
            lastMode == .mono {
-            AppLogger.photoWindow.log(level: AppLogger.effectiveDebugLevel, "Skipping auto-generation; last mode was 2D")
+            AppLogger.photoWindow.debug("Skipping auto-generation; last mode was 2D")
             return
         }
 
@@ -707,7 +707,7 @@ extension PhotoWindowModel {
             if lastMode == .spatial3DImmersive {
                 desiredViewingMode = .spatial3DImmersive
             }
-            AppLogger.photoWindow.log(level: AppLogger.effectiveDebugLevel, "Auto-generating spatial 3D for previously converted image")
+            AppLogger.photoWindow.debug("Auto-generating spatial 3D for previously converted image")
             await generateSpatial3DImage()
         }
     }
@@ -759,8 +759,7 @@ extension PhotoWindowModel {
 
         guard spatial3DImageState == .generated, let spatial3DImage else {
             // The common case — most pop-outs are of 2D images.
-            AppLogger.photoWindow.log(
-                level: AppLogger.effectiveDebugLevel,
+            AppLogger.photoWindow.debug(
                 "[Handoff] nothing to deposit state=\(String(describing: self.spatial3DImageState), privacy: .public)"
             )
             return false
@@ -772,8 +771,7 @@ extension PhotoWindowModel {
         // Immersive entry the owner guard turned down).
         let sourceMode = contentEntity.components[ImagePresentationComponent.self]?.viewingMode
             ?? desiredViewingMode
-        AppLogger.photoWindow.log(
-            level: AppLogger.effectiveDebugLevel,
+        AppLogger.photoWindow.debug(
             "[Handoff] depositing generated instance mode=\(String(describing: sourceMode), privacy: .public)"
         )
 
@@ -838,8 +836,7 @@ extension PhotoWindowModel {
             }
         }
 
-        AppLogger.photoWindow.log(
-            level: AppLogger.effectiveDebugLevel,
+        AppLogger.photoWindow.debug(
             "[Handoff] adopted generated instance, no regeneration (sourceMode=\(String(describing: claimed.viewingMode), privacy: .public))"
         )
         return claimed.image

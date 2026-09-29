@@ -7,9 +7,9 @@
  */
 
 import AVFoundation
+import DebugTrace
 import Foundation
 import ImageIO
-import os
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -113,7 +113,7 @@ actor ThumbnailGenerator {
             }
         }
 
-        AppLogger.imageLoader.log(level: AppLogger.effectiveDebugLevel, "Failed to create video thumbnail for: \(url.lastPathComponent, privacy: .private)")
+        AppLogger.imageLoader.debug("Failed to create video thumbnail for: \(url.lastPathComponent, privacy: .private)")
         return nil
     }
 

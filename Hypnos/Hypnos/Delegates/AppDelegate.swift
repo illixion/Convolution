@@ -5,7 +5,7 @@ Abstract:
 The delegate class for the application.
 */
 
-import os
+import DebugTrace
 import RAVEUI
 import SwiftUI
 

@@ -21,8 +21,8 @@
  would silently trigger a full wipe on the next launch.
  */
 
+import DebugTrace
 import Foundation
-import os
 
 enum DiskCacheVersion {
     /// Bump a cache's version (at its `enforce` call site) whenever the format

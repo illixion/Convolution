@@ -26,7 +26,7 @@
  new pose.
  */
 
-import os
+import DebugTrace
 import RealityKit
 import SwiftUI
 
@@ -189,7 +189,7 @@ struct Spatial3DImmersiveView: View {
     @MainActor
     private func buildFallbackEntity() async -> Entity? {
         guard let sourceURL = await PhotoWindowModel.localFileURL(for: value.imageURL) else {
-            AppLogger.photoWindow.warning("Spatial3DImmersiveView: no local file for \(value.imageURL.loggableDescription, privacy: .public)")
+            AppLogger.photoWindow.warning("Spatial3DImmersiveView: no local file for \(value.imageURL.loggableDescription)")
             return nil
         }
 
@@ -210,7 +210,7 @@ struct Spatial3DImmersiveView: View {
             try await spatial3DImage.generate()
             return entity
         } catch {
-            AppLogger.photoWindow.error("Spatial3DImmersiveView: failed to load Spatial3DImage: \(error.localizedDescription, privacy: .public)")
+            AppLogger.photoWindow.error("Spatial3DImmersiveView: failed to load Spatial3DImage: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             return nil
         }
     }

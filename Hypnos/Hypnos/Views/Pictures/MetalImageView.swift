@@ -8,8 +8,8 @@
  source textures.
  */
 
+import DebugTrace
 import MetalKit
-import os
 import SwiftUI
 
 // This is a real `UIViewRepresentable`, not something visionOS-only, so it

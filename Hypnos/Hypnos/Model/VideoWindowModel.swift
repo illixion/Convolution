@@ -14,10 +14,10 @@
  from onAppear.
  */
 
+import DebugTrace
 import Foundation
 import AVFoundation
 import RAVEMedia
-import os
 import SwiftUI
 
 @MainActor
@@ -282,7 +282,7 @@ final class VideoWindowModel {
 
     /// The last fallback failed; there is nothing further to try.
     func reportPlaybackFailure(_ message: String) {
-        AppLogger.videoWindow.error("[\(self.videoDisplayName, privacy: .public)] playback failed: \(message, privacy: .public)")
+        AppLogger.videoWindow.error("[\(self.videoDisplayName, privacy: .private(mask: .hash))] playback failed: \(message, privacy: .public)")
         playbackFailure = message
         isLoadStalled = false
         loadStallTask?.cancel()
@@ -310,7 +310,7 @@ final class VideoWindowModel {
                   // Genuine stereoscopic plays in the immersive space and
                   // never reports a size to this window.
                   !self.shouldUse3DMode else { return }
-            AppLogger.videoWindow.error("[\(self.videoDisplayName, privacy: .public)] no picture after \(Self.loadStallTimeout, privacy: .public)")
+            AppLogger.videoWindow.error("[\(self.videoDisplayName, privacy: .private(mask: .hash))] no picture after \(Self.loadStallTimeout, privacy: .public)")
             self.isLoadStalled = true
             self.revealChrome()
         }
@@ -428,7 +428,7 @@ final class VideoWindowModel {
             hasMorePages = result.hasMore
             currentPage += 1
         } catch {
-            AppLogger.videoWindow.error("Failed to load more videos for window: \(error.localizedDescription, privacy: .public)")
+            AppLogger.videoWindow.error("Failed to load more videos for window: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 
@@ -808,7 +808,7 @@ final class VideoWindowModel {
     func switchToTranscodedStream(reason: String) -> Bool {
         guard canUseTranscodedStream else { return false }
         AppLogger.videoWindow.info(
-            "[\(self.videoDisplayName, privacy: .public)] switching to server transcode: \(reason, privacy: .public)"
+            "[\(self.videoDisplayName, privacy: .private(mask: .hash))] switching to server transcode: \(reason, privacy: .public)"
         )
         usingTranscodedStream = true
         resolvePlaybackRenderer()
@@ -841,7 +841,7 @@ final class VideoWindowModel {
                     guard let playable else {
                         // The asset is gone, or access to it was revoked.
                         AppLogger.videoWindow.error(
-                            "[\(self.videoDisplayName, privacy: .public)] Photos video could not be resolved"
+                            "[\(self.videoDisplayName, privacy: .private(mask: .hash))] Photos video could not be resolved"
                         )
                         self.playbackRenderer = .nativeMetal
                         return
@@ -990,7 +990,7 @@ final class VideoWindowModel {
             try? FileManager.default.removeItem(at: tempURL)
             presentShareSheet(url: namedURL)
         } catch {
-            AppLogger.videoWindow.error("Failed to download video for sharing: \(error.localizedDescription, privacy: .public)")
+            AppLogger.videoWindow.error("Failed to download video for sharing: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 

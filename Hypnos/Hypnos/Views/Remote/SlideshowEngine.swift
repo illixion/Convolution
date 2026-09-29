@@ -13,10 +13,10 @@
  */
 
 import CoreGraphics
+import DebugTrace
 import Metal
 import RAVESlideshow
 import RAVEMedia
-import os
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
@@ -218,7 +218,7 @@ class SlideshowEngine {
         prefetchedImages.removeAll { !ids.contains($0.post._id) }
         let dropped = before - prefetchedImages.count
         if dropped > 0 {
-            AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "Pruned \(dropped, privacy: .public) stale prefetched image(s) the server moved past")
+            AppLogger.remoteViewer.debug("Pruned \(dropped, privacy: .public) stale prefetched image(s) the server moved past")
         }
     }
 
@@ -391,7 +391,7 @@ class SlideshowEngine {
         // Ignore a late report from a player torn down for a post we've moved
         // past — that would wrongly disable 3D for the clip now on screen.
         guard let target = pseudo3DVideoTarget, activePseudo3DVideoURL == target.url else { return }
-        AppLogger.remoteViewer.warning("Slideshow fake-3D failed for post \(target.postId, privacy: .public); falling back to flat playback")
+        AppLogger.remoteViewer.warning("Slideshow fake-3D failed for post \(target.postId, privacy: .private(mask: .hash)); falling back to flat playback")
         pseudo3DVideoTarget = nil
     }
 
@@ -408,7 +408,7 @@ class SlideshowEngine {
     private func resolvePseudo3DTarget(url: URL, hlsURL: URL?, post: RemotePost) async -> Pseudo3DVideoTarget? {
         guard isSlideshow3DActive else { return nil }
         guard CoreMLDepthProvider.hasAvailableModel(role: .realtime) else {
-            AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "Slideshow 3D on but no real-time depth model installed — video plays flat")
+            AppLogger.remoteViewer.debug("Slideshow 3D on but no real-time depth model installed — video plays flat")
             return nil
         }
         // Raw source first (no transcode cost); HLS transcode as the fallback
@@ -420,7 +420,7 @@ class SlideshowEngine {
                 return Pseudo3DVideoTarget(postId: post._id, url: candidate)
             }
         }
-        AppLogger.remoteViewer.info("Slideshow post \(post._id, privacy: .public) isn't AVFoundation-decodable — video plays flat in 2D")
+        AppLogger.remoteViewer.info("Slideshow post \(post._id, privacy: .private(mask: .hash)) isn't AVFoundation-decodable — video plays flat in 2D")
         return nil
     }
 
@@ -756,7 +756,7 @@ class SlideshowEngine {
         state = newState
         stateVersion += 1
 
-        AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "State: \(oldState.description, privacy: .public) → \(newState.description, privacy: .public)")
+        AppLogger.remoteViewer.debug("State: \(oldState.description, privacy: .public) → \(newState.description, privacy: .public)")
     }
 
     // MARK: - Lifecycle
@@ -1176,7 +1176,7 @@ class SlideshowEngine {
                 }
             }
 
-            AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "Run loop exited (state: \(self.state.description, privacy: .public))")
+            AppLogger.remoteViewer.debug("Run loop exited (state: \(self.state.description, privacy: .public))")
         }
     }
 
@@ -1455,7 +1455,7 @@ class SlideshowEngine {
                         self?.currentMediaType = .animatedGIF(hevcURL)
                     }
                 } catch {
-                    AppLogger.remoteViewer.warning("GIF HEVC conversion failed: \(error.localizedDescription, privacy: .public)")
+                    AppLogger.remoteViewer.warning("GIF HEVC conversion failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
                 }
             }
             return
@@ -1464,7 +1464,7 @@ class SlideshowEngine {
         // Animated WebP — WKWebView animates these natively, no conversion
         // needed. Mark as animated so Ken Burns / 3D gates are bypassed.
         let isAnimatedWebP = data.isAnimatedWebP
-        AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "Post \(post._id, privacy: .public) ext=\(ext, privacy: .public) isAnimatedWebP=\(isAnimatedWebP, privacy: .public) bytes=\(data.count, privacy: .public)")
+        AppLogger.remoteViewer.debug("Post \(post._id, privacy: .private(mask: .hash)) ext=\(ext, privacy: .public) isAnimatedWebP=\(isAnimatedWebP, privacy: .public) bytes=\(data.count, privacy: .public)")
         if isAnimatedWebP {
             isCurrentPostAnimatedGIF = true
             // Stash the bytes so the view can hand them to WKWebView
@@ -1642,7 +1642,7 @@ class SlideshowEngine {
             transition(to: .displaying)
         }
 
-        AppLogger.remoteViewer.info("Displaying video post \(post._id, privacy: .public)")
+        AppLogger.remoteViewer.info("Displaying video post \(post._id, privacy: .private(mask: .hash))")
         onPostTransitioned(post: post, url: url)
     }
 
@@ -1709,7 +1709,7 @@ class SlideshowEngine {
             await awaitNextDioramaReady(post: post, image: image)
             // State may have changed while awaiting (e.g. navigation away).
             guard state == .loading || state == .displaying else {
-                AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "displayImage post-diorama guard bailed for post \(post._id, privacy: .public) in state \(self.state.description, privacy: .public) — onPostTransitioned will not fire")
+                AppLogger.remoteViewer.debug("displayImage post-diorama guard bailed for post \(post._id, privacy: .private(mask: .hash)) in state \(self.state.description, privacy: .public) — onPostTransitioned will not fire")
                 return
             }
         }
@@ -1719,7 +1719,7 @@ class SlideshowEngine {
         // will keep showing the UIImage path if texture creation fails.
         let newTexture = await Self.makeTexture(from: image)
         guard state == .loading || state == .displaying else {
-            AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "displayImage post-texture guard bailed for post \(post._id, privacy: .public) in state \(self.state.description, privacy: .public) — onPostTransitioned will not fire")
+            AppLogger.remoteViewer.debug("displayImage post-texture guard bailed for post \(post._id, privacy: .private(mask: .hash)) in state \(self.state.description, privacy: .public) — onPostTransitioned will not fire")
             return
         }
 
@@ -1879,7 +1879,7 @@ class SlideshowEngine {
             // <img> renderer, like a video post (which never reaches here).
             guard case .still(let image, let data) = media else { continue }
             prefetchedImages.append((post: post, image: image, url: imageURL, data: data))
-            AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "Prefetched post \(post._id, privacy: .public) (\(self.prefetchedImages.count, privacy: .public)/\(Self.prefetchTarget, privacy: .public))")
+            AppLogger.remoteViewer.debug("Prefetched post \(post._id, privacy: .private(mask: .hash)) (\(self.prefetchedImages.count, privacy: .public)/\(Self.prefetchTarget, privacy: .public))")
 
             // Pre-process diorama foreground for the upcoming post so the
             // overlay is ready the moment it transitions in.

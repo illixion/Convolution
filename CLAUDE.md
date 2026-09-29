@@ -334,7 +334,7 @@ Three seams that migration created, and that will bite if missed:
 - **ImageEnhancementTracker** - Tracks per-image viewing mode (mono/backgroundRemoved/autoEnhanced/spatial3D) for auto-restoration on reopen
 - **SharedMediaCache** - Temporary storage for share sheet media
 - **SharedMediaSaver** - Saves shared media to Documents folder
-- **AppLogger** - Structured os.Logger instances across domains
+- **AppLogger** - One DebugTrace `DebugLogger` per domain (os.Logger's API; lines also land in DebugTrace's in-memory ring for the in-app console and debug traces). Privacy follows os_log's default — strings private unless marked — and the rules are in `AppLogger`'s doc comment: `.public` only for app-defined values, `.private(mask: .hash)` for server/library ids, `.sensitive` for credentials. `error.logCode` gives the public domain + code next to a private `localizedDescription`
 
 ### Incoming URLs & web-yt-dlp (YouTube-in-3D)
 The app registers a `hypnos://play?url=<link>` custom URL scheme (declared in `Info.plist`, handled by **IncomingURLHandler**; a `SceneDelegate` notification path covers file-share cold launches that SwiftUI's `.onOpenURL` misses, so `AppModel.shouldProcessIncomingURL` de-dupes the double-fire). This is the primary way to send arbitrary web videos into the app — most conveniently via the **"Open in Spatial Viewer"** iOS/visionOS Shortcut (<https://www.icloud.com/shortcuts/c313953ed4c245f988ca746808109b8d>), which shares any link into the scheme; a bookmarklet works too.

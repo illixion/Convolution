@@ -10,9 +10,9 @@
  is re-downsampled in memory (no temp files on disk).
  */
 
+import DebugTrace
 import ImageIO
 import Metal
-import os
 import RealityKit
 import SwiftUI
 
@@ -863,11 +863,11 @@ class PhotoWindowModel {
     func recordLoadFailure(_ message: String, url: URL, error: Error? = nil) {
         if let error {
             AppLogger.photoWindow.error(
-                "Error loading image data: \(error.localizedDescription, privacy: .public)"
+                "Error loading image data: \(error.localizedDescription) (\(error.logCode, privacy: .public))"
             )
         } else {
             AppLogger.photoWindow.error(
-                "Image load produced no data for \(url.loggableDescription, privacy: .public)"
+                "Image load produced no data for \(url.loggableDescription)"
             )
         }
         isInitialLoadInProgress = false
@@ -1109,7 +1109,7 @@ class PhotoWindowModel {
         // Try shared texture cache first — another window may already have this texture
         if allowsSharedTexture, let cached = SharedTextureCache.shared.acquire(key: newCacheKey) {
             AppLogger.windowState.info(
-                "[Photo \(self.displayName, privacy: .public)] shared texture hit dimension=\(newCacheKey.maxDimension, privacy: .public)"
+                "[Photo \(self.displayName, privacy: .private(mask: .hash))] shared texture hit dimension=\(newCacheKey.maxDimension, privacy: .public)"
             )
             displayTexture = cached.texture
             imageAspectRatio = cached.aspectRatio
@@ -1151,7 +1151,7 @@ class PhotoWindowModel {
             displayTextureCacheKey = newCacheKey
         } else {
             AppLogger.windowState.info(
-                "[Photo \(self.displayName, privacy: .public)] restored window using private texture dimension=\(Int(targetDimension), privacy: .public)"
+                "[Photo \(self.displayName, privacy: .private(mask: .hash))] restored window using private texture dimension=\(Int(targetDimension), privacy: .public)"
             )
         }
         isLoadingDetailImage = false

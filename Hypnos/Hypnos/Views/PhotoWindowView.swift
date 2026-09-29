@@ -8,7 +8,7 @@
  Uses PhotoDisplayView for rendering and PhotoOrnamentView for controls.
  */
 
-import os
+import DebugTrace
 import RAVEUI
 import SwiftUI
 
@@ -147,7 +147,7 @@ struct PhotoWindowView: View {
                 showRestorationPlaceholder = true
                 if let popOutWindowID {
                     AppLogger.windowState.info(
-                        "[Photo \(popOutWindowID.uuidString, privacy: .public)] restored view appeared image=\(windowModel.imageURL.loggableDescription, privacy: .public) savedSize=\(String(describing: restoredSize), privacy: .public)"
+                        "[Photo \(popOutWindowID.uuidString, privacy: .public)] restored view appeared image=\(windowModel.imageURL.loggableDescription) savedSize=\(String(describing: restoredSize), privacy: .public)"
                     )
                 }
             } else if let id = popOutWindowID {

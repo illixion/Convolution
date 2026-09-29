@@ -19,7 +19,7 @@
 
 import AVFoundation
 import CoreMedia
-import os
+import DebugTrace
 
 enum AudioSessionConfig {
     /// Configure a mixable playback session. Idempotent; safe to call repeatedly.
@@ -36,7 +36,7 @@ enum AudioSessionConfig {
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
         } catch {
-            AppLogger.appModel.error("Failed to set mixable audio session: \(error.localizedDescription, privacy: .public)")
+            AppLogger.appModel.error("Failed to set mixable audio session: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
         #endif
     }
@@ -53,7 +53,7 @@ enum AudioSessionConfig {
             try session.setCategory(.playback, mode: .moviePlayback)
             try session.setActive(true)
         } catch {
-            AppLogger.filmPlayer.error("Failed to set film audio session: \(error.localizedDescription, privacy: .public)")
+            AppLogger.filmPlayer.error("Failed to set film audio session: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
     #endif

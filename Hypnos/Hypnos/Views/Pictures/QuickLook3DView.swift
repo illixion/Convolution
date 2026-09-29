@@ -32,7 +32,7 @@
  cap on concurrent ImagePresentationComponent instances on visionOS.
  */
 
-import os
+import DebugTrace
 import RealityKit
 import SwiftUI
 #if canImport(UIKit)
@@ -456,7 +456,7 @@ struct QuickLook3DView: View {
                 }
                 resolved = cached
             } catch {
-                AppLogger.views.warning("QuickLook3DView: download failed: \(error.localizedDescription, privacy: .public)")
+                AppLogger.views.warning("QuickLook3DView: download failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
                 loadFailed = true
                 return
             }
@@ -512,7 +512,7 @@ struct QuickLook3DView: View {
                 spatial = try await ImagePresentationComponent.Spatial3DImage(contentsOf: localURL)
             }
         } catch {
-            AppLogger.views.warning("QuickLook3DView: Spatial3DImage init failed: \(error.localizedDescription, privacy: .public)")
+            AppLogger.views.warning("QuickLook3DView: Spatial3DImage init failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             spatialLoading = false
             spatialFailed = true
             return
@@ -539,7 +539,7 @@ struct QuickLook3DView: View {
                     spatialReady = true
                 }
             } catch {
-                AppLogger.views.warning("QuickLook3DView: generate failed: \(error.localizedDescription, privacy: .public)")
+                AppLogger.views.warning("QuickLook3DView: generate failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
                 spatialFailed = true
             }
             spatialLoading = false

@@ -10,7 +10,7 @@
  failure — see the comments before loosening any of them.
  */
 
-import os
+import DebugTrace
 import SwiftUI
 
 #if canImport(UIKit)
@@ -34,7 +34,7 @@ final class WindowSizePersistence {
 
     private let windowId: UUID
     private let minimumSize: CGSize
-    private let log: Logger
+    private let log: DebugLogger
 
     /// Live content size, pushed in by the host view's geometry observer. Used
     /// to verify a restore request actually landed.
@@ -56,7 +56,7 @@ final class WindowSizePersistence {
     init(
         windowId: UUID,
         minimumSize: CGSize = WindowSizePersistence.defaultMinimumSize,
-        log: Logger = AppLogger.windowState
+        log: DebugLogger = AppLogger.windowState
     ) {
         self.windowId = windowId
         self.minimumSize = minimumSize

@@ -23,7 +23,7 @@
  device's actual speed is the honest version of the pitch.
  */
 
-import os
+import DebugTrace
 import RealityKit
 import SwiftUI
 #if canImport(UIKit)
@@ -113,7 +113,7 @@ final class WelcomeSampleModel {
             showing3D = true
             stage = .ready
         } catch {
-            AppLogger.settings.error("Welcome sample conversion failed: \(error.localizedDescription, privacy: .public)")
+            AppLogger.settings.error("Welcome sample conversion failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             // Back to flat rather than to an error state: a failed demo should
             // still show the photograph.
             stage = .flat

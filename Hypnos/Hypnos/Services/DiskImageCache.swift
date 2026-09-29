@@ -7,8 +7,8 @@
  with the cap derived from device storage by CacheBudget.
  */
 
+import DebugTrace
 import Foundation
-import os
 
 actor DiskImageCache {
     static let shared = DiskImageCache()
@@ -76,7 +76,7 @@ actor DiskImageCache {
             try data.write(to: fileURL)
             engine.noteWrite(at: fileURL, replacing: replaced)
         } catch {
-            AppLogger.diskCache.error("Failed to save data: \(error.localizedDescription, privacy: .public)")
+            AppLogger.diskCache.error("Failed to save data: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 

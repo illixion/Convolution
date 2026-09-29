@@ -17,8 +17,8 @@
 
 import AVFoundation
 import AudioToolbox
+import DebugTrace
 import Foundation
-import os
 
 @MainActor
 final class RemoteNotificationSound {
@@ -41,7 +41,7 @@ final class RemoteNotificationSound {
         do {
             dest = try await downloadToTemp(remoteURL)
         } catch {
-            AppLogger.remoteViewer.warning("notification sound download failed for \(remoteURL.absoluteString, privacy: .private): \(error.localizedDescription, privacy: .public)")
+            AppLogger.remoteViewer.warning("notification sound download failed for \(remoteURL.absoluteString, privacy: .private): \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             return
         }
 

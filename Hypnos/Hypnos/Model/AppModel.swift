@@ -5,10 +5,10 @@
  Includes navigation state, gallery management, and spatial image handling.
  */
 
+import DebugTrace
 import NextcloudMedia
 import Photos
 import RAVEMedia
-import os
 import RAVEUI
 import RealityKit
 import SwiftUI
@@ -585,7 +585,7 @@ class AppModel {
         // showing whatever the Pictures tab happened to be on).
         if let config = remoteViewerConfig(id: configId), !config.isLaunchable {
             AppLogger.remoteViewer.error(
-                "Refusing to open “\(config.name, privacy: .public)”: \(config.launchBlockedReason ?? "not launchable", privacy: .public)"
+                "Refusing to open “\(config.name)”: \(config.launchBlockedReason ?? "not launchable", privacy: .public)"
             )
             return
         }
@@ -2237,7 +2237,7 @@ class AppModel {
         let group = SavedWindowGroup(name: name, entries: entries)
         savedWindowGroups.append(group)
         persistSavedWindowGroups()
-        AppLogger.windowState.info("Saved window group '\(name, privacy: .public)' with \(entries.count, privacy: .public) windows (\(group.contentSummary, privacy: .public))")
+        AppLogger.windowState.info("Saved window group '\(name)' with \(entries.count, privacy: .public) windows (\(group.contentSummary, privacy: .public))")
     }
 
     func deleteSavedWindowGroup(_ group: SavedWindowGroup) {
@@ -2260,7 +2260,7 @@ class AppModel {
             savedWindowGroups.remove(at: groupIndex)
         }
         persistSavedWindowGroups()
-        AppLogger.windowState.info("Removed \(entryIds.count, privacy: .public) windows from group '\(group.name, privacy: .public)'")
+        AppLogger.windowState.info("Removed \(entryIds.count, privacy: .public) windows from group '\(group.name)'")
     }
 
     func addEntriesToWindowGroup(_ group: SavedWindowGroup, entries: [SavedWindowEntry]) {
@@ -2268,7 +2268,7 @@ class AppModel {
               let groupIndex = savedWindowGroups.firstIndex(where: { $0.id == group.id }) else { return }
         savedWindowGroups[groupIndex].entries.append(contentsOf: entries)
         persistSavedWindowGroups()
-        AppLogger.windowState.info("Added \(entries.count, privacy: .public) windows to group '\(group.name, privacy: .public)'")
+        AppLogger.windowState.info("Added \(entries.count, privacy: .public) windows to group '\(group.name)'")
     }
 
     /// Open windows not already represented in this group, offered by the
@@ -2349,7 +2349,7 @@ class AppModel {
                 restoreWindowEntry(entry, bypassDuplicatePrompt: true)
                 try? await Task.sleep(for: .seconds(0.3))
             }
-            AppLogger.windowState.info("Restored all \(group.entries.count, privacy: .public) windows from group '\(group.name, privacy: .public)'")
+            AppLogger.windowState.info("Restored all \(group.entries.count, privacy: .public) windows from group '\(group.name)'")
         }
     }
 
@@ -2385,7 +2385,7 @@ class AppModel {
             currentFilter = defaultImageView.filter
             normalizeEmptyMultiSelectModifiers(&currentFilter)
             selectedSavedView = defaultImageView
-            AppLogger.appModel.info("Applied default image view: \(defaultImageView.name, privacy: .public)")
+            AppLogger.appModel.info("Applied default image view: \(defaultImageView.name)")
         }
 
         // Apply default video view if one exists
@@ -2393,7 +2393,7 @@ class AppModel {
             currentVideoFilter = defaultVideoView.filter
             normalizeEmptyMultiSelectModifiers(&currentVideoFilter)
             selectedSavedVideoView = defaultVideoView
-            AppLogger.appModel.info("Applied default video view: \(defaultVideoView.name, privacy: .public)")
+            AppLogger.appModel.info("Applied default video view: \(defaultVideoView.name)")
         }
     }
 
@@ -2779,7 +2779,7 @@ class AppModel {
         } else {
             nextcloudClient = NextcloudClient(server: server)
         }
-        AppLogger.appModel.info("Nextcloud client updated (root: \(self.nextcloudRoot, privacy: .public))")
+        AppLogger.appModel.info("Nextcloud client updated (root: \(self.nextcloudRoot))")
         applyLibrarySource()
     }
 
@@ -2948,7 +2948,7 @@ class AppModel {
         galleryLoadGeneration += 1
 
         let sourceType = String(describing: type(of: imageSource))
-        AppLogger.appModel.log(level: AppLogger.effectiveDebugLevel, "loadInitialGallery called, source: \(sourceType, privacy: .public)")
+        AppLogger.appModel.debug("loadInitialGallery called, source: \(sourceType, privacy: .public)")
         // Ensure random sort has a seed for consistent pagination
         if currentFilter.sortField == .random && currentFilter.randomSeed == nil {
             currentFilter.shuffleRandomSort()
@@ -3000,14 +3000,14 @@ class AppModel {
         guard !isLoadingGallery && hasMorePages else {
             let loading = isLoadingGallery
             let hasMore = hasMorePages
-            AppLogger.appModel.log(level: AppLogger.effectiveDebugLevel, "loadNextPage skipped - isLoading: \(loading, privacy: .public), hasMore: \(hasMore, privacy: .public)")
+            AppLogger.appModel.debug("loadNextPage skipped - isLoading: \(loading, privacy: .public), hasMore: \(hasMore, privacy: .public)")
             return
         }
 
         let generation = galleryLoadGeneration
         let page = currentPage
         let sourceTypeName = String(describing: type(of: imageSource))
-        AppLogger.appModel.log(level: AppLogger.effectiveDebugLevel, "loadNextPage starting, page: \(page, privacy: .public), source: \(sourceTypeName, privacy: .public)")
+        AppLogger.appModel.debug("loadNextPage starting, page: \(page, privacy: .public), source: \(sourceTypeName, privacy: .public)")
         isLoadingGallery = true
         defer {
             if generation == galleryLoadGeneration {
@@ -3020,10 +3020,10 @@ class AppModel {
             let result = try await imageSource.fetchImages(page: currentPage, pageSize: pageSize, filter: currentFilter)
             // Discard results if a new loadInitialGallery was called while fetching
             guard generation == galleryLoadGeneration else {
-                AppLogger.appModel.log(level: AppLogger.effectiveDebugLevel, "loadNextPage discarding stale results (generation \(generation, privacy: .public) != \(self.galleryLoadGeneration, privacy: .public))")
+                AppLogger.appModel.debug("loadNextPage discarding stale results (generation \(generation, privacy: .public) != \(self.galleryLoadGeneration, privacy: .public))")
                 return
             }
-            AppLogger.appModel.log(level: AppLogger.effectiveDebugLevel, "loadNextPage got \(result.images.count, privacy: .public) images, hasMore: \(result.hasMore, privacy: .public)")
+            AppLogger.appModel.debug("loadNextPage got \(result.images.count, privacy: .public) images, hasMore: \(result.hasMore, privacy: .public)")
             if page == 0 {
                 // Replace, rather than having loadInitialGallery empty the array
                 // up front. Clearing first meant every reload — a filter change,
@@ -3049,9 +3049,9 @@ class AppModel {
             // gesture was torn down is how a pull-to-refresh ends up looking
             // like it deleted the library.
             if error.isCancellation {
-                AppLogger.appModel.log(level: AppLogger.effectiveDebugLevel, "Gallery page load cancelled")
+                AppLogger.appModel.debug("Gallery page load cancelled")
             } else {
-                AppLogger.appModel.error("Failed to load gallery page: \(error.localizedDescription, privacy: .public)")
+                AppLogger.appModel.error("Failed to load gallery page: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
                 if page == 0 {
                     galleryImages = []
                 }
@@ -3143,9 +3143,9 @@ class AppModel {
                 }
             }
             let galleriesCount = availableGalleries.count
-            AppLogger.appModel.log(level: AppLogger.effectiveDebugLevel, "Loaded \(galleriesCount, privacy: .public) galleries for autocomplete")
+            AppLogger.appModel.debug("Loaded \(galleriesCount, privacy: .public) galleries for autocomplete")
         } catch {
-            AppLogger.appModel.error("Failed to search galleries: \(error.localizedDescription, privacy: .public)")
+            AppLogger.appModel.error("Failed to search galleries: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 
@@ -3193,7 +3193,7 @@ class AppModel {
                     }
                 }
         } catch {
-            AppLogger.appModel.error("Failed to search tags: \(error.localizedDescription, privacy: .public)")
+            AppLogger.appModel.error("Failed to search tags: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 
@@ -3239,7 +3239,7 @@ class AppModel {
                     }
                 }
         } catch {
-            AppLogger.appModel.error("Failed to search studios: \(error.localizedDescription, privacy: .public)")
+            AppLogger.appModel.error("Failed to search studios: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 
@@ -3285,7 +3285,7 @@ class AppModel {
                     }
                 }
         } catch {
-            AppLogger.appModel.error("Failed to search performers: \(error.localizedDescription, privacy: .public)")
+            AppLogger.appModel.error("Failed to search performers: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 
@@ -3296,7 +3296,7 @@ class AppModel {
             let result = try await apiClient.findGroups(perPage: Self.containerFetchLimit)
             availableGroups = result.groups.map(MediaContainer.init(group:))
         } catch {
-            AppLogger.appModel.error("Failed to load groups: \(error.localizedDescription, privacy: .public)")
+            AppLogger.appModel.error("Failed to load groups: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             availableGroups = []
         }
     }
@@ -3329,7 +3329,7 @@ class AppModel {
                 let result = try await apiClient.findGroups(perPage: Self.containerFetchLimit)
                 mediaContainers = result.groups.map(MediaContainer.init(group:))
             } catch {
-                AppLogger.appModel.error("Failed to load groups: \(error.localizedDescription, privacy: .public)")
+                AppLogger.appModel.error("Failed to load groups: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
                 mediaContainers = []
             }
 
@@ -3343,7 +3343,7 @@ class AppModel {
                     .map(MediaContainer.init(gallery:))
                     .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
             } catch {
-                AppLogger.appModel.error("Failed to load galleries: \(error.localizedDescription, privacy: .public)")
+                AppLogger.appModel.error("Failed to load galleries: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
                 mediaContainers = []
             }
 
@@ -3354,8 +3354,7 @@ class AppModel {
             // (`LibrarySource.offersAlbums`). Kept exhaustive, not reachable.
             mediaContainers = []
         }
-        AppLogger.appModel.log(level: AppLogger.effectiveDebugLevel,
-                               "Loaded \(self.mediaContainers.count, privacy: .public) containers")
+        AppLogger.appModel.debug("Loaded \(self.mediaContainers.count, privacy: .public) containers")
     }
 
     /// Most containers any one browse will show.
@@ -3469,8 +3468,7 @@ class AppModel {
         availablePhotoAlbums = (try? await PhotosIndexStore.shared.albums(mediaType: mediaType)) ?? []
         availablePhotoPeople = (try? await PhotosIndexStore.shared.people(mediaType: mediaType)) ?? []
         isLoadingPhotoAlbums = false
-        AppLogger.appModel.log(level: AppLogger.effectiveDebugLevel,
-                               "Loaded \(self.availablePhotoAlbums.count, privacy: .public) albums, \(self.availablePhotoPeople.count, privacy: .public) people")
+        AppLogger.appModel.debug("Loaded \(self.availablePhotoAlbums.count, privacy: .public) albums, \(self.availablePhotoPeople.count, privacy: .public) people")
     }
 
     // MARK: - Video Gallery Methods
@@ -3480,7 +3478,7 @@ class AppModel {
         // Bump generation so any in-flight loadNextVideoPage discards its results
         videoLoadGeneration += 1
 
-        AppLogger.appModel.log(level: AppLogger.effectiveDebugLevel, "loadInitialVideos called")
+        AppLogger.appModel.debug("loadInitialVideos called")
         // Ensure random sort has a seed for consistent pagination
         if currentVideoFilter.sortField == .random && currentVideoFilter.randomSeed == nil {
             currentVideoFilter.shuffleRandomSort()
@@ -3497,13 +3495,13 @@ class AppModel {
         guard !isLoadingVideos && hasMoreVideoPages else {
             let loadingVideos = isLoadingVideos
             let hasMoreVideo = hasMoreVideoPages
-            AppLogger.appModel.log(level: AppLogger.effectiveDebugLevel, "loadNextVideoPage skipped - isLoading: \(loadingVideos, privacy: .public), hasMore: \(hasMoreVideo, privacy: .public)")
+            AppLogger.appModel.debug("loadNextVideoPage skipped - isLoading: \(loadingVideos, privacy: .public), hasMore: \(hasMoreVideo, privacy: .public)")
             return
         }
 
         let generation = videoLoadGeneration
         let videoPage = currentVideoPage
-        AppLogger.appModel.log(level: AppLogger.effectiveDebugLevel, "loadNextVideoPage starting, page: \(videoPage, privacy: .public)")
+        AppLogger.appModel.debug("loadNextVideoPage starting, page: \(videoPage, privacy: .public)")
         isLoadingVideos = true
         defer {
             if generation == videoLoadGeneration {
@@ -3516,10 +3514,10 @@ class AppModel {
             let result = try await videoSource.fetchVideos(page: currentVideoPage, pageSize: pageSize, filter: currentVideoFilter)
             // Discard results if a new loadInitialVideos was called while fetching
             guard generation == videoLoadGeneration else {
-                AppLogger.appModel.log(level: AppLogger.effectiveDebugLevel, "loadNextVideoPage discarding stale results")
+                AppLogger.appModel.debug("loadNextVideoPage discarding stale results")
                 return
             }
-            AppLogger.appModel.log(level: AppLogger.effectiveDebugLevel, "loadNextVideoPage got \(result.videos.count, privacy: .public) videos, hasMore: \(result.hasMore, privacy: .public)")
+            AppLogger.appModel.debug("loadNextVideoPage got \(result.videos.count, privacy: .public) videos, hasMore: \(result.hasMore, privacy: .public)")
             // See loadNextPage for both halves of this: page 0 replaces so a
             // reload never paints an empty grid, and later pages de-duplicate
             // because derived ids make a repeated asset a duplicate id.
@@ -3534,9 +3532,9 @@ class AppModel {
         } catch {
             // See loadNextPage: cancellation leaves the list alone.
             if error.isCancellation {
-                AppLogger.appModel.log(level: AppLogger.effectiveDebugLevel, "Video page load cancelled")
+                AppLogger.appModel.debug("Video page load cancelled")
             } else {
-                AppLogger.appModel.error("Failed to load video page: \(error.localizedDescription, privacy: .public)")
+                AppLogger.appModel.error("Failed to load video page: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
                 if videoPage == 0 {
                     galleryVideos = []
                 }

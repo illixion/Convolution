@@ -8,6 +8,7 @@
  engine routes each post through its video display path.
  */
 
+import DebugTrace
 import Foundation
 #if canImport(UIKit)
 import UIKit
@@ -17,7 +18,6 @@ import AppKit
 #endif
 import Foundation
 import ImageIO
-import os
 import RAVESlideshow
 
 @MainActor
@@ -76,7 +76,7 @@ class VideoSlideshowContentProvider: SlideshowContentProvider, RAVESlideshowCont
             AppLogger.remoteViewer.info("Video slideshow: fetched \(posts.count, privacy: .public) videos")
             return posts
         } catch {
-            AppLogger.remoteViewer.error("Video slideshow fetch failed: \(error.localizedDescription, privacy: .public)")
+            AppLogger.remoteViewer.error("Video slideshow fetch failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             return []
         }
     }

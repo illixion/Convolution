@@ -7,25 +7,28 @@
  showing them unchanged.
  */
 
+import DebugTrace
 import Foundation
 import RAVENet
-import os
 
 /// Forwards `RAVENet` transport logging into `AppLogger.remoteViewer`.
 ///
-/// Debug-level lines are routed through `AppLogger.effectiveDebugLevel` so they
-/// obey the app's existing developer-toggle gating rather than always emitting.
+/// The sink receives finished strings, and RAVENet builds some of them from
+/// the server URL and `localizedDescription` ("connecting to wss://…",
+/// "receive error: …"). Without per-value privacy the whole line has to be
+/// private: readable on this device's console in development builds,
+/// `<private>` in exports.
 struct RAVENetAppLogger: RAVENetLogger {
     func log(_ level: RAVENetLogLevel, _ message: String) {
         switch level {
         case .debug:
-            AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "WebSocket \(message, privacy: .public)")
+            AppLogger.remoteViewer.debug("WebSocket \(message)")
         case .info:
-            AppLogger.remoteViewer.info("WebSocket \(message, privacy: .public)")
+            AppLogger.remoteViewer.info("WebSocket \(message)")
         case .warning:
-            AppLogger.remoteViewer.warning("WebSocket \(message, privacy: .public)")
+            AppLogger.remoteViewer.warning("WebSocket \(message)")
         case .error:
-            AppLogger.remoteViewer.error("WebSocket \(message, privacy: .public)")
+            AppLogger.remoteViewer.error("WebSocket \(message)")
         }
     }
 }

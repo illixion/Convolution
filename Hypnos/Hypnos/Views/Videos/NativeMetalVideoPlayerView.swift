@@ -8,9 +8,9 @@
 
 import AVFoundation
 import CoreVideo
+import DebugTrace
 import MetalKit
 import RAVEMedia
-import os
 import SwiftUI
 
 // A real `UIViewRepresentable` (nothing visionOS-only here), so it already
@@ -241,7 +241,7 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
                 let message = observedItem.error?.localizedDescription ?? "unknown error"
                 Task { @MainActor [weak self] in
                     guard let self, self.playerItem === observedItem else { return }
-                    AppLogger.videoWindow.error("Native player item failed for \(self.loadedURL?.loggableDescription ?? "?", privacy: .public): \(message, privacy: .public)")
+                    AppLogger.videoWindow.error("Native player item failed for \(self.loadedURL?.loggableDescription ?? "?"): \(message)")
                     self.onPlaybackError?()
                 }
             }

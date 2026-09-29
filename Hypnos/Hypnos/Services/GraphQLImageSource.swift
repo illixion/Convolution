@@ -4,8 +4,8 @@
  ImageSource implementation that fetches images from Stash server via GraphQL.
  */
 
+import DebugTrace
 import Foundation
-import os
 
 /// Image source that fetches from Stash GraphQL API
 final class GraphQLImageSource: ImageSource, @unchecked Sendable {
@@ -22,7 +22,7 @@ final class GraphQLImageSource: ImageSource, @unchecked Sendable {
     func fetchImages(page: Int, pageSize: Int, filter: ImageFilterCriteria?) async throws -> ImageFetchResult {
         // Stash uses 1-indexed pages
         let stashPage = page + 1
-        AppLogger.graphQLImage.log(level: AppLogger.effectiveDebugLevel, "Fetching images page \(stashPage, privacy: .public), pageSize \(pageSize, privacy: .public), hasFilter: \(filter != nil, privacy: .public)")
+        AppLogger.graphQLImage.debug("Fetching images page \(stashPage, privacy: .public), pageSize \(pageSize, privacy: .public), hasFilter: \(filter != nil, privacy: .public)")
 
         // Converted to 3D is a local fact with no ImageFilterType expression, so
         // it is applied by asking the server for exactly those ids. An empty set
@@ -39,7 +39,7 @@ final class GraphQLImageSource: ImageSource, @unchecked Sendable {
         }
 
         let result = try await apiClient.findImages(page: stashPage, perPage: pageSize, filter: filter, ids: convertedIds)
-        AppLogger.graphQLImage.log(level: AppLogger.effectiveDebugLevel, "Got \(result.images.count, privacy: .public) images, total: \(result.count, privacy: .public)")
+        AppLogger.graphQLImage.debug("Got \(result.images.count, privacy: .public) images, total: \(result.count, privacy: .public)")
 
         let images = result.images.compactMap(Self.makeGalleryImage(from:))
 

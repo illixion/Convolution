@@ -9,9 +9,9 @@
  background-removed render is useless without its source).
  */
 
+import DebugTrace
 import Foundation
 import ImageIO
-import os
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -177,7 +177,7 @@ actor BackgroundRemovalCache {
             tagOrigin(of: fileURL, for: url)
             engine.noteWrite(at: fileURL, replacing: replaced)
         } catch {
-            AppLogger.diskCache.error("Failed to save background-removal cache entry: \(error.localizedDescription, privacy: .public)")
+            AppLogger.diskCache.error("Failed to save background-removal cache entry: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 
@@ -329,7 +329,7 @@ actor BackgroundRemovalCache {
             engine.noteWrite(at: destinationURL, replacing: replaced)
             return heicData
         } catch {
-            AppLogger.diskCache.warning("Failed to migrate background-removed image to HEIC: \(error.localizedDescription, privacy: .public)")
+            AppLogger.diskCache.warning("Failed to migrate background-removed image to HEIC: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             return nil
         }
     }
@@ -347,7 +347,7 @@ actor BackgroundRemovalCache {
             try? fileManager.removeItem(at: legacyURL)
             return heicData
         } catch {
-            AppLogger.diskCache.warning("Failed to migrate legacy background removal cache: \(error.localizedDescription, privacy: .public)")
+            AppLogger.diskCache.warning("Failed to migrate legacy background removal cache: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             return nil
         }
     }

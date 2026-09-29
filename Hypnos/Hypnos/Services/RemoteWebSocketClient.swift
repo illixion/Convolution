@@ -17,9 +17,9 @@
  Home promotes on a parsed `auth_ok` instead.
  */
 
+import DebugTrace
 import Foundation
 import RAVENet
-import os
 
 struct HASensorReading: Identifiable {
     let entityId: String
@@ -311,7 +311,7 @@ class RemoteWebSocketClient {
             state = newState
             if case .failed(let reason) = newState {
                 broadcastToSessions(.fatalAuthError(reason: reason))
-                AppLogger.remoteViewer.error("\(reason, privacy: .public)")
+                AppLogger.remoteViewer.error("WS failed: \(reason)")
             }
 
         case .failure:
@@ -391,7 +391,7 @@ class RemoteWebSocketClient {
         for (sessionId, contribution) in sceneBySession {
             if force || sentPresenceBySession[sessionId] != contribution.present {
                 sentPresenceBySession[sessionId] = contribution.present
-                AppLogger.remoteViewer.info("WS tx present sessionId=\(sessionId, privacy: .public) deviceId=\(contribution.deviceId, privacy: .public) present=\(contribution.present, privacy: .public)")
+                AppLogger.remoteViewer.info("WS tx present sessionId=\(sessionId, privacy: .private(mask: .hash)) deviceId=\(contribution.deviceId, privacy: .private(mask: .hash)) present=\(contribution.present, privacy: .public)")
                 sendJSON([
                     "sessionId": sessionId,
                     "action": "present",
@@ -409,7 +409,7 @@ class RemoteWebSocketClient {
 
         for (deviceId, visible) in visibility where force || sentVisibilityByDevice[deviceId] != visible {
             sentVisibilityByDevice[deviceId] = visible
-            AppLogger.remoteViewer.info("WS tx visibility deviceId=\(deviceId, privacy: .public) visible=\(visible, privacy: .public)")
+            AppLogger.remoteViewer.info("WS tx visibility deviceId=\(deviceId, privacy: .private(mask: .hash)) visible=\(visible, privacy: .public)")
             sendJSON(["action": "visibility", "payload": ["deviceId": deviceId, "visible": visible]])
         }
 
@@ -527,12 +527,12 @@ class RemoteWebSocketClient {
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let action = json["action"] as? String else {
-            AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "WS rx (unparseable): \(text.prefix(200), privacy: .public)")
+            AppLogger.remoteViewer.debug("WS rx (unparseable): \(text.prefix(200))")
             return
         }
 
         let payload = json["payload"]
-        AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "WS rx action=\(action, privacy: .public)")
+        AppLogger.remoteViewer.debug("WS rx action=\(action, privacy: .public)")
 
         switch action {
         case "tagLists":
@@ -644,7 +644,7 @@ class RemoteWebSocketClient {
             break
 
         default:
-            AppLogger.remoteViewer.log(level: AppLogger.effectiveDebugLevel, "Unknown WS action: \(action, privacy: .public)")
+            AppLogger.remoteViewer.debug("Unknown WS action: \(action, privacy: .public)")
         }
     }
 

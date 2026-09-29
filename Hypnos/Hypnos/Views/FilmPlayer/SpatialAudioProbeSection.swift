@@ -47,7 +47,7 @@
 #if os(visionOS)
 import AudioToolbox
 import AVFoundation
-import os
+import DebugTrace
 import RealityKit
 import SwiftUI
 #if canImport(UIKit)
@@ -368,13 +368,13 @@ struct SpatialAudioProbeSection: View {
         do {
             try engine.start()
         } catch {
-            log("Engine failed to start: \(error.localizedDescription)")
+            log("Engine failed to start: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             return
         }
-        log("Source format: \(describe(format))")
-        log("Output node in: \(describe(engine.outputNode.inputFormat(forBus: 0)))")
-        log("Output node out: \(describe(engine.outputNode.outputFormat(forBus: 0)))")
-        log("Experience: \(String(describing: engine.outputNode.intendedSpatialExperience))")
+        log("Source format: \(describe(format), privacy: .public)")
+        log("Output node in: \(describe(engine.outputNode.inputFormat(forBus: 0)), privacy: .public)")
+        log("Output node out: \(describe(engine.outputNode.outputFormat(forBus: 0)), privacy: .public)")
+        log("Experience: \(String(describing: engine.outputNode.intendedSpatialExperience), privacy: .public)")
         self.engine = engine
         self.speakers = speakers
         startedAt = Date()
@@ -410,11 +410,11 @@ struct SpatialAudioProbeSection: View {
                 log("AVAudioPlayer refused to play")
                 return
             }
-            log("File format: \(describe(player.format))")
-            log("Experience: \(String(describing: player.intendedSpatialExperience))")
+            log("File format: \(describe(player.format), privacy: .public)")
+            log("Experience: \(String(describing: player.intendedSpatialExperience), privacy: .public)")
             self.player = player
         } catch {
-            log("Player failed: \(error.localizedDescription)")
+            log("Player failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             return
         }
         self.speakers = speakers
@@ -444,7 +444,7 @@ struct SpatialAudioProbeSection: View {
             controller.play()
             generator = controller
         } catch {
-            log("Generator failed: \(error.localizedDescription)")
+            log("Generator failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             realityRoot.children.removeAll()
             return
         }
@@ -484,13 +484,13 @@ struct SpatialAudioProbeSection: View {
             try session.setActive(true)
             try session.setPreferredOutputNumberOfChannels(min(channels, session.maximumOutputNumberOfChannels))
         } catch {
-            log("Preferred output channels: \(error.localizedDescription)")
+            log("Preferred output channels: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
         let route = session.currentRoute.outputs.map {
             "\($0.portType.rawValue) ch=\($0.channels?.count ?? 0) spatial=\($0.isSpatialAudioEnabled)"
         }.joined(separator: ", ")
         log("Session: max out \(session.maximumOutputNumberOfChannels), out \(before) → \(session.outputNumberOfChannels), preferred \(session.preferredOutputNumberOfChannels), multichannel content \(session.supportsMultichannelContent)")
-        log("Route: \(route)")
+        log("Route: \(route, privacy: .public)")
     }
 
     private func describe(_ format: AVAudioFormat) -> String {
@@ -498,9 +498,11 @@ struct SpatialAudioProbeSection: View {
         return "\(format.channelCount) ch @ \(Int(format.sampleRate)) Hz, layout \(tag)"
     }
 
-    private func log(_ line: String) {
-        report.append(line)
-        AppLogger.filmPlayer.info("Probe: \(line, privacy: .public)")
+    /// Shows the line in the on-screen report in full, and logs it with each
+    /// value's own privacy.
+    private func log(_ message: DebugLogMessage) {
+        report.append(message.revealed)
+        AppLogger.filmPlayer.info(message)
     }
 }
 

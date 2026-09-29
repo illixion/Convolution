@@ -16,7 +16,7 @@
 // window visibility), and nothing mounts this path on macOS. See
 // Hypnos/CLAUDE.md "macOS".
 #if canImport(WebKit) && !os(macOS)
-import os
+import DebugTrace
 import UIKit
 import WebKit
 
@@ -150,7 +150,7 @@ private final class WebMFrameCapture: NSObject, WKScriptMessageHandler {
                 finish(image)
             } else {
                 let reason = (message.body as? [String: Any])?["error"] as? String ?? "unknown"
-                AppLogger.imageLoader.log(level: AppLogger.effectiveDebugLevel, "WebM thumbnail capture failed: \(reason, privacy: .public)")
+                AppLogger.imageLoader.debug("WebM thumbnail capture failed: \(reason, privacy: .public)")
                 finish(nil)
             }
         }

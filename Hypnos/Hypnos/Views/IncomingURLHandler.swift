@@ -11,7 +11,7 @@
  resulting multi-scene / multi-path duplicate deliveries into one window.
  */
 
-import os
+import DebugTrace
 import RAVEDeviceSetup
 import SwiftUI
 
@@ -46,7 +46,7 @@ struct IncomingURLHandler: ViewModifier {
         // Both `.onOpenURL` and the SceneDelegate notification — and now every
         // open window — can deliver the same URL, so drop duplicates.
         guard appModel.shouldProcessIncomingURL(url) else {
-            AppLogger.streamURL.info("Ignoring duplicate incoming URL: \(url.absoluteString, privacy: .public)")
+            AppLogger.streamURL.info("Ignoring duplicate incoming URL: \(url.absoluteString)")
             return
         }
         // This handler owns the URL now; keep the cold-launch backlog from
@@ -70,12 +70,12 @@ struct IncomingURLHandler: ViewModifier {
             case "play", nil, "":
                 // hypnos://play?url=<percent-encoded URL>
                 guard let target = Self.playTargetURL(from: url) else {
-                    AppLogger.streamURL.error("hypnos:// URL had no valid 'url' parameter: \(url.absoluteString, privacy: .public)")
+                    AppLogger.streamURL.error("hypnos:// URL had no valid 'url' parameter: \(url.absoluteString)")
                     return
                 }
                 await route(target)
             default:
-                AppLogger.streamURL.error("Unrecognised hypnos:// host: \(url.absoluteString, privacy: .public)")
+                AppLogger.streamURL.error("Unrecognised hypnos:// host: \(url.absoluteString)")
             }
             return
         }
@@ -88,19 +88,19 @@ struct IncomingURLHandler: ViewModifier {
     @MainActor
     private func openStashImage(from url: URL) async {
         guard let id = Self.idParameter(from: url) else {
-            AppLogger.streamURL.error("hypnos://image had no 'id' parameter: \(url.absoluteString, privacy: .public)")
+            AppLogger.streamURL.error("hypnos://image had no 'id' parameter: \(url.absoluteString)")
             return
         }
         do {
             let source = GraphQLImageSource(apiClient: appModel.apiClient)
             guard let image = try await source.fetchImage(id: id) else {
-                AppLogger.streamURL.error("No Stash image found for id \(id, privacy: .public)")
+                AppLogger.streamURL.error("No Stash image found for id \(id, privacy: .private(mask: .hash))")
                 return
             }
             openWindow(id: "photo-detail", value: PhotoWindowValue(image: image))
-            AppLogger.streamURL.info("Opened Stash image \(id, privacy: .public) via callback URL")
+            AppLogger.streamURL.info("Opened Stash image \(id, privacy: .private(mask: .hash)) via callback URL")
         } catch {
-            AppLogger.streamURL.error("Failed to fetch Stash image \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            AppLogger.streamURL.error("Failed to fetch Stash image \(id, privacy: .private(mask: .hash)): \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 
@@ -108,19 +108,19 @@ struct IncomingURLHandler: ViewModifier {
     @MainActor
     private func openStashScene(from url: URL) async {
         guard let id = Self.idParameter(from: url) else {
-            AppLogger.streamURL.error("hypnos://scene had no 'id' parameter: \(url.absoluteString, privacy: .public)")
+            AppLogger.streamURL.error("hypnos://scene had no 'id' parameter: \(url.absoluteString)")
             return
         }
         do {
             let source = GraphQLVideoSource(apiClient: appModel.apiClient)
             guard let video = try await source.fetchVideo(id: id) else {
-                AppLogger.streamURL.error("No Stash scene found for id \(id, privacy: .public)")
+                AppLogger.streamURL.error("No Stash scene found for id \(id, privacy: .private(mask: .hash))")
                 return
             }
             openWindow(id: "video-detail", value: VideoWindowValue(video: video, galleryVideos: [video]))
-            AppLogger.streamURL.info("Opened Stash scene \(id, privacy: .public) via callback URL")
+            AppLogger.streamURL.info("Opened Stash scene \(id, privacy: .private(mask: .hash)) via callback URL")
         } catch {
-            AppLogger.streamURL.error("Failed to fetch Stash scene \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            AppLogger.streamURL.error("Failed to fetch Stash scene \(id, privacy: .private(mask: .hash)): \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 
@@ -143,7 +143,7 @@ struct IncomingURLHandler: ViewModifier {
             case .directVideo(let videoURL):
                 openStreamVideo(videoURL, identitySource: url)
             case .notPlayable:
-                AppLogger.streamURL.info("Remote URL not playable as video; ignoring: \(url.absoluteString, privacy: .public)")
+                AppLogger.streamURL.info("Remote URL not playable as video; ignoring: \(url.absoluteString)")
             }
         } else {
             await handleSharedFile(url)
@@ -161,7 +161,7 @@ struct IncomingURLHandler: ViewModifier {
             title: StreamableURLResolver.displayTitle(for: identitySource)
         )
         openWindow(id: "video-detail", value: VideoWindowValue(video: video, galleryVideos: [video]))
-        AppLogger.streamURL.info("Opened stream video window: \(video.identity, privacy: .public)")
+        AppLogger.streamURL.info("Opened stream video window: \(video.identity, privacy: .private(mask: .hash))")
     }
 
     /// Local file shares (file:// URLs): cache to app storage, then open images
@@ -174,14 +174,14 @@ struct IncomingURLHandler: ViewModifier {
             from: url,
             mediaType: mediaType
         ) else {
-            AppLogger.sharedMedia.error("Failed to cache shared file from URL: \(url.lastPathComponent, privacy: .public)")
+            AppLogger.sharedMedia.error("Failed to cache shared file from URL: \(url.lastPathComponent)")
             // A video is playable straight from the source URL when the copy is
             // what failed (network file share, disk pressure, a multi-GB file):
             // AVFoundation only needs read access, not a private copy. Bailing
             // out here instead left the share with no window and no error at
             // all, which is the "nothing happens when I share a video" symptom.
             if mediaType == .video {
-                AppLogger.sharedMedia.info("Playing shared video in place: \(url.lastPathComponent, privacy: .public)")
+                AppLogger.sharedMedia.info("Playing shared video in place: \(url.lastPathComponent)")
                 openStreamVideo(url, identitySource: url)
             }
             return
@@ -202,7 +202,7 @@ struct IncomingURLHandler: ViewModifier {
             openStreamVideo(result.cachedURL, identitySource: url)
         }
 
-        AppLogger.sharedMedia.info("Opened shared \(mediaType.rawValue, privacy: .public): \(url.lastPathComponent, privacy: .public)")
+        AppLogger.sharedMedia.info("Opened shared \(mediaType.rawValue, privacy: .public): \(url.lastPathComponent)")
     }
 
     /// Extract the inner target from `hypnos://play?url=<encoded>`.

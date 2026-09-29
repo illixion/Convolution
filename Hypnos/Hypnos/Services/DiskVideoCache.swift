@@ -10,8 +10,8 @@
  expected bytes count against the cap so room is made before the file lands.
  */
 
+import DebugTrace
 import Foundation
-import os
 
 /// Metadata about a cached video
 struct CachedVideoMetadata: Codable {
@@ -193,7 +193,7 @@ actor DiskVideoCache {
         try metadataData.write(to: metadataURL)
 
         engine.noteWrite(at: destinationURL, replacing: replaced)
-        AppLogger.videoCache.info("Cached video\(move ? " (moved)" : ""): \(videoId, privacy: .private) (\(format, privacy: .public))")
+        AppLogger.videoCache.info("Cached video\(move ? " (moved)" : "", privacy: .public): \(videoId, privacy: .private) (\(format, privacy: .public))")
         return destinationURL
     }
 
@@ -220,7 +220,7 @@ actor DiskVideoCache {
             for fileURL in cacheContents where fileURL.lastPathComponent.hasPrefix(prefix) {
                 engine.noteRemoval(bytes: engine.sizeOnDisk(of: fileURL))
                 try? fileManager.removeItem(at: fileURL)
-                AppLogger.videoCache.info("Removed cached video: \(fileURL.lastPathComponent, privacy: .public)")
+                AppLogger.videoCache.info("Removed cached video: \(fileURL.lastPathComponent)")
             }
         }
 

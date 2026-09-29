@@ -8,8 +8,8 @@
  LRU eviction live in the shared LRUDiskCache engine.
  */
 
+import DebugTrace
 import Foundation
-import os
 
 actor DiskAnimatedHEVCCache {
     static let shared = DiskAnimatedHEVCCache()
@@ -60,7 +60,7 @@ actor DiskAnimatedHEVCCache {
             try fileManager.moveItem(at: tempURL, to: destinationURL)
             engine.noteWrite(at: destinationURL, replacing: replaced)
         } catch {
-            AppLogger.gifConverter.error("Failed to save animated HEVC to cache: \(error.localizedDescription, privacy: .public)")
+            AppLogger.gifConverter.error("Failed to save animated HEVC to cache: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 

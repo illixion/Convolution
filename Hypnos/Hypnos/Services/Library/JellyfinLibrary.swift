@@ -10,6 +10,7 @@
  decode the source natively, else the HLS transcode.
  */
 
+import DebugTrace
 import Foundation
 import os
 
@@ -657,7 +658,7 @@ actor JellyfinLibrary: MediaServerLibrary {
         do {
             _ = try await URLSession.shared.data(for: request)
         } catch {
-            AppLogger.library.error("Progress report to \(path, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            AppLogger.library.error("Progress report to \(path, privacy: .public) failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 

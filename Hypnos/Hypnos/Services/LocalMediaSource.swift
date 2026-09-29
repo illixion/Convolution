@@ -5,8 +5,8 @@
  Files appear in the Files app under "On My Apple Vision Pro" > "Hypnos".
  */
 
+import DebugTrace
 import Foundation
-import os
 import UniformTypeIdentifiers
 
 /// Represents a local media file
@@ -139,7 +139,7 @@ actor LocalMediaSource {
         let fileManager = FileManager.default
         var mediaFiles: [LocalMediaFile] = []
 
-        AppLogger.localMedia.log(level: AppLogger.effectiveDebugLevel, "Scanning directory: \(directory.path, privacy: .private)")
+        AppLogger.localMedia.debug("Scanning directory: \(directory.path, privacy: .private)")
 
         let resourceKeys: [URLResourceKey] = [
             .isDirectoryKey,
@@ -235,7 +235,7 @@ actor LocalMediaSource {
             fileSize: fileSize
         )
 
-        AppLogger.localMedia.log(level: AppLogger.effectiveDebugLevel, "Found \(type == .image ? "image" : "video", privacy: .public): \(url.lastPathComponent, privacy: .private)")
+        AppLogger.localMedia.debug("Found \(type == .image ? "image" : "video", privacy: .public): \(url.lastPathComponent, privacy: .private)")
 
         return mediaFile
     }
@@ -254,7 +254,7 @@ final class LocalImageSource: ImageSource, @unchecked Sendable {
     }
 
     func fetchImages(page: Int, pageSize: Int) async throws -> ImageFetchResult {
-        AppLogger.localMedia.log(level: AppLogger.effectiveDebugLevel, "Fetching images page \(page, privacy: .public), pageSize \(pageSize, privacy: .public)")
+        AppLogger.localMedia.debug("Fetching images page \(page, privacy: .public), pageSize \(pageSize, privacy: .public)")
 
         let allImages: [LocalMediaFile]
         if let rootURL {
@@ -262,13 +262,13 @@ final class LocalImageSource: ImageSource, @unchecked Sendable {
         } else {
             allImages = await LocalMediaSource.shared.scanImages()
         }
-        AppLogger.localMedia.log(level: AppLogger.effectiveDebugLevel, "Total images found: \(allImages.count, privacy: .public)")
+        AppLogger.localMedia.debug("Total images found: \(allImages.count, privacy: .public)")
 
         let startIndex = page * pageSize
         let endIndex = min(startIndex + pageSize, allImages.count)
 
         guard startIndex < allImages.count else {
-            AppLogger.localMedia.log(level: AppLogger.effectiveDebugLevel, "No more images (startIndex \(startIndex, privacy: .public) >= count \(allImages.count, privacy: .public))")
+            AppLogger.localMedia.debug("No more images (startIndex \(startIndex, privacy: .public) >= count \(allImages.count, privacy: .public))")
             return ImageFetchResult(images: [], hasMore: false, totalCount: allImages.count)
         }
 
@@ -283,7 +283,7 @@ final class LocalImageSource: ImageSource, @unchecked Sendable {
             )
         }
 
-        AppLogger.localMedia.log(level: AppLogger.effectiveDebugLevel, "Returning \(galleryImages.count, privacy: .public) images for page \(page, privacy: .public)")
+        AppLogger.localMedia.debug("Returning \(galleryImages.count, privacy: .public) images for page \(page, privacy: .public)")
 
         return ImageFetchResult(
             images: galleryImages,

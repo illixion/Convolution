@@ -20,9 +20,9 @@
 import AVFoundation
 import CoreMedia
 import CoreVideo
+import DebugTrace
 import Foundation
 import ImageIO
-import os
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -64,11 +64,11 @@ actor AnimatedHEVCConverter {
     func convert(animatedData: Data, sourceURL: URL) async throws -> URL {
         // Check cache first
         if let cachedURL = await DiskAnimatedHEVCCache.shared.cachedFileURL(for: sourceURL) {
-            AppLogger.gifConverter.log(level: AppLogger.effectiveDebugLevel, "Cache hit for animated HEVC: \(sourceURL.lastPathComponent, privacy: .public)")
+            AppLogger.gifConverter.debug("Cache hit for animated HEVC: \(sourceURL.lastPathComponent)")
             return cachedURL
         }
 
-        AppLogger.gifConverter.info("Converting animated still to HEVC: \(sourceURL.lastPathComponent, privacy: .public)")
+        AppLogger.gifConverter.info("Converting animated still to HEVC: \(sourceURL.lastPathComponent)")
 
         // Extract frames (CGImageSource handles both GIF and APNG)
         guard let imageSource = CGImageSourceCreateWithData(animatedData as CFData, nil) else {

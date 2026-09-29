@@ -12,8 +12,8 @@
 
 import AVFoundation
 import Combine
+import DebugTrace
 import RAVEMedia
-import os
 import RealityKit
 
 /// Player state for stereoscopic video
@@ -131,7 +131,7 @@ class StereoscopicVideoPlayer: ObservableObject {
                 // Check cache first
                 if let cachedURL = await videoCache.getCachedVideoURL(videoId: video.identity, format: settingsCacheKey) {
                     // Cache hit! Use cached converted video
-                    AppLogger.stereoscopicPlayer.info("Cache hit for video: \(video.identity, privacy: .private) with settings: \(settingsCacheKey, privacy: .public)")
+                    AppLogger.stereoscopicPlayer.info("Cache hit for video: \(video.identity, privacy: .private(mask: .hash)) with settings: \(settingsCacheKey, privacy: .public)")
 
                     await MainActor.run {
                         self.currentChunkInfo = "Loading from cache..."
@@ -150,7 +150,7 @@ class StereoscopicVideoPlayer: ObservableObject {
                 }
 
                 // Cache miss - need to download and convert
-                AppLogger.stereoscopicPlayer.info("Cache miss for video: \(video.identity, privacy: .private) with settings: \(settingsCacheKey, privacy: .public), downloading...")
+                AppLogger.stereoscopicPlayer.info("Cache miss for video: \(video.identity, privacy: .private(mask: .hash)) with settings: \(settingsCacheKey, privacy: .public), downloading...")
 
                 await MainActor.run {
                     self.state = .downloading(progress: 0)
@@ -309,8 +309,8 @@ class StereoscopicVideoPlayer: ObservableObject {
 
                 // Log detailed error info for debugging
                 AppLogger.stereoscopicPlayer.error("Playback error: \(error.localizedDescription)")
-                AppLogger.stereoscopicPlayer.error("Error type: \(type(of: error))")
-                AppLogger.stereoscopicPlayer.error("NSError domain: \(nsError.domain), code: \(nsError.code)")
+                AppLogger.stereoscopicPlayer.error("Error type: \(String(describing: type(of: error)), privacy: .public)")
+                AppLogger.stereoscopicPlayer.error("NSError domain: \(nsError.domain, privacy: .public), code: \(nsError.code)")
 
                 // Set error state - don't immediately fall back to 2D
                 // The error overlay will show with options to retry or play as 2D

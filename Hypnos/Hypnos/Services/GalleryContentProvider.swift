@@ -6,7 +6,7 @@
  */
 
 import CoreGraphics
-import os
+import DebugTrace
 import RAVESlideshow
 #if canImport(UIKit)
 import UIKit
@@ -65,7 +65,7 @@ class GalleryContentProvider: SlideshowContentProvider, RAVESlideshowContentProv
             AppLogger.remoteViewer.info("Gallery: fetched \(posts.count, privacy: .public) images")
             return posts
         } catch {
-            AppLogger.remoteViewer.error("Gallery fetch failed: \(error.localizedDescription, privacy: .public)")
+            AppLogger.remoteViewer.error("Gallery fetch failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             return []
         }
     }
@@ -85,7 +85,7 @@ class GalleryContentProvider: SlideshowContentProvider, RAVESlideshowContentProv
                 }
                 return .still(image: image, data: data)
             } catch {
-                AppLogger.remoteViewer.error("Gallery image load failed: \(error.localizedDescription, privacy: .public)")
+                AppLogger.remoteViewer.error("Gallery image load failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
                 return nil
             }
         }.value

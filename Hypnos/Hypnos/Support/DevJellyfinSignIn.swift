@@ -18,8 +18,8 @@
 
 #if DEBUG
 
+import DebugTrace
 import Foundation
-import os
 
 enum DevJellyfinSignIn {
     static func performIfRequested() {

@@ -8,7 +8,7 @@
 
 import AVFoundation
 import AVKit
-import os
+import DebugTrace
 import SwiftUI
 
 #if os(visionOS)
@@ -287,7 +287,7 @@ struct StereoscopicVideoView: View {
             return
         }
 
-        AppLogger.stereoscopicPlayer.info("Applying new 3D settings: format=\(newSettings.format.rawValue), eyesReversed=\(newSettings.eyesReversed), cacheKey=\(newSettings.cacheKey)")
+        AppLogger.stereoscopicPlayer.info("Applying new 3D settings: format=\(newSettings.format.rawValue, privacy: .public), eyesReversed=\(newSettings.eyesReversed), cacheKey=\(newSettings.cacheKey, privacy: .public)")
 
         // Reset fallbackTo2D IMMEDIATELY (before async task) to show progress UI
         fallbackTo2D = false

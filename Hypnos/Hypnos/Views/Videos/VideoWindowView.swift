@@ -12,8 +12,8 @@
  PhotoWindowModel), so multiple video windows are fully independent.
  */
 
+import DebugTrace
 import RAVEMedia
-import os
 import RAVEUI
 import SwiftUI
 
@@ -428,7 +428,7 @@ struct VideoWindowView: View {
         }
         .onChange(of: scenePhase) { oldPhase, newPhase in
             AppLogger.videoWindow.info(
-                "[\(windowModel.videoDisplayName, privacy: .public)] scenePhase: \(phaseLabel(oldPhase), privacy: .public) → \(phaseLabel(newPhase), privacy: .public)"
+                "[\(windowModel.videoDisplayName, privacy: .private(mask: .hash))] scenePhase: \(phaseLabel(oldPhase), privacy: .public) → \(phaseLabel(newPhase), privacy: .public)"
             )
             windowModel.handleScenePhaseChange(from: oldPhase, to: newPhase)
         }

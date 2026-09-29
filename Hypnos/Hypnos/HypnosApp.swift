@@ -10,7 +10,7 @@
  `IOSWindowRouter`). Everything below the scene roots is common code.
  */
 
-import os
+import DebugTrace
 import RAVEUI
 import SwiftUI
 
@@ -32,6 +32,11 @@ struct HypnosApp: App {
     /// value expression is evaluated ahead of the initializer body, so
     /// `appModel = AppModel()` as a default would win the race.
     init() {
+        // Before anything logs. The bundle id comes first (it is
+        // com.illixion.hypnos.debug in local builds); the rest are the
+        // subsystems RAVEFilm, RAVEDeviceSetup and RAVESpatialAudio log under.
+        let subsystems = [AppLogger.subsystem, "com.illixion.hypnos", "com.illixion.rave", "com.illixion.ravesdk"]
+        DebugTrace.configure(.init(subsystems: subsystems.reduce(into: []) { if !$0.contains($1) { $0.append($1) } }))
         #if DEBUG
         UITestingConfiguration.applyIfNeeded()
         DevJellyfinSignIn.performIfRequested()

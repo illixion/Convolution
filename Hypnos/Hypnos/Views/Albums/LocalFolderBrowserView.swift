@@ -16,7 +16,7 @@
  the way the old tab needed one: arriving here already answers that question.
  */
 
-import os
+import DebugTrace
 import SwiftUI
 
 struct LocalFolderBrowserView: View {

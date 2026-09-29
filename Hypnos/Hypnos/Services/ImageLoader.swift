@@ -5,8 +5,8 @@
  Supports both static images and animated GIFs.
  */
 
+import DebugTrace
 import ImageIO
-import os
 import SwiftUI
 
 #if canImport(AppKit)

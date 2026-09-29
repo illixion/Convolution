@@ -24,13 +24,13 @@
  and bounded by one directory enumeration.
  */
 
+import DebugTrace
 import Foundation
-import os
 
 final class LRUDiskCache: @unchecked Sendable {
     let directory: URL
     private let domain: CacheBudget.Domain
-    private let log: Logger
+    private let log: DebugLogger
     private let fileManager = FileManager.default
     private let lock = NSLock()
 
@@ -48,7 +48,7 @@ final class LRUDiskCache: @unchecked Sendable {
     /// Incrementally tracked directory size; nil until first computed.
     private var trackedSize: Int64?
 
-    init(directory: URL, domain: CacheBudget.Domain, log: Logger, formatVersion: Int? = nil) {
+    init(directory: URL, domain: CacheBudget.Domain, log: DebugLogger, formatVersion: Int? = nil) {
         self.directory = directory
         self.domain = domain
         self.log = log
@@ -170,7 +170,7 @@ final class LRUDiskCache: @unchecked Sendable {
                     try? fileManager.removeItem(at: companion)
                 }
             } catch {
-                log.warning("Failed to evict cache file: \(error.localizedDescription, privacy: .public)")
+                log.warning("Failed to evict cache file: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             }
         }
         trackedSize = max(0, actualSize - freed)

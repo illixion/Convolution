@@ -29,9 +29,9 @@ import UIKit
 #if canImport(AppKit)
 import AppKit
 #endif
+import DebugTrace
 import Foundation
 import ImageIO
-import os
 
 @MainActor
 enum WelcomeSample {
@@ -85,7 +85,7 @@ enum WelcomeSample {
             try data.write(to: url, options: .atomic)
             return url
         } catch {
-            AppLogger.settings.error("Could not materialize welcome sample: \(error.localizedDescription, privacy: .public)")
+            AppLogger.settings.error("Could not materialize welcome sample: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             return nil
         }
     }

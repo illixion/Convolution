@@ -23,7 +23,7 @@
 
 #if !os(visionOS)
 
-import os
+import DebugTrace
 import SwiftUI
 
 /// One entry on the iOS cover stack: the window value a visionOS scene would
@@ -142,7 +142,7 @@ final class IOSWindowRouter {
 
     private func unroutable(_ id: String, _ value: (any Codable & Hashable)?) {
         AppLogger.windowState.error(
-            "iOS router has no destination for scene \(id, privacy: .public) with value \(String(describing: value), privacy: .public)"
+            "iOS router has no destination for scene \(id, privacy: .public) with value \(String(describing: value))"
         )
     }
 

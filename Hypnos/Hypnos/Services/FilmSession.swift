@@ -9,10 +9,10 @@
  and the object audio.
  */
 
+import DebugTrace
 import RAVEFilm
 import Foundation
 import Observation
-import os
 
 @MainActor
 @Observable
@@ -191,7 +191,7 @@ final class FilmSession {
             return false
         }
         loadedItem = item
-        AppLogger.filmPlayer.info("Loaded \(item.name, privacy: .public): \(self.player.video.formatSummary, privacy: .public); audio \(self.player.audioStatus, privacy: .public)")
+        AppLogger.filmPlayer.info("Loaded \(item.name): \(self.player.video.formatSummary, privacy: .public); audio \(self.player.audioStatus, privacy: .public)")
         return true
     }
 

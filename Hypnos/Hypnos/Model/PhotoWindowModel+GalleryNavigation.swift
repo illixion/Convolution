@@ -4,7 +4,7 @@
  Extension for gallery image navigation, lazy loading pagination, and rating/counter updates.
  */
 
-import os
+import DebugTrace
 import RealityKit
 import SwiftUI
 
@@ -199,7 +199,7 @@ extension PhotoWindowModel {
             hasMorePages = result.hasMore
             currentPage = 1
         } catch {
-            AppLogger.photoWindow.error("Failed to load local gallery: \(error.localizedDescription, privacy: .public)")
+            AppLogger.photoWindow.error("Failed to load local gallery: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 
@@ -215,9 +215,9 @@ extension PhotoWindowModel {
             galleryImages.append(contentsOf: result.images)
             hasMorePages = result.hasMore
             currentPage += 1
-            AppLogger.photoWindow.log(level: AppLogger.effectiveDebugLevel, "Loaded \(result.images.count, privacy: .public) more images for window, total: \(self.galleryImages.count, privacy: .public)")
+            AppLogger.photoWindow.debug("Loaded \(result.images.count, privacy: .public) more images for window, total: \(self.galleryImages.count, privacy: .public)")
         } catch {
-            AppLogger.photoWindow.error("Failed to load more images for window: \(error.localizedDescription, privacy: .public)")
+            AppLogger.photoWindow.error("Failed to load more images for window: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 

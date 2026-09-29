@@ -19,6 +19,7 @@
 		AA10000000000000000000A3 /* NextcloudMedia in Frameworks */ = {isa = PBXBuildFile; productRef = AA10000000000000000000A2 /* NextcloudMedia */; };
 		AA11000000000000000000A3 /* RAVEFilm in Frameworks */ = {isa = PBXBuildFile; productRef = AA11000000000000000000A2 /* RAVEFilm */; };
 		AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */ = {isa = PBXBuildFile; productRef = AA12000000000000000000A2 /* RAVEDeviceSetup */; };
+		967834AC244B65FE72E57FB4 /* DebugTrace in Frameworks */ = {isa = PBXBuildFile; productRef = 7ECF8E7CC7BA800706D085EF /* DebugTrace */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -70,6 +71,7 @@
 				AA10000000000000000000A3 /* NextcloudMedia in Frameworks */,
 				AA11000000000000000000A3 /* RAVEFilm in Frameworks */,
 				AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */,
+				967834AC244B65FE72E57FB4 /* DebugTrace in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -161,6 +163,7 @@
 				AA10000000000000000000A2 /* NextcloudMedia */,
 				AA11000000000000000000A2 /* RAVEFilm */,
 				AA12000000000000000000A2 /* RAVEDeviceSetup */,
+				7ECF8E7CC7BA800706D085EF /* DebugTrace */,
 			);
 			productName = Hypnos;
 			productReference = 0778651A2D811C5500BCF113 /* Hypnos.app */;
@@ -222,6 +225,7 @@
 				AA01000000000000000000A1 /* XCLocalSwiftPackageReference "../../RAVESDK" */,
 				AA05000000000000000000B1 /* XCLocalSwiftPackageReference "../../RAVEEngine" */,
 				AA10000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/NextcloudMedia" */,
+				FF53DB263485AD6DE8BF39A4 /* XCLocalSwiftPackageReference "../../DebugTrace" */,
 			);
 			productRefGroup = 0778651B2D811C5500BCF113 /* Products */;
 			projectDirPath = "";
@@ -578,6 +582,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../Packages/NextcloudMedia;
 		};
+		FF53DB263485AD6DE8BF39A4 /* XCLocalSwiftPackageReference "../../DebugTrace" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../DebugTrace;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -629,6 +637,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AA01000000000000000000A1 /* XCLocalSwiftPackageReference "../../RAVESDK" */;
 			productName = RAVEDeviceSetup;
+		};
+		7ECF8E7CC7BA800706D085EF /* DebugTrace */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FF53DB263485AD6DE8BF39A4 /* XCLocalSwiftPackageReference "../../DebugTrace" */;
+			productName = DebugTrace;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

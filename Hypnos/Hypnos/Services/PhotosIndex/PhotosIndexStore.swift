@@ -10,9 +10,9 @@
  space to store something they already have.
  */
 
+import DebugTrace
 import Foundation
 import Photos
-import os
 
 actor PhotosIndexStore {
     static let shared = PhotosIndexStore()

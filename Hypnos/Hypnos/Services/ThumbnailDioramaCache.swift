@@ -18,9 +18,9 @@
  */
 
 import CommonCrypto
+import DebugTrace
 import Foundation
 import ImageIO
-import os
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -121,7 +121,7 @@ final class ThumbnailDioramaCache {
                 }
                 return pair
             } catch {
-                AppLogger.backgroundRemover.warning("Thumbnail diorama generation failed: \(error.localizedDescription, privacy: .public)")
+                AppLogger.backgroundRemover.warning("Thumbnail diorama generation failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
                 return nil
             }
         }
@@ -197,7 +197,7 @@ final class ThumbnailDioramaCache {
             try bgData.write(to: bgURL)
             engine.noteWrite(at: bgURL, replacing: replacedBg)
         } catch {
-            AppLogger.diskCache.warning("Failed to persist thumbnail diorama: \(error.localizedDescription, privacy: .public)")
+            AppLogger.diskCache.warning("Failed to persist thumbnail diorama: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
     }
 
