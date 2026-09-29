@@ -2801,7 +2801,13 @@ class AppModel {
         // in place, so an incomplete configuration has to drop the credential
         // here rather than only in the URL's observer.
         guard let server = currentNextcloudServer, let host = server.baseURL.host else {
-            if let staleHost = URL(string: nextcloudServerURL)?.host {
+            // The registry is keyed by host alone, so when Nextcloud sits on
+            // Stash's host (one reverse proxy) an incomplete Nextcloud
+            // config must not drop the credential Stash just registered —
+            // on a cold launch that left every thumbnail request
+            // unauthenticated until the API key was re-applied in Settings.
+            if let staleHost = URL(string: nextcloudServerURL)?.host,
+               staleHost.lowercased() != URL(string: stashServerURL)?.host?.lowercased() {
                 MediaAuthorization.shared.unregister(host: staleHost)
             }
             return

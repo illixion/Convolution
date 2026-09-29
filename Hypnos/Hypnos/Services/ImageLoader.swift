@@ -568,8 +568,19 @@ actor ImageLoader {
         }
 
         let base: UIImage
+        var rawData: Data?
+        if maxSize != nil {
+            do {
+                rawData = try await loadRawData(from: url)
+                if rawData == nil {
+                    AppLogger.imageLoader.warning("Thumbnail fetch returned no data (credential registered: \(MediaAuthorization.shared.credential(for: url) != nil, privacy: .public))")
+                }
+            } catch {
+                AppLogger.imageLoader.warning("Thumbnail fetch failed: \(error.logCode, privacy: .public) (credential registered: \(MediaAuthorization.shared.credential(for: url) != nil, privacy: .public))")
+            }
+        }
         if let maxSize,
-           let data = try? await loadRawData(from: url),
+           let data = rawData,
            let downsampled = await ThumbnailGenerator.shared.downsample(data: data, maxSize: maxSize) {
             // Downsample directly from bytes — skips the full decode + normalize.
             base = downsampled
