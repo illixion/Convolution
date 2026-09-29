@@ -11,6 +11,7 @@
  */
 
 import DebugTrace
+import DebugTraceServer
 import RAVEUI
 import SwiftUI
 
@@ -37,6 +38,7 @@ struct HypnosApp: App {
         // subsystems RAVEFilm, RAVEDeviceSetup and RAVESpatialAudio log under.
         let subsystems = [AppLogger.subsystem, "com.illixion.hypnos", "com.illixion.rave", "com.illixion.ravesdk"]
         DebugTrace.configure(.init(subsystems: subsystems.reduce(into: []) { if !$0.contains($1) { $0.append($1) } }))
+        DebugTraceServer.startIfRequested()
         #if DEBUG
         UITestingConfiguration.applyIfNeeded()
         DevJellyfinSignIn.performIfRequested()
