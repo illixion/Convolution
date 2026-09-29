@@ -11,15 +11,11 @@ import DebugTrace
 import Foundation
 import RAVENet
 
-/// Forwards `RAVENet` transport logging into `AppLogger.remoteViewer`.
-///
-/// The sink receives finished strings, and RAVENet builds some of them from
-/// the server URL and `localizedDescription` ("connecting to wss://…",
-/// "receive error: …"). Without per-value privacy the whole line has to be
-/// private: readable on this device's console in development builds,
-/// `<private>` in exports.
+/// Forwards `RAVENet` transport logging into `AppLogger.remoteViewer`,
+/// keeping RAVENet's per-value privacy: timings, counts and error codes stay
+/// public, the server endpoint (query already dropped) and error text don't.
 struct RAVENetAppLogger: RAVENetLogger {
-    func log(_ level: RAVENetLogLevel, _ message: String) {
+    func log(_ level: RAVENetLogLevel, _ message: DebugLogMessage) {
         switch level {
         case .debug:
             AppLogger.remoteViewer.debug("WebSocket \(message)")
