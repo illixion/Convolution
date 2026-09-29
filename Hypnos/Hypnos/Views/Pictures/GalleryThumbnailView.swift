@@ -11,9 +11,11 @@ import SwiftUI
 struct GalleryThumbnailView: View {
     @Environment(AppModel.self) private var appModel
     let image: GalleryImage
-    /// Side length of the square cell. The grid shrinks this below the
-    /// default to keep a minimum column count when the window is narrow.
-    var size: CGFloat = 200
+    /// Cell size. Square in the square grid; in the original-aspect grid the
+    /// width follows the image's ratio at the row's height. The bitmap is
+    /// never cropped in advance — `scaledToFill` center-crops it to whatever
+    /// the cell is, so one cached thumbnail (and one diorama) serves both.
+    var size: CGSize = CGSize(width: 200, height: 200)
     var onTap: (() -> Void)? = nil
     /// Fires when the cell's long-press grows-and-pops gesture
     /// completes. Receives the cell's already-loaded thumbnail bitmap
@@ -30,9 +32,13 @@ struct GalleryThumbnailView: View {
     /// Long-edge cap for remote thumbnails, which are also the diorama's
     /// source. A server can answer the thumbnail URL with the full original;
     /// uncapped, that bitmap and its two diorama layers are what stalled the
-    /// grid. 800 keeps the square crop's short edge covering a 200pt cell at
-    /// 2x for sources up to 2:1.
-    static let thumbnailMaxSize: CGFloat = 800
+    /// grid. 1000 covers the widest original-aspect cell (2.5:1 at a 200pt row,
+    /// 2x) and a square cell's short edge with room to spare.
+    static let thumbnailMaxSize: CGFloat = 1000
+    /// How long a cell must stay on screen before it starts a network fetch.
+    /// A fast flick realizes and discards cells faster than this, so nothing
+    /// is downloaded for content that only flashed past. Warm caches skip it.
+    private static let coldLoadDelay: Duration = .milliseconds(120)
     @State private var loadedImage: UIImage?
     @State private var isLoading = true
     @State private var loadFailed = false
@@ -92,7 +98,7 @@ struct GalleryThumbnailView: View {
                 }
             }
         }
-        .frame(width: size, height: size)
+        .frame(width: size.width, height: size.height)
         .cornerRadius(12)
         .clipped()
         .contentShape(Rectangle())
@@ -195,23 +201,39 @@ struct GalleryThumbnailView: View {
         if image.thumbnailURL.isFileURL {
             // Local files: use efficient downsampling path
             if let result = await ImageLoader.shared.loadThumbnailWithData(from: image.thumbnailURL) {
-                loadedImage = Self.cropToSquare(result.image)
-            } else {
+                show(result.image)
+            } else if !Task.isCancelled {
                 AppLogger.views.warning("Failed to load thumbnail for: \(image.thumbnailURL.lastPathComponent, privacy: .private)")
                 loadFailed = true
             }
+        } else if let warm = await ImageLoader.shared.cachedRemoteThumbnail(from: image.thumbnailURL, maxSize: Self.thumbnailMaxSize) {
+            show(warm)
         } else {
-            // Remote URLs: use cached thumbnail path (stores cropped result in ThumbnailCache)
-            if let result = await ImageLoader.shared.loadRemoteThumbnailCached(from: image.thumbnailURL, maxSize: Self.thumbnailMaxSize, crop: Self.cropToSquare) {
-                loadedImage = result
-            } else {
+            // Cold: wait out a flick before spending the network on this cell.
+            // The sleep throws when the cell scrolls away and cancels the task.
+            do { try await Task.sleep(for: Self.coldLoadDelay) } catch { return }
+            if let result = await ImageLoader.shared.loadRemoteThumbnailCached(from: image.thumbnailURL, maxSize: Self.thumbnailMaxSize) {
+                show(result)
+            } else if !Task.isCancelled {
                 AppLogger.views.warning("Failed to load thumbnail for: \(image.thumbnailURL.lastPathComponent, privacy: .private)")
                 loadFailed = true
             }
         }
+        // A cancelled load is a cell that scrolled away, not a failure; its
+        // state is reset on disappear.
+        guard !Task.isCancelled else { return }
         isLoading = false
     }
-    
+
+    /// Shows the bitmap and, when the source reported no dimensions, remembers
+    /// its true ratio so the original-aspect grid lays this item out correctly
+    /// from the first frame next time.
+    private func show(_ bitmap: UIImage) {
+        loadedImage = bitmap
+        guard image.reportedAspectRatio == nil, bitmap.size.height > 0 else { return }
+        MediaAspectStore.shared.record(ratio: bitmap.size.width / bitmap.size.height, for: image.identity)
+    }
+
     /// Wraps the thumbnail's hover effect choice. Reduce-motion swaps the
     /// scale-up animation for the system default highlight so gaze still
     /// gives feedback without movement.
@@ -243,20 +265,6 @@ struct GalleryThumbnailView: View {
         } else {
             Color.clear
         }
-    }
-
-    private nonisolated static func cropToSquare(_ image: UIImage) -> UIImage {
-        let side = min(image.size.width, image.size.height)
-        let xOffset = (image.size.width - side) / 2
-        let yOffset = (image.size.height - side) / 2
-        
-        let cropRect = CGRect(x: xOffset, y: yOffset, width: side, height: side)
-        
-        guard let cgImage = image.cgImage?.cropping(to: cropRect) else {
-            return image
-        }
-        
-        return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
     }
 }
 

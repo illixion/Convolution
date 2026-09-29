@@ -854,6 +854,16 @@ class AppModel {
         }
     }
 
+    /// How the Pictures grid arranges its cells: uniform squares, or each
+    /// image at its own aspect ratio.
+    var galleryGridStyle: GalleryGridStyle {
+        didSet {
+            if galleryGridStyle != oldValue {
+                UserDefaults.standard.set(galleryGridStyle.rawValue, forKey: "galleryGridStyle")
+            }
+        }
+    }
+
     var effectiveThumbnailStyle: ThumbnailStyle {
         guard PlatformCapabilities.supportsDiorama else { return .flat }
         return effectiveReduceMotion ? .flat : thumbnailStyle
@@ -1488,6 +1498,9 @@ class AppModel {
             return PlatformCapabilities.supportsDiorama ? .diorama : .flat
         }()
 
+        let loadedGalleryGridStyle = UserDefaults.standard.string(forKey: "galleryGridStyle")
+            .flatMap(GalleryGridStyle.init(rawValue:)) ?? .square
+
         // Load rounded corners (default: true)
         let loadedRoundedCorners = UserDefaults.standard.object(forKey: "roundedCorners") != nil
             ? UserDefaults.standard.bool(forKey: "roundedCorners")
@@ -1626,6 +1639,7 @@ class AppModel {
         self.dioramaDistance = loadedDioramaDistance
         self.reduceMotion = loadedReduceMotion
         self.thumbnailStyle = loadedThumbnailStyle
+        self.galleryGridStyle = loadedGalleryGridStyle
         self.roundedCorners = loadedRoundedCorners
         self.openMediaInNewWindows = loadedOpenMediaInNewWindows
         self.enableStashTranscoding = loadedEnableStashTranscoding
@@ -2490,6 +2504,7 @@ class AppModel {
             globalVisualAdjustments: try? JSONEncoder().encode(globalVisualAdjustments),
             imageEnhancementAdjustments: imageEnhancementData.adjustments,
             thumbnailStyle: thumbnailStyle.rawValue,
+            galleryGridStyle: galleryGridStyle.rawValue,
             reduceMotion: reduceMotion,
             defaultImageViewingMode: defaultImageViewingMode.rawValue,
             enableStashTranscoding: enableStashTranscoding,
@@ -2536,6 +2551,7 @@ class AppModel {
         if let v = backup.enableRemoteViewer { enableRemoteViewer = v }
         if let v = backup.librarySource.flatMap(LibrarySource.init(rawValue:)) { librarySource = v }
         if let raw = backup.thumbnailStyle, let style = ThumbnailStyle(rawValue: raw) { thumbnailStyle = style }
+        if let raw = backup.galleryGridStyle, let style = GalleryGridStyle(rawValue: raw) { galleryGridStyle = style }
         if let v = backup.reduceMotion { reduceMotion = v }
         if let raw = backup.defaultImageViewingMode, let mode = DefaultImageViewingMode(rawValue: raw) { defaultImageViewingMode = mode }
         if let v = backup.enableStashTranscoding { enableStashTranscoding = v }
@@ -2869,6 +2885,17 @@ class AppModel {
     /// available, and Photos otherwise — the one source that always is. This
     /// is what makes losing the Stash server fall back cleanly instead of
     /// leaving `librarySource` pointing at something no longer offered.
+    /// How many of the loaded Nextcloud images the server reported no pixel
+    /// dimensions for, out of how many are loaded; nil unless Nextcloud is the
+    /// library in view. Files uploaded through Nextcloud get dimensions from
+    /// its Photos app; files added by copying into the data directory and
+    /// scanning do not, until the server's metadata job runs over them.
+    var nextcloudDimensionCoverage: (missing: Int, total: Int)? {
+        guard effectiveLibrarySource == .nextcloud, !galleryImages.isEmpty else { return nil }
+        let missing = galleryImages.reduce(0) { $0 + ($1.reportedAspectRatio == nil ? 1 : 0) }
+        return (missing, galleryImages.count)
+    }
+
     var effectiveLibrarySource: LibrarySource {
         availableLibrarySources.contains(librarySource) ? librarySource : .photos
     }

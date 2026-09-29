@@ -44,8 +44,14 @@ actor ThumbnailCache {
 
     /// Generate a cache key that includes file modification time
     /// This invalidates cached thumbnails when the source file changes
-    private func cacheKey(for url: URL) -> String {
+    ///
+    /// `variant` separates entries that render the same URL differently. The
+    /// unlabelled entries written before uncropped thumbnails existed are
+    /// center-cropped squares, so uncropped ones live under their own label
+    /// instead of being mistaken for them.
+    private func cacheKey(for url: URL, variant: String? = nil) -> String {
         var keyString = url.absoluteString
+        if let variant { keyString += "#\(variant)" }
 
         // Include modification time for local files to detect changes
         if url.isFileURL,
@@ -58,15 +64,15 @@ actor ThumbnailCache {
     }
 
     /// Get the file URL for a cached thumbnail
-    private func cacheFileURL(for url: URL) -> URL {
-        engine.directory.appendingPathComponent(cacheKey(for: url) + ".heic")
+    private func cacheFileURL(for url: URL, variant: String? = nil) -> URL {
+        engine.directory.appendingPathComponent(cacheKey(for: url, variant: variant) + ".heic")
     }
 
     /// Load a cached thumbnail
     /// - Parameter url: The source image URL
     /// - Returns: The cached thumbnail UIImage, or nil if not cached
-    func loadThumbnail(for url: URL) -> UIImage? {
-        let key = cacheKey(for: url)
+    func loadThumbnail(for url: URL, variant: String? = nil) -> UIImage? {
+        let key = cacheKey(for: url, variant: variant)
 
         // Check memory cache first
         if let cached = memoryCache.object(forKey: key as NSString) {
@@ -74,7 +80,7 @@ actor ThumbnailCache {
         }
 
         // Check disk cache
-        let fileURL = cacheFileURL(for: url)
+        let fileURL = cacheFileURL(for: url, variant: variant)
         guard fileManager.fileExists(atPath: fileURL.path),
               let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe),
               let image = UIImage(data: data) else {
@@ -94,8 +100,8 @@ actor ThumbnailCache {
     /// - Parameters:
     ///   - image: The thumbnail image to cache
     ///   - url: The source image URL (used as key)
-    func saveThumbnail(_ image: UIImage, for url: URL) {
-        let key = cacheKey(for: url)
+    func saveThumbnail(_ image: UIImage, for url: URL, variant: String? = nil) {
+        let key = cacheKey(for: url, variant: variant)
 
         // Save to memory cache
         // Estimate cost as width * height * 4 bytes per pixel
@@ -103,7 +109,7 @@ actor ThumbnailCache {
         memoryCache.setObject(image, forKey: key as NSString, cost: cost)
 
         // Save to disk as HEIC (supports alpha, smaller than JPEG/PNG)
-        let fileURL = cacheFileURL(for: url)
+        let fileURL = cacheFileURL(for: url, variant: variant)
         guard let cgImage = image.cgImage else { return }
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(

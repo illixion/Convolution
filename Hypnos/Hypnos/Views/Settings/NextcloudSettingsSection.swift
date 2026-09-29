@@ -129,6 +129,16 @@ struct NextcloudSettingsSection: View {
                 .foregroundStyle(.secondary)
         }
 
+        if let coverage = appModel.nextcloudDimensionCoverage,
+           coverage.missing * 4 >= coverage.total {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(coverage.missing) of \(coverage.total) loaded photos have no dimensions on the server.")
+                Text("The Original Aspect Ratio grid lays those out as squares until each thumbnail loads, then remembers the real shape. To have Nextcloud fill them in ahead of time, run its metadata job on the server: `occ background-job:list` shows the id of `GenerateMetadataJob`, and `occ background-job:execute --force-execute <id>` runs it.")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+        }
+
         Button("Test Connection") { verify() }
         if let verifyResult {
             Text(verifyResult)

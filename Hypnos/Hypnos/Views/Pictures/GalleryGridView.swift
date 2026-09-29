@@ -1,7 +1,8 @@
 /*
  Hypnos - Gallery Grid View
 
- LazyVGrid-based gallery view with lazy loading for thumbnails.
+ Gallery view with lazy loading for thumbnails: uniform squares in a
+ LazyVGrid, or every image at its own aspect ratio in justified rows.
  Supports multi-select mode for bulk operations.
  */
 
@@ -35,6 +36,9 @@ struct GalleryGridView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
     private let gallerySpace = "gallery"
+    /// Rows for the original-aspect grid, kept between body passes so a scroll
+    /// or selection change doesn't re-pack thousands of images.
+    @State private var rowsCache = JustifiedRowsCache()
 
     private let gridSpacing: CGFloat = 16
     /// Preferred (and maximum) thumbnail edge. Wide windows keep cells at
@@ -108,55 +112,7 @@ struct GalleryGridView: View {
                     LibrarySafetyNetView()
                 }
             } else {
-                // Gallery grid
-                GeometryReader { geo in
-                    let layout = gridLayout(forWidth: geo.size.width)
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            LazyVGrid(columns: layout.columns, spacing: gridSpacing) {
-                                ForEach(appModel.galleryImages) { image in
-                                    thumbnailCell(for: image, cellSize: layout.cellSize)
-                                        .id(image.id)
-                                        .onAppear {
-                                            if image == appModel.galleryImages.last && appModel.hasMorePages {
-                                                Task {
-                                                    await appModel.loadNextPage()
-                                                }
-                                            }
-                                        }
-                                }
-
-                                if appModel.isLoadingGallery {
-                                    ProgressView()
-                                        .frame(maxWidth: .infinity)
-                                        .padding()
-                                }
-                            }
-                            .padding()
-                            // Animate only the column-count transition: cells
-                            // slide into their new positions when a column is
-                            // added/removed. In-band resizing (and the small-mode
-                            // cell shrink, where count stays at the floor) keeps
-                            // count stable, so it tracks the drag live with no
-                            // animation. Keyed on count so appending images or
-                            // the live resize don't trigger a transaction.
-                            .animation(appModel.effectiveReduceMotion ? nil : .smooth(duration: 0.3),
-                                       value: layout.columns.count)
-                        }
-                        .refreshable {
-                            await appModel.refreshGallery()
-                        }
-                        .onAppear {
-                            if let lastId = appModel.lastViewedImageId {
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        proxy.scrollTo(lastId, anchor: .center)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                galleryGrid
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -242,6 +198,142 @@ struct GalleryGridView: View {
         }
     }
 
+
+    // MARK: - Grid
+
+    private var galleryGrid: some View {
+        GeometryReader { geo in
+            ScrollViewReader { proxy in
+                ScrollView {
+                    switch appModel.galleryGridStyle {
+                    case .square:
+                        squareGrid(width: geo.size.width)
+                    case .original:
+                        justifiedGrid(width: geo.size.width)
+                    }
+                }
+                .refreshable {
+                    await appModel.refreshGallery()
+                }
+                .onAppear {
+                    if let lastId = appModel.lastViewedImageId {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                proxy.scrollTo(scrollTarget(for: lastId, width: geo.size.width), anchor: .center)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// What to hand `scrollTo` for an image: the image itself in the square
+    /// grid, or the id of the row holding it in the original-aspect grid,
+    /// where cells are nested inside rows the lazy stack knows by their own id.
+    private func scrollTarget(for imageId: UUID, width: CGFloat) -> UUID {
+        guard appModel.galleryGridStyle == .original else { return imageId }
+        let images = appModel.galleryImages
+        guard let index = images.firstIndex(where: { $0.id == imageId }) else { return imageId }
+        return gridRows(images: images, width: width)
+            .first { $0.row.cells.contains { $0.index == index } }?.id ?? imageId
+    }
+
+    private func loadMoreIfNeeded() {
+        guard appModel.hasMorePages, !appModel.isLoadingGallery else { return }
+        Task { await appModel.loadNextPage() }
+    }
+
+    private func squareGrid(width: CGFloat) -> some View {
+        let layout = gridLayout(forWidth: width)
+        return LazyVGrid(columns: layout.columns, spacing: gridSpacing) {
+            ForEach(appModel.galleryImages) { image in
+                thumbnailCell(for: image, cellSize: CGSize(width: layout.cellSize, height: layout.cellSize))
+                    .id(image.id)
+                    .onAppear {
+                        if image == appModel.galleryImages.last {
+                            loadMoreIfNeeded()
+                        }
+                    }
+            }
+
+            if appModel.isLoadingGallery {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding()
+            }
+        }
+        .padding()
+        // Animate only the column-count transition: cells
+        // slide into their new positions when a column is
+        // added/removed. In-band resizing (and the small-mode
+        // cell shrink, where count stays at the floor) keeps
+        // count stable, so it tracks the drag live with no
+        // animation. Keyed on count so appending images or
+        // the live resize don't trigger a transaction.
+        .animation(appModel.effectiveReduceMotion ? nil : .smooth(duration: 0.3),
+                   value: layout.columns.count)
+    }
+
+    /// Every image at its own aspect ratio, packed into rows that fill the
+    /// width. Geometry comes from metadata (reported dimensions, else a ratio
+    /// learned earlier), so the sheet is laid out before any thumbnail loads
+    /// and skipped ranges of a fast flick are already the right size.
+    private func justifiedGrid(width: CGFloat) -> some View {
+        let images = appModel.galleryImages
+        let rows = gridRows(images: images, width: width)
+        return LazyVStack(alignment: .leading, spacing: gridSpacing) {
+            ForEach(Array(rows.enumerated()), id: \.element.id) { position, gridRow in
+                HStack(spacing: gridSpacing) {
+                    ForEach(gridRow.row.cells, id: \.index) { cell in
+                        thumbnailCell(
+                            for: images[cell.index],
+                            cellSize: CGSize(width: cell.width, height: gridRow.row.height)
+                        )
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: gridRow.row.height, maxHeight: gridRow.row.height, alignment: .leading)
+                .onAppear {
+                    // Start the next page a few rows early; row heights are
+                    // known, so waiting for the very last row would show a
+                    // spinner to anyone scrolling at speed.
+                    if position >= rows.count - 3 { loadMoreIfNeeded() }
+                }
+            }
+
+            if appModel.isLoadingGallery {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding()
+            }
+        }
+        .padding()
+    }
+
+    private func gridRows(images: [GalleryImage], width: CGFloat) -> [JustifiedGridRow] {
+        let inset: CGFloat = 16
+        let available = max(1, width - inset * 2)
+        let target = JustifiedRowLayout.targetHeight(forWidth: available,
+                                                     preferred: preferredCellSize,
+                                                     minPerRow: minColumns,
+                                                     spacing: gridSpacing)
+        // Reading `revision` makes the grid re-lay-out (debounced) when a
+        // thumbnail teaches the store the true ratio of a dimensionless item.
+        let key = JustifiedRowsCache.Key(count: images.count,
+                                         first: images.first?.id,
+                                         last: images.last?.id,
+                                         width: available.rounded(),
+                                         revision: MediaAspectStore.shared.revision)
+        if rowsCache.key == key { return rowsCache.rows }
+        let store = MediaAspectStore.shared
+        let aspects = images.map { $0.reportedAspectRatio ?? store.ratio(for: $0.identity) ?? 1 }
+        let rows = JustifiedRowLayout.rows(aspects: aspects, width: available, targetHeight: target, spacing: gridSpacing)
+            .map { JustifiedGridRow(id: images[$0.firstIndex].id, row: $0) }
+        rowsCache.key = key
+        rowsCache.rows = rows
+        return rows
+    }
+
     /// Whether the grid is currently backed by the device photo library, and so
     /// should explain a permission state rather than just showing nothing.
     private var isShowingPhotoLibrary: Bool {
@@ -260,7 +352,7 @@ struct GalleryGridView: View {
     }
 
     @ViewBuilder
-    private func thumbnailCell(for image: GalleryImage, cellSize: CGFloat) -> some View {
+    private func thumbnailCell(for image: GalleryImage, cellSize: CGSize) -> some View {
         if appModel.isSelectingImages {
             GalleryThumbnailView(image: image, size: cellSize)
                 .overlay(alignment: .topTrailing) {
@@ -362,4 +454,26 @@ struct GalleryGridView: View {
             .first { $0.activationState == .foregroundActive }
         #endif
     }
+}
+
+/// One packed row of the original-aspect grid, identified by its first image
+/// so the lazy stack keeps a row's identity when pages are appended below it.
+struct JustifiedGridRow: Identifiable {
+    let id: UUID
+    let row: JustifiedRowLayout.Row
+}
+
+/// Reference-typed memo for `GalleryGridView`'s packed rows. Held in `@State`
+/// but never observed: writing it during `body` must not invalidate the body.
+@MainActor
+final class JustifiedRowsCache {
+    struct Key: Equatable {
+        let count: Int
+        let first: UUID?
+        let last: UUID?
+        let width: CGFloat
+        let revision: Int
+    }
+    var key: Key?
+    var rows: [JustifiedGridRow] = []
 }

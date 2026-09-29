@@ -41,6 +41,54 @@ enum ImageLoaderError: LocalizedError {
     }
 }
 
+/// Limits how many thumbnail downloads run at once, and serves the *newest*
+/// waiter first. A fast flick queues far more cells than the network can serve
+/// before they scroll away; first-in-first-out would fetch everything that was
+/// passed before what is on screen now.
+actor FetchGate {
+    private var available: Int
+    private var waiters: [(id: UUID, continuation: CheckedContinuation<Void, Error>)] = []
+
+    init(limit: Int) { available = limit }
+
+    func acquire() async throws {
+        try Task.checkCancellation()
+        if available > 0 {
+            available -= 1
+            return
+        }
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                waiters.append((id, continuation))
+            }
+        } onCancel: {
+            Task { await self.cancelWaiter(id) }
+        }
+    }
+
+    func release() {
+        if let next = waiters.popLast() {
+            next.continuation.resume()
+        } else {
+            available += 1
+        }
+    }
+
+    private func cancelWaiter(_ id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: index).continuation.resume(throwing: CancellationError())
+    }
+}
+
+/// A network fetch shared by every caller asking for the same URL. It is
+/// cancelled when the last of them stops waiting, so scrolling a cell away
+/// abandons its download instead of finishing it for nobody.
+private struct SharedFetch {
+    let task: Task<Data?, Error>
+    var waiters: Int
+}
+
 actor ImageLoader {
     static let shared = ImageLoader()
 
@@ -91,7 +139,9 @@ actor ImageLoader {
     /// In-flight dedupe for decode-free raw-data fetches, so a prefetch
     /// fan-out (many cells requesting overlapping ranges) coalesces instead of
     /// issuing duplicate network loads for the same URL.
-    private var inProgressDataTasks: [URL: Task<Data?, Error>] = [:]
+    private var inProgressDataTasks: [URL: SharedFetch] = [:]
+    /// Thumbnail downloads in flight at once; see `FetchGate`.
+    private let thumbnailGate = FetchGate(limit: 6)
 
     private init() {
         // Configure cache limits (costs reflect true decoded image sizes)
@@ -289,7 +339,7 @@ actor ImageLoader {
     ///   credential (e.g. a Stash API key whose signature no longer verifies)
     ///   by silently serving the old bytes instead of re-authenticating.
     ///   Successful fetches are still written to disk cache as usual.
-    func loadRawData(from url: URL, bypassCache: Bool = false) async throws -> Data? {
+    func loadRawData(from url: URL, bypassCache: Bool = false, throttled: Bool = false) async throws -> Data? {
         guard let url = await resolvingPhotosAsset(url) else { return nil }
         // Check memory cache first (if already loaded, return cached data)
         if !bypassCache, let cached = cache.object(forKey: url as NSURL) {
@@ -306,13 +356,26 @@ actor ImageLoader {
             return diskData
         }
 
-        // Coalesce concurrent network fetches for the same URL.
-        if let existingTask = inProgressDataTasks[url] {
-            return try await existingTask.value
+        // Coalesce concurrent network fetches for the same URL. Every caller
+        // counts as a waiter; the fetch is cancelled when the last one leaves.
+        var entry = inProgressDataTasks[url] ?? SharedFetch(task: makeDataTask(for: url, throttled: throttled), waiters: 0)
+        entry.waiters += 1
+        inProgressDataTasks[url] = entry
+        let task = entry.task
+        defer { leaveSharedFetch(url, task: task) }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            Task { await self.abandonSharedFetch(url, task: task) }
         }
+    }
 
-        // Download without decoding to UIImage
-        let task = Task<Data?, Error> {
+    /// The download for one URL, shared by every caller via `SharedFetch`.
+    private func makeDataTask(for url: URL, throttled: Bool) -> Task<Data?, Error> {
+        let gate = thumbnailGate
+        return Task<Data?, Error> {
+            if throttled { try await gate.acquire() }
+            defer { if throttled { Task { await gate.release() } } }
             let (data, response) = try await Self.session.data(for: Self.remoteRequest(for: url))
 
             // Report a refusal as an error rather than a silent nil: the photo
@@ -354,11 +417,28 @@ actor ImageLoader {
 
             return data
         }
-
-        inProgressDataTasks[url] = task
-        defer { inProgressDataTasks[url] = nil }
-        return try await task.value
     }
+
+    /// A waiter finished (or gave up): drop the entry once nobody is left.
+    private func leaveSharedFetch(_ url: URL, task: Task<Data?, Error>) {
+        guard var entry = inProgressDataTasks[url], entry.task == task else { return }
+        entry.waiters -= 1
+        if entry.waiters <= 0 {
+            inProgressDataTasks[url] = nil
+        } else {
+            inProgressDataTasks[url] = entry
+        }
+    }
+
+    /// A waiter was cancelled: if it was the last, stop the download itself.
+    private func abandonSharedFetch(_ url: URL, task: Task<Data?, Error>) {
+        guard let entry = inProgressDataTasks[url], entry.task == task, entry.waiters <= 1 else { return }
+        // Remove it first: a caller arriving now must start a fresh fetch, not
+        // join one that is about to report cancellation.
+        inProgressDataTasks[url] = nil
+        task.cancel()
+    }
+
 
     /// Load both image and data from a URL, using cache if available
     /// - Parameter url: The URL to load the image from
@@ -552,17 +632,35 @@ actor ImageLoader {
     ///     bitmaps. When nil, the full-resolution image is used (legacy behavior).
     ///   - crop: Optional transform to apply before caching (e.g. crop to square or 16:9)
     /// - Returns: The cached thumbnail UIImage
+    /// Cache label for thumbnails stored at their own aspect ratio. Entries
+    /// written before that existed are center-cropped squares under no label.
+    private static let uncroppedVariant = "uncropped"
+
+    /// Memory/disk lookup only — never touches the network. Lets a cell paint
+    /// a warm thumbnail immediately while deferring a cold fetch.
+    func cachedRemoteThumbnail(from url: URL, maxSize: CGFloat? = nil) async -> UIImage? {
+        if PhotosAssetURL.isPhotosAsset(url) { return nil }
+        guard let cached = await ThumbnailCache.shared.loadThumbnail(for: url, variant: Self.uncroppedVariant),
+              maxSize.map({ Self.pixelLongEdge(of: cached) <= $0 }) ?? true else { return nil }
+        return cached
+    }
+
+    /// `crop`, when given, produces the stored bitmap (the video grid crops to
+    /// 16:9). With no `crop` the thumbnail is stored uncropped, and the caller
+    /// decides how to fit it — the image grid's square mode just uses
+    /// `scaledToFill`, so one cache entry (and one diorama) serves both modes.
     func loadRemoteThumbnailCached(from url: URL, maxSize: CGFloat? = nil, crop: ((UIImage) -> UIImage)? = nil) async -> UIImage? {
         if PhotosAssetURL.isPhotosAsset(url) {
             let target = maxSize ?? ThumbnailGenerator.defaultThumbnailSize
             guard let image = await PhotosAssetStore.shared.thumbnail(for: url, maxSize: target) else { return nil }
             return crop.map { $0(image) } ?? image
         }
+        let variant: String? = crop == nil ? Self.uncroppedVariant : nil
         // Check ThumbnailCache first (fast memory cache, then HEIC disk)
         // The cache is keyed by URL alone, so an entry written by an uncapped
         // caller can be the full original; a capped caller regenerates it
         // instead of holding that bitmap.
-        if let cached = await ThumbnailCache.shared.loadThumbnail(for: url),
+        if let cached = await ThumbnailCache.shared.loadThumbnail(for: url, variant: variant),
            maxSize.map({ Self.pixelLongEdge(of: cached) <= $0 }) ?? true {
             return cached
         }
@@ -571,11 +669,17 @@ actor ImageLoader {
         var rawData: Data?
         if maxSize != nil {
             do {
-                rawData = try await loadRawData(from: url)
+                // Throttled: thumbnails queue behind a small gate that serves
+                // the newest request first, so a flick doesn't spend the
+                // network on cells that have already scrolled away.
+                rawData = try await loadRawData(from: url, throttled: true)
                 if rawData == nil {
                     AppLogger.imageLoader.warning("Thumbnail fetch returned no data (credential registered: \(MediaAuthorization.shared.credential(for: url) != nil, privacy: .public))")
                 }
+            } catch is CancellationError {
+                return nil
             } catch {
+                if Task.isCancelled { return nil }
                 AppLogger.imageLoader.warning("Thumbnail fetch failed: \(error.logCode, privacy: .public) (credential registered: \(MediaAuthorization.shared.credential(for: url) != nil, privacy: .public))")
             }
         }
@@ -585,6 +689,9 @@ actor ImageLoader {
             // Downsample directly from bytes — skips the full decode + normalize.
             base = downsampled
         } else {
+            // A cell that scrolled away has nothing to gain from the full-load
+            // fallback, which would start a second, unthrottled download.
+            if Task.isCancelled { return nil }
             // Full load (memory cache → disk cache → network + normalizeImage).
             // Also the fallback if the raw-data/downsample path failed.
             guard let image = try? await loadImage(from: url) else {
@@ -599,7 +706,7 @@ actor ImageLoader {
         let thumbnail = crop?(base) ?? base
 
         // Store in ThumbnailCache for fast future reloads
-        await ThumbnailCache.shared.saveThumbnail(thumbnail, for: url)
+        await ThumbnailCache.shared.saveThumbnail(thumbnail, for: url, variant: variant)
 
         return thumbnail
     }

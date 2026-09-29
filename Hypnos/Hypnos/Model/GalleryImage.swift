@@ -79,6 +79,16 @@ extension GalleryImage {
     }
 }
 
+// MARK: - Aspect ratio
+
+extension GalleryImage {
+    /// Width / height as reported by the source, when it reported both.
+    var reportedAspectRatio: CGFloat? {
+        guard let sourceWidth, let sourceHeight, sourceWidth > 0, sourceHeight > 0 else { return nil }
+        return CGFloat(sourceWidth) / CGFloat(sourceHeight)
+    }
+}
+
 // MARK: - Local File URL Re-resolution
 
 extension GalleryImage {

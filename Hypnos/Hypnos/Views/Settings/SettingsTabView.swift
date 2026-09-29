@@ -83,6 +83,13 @@ struct SettingsTabView: View {
                         .pickerStyle(.menu)
                     }
 
+                    Picker("Pictures Grid", selection: $appModel.galleryGridStyle) {
+                        ForEach(GalleryGridStyle.allCases) { style in
+                            Text(style.label).tag(style)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
                     // A window with rounded glass corners is a visionOS
                     // thing; on a phone the photo is content inside the
                     // screen, and rounding it just crops the picture.

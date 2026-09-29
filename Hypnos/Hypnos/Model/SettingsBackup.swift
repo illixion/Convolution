@@ -96,6 +96,7 @@ struct SettingsBackup: Codable {
     // optional so older backups (missing the keys) still decode, and a
     // restore leaves them untouched rather than resetting to defaults.
     var thumbnailStyle: String?
+    var galleryGridStyle: String?
     var reduceMotion: Bool?
     var defaultImageViewingMode: String?
     var enableStashTranscoding: Bool?

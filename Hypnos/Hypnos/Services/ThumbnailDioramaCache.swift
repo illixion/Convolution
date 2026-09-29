@@ -49,6 +49,10 @@ final class ThumbnailDioramaCache {
         c.totalCostLimit = 80 * 1024 * 1024 // ~80 MB of decoded thumbnail diorama bitmaps
         return c
     }()
+    /// Thumbnails Vision found no subject in. Not an error — a landscape or a
+    /// pattern has nothing to lift out — but without remembering it each such
+    /// tile would rerun Vision every time it scrolled back into view.
+    private var withoutSubject: Set<URL> = []
     private var inFlight: [URL: Task<Pair?, Never>] = [:]
     private var diskLoads: [URL: Task<Pair?, Never>] = [:]
 
@@ -106,6 +110,7 @@ final class ThumbnailDioramaCache {
     /// callers can pass an already-loaded thumbnail UIImage cheaply.
     func dioramaPair(for url: URL, source: () -> UIImage?) async -> Pair? {
         if let cached = cache.object(forKey: url as NSURL) { return cached }
+        if withoutSubject.contains(url) { return nil }
         if let existing = inFlight[url] { return await existing.value }
         guard let sourceImage = source() else { return nil }
 
@@ -120,6 +125,10 @@ final class ThumbnailDioramaCache {
                     Self.savePairToDisk(pair, for: url)
                 }
                 return pair
+            } catch BackgroundRemover.BackgroundRemovalError.noMaskResults {
+                self?.withoutSubject.insert(url)
+                AppLogger.backgroundRemover.info("Thumbnail has no foreground subject; keeping it flat")
+                return nil
             } catch {
                 AppLogger.backgroundRemover.warning("Thumbnail diorama generation failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
                 return nil
@@ -138,6 +147,7 @@ final class ThumbnailDioramaCache {
 
     func clearCache() {
         cache.removeAllObjects()
+        withoutSubject.removeAll()
         inFlight.values.forEach { $0.cancel() }
         inFlight.removeAll()
         diskLoads.values.forEach { $0.cancel() }
@@ -148,7 +158,7 @@ final class ThumbnailDioramaCache {
     // MARK: - Disk persistence
 
     nonisolated private static func diskKey(for url: URL) -> String {
-        let urlString = url.absoluteString + ":thumbnailDiorama"
+        let urlString = url.absoluteString + ":thumbnailDiorama:uncropped"
         let data = Data(urlString.utf8)
         var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
         data.withUnsafeBytes { bytes in
