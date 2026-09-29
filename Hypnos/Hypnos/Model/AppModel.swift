@@ -1746,6 +1746,9 @@ class AppModel {
         // URLs carry no credential of their own at all, that is every request.
         updateStashMediaCredential()
         updateNextcloudMediaCredential()
+        // Jellyfin often shares the Stash host behind one reverse proxy;
+        // keep the Stash key off its URLs from the first request on.
+        FilmSession.excludeStoredServerFromOtherCredentials()
 
         // Monitor memory pressure and downscale windows that have been
         // backgrounded (not in active room) for at least 2 minutes.

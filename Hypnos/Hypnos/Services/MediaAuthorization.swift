@@ -49,7 +49,24 @@ struct MediaAuthorization: Sendable {
 
     private let state = OSAllocatedUnfairLock(initialState: [Entry]())
 
+    /// URL prefixes that belong to a different server than the one
+    /// registered for their host, keyed by who set them. A host's credential
+    /// is never applied under one of these.
+    private let exclusions = OSAllocatedUnfairLock(initialState: [String: URL]())
+
     private init() {}
+
+    /// Marks everything under `baseURL` as belonging to another server, so the
+    /// credential registered for its host is not applied there; nil clears it.
+    ///
+    /// Credentials are matched by host alone, which is wrong when two servers
+    /// sit behind one reverse proxy: with Stash at `host/stash` and Jellyfin
+    /// at `host/jellyfin`, Stash's `?apikey=` went onto every Jellyfin stream
+    /// URL, and Jellyfin 10.11 reads it as its own `ApiKey` (query keys are
+    /// case-insensitive there), prefers it over `api_key`, and answers 401.
+    func excludeCredentials(under baseURL: URL?, owner: String) {
+        exclusions.withLock { $0[owner] = baseURL }
+    }
 
     /// Registers (or replaces) the credential for `host`, which is a bare
     /// hostname (`URL.host`), not a URL — accepting both would mean guessing
@@ -70,7 +87,7 @@ struct MediaAuthorization: Sendable {
     }
 
     func credential(for url: URL) -> MediaCredential? {
-        guard let host = normalizedHost(url.host) else { return nil }
+        guard let host = normalizedHost(url.host), !isExcluded(url) else { return nil }
         return state.withLock { entries in entries.first { $0.host == host }?.credential }
     }
 
@@ -136,6 +153,20 @@ struct MediaAuthorization: Sendable {
         queryItems.append(URLQueryItem(name: name, value: value))
         components.queryItems = queryItems
         return components.url ?? url
+    }
+
+    private func isExcluded(_ url: URL) -> Bool {
+        let bases = exclusions.withLock { Array($0.values) }
+        return bases.contains { base in
+            guard normalizedHost(base.host) == normalizedHost(url.host),
+                  effectivePort(base) == effectivePort(url) else { return false }
+            let prefix = base.path.hasSuffix("/") ? String(base.path.dropLast()) : base.path
+            return prefix.isEmpty || url.path == prefix || url.path.hasPrefix(prefix + "/")
+        }
+    }
+
+    private func effectivePort(_ url: URL) -> Int? {
+        url.port ?? (url.scheme?.lowercased() == "https" ? 443 : url.scheme?.lowercased() == "http" ? 80 : nil)
     }
 
     private func normalizedHost(_ host: String?) -> String? {

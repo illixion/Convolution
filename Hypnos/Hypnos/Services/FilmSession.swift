@@ -21,9 +21,32 @@ final class FilmSession {
 
     let player = FilmPlayer()
 
-    var server: String = UserDefaults.standard.string(forKey: "filmPlayer.jellyfinServer")
-        ?? UserDefaults.standard.string(forKey: "atmosSpike.jellyfinServer") ?? "" {
-        didSet { UserDefaults.standard.set(server, forKey: "filmPlayer.jellyfinServer") }
+    var server: String = FilmSession.storedServer {
+        didSet {
+            UserDefaults.standard.set(server, forKey: "filmPlayer.jellyfinServer")
+            Self.excludeFromOtherCredentials(server)
+        }
+    }
+
+    private nonisolated static var storedServer: String {
+        UserDefaults.standard.string(forKey: "filmPlayer.jellyfinServer")
+            ?? UserDefaults.standard.string(forKey: "atmosSpike.jellyfinServer") ?? ""
+    }
+
+    /// Registers the exclusion below for the saved server without building
+    /// the session. `AppModel.init` calls this, because a restored video
+    /// window can open a Jellyfin stream before anything touches `shared`.
+    nonisolated static func excludeStoredServerFromOtherCredentials() {
+        excludeFromOtherCredentials(storedServer)
+    }
+
+    /// Keeps a credential registered for the same host (Stash behind the
+    /// same reverse proxy) off Jellyfin URLs. See
+    /// `MediaAuthorization.excludeCredentials(under:owner:)`.
+    private nonisolated static func excludeFromOtherCredentials(_ server: String) {
+        let trimmed = server.trimmingCharacters(in: .whitespaces)
+        let url = URL(string: trimmed).flatMap { $0.host == nil ? nil : $0 }
+        MediaAuthorization.shared.excludeCredentials(under: url, owner: "jellyfin")
     }
     var apiKey: String = {
         // Same UserDefaults→Keychain migration shape as the Stash API key
@@ -60,6 +83,7 @@ final class FilmSession {
 
     private init() {
         restoreSound()
+        Self.excludeFromOtherCredentials(server)
     }
 
     // MARK: Sound settings

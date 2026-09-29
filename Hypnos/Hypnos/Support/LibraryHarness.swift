@@ -18,6 +18,7 @@
 
 #if DEBUG && os(macOS)
 
+import AVFoundation
 import Foundation
 
 enum LibraryHarness {
@@ -171,6 +172,9 @@ enum LibraryHarness {
             }
         }
 
+        await checkStreams(library: library, server: server, apiKey: apiKey,
+                           items: [wideStatic, crimson].compactMap { $0 }, atmosDemo: atmosDemo)
+
         // Progress / played / favorite writes, read back through the API.
         if let quietLedger {
             do {
@@ -209,6 +213,80 @@ enum LibraryHarness {
         }
 
         log("DONE")
+    }
+
+    /// Plays each routed stream through the app's own AVFoundation entry
+    /// point (`MediaAuthorization.asset(for:)`) with a Stash-style query
+    /// credential registered for the same host — the reverse-proxy layout
+    /// where the Stash key used to land on Jellyfin URLs and 401 them.
+    private static func checkStreams(library: JellyfinLibrary, server: URL, apiKey: String,
+                                     items: [LibraryItem], atmosDemo: LibraryItem?) async {
+        guard let host = server.host else { return }
+        let auth = MediaAuthorization.shared
+        auth.register(host: host, credential: .queryParam(name: "apikey", value: "harness-not-a-jellyfin-key"))
+        defer {
+            auth.unregister(host: host)
+            auth.excludeCredentials(under: nil, owner: "jellyfin")
+        }
+
+        var streams: [(String, URL)] = []
+        for item in items {
+            if case .genericPlayer(let plan)? = try? await library.playbackRoute(for: item) {
+                streams.append(("\(item.title) [\(plan.method)]", plan.streamURL))
+            }
+        }
+        if let atmosDemo {
+            // Routes to FilmPlayer through the plugin; its HLS form is the
+            // 4K HDR HEVC case the generic player has to handle when the
+            // plugin isn't installed.
+            streams.append(("\(atmosDemo.title) [hls]", JellyfinLibrary.hlsStreamURL(
+                baseURL: server, itemId: atmosDemo.id, mediaSourceId: atmosDemo.id,
+                sourceVideoCodec: "hevc", playSessionId: UUID().uuidString, token: apiKey)))
+        }
+
+        for (label, url) in streams {
+            auth.excludeCredentials(under: nil, owner: "jellyfin")
+            log("stream(\(label)) sameHostCredential=applied \(await playProbe(url))")
+            auth.excludeCredentials(under: server, owner: "jellyfin")
+            let untouched = auth.authorizedURL(url) == url
+            log("stream(\(label)) sameHostCredential=excluded urlUntouched=\(untouched) \(await playProbe(url))")
+        }
+
+        // A token the server rejects has to fail at routing, under the Play
+        // button, not as a player window that never shows a frame.
+        let revoked = JellyfinLibrary(baseURL: server, accessToken: "revoked-token", userId: "revoked-user")
+        if let item = items.first {
+            do {
+                _ = try await revoked.playbackRoute(for: item)
+                log("playbackRoute(revokedToken)=ROUTED (expected a failure)")
+            } catch {
+                log("playbackRoute(revokedToken) failed as expected: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Plays `url` for up to 20 s and describes what came out.
+    @MainActor
+    private static func playProbe(_ url: URL) async -> String {
+        let item = AVPlayerItem(asset: MediaAuthorization.shared.asset(for: url))
+        let player = AVPlayer(playerItem: item)
+        player.isMuted = true
+        player.play()
+        defer { player.pause() }
+        let start = Date()
+        while Date().timeIntervalSince(start) < 20 {
+            if item.status == .failed {
+                return "FAILED: \(item.error?.localizedDescription ?? "unknown")"
+            }
+            if player.timeControlStatus == .playing, item.presentationSize != .zero {
+                let hasAudio = item.tracks.contains { $0.assetTrack?.mediaType == .audio }
+                return String(format: "playing after %.1fs size=%.0fx%.0f audio=%@",
+                              Date().timeIntervalSince(start), item.presentationSize.width,
+                              item.presentationSize.height, hasAudio ? "yes" : "no")
+            }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        return "STALLED (\(player.reasonForWaitingToPlay?.rawValue ?? "paused"))"
     }
 
     private static func describeRoute(_ route: PlaybackRoute) -> String {

@@ -229,6 +229,19 @@ reading it) — no new plumbing needed, but the app's build **must be signed**
 is not) or every Keychain call fails with `errSecMissingEntitlement`
 (-34018), silently leaving the API key unset.
 
+**Credentials are matched by host, and Stash and Jellyfin often share one.**
+Behind a reverse proxy (`host/stash`, `host/jellyfin`) the Stash
+`.queryParam("apikey")` credential was appended to every Jellyfin stream URL,
+and Jellyfin 10.11 reads it as its own `ApiKey` (ASP.NET query keys are
+case-insensitive), prefers it over `api_key`, and 401s the HLS playlist —
+AVPlayer reports only `NSURLErrorDomain -1013`. `FilmSession` now registers
+its server with `MediaAuthorization.excludeCredentials(under:owner:)` (from
+`AppModel.init` too, for restored windows), and the macOS `-LibraryHarness`
+replays every routed stream with a fake same-host Stash key both applied and
+excluded, so this shows up as a `FAILED`/`playing` pair rather than a silent
+blank player. `127.0.0.1` hosts both dev servers, so the dev setup has the
+same layout.
+
 ## What's excluded, and why (capability flags + fencing)
 
 `PlatformCapabilities` (`Support/PlatformShims.swift`) — visionOS-only

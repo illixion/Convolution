@@ -29,7 +29,8 @@ enum PlaybackRoute: Sendable {
     case atmosFilmPlayer
     /// The app's generic video player. `direct` streams the source
     /// natively-playable codec as-is; `transcode` asks the server for an
-    /// HLS transcode (Jellyfin's `master.m3u8`) because
+    /// HLS stream (Jellyfin's `main.m3u8`, video copied when the codec
+    /// allows) because
     /// `NativeVideoDecodeProbe` can't decode it directly.
     case genericPlayer(GenericPlaybackPlan)
 }

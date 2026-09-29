@@ -21,6 +21,8 @@ enum JellyfinLibraryError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notConfigured: return "Set the Jellyfin server URL and sign in first."
+        case .http(_, 401):
+            return "Jellyfin didn't accept the saved sign-in. Sign out and back in under Settings → Jellyfin."
         case .http(let path, let status): return "\(path): HTTP \(status)"
         case .noSuchUser: return "No Jellyfin user to report progress as."
         }
@@ -136,6 +138,20 @@ private extension LibraryItem {
             playedPercentage: dto.UserData?.PlayedPercentage
         )
     }
+}
+
+/// The parts of `GET /Items/{id}/PlaybackInfo` that shape a stream request.
+private struct JFPlaybackInfo: Decodable {
+    struct MediaSource: Decodable {
+        struct Stream: Decodable {
+            let `Type`: String?
+            let Codec: String?
+        }
+        let Id: String?
+        let MediaStreams: [Stream]?
+    }
+    let MediaSources: [MediaSource]?
+    let PlaySessionId: String?
 }
 
 /// Jellyfin's per-item Atmos Objects plugin state (`GET /AtmosObjects/{id}`).
@@ -411,12 +427,31 @@ actor JellyfinLibrary: MediaServerLibrary {
             return .atmosFilmPlayer
         }
 
+        // Header-authenticated, so a token the server no longer accepts
+        // fails here, under the Play button, rather than as a player window
+        // that never shows a frame (every stream URL below authenticates by
+        // query parameter and AVPlayer reports its 401 as nothing at all).
+        let userId = try await resolveUserId()
+        let info: JFPlaybackInfo = try await get("Items/\(item.id)/PlaybackInfo", query: [
+            .init(name: "userId", value: userId),
+        ])
+        let source = info.MediaSources?.first
+        let mediaSourceId = source?.Id ?? item.id
+        // One id per play. Jellyfin names a transcode's output after the
+        // media, device and play session, so without one every play of an
+        // item on this device maps onto the same job, including a stale one
+        // left behind by a player that vanished mid-stream (a headset
+        // reboot). It also lets the stop report end this play's transcode.
+        let playSessionId = info.PlaySessionId ?? UUID().uuidString
+        Self.playSessions.withLock { $0[item.id] = playSessionId }
+
         // Confirmed directly against the dev instance: `/Items/{id}/stream`
         // (as opposed to `/Videos/{id}/stream`) is a flat 404 — Jellyfin's
         // direct-play route lives under `Videos`, not `Items`.
         let directURL = baseURL.appending(path: "Videos/\(item.id)/stream")
             .appending(queryItems: [
                 .init(name: "static", value: "true"),
+                .init(name: "MediaSourceId", value: mediaSourceId),
                 .init(name: "api_key", value: authHeaderToken),
             ])
         let resumeSeconds = item.userData.resumeSeconds
@@ -425,32 +460,99 @@ actor JellyfinLibrary: MediaServerLibrary {
             return .genericPlayer(GenericPlaybackPlan(method: .direct, streamURL: directURL, resumeSeconds: resumeSeconds))
         }
 
-        // `MediaSourceId` is required: without it Jellyfin (10.11 confirmed)
-        // answers 400 "The mediaSourceId field is required.", which AVPlayer
-        // surfaces only as "resource unavailable". An item's default media
-        // source shares the item's id. `DeviceId` keys the server's
-        // transcode job, which `api_key` query auth otherwise leaves unset.
-        var transcodeURL = baseURL.appending(path: "Videos/\(item.id)/master.m3u8")
-        transcodeURL.append(queryItems: [
-            .init(name: "api_key", value: authHeaderToken),
-            .init(name: "MediaSourceId", value: item.id),
-            .init(name: "DeviceId", value: JellyfinClientIdentity.deviceId),
-            .init(name: "VideoCodec", value: "h264"),
-            .init(name: "AudioCodec", value: "aac"),
-        ])
+        let sourceVideoCodec = source?.MediaStreams?
+            .first { $0.Type == "Video" }?.Codec?.lowercased()
+        let transcodeURL = Self.hlsStreamURL(
+            baseURL: baseURL, itemId: item.id, mediaSourceId: mediaSourceId,
+            sourceVideoCodec: sourceVideoCodec, playSessionId: playSessionId,
+            token: authHeaderToken)
         return .genericPlayer(GenericPlaybackPlan(method: .transcode, streamURL: transcodeURL, resumeSeconds: resumeSeconds))
+    }
+
+    /// Jellyfin's HLS stream for a source AVFoundation can't open directly
+    /// (MKV, WebM). Each parameter is here for a measured reason, all against
+    /// the dev instance (10.11) and AVPlayer:
+    ///
+    /// - `VideoBitrate`/`AudioBitrate`/`MaxStreamingBitrate`: without them
+    ///   Jellyfin sizes a transcode for 640 kbps and scales the picture to
+    ///   416 px wide, whatever the source.
+    /// - `VideoCodec` names the source's own codec when Apple platforms decode
+    ///   it (H.264, HEVC), so the video is stream-copied rather than
+    ///   re-encoded; anything else (VP9, AV1) is encoded to H.264. Copying is
+    ///   also what lets a 4K HEVC source start in about 2 s instead of
+    ///   waiting on a software 4K encode the server may not keep up with.
+    /// - `main.m3u8` rather than `master.m3u8`: for an HDR source whose video
+    ///   is copied, the master playlist also offers an SDR H.264 variant, and
+    ///   AVPlayer may pick that one. That is a full 4K re-encode (it ran the
+    ///   dev container out of memory). The variant playlist is exactly the
+    ///   copied stream.
+    /// - `SegmentContainer=mp4`: HEVC in HLS has to be fragmented MP4, not TS.
+    /// - `AudioCodec=aac`, up to 5.1: plays on every Apple platform. Jellyfin
+    ///   re-encoded EAC3 even when offered it first.
+    /// - `MediaSourceId` is required. Without it Jellyfin (10.11 confirmed)
+    ///   answers 400 "The mediaSourceId field is required.", which AVPlayer
+    ///   surfaces only as "resource unavailable".
+    /// - `DeviceId` and `PlaySessionId` key the server's transcode job, which
+    ///   `api_key` query auth otherwise leaves unset.
+    static func hlsStreamURL(baseURL: URL, itemId: String, mediaSourceId: String,
+                             sourceVideoCodec: String?, playSessionId: String,
+                             token: String) -> URL {
+        let videoCodec = switch sourceVideoCodec {
+        case "hevc", "h265": "hevc"
+        default: "h264"
+        }
+        let maxBitrate = 120_000_000
+        let audioBitrate = 640_000
+        return baseURL.appending(path: "Videos/\(itemId)/main.m3u8").appending(queryItems: [
+            .init(name: "api_key", value: token),
+            .init(name: "MediaSourceId", value: mediaSourceId),
+            .init(name: "DeviceId", value: JellyfinClientIdentity.deviceId),
+            .init(name: "PlaySessionId", value: playSessionId),
+            .init(name: "VideoCodec", value: videoCodec),
+            .init(name: "AudioCodec", value: "aac"),
+            .init(name: "TranscodingMaxAudioChannels", value: "6"),
+            .init(name: "SegmentContainer", value: "mp4"),
+            .init(name: "MaxStreamingBitrate", value: String(maxBitrate)),
+            .init(name: "VideoBitrate", value: String(maxBitrate - audioBitrate)),
+            .init(name: "AudioBitrate", value: String(audioBitrate)),
+        ])
+    }
+
+    /// Ends this play's transcode on the server. A stop report does the same
+    /// thing, but only a play that got as far as a start report sends one; a
+    /// stream that never produced a frame would otherwise keep its ffmpeg job
+    /// running until Jellyfin's idle timer notices.
+    func stopTranscoding(itemId: String) async {
+        guard let playSessionId = Self.playSessions.withLock({ $0.removeValue(forKey: itemId) }) else { return }
+        var request = URLRequest(url: baseURL.appending(path: "Videos/ActiveEncodings").appending(queryItems: [
+            .init(name: "deviceId", value: JellyfinClientIdentity.deviceId),
+            .init(name: "playSessionId", value: playSessionId),
+        ]))
+        request.httpMethod = "DELETE"
+        request.setValue(JellyfinClientIdentity.authorizationHeader(token: authHeaderToken), forHTTPHeaderField: "Authorization")
+        _ = try? await URLSession.shared.data(for: request)
     }
 
     // MARK: - Progress reporting
 
-    /// One play-session id per item currently being reported, so
-    /// progress/stop calls after `reportPlaybackStarted` reference the same
-    /// session Jellyfin opened.
-    private var playSessions: [String: String] = [:]
+    /// One play-session id per item currently playing, so the stream URL,
+    /// the start/progress/stop reports and `stopTranscoding` all name the
+    /// same session. Static because `LibraryService.current()` builds a
+    /// fresh `JellyfinLibrary` per use: the one that routed playback is not
+    /// the one that reports on it.
+    private static let playSessions = OSAllocatedUnfairLock(initialState: [String: String]())
+
+    private func playSessionId(for itemId: String) -> String {
+        Self.playSessions.withLock { sessions in
+            if let existing = sessions[itemId] { return existing }
+            let fresh = UUID().uuidString
+            sessions[itemId] = fresh
+            return fresh
+        }
+    }
 
     func reportPlaybackStarted(itemId: String, positionSeconds: Double) async {
-        let sessionId = UUID().uuidString
-        playSessions[itemId] = sessionId
+        let sessionId = playSessionId(for: itemId)
         await post("Sessions/Playing", body: [
             "ItemId": itemId,
             "PlaySessionId": sessionId,
@@ -463,7 +565,7 @@ actor JellyfinLibrary: MediaServerLibrary {
     func reportPlaybackProgress(itemId: String, positionSeconds: Double, isPaused: Bool) async {
         await post("Sessions/Playing/Progress", body: [
             "ItemId": itemId,
-            "PlaySessionId": playSessions[itemId] ?? UUID().uuidString,
+            "PlaySessionId": playSessionId(for: itemId),
             "PositionTicks": Int64(positionSeconds * 10_000_000),
             "IsPaused": isPaused,
             "CanSeek": true,
@@ -473,10 +575,10 @@ actor JellyfinLibrary: MediaServerLibrary {
     func reportPlaybackStopped(itemId: String, positionSeconds: Double) async {
         await post("Sessions/Playing/Stopped", body: [
             "ItemId": itemId,
-            "PlaySessionId": playSessions[itemId] ?? UUID().uuidString,
+            "PlaySessionId": playSessionId(for: itemId),
             "PositionTicks": Int64(positionSeconds * 10_000_000),
         ])
-        playSessions[itemId] = nil
+        Self.playSessions.withLock { _ = $0.removeValue(forKey: itemId) }
     }
 
     func setPlayed(itemId: String, played: Bool) async throws {

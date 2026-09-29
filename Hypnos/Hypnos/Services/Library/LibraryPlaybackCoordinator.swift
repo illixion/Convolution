@@ -68,8 +68,13 @@ enum LibraryPlaybackCoordinator {
         var started = false
         var lastPosition: Double = 0
         defer {
+            let position = lastPosition
+            // A stop report also ends the server's transcode for this play;
+            // one that never started has to end it explicitly.
             if started {
-                Task { await library.reportPlaybackStopped(itemId: itemId, positionSeconds: lastPosition) }
+                Task { await library.reportPlaybackStopped(itemId: itemId, positionSeconds: position) }
+            } else {
+                Task { await library.stopTranscoding(itemId: itemId) }
             }
         }
 
@@ -124,7 +129,10 @@ final class GenericProgressReporter {
     }
 
     func finish() {
-        guard started else { return }
+        guard started else {
+            Task { [library, itemId] in await library.stopTranscoding(itemId: itemId) }
+            return
+        }
         started = false
         Task { await library.reportPlaybackStopped(itemId: itemId, positionSeconds: lastPosition) }
     }
