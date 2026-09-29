@@ -123,6 +123,23 @@ final class VideoWindowModel {
     /// timeupdate writes so the thumb doesn't fight the drag.
     var isScrubbing: Bool = false
 
+    // MARK: - Load Status
+
+    /// True once the player has reported the video's size, i.e. there is a
+    /// picture in the window. Until then the chrome stays up: a player that
+    /// never produces a frame is an empty, transparent window, and with the
+    /// ornament auto-hidden there was nothing left to see or tap.
+    private(set) var hasPresentedVideo = false
+    /// Nothing has appeared `loadStallTimeout` after the player started.
+    private(set) var isLoadStalled = false
+    /// Every renderer has given up on this video. Shown in place of the video.
+    private(set) var playbackFailure: String?
+    /// Bumped by Retry; part of the players' view identity, so a retry
+    /// rebuilds the player rather than reusing the one that failed.
+    private(set) var playbackAttempt = 0
+    @ObservationIgnored private var loadStallTask: Task<Void, Never>?
+    static let loadStallTimeout: Duration = .seconds(20)
+
     /// Command hooks bound by WebVideoPlayerView.updateUIView (only when this
     /// model is passed as the player's `playbackModel`). They evaluate JS on
     /// the underlying <video> element.
@@ -197,7 +214,7 @@ final class VideoWindowModel {
         self.video3DSettings = windowValue.video3DSettings
         self.pseudo3DEnabled = windowValue.pseudo3DEnabled
         self.pseudo3DSettings = windowValue.pseudo3DSettings ?? .default
-        self.isMuted = appModel.videoAutoplayMuted
+        self.isMuted = Self.startsMuted(windowValue.video, appModel: appModel)
 
         // Snapshot the browse list + pagination so prev/next navigate over this
         // window's own copy (parallels PhotoWindowModel.init). A window value may
@@ -238,6 +255,70 @@ final class VideoWindowModel {
             pseudo3DDepthMode = .cached(videoIdentity: video.identity)
         }
         resolvePlaybackRenderer()
+        armLoadStallWatch()
+    }
+
+    /// Browsing autoplay follows Settings (muted by default). A Library title
+    /// is different: someone pressed Play on a film, and a muted start read
+    /// as the stream having no audio at all.
+    private static func startsMuted(_ video: GalleryVideo, appModel: AppModel) -> Bool {
+        if LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity) != nil {
+            return false
+        }
+        return appModel.videoAutoplayMuted
+    }
+
+    // MARK: - Load Status
+
+    /// Called when the player reports the video's size (its first frame).
+    func markVideoPresented() {
+        guard !hasPresentedVideo else { return }
+        hasPresentedVideo = true
+        isLoadStalled = false
+        loadStallTask?.cancel()
+        // The auto-hide timer held off while the window was empty; start it now.
+        if !isUIHidden { startAutoHideTimer() }
+    }
+
+    /// The last fallback failed; there is nothing further to try.
+    func reportPlaybackFailure(_ message: String) {
+        AppLogger.videoWindow.error("[\(self.videoDisplayName, privacy: .public)] playback failed: \(message, privacy: .public)")
+        playbackFailure = message
+        isLoadStalled = false
+        loadStallTask?.cancel()
+        revealChrome()
+    }
+
+    /// Starts this video again from a fresh player.
+    func retryPlayback() {
+        playbackFailure = nil
+        isLoadStalled = false
+        hasPresentedVideo = false
+        playbackAttempt += 1
+        usingTranscodedStream = false
+        pseudo3DEnabled = false
+        resolvePlaybackRenderer()
+        armLoadStallWatch()
+    }
+
+    private func armLoadStallWatch() {
+        loadStallTask?.cancel()
+        loadStallTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.loadStallTimeout)
+            guard !Task.isCancelled, let self,
+                  !self.hasPresentedVideo, self.playbackFailure == nil,
+                  // Genuine stereoscopic plays in the immersive space and
+                  // never reports a size to this window.
+                  !self.shouldUse3DMode else { return }
+            AppLogger.videoWindow.error("[\(self.videoDisplayName, privacy: .public)] no picture after \(Self.loadStallTimeout, privacy: .public)")
+            self.isLoadStalled = true
+            self.revealChrome()
+        }
+    }
+
+    private func revealChrome() {
+        cancelAutoHideTimer()
+        isUIHidden = false
     }
 
     /// Call from onDisappear.
@@ -251,6 +332,8 @@ final class VideoWindowModel {
         progressiveEngageTask = nil
         playbackRendererTask?.cancel()
         playbackRendererTask = nil
+        loadStallTask?.cancel()
+        loadStallTask = nil
         photosResolveTask?.cancel()
         photosResolveTask = nil
         loopController.reset()
@@ -326,9 +409,13 @@ final class VideoWindowModel {
         currentTime = 0
         duration = 0
         isPaused = true
-        isMuted = appModel.videoAutoplayMuted
+        isMuted = Self.startsMuted(newVideo, appModel: appModel)
         bufferedEnd = 0
         isScrubbing = false
+        hasPresentedVideo = false
+        isLoadStalled = false
+        playbackFailure = nil
+        armLoadStallWatch()
     }
 
     func loadMoreVideos() async {
@@ -732,7 +819,8 @@ final class VideoWindowModel {
     /// its network retries are exhausted). Falls forward to the transcode; with
     /// no transcode available the player keeps its own retry behaviour.
     func handleSourceUnplayable() {
-        switchToTranscodedStream(reason: "original file is not decodable by WebKit")
+        guard !switchToTranscodedStream(reason: "original file is not decodable by WebKit") else { return }
+        reportPlaybackFailure("The server didn't send a video this device can play. Check that the server is reachable and that you're still signed in.")
     }
 
     private func resolvePlaybackRenderer() {
@@ -918,9 +1006,12 @@ final class VideoWindowModel {
         guard appModel.autoHideDelay > 0 else { return }
         guard !hasOpenPopover else { return }
 
+        // Hide only over a picture; `markVideoPresented` re-arms this.
+        guard hasPresentedVideo else { return }
+
         autoHideTask = Task {
             try? await Task.sleep(for: .seconds(appModel.autoHideDelay))
-            if !Task.isCancelled, !self.hasOpenPopover {
+            if !Task.isCancelled, !self.hasOpenPopover, self.hasPresentedVideo {
                 isUIHidden = true
                 scheduleWindowControlsHiding()
             }

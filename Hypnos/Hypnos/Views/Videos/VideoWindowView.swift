@@ -135,7 +135,7 @@ struct VideoWindowView: View {
                             }
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .id("\(video.id)_pseudo3d")
+                        .id("\(video.id)_pseudo3d_\(windowModel.playbackAttempt)")
                     } else {
                         switch windowModel.playbackRenderer {
                         case .resolving:
@@ -164,7 +164,7 @@ struct VideoWindowView: View {
                             // stretching — the fix for tall videos appearing wide.
                             .aspectRatio(windowModel.videoAspectRatio, contentMode: .fit)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .id("\(video.id)_native")
+                            .id("\(video.id)_native_\(windowModel.playbackAttempt)")
 
                         case .webKit:
                             #if canImport(WebKit)
@@ -189,7 +189,7 @@ struct VideoWindowView: View {
                                 }
                             )
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .id("\(video.id)_web")
+                            .id("\(video.id)_web_\(windowModel.playbackAttempt)")
                             #else
                             // No WebKit on tvOS, so no fallback decoder either —
                             // if AVFoundation can't play the source natively,
@@ -242,6 +242,12 @@ struct VideoWindowView: View {
 
                 Spacer()
                     .frame(height: ornamentBottomPadding)
+            }
+
+            if !appModel.allWindowsHidden, !windowModel.shouldUse3DMode,
+               windowModel.playbackFailure != nil || windowModel.isLoadStalled {
+                loadStatusCard
+                    .padding(.bottom, ornamentBottomPadding)
             }
 
             // Toast notification (A-B loop feedback)
@@ -464,6 +470,40 @@ struct VideoWindowView: View {
         }
     }
 
+    // MARK: - Load Status
+
+    /// Shown over the video when it failed or hasn't produced a picture —
+    /// the same shape as the photo viewer's load-failure card. Without it a
+    /// stream that never delivered a frame left a transparent window.
+    private var loadStatusCard: some View {
+        VStack(spacing: 16) {
+            Image(systemName: windowModel.playbackFailure != nil
+                  ? "exclamationmark.triangle" : "hourglass")
+                .font(.system(size: 44))
+                .foregroundStyle(.secondary)
+            Text(windowModel.playbackFailure != nil
+                 ? "Couldn't play this video" : "Still waiting for the server")
+                .font(.title3.weight(.semibold))
+            Text(windowModel.playbackFailure
+                 ?? "The video hasn't started yet. You can keep waiting, retry, or close the window.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+            Button {
+                windowModel.retryPlayback()
+            } label: {
+                Label("Retry", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(32)
+        .glassBackgroundEffect(in: RoundedRectangle(cornerRadius: 24))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(A11y.Video.loadStatus)
+    }
+
     // MARK: - Ornament
 
     /// Unified ornament for both pushed and standalone windows.
@@ -519,6 +559,7 @@ struct VideoWindowView: View {
 
         let videoAspectRatio = videoSize.width / videoSize.height
         windowModel.videoAspectRatio = videoAspectRatio
+        windowModel.markVideoPresented()
 
         // The letterbox above is all a fixed-size window needs; the rest of
         // this method resizes the window to the video, which only visionOS allows.

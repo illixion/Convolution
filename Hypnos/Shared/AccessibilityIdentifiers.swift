@@ -45,6 +45,12 @@ enum A11y {
         static let localBrowser = "albums.localBrowser"
     }
 
+    /// Video window.
+    enum Video {
+        /// The stalled/failed card shown in place of a video with no picture.
+        static let loadStatus = "video.loadStatus"
+    }
+
     /// First-run flow.
     enum Welcome {
         static let panel = "welcome.panel"
