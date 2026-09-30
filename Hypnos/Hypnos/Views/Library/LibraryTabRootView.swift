@@ -55,7 +55,11 @@ struct LibraryTabRootView: View {
         // Dark whatever the system appearance, like the Apple TV app: the
         // page is artwork, and a white page between backdrops glares.
         .environment(\.colorScheme, .dark)
+        #if !os(visionOS)
+        // On visionOS NavigationStack supplies rounded glass. A rectangular
+        // backing outside it fills the transparent window corners with black.
         .background(Color.black)
+        #endif
         .libraryPlayback(playback)
         .task(id: LibraryService.configurationKey) {
             await model.start()
