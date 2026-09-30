@@ -1,31 +1,24 @@
 /*
  Hypnos - film player window
 
- The film's picture with its Atmos objects as spatial sources around it
- (RAVEFilm's `FilmVideoView` and `FilmStageView`, driven by one
- `FilmPlayer`). On visionOS it is its own window: the sound stage is
- anchored to the window, so the screen is the front wall of the room
- wherever the window goes, and the transport sits in an ornament with
- tuning left in Settings. On iOS the same window id opens it as a tool
- sheet (`IOSWindowRouter`), with AirPods head tracking and tuning below the
- picture.
+ The film picture and Atmos object audio keep one RAVEFilm clock. Its
+ transport uses RAVEUI's RAVEPlayerControls, just like general videos and
+ Raven's converted browser video. Sound tuning uses a separate window on visionOS
+ and a sheet elsewhere. Mute leaves saved gain levels intact.
 
- tvOS: the objects play through RAVEFilm's `FilmPhaseStageView` (PHASE)
- rather than RealityKit's stage, because PHASE is what the system gives
- AirPods head tracking and the listener's personalized spatial audio
- profile to (the app is signed with the head-pose and profile-access
- entitlements). It renders binaural, which is right for AirPods and, as
- heard on a HomePod mini stereo pair, for HomePods too. The listener faces
- the TV; the Sound panel off the transport sets the room, reverb, bass,
- head tracking and the picture's offset, saved between launches. Recenter
- (transport and Sound panel) makes the way the wearer faces the front, and
- the stage recentres by itself whenever playback resumes. The objects
- button overlays RAVEFilm's `FilmObjectMapPanel` (top and front views,
- overhead count). iOS's AirPods
- tracker recentres on resume the same way.
+ visionOS uses a bottom-front ornament and offers realtime 3D. A compressed
+ sample tap feeds RAVEMedia's clocked SampleBufferFrameSource; the original
+ picture renderer stays primed while only its visible surface changes.
+ Atmos transport, seeking and progress reporting stay with FilmPlayer.
+
+ iOS/macOS use the AirPods tracker for the listener; Recenter is beside the
+ transport when tracking is active. tvOS keeps its PHASE stage and focusable
+ controls. Head tracking recentres on resume on all three platforms.
  */
 
 import RAVEFilm
+import RAVEMedia
+import RAVEUI
 import simd
 import SwiftUI
 
@@ -36,6 +29,15 @@ struct FilmPlayerView: View {
     private var player: FilmPlayer { session.player }
     #if os(tvOS) || os(iOS)
     @State private var nowPlaying: FilmNowPlaying?
+    #endif
+
+    #if os(visionOS)
+    @Environment(AppModel.self) private var appModel
+    @State private var stereoSource: SampleBufferFrameSource?
+    @State private var mountedDepthModelName: String?
+    @State private var showsDepthSetup = false
+    @State private var chromeOpen = false
+    @State private var stereoFailure: String?
     #endif
 
     var body: some View {
@@ -52,6 +54,9 @@ struct FilmPlayerView: View {
                 #endif
             }
             .onDisappear {
+                #if os(visionOS)
+                stopStereo()
+                #endif
                 player.pause()
                 session.isPlayerOpen = false
                 session.saveSound()
@@ -64,6 +69,32 @@ struct FilmPlayerView: View {
             #if os(tvOS) || os(iOS)
             .onChange(of: session.loadedItem?.name) { _, name in
                 if let name { nowPlaying?.setTitle(name) }
+            }
+            #endif
+            #if os(visionOS)
+            .sheet(isPresented: $showsDepthSetup) {
+                DepthModelSetupSheet(onModelReady: { startStereo() })
+            }
+            .alert("3D unavailable", isPresented: Binding(
+                get: { stereoFailure != nil }, set: { if !$0 { stereoFailure = nil } }
+            )) { Button("OK", role: .cancel) {} } message: { Text(stereoFailure ?? "") }
+            .onChange(of: session.loadedItem?.id) { _, _ in stopStereo() }
+            .onChange(of: appModel.realtimeDepthModelName) { _, name in
+                if stereoSource != nil, mountedDepthModelName != name {
+                    stopStereo()
+                    startStereo()
+                }
+            }
+            .task(id: stereoSource.map(ObjectIdentifier.init)) {
+                guard let source = stereoSource else { return }
+                while !Task.isCancelled {
+                    if source.decodeFailure != nil {
+                        stopStereo()
+                        stereoFailure = "This video's picture could not be converted. Playback continues in 2D."
+                        return
+                    }
+                    try? await Task.sleep(for: .milliseconds(250))
+                }
             }
             #endif
             // Library-feature progress sync for the Atmos/FilmPlayer route —
@@ -105,29 +136,34 @@ struct FilmPlayerView: View {
         #if os(visionOS)
         ZStack {
             FilmVideoView(player: player.video)
-                // Draws nothing; it places the sound sources around the window.
-                // A RealityView takes the window's whole depth by default, and a
-                // ZStack then parks its 2D siblings at the front of that depth,
-                // ~15cm proud of the glass (the pseudo-3D player hit the same
-                // thing). Flattened behind the picture, the stage adds no depth
-                // and its origin is the glass itself, where the room is measured
-                // from.
+                .padding(.bottom, 180)
+                .opacity(stereoSource == nil ? 1 : 0)
+                // The audio stage contributes no window depth. It remains
+                // mounted when only the picture changes to stereo.
                 .background {
                     FilmStageView(player: player, listenerDistance: session.listenerDistance)
                         .frame(depth: 0)
                 }
-            if session.showMap {
-                FilmObjectMapPanel(player: player)
-                    .frame(width: 520)
-                    .padding(24)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            if let source = stereoSource {
+                RAVEExternalStereoVideoView(
+                    source: source, settings: session.stereoSettings, chromeOpen: chromeOpen,
+                    onUnavailable: {
+                        guard stereoSource === source else { return }
+                        stopStereo()
+                        stereoFailure = "The 3D renderer is unavailable. Playback continues in 2D."
+                    }
+                )
+                // Keep the picture out of the ornament's footprint. The same
+                // measured separation keeps Hypnos/Raven controls reachable.
+                .padding(.bottom, 180)
             }
         }
-        .ornament(attachmentAnchor: .scene(.bottom)) {
-            FilmTransport(player: player)
-                .padding()
+        .ornament(attachmentAnchor: .scene(.bottomFront)) {
+            FilmTransport(player: player, stereoEnabled: stereoSource != nil,
+                          onToggle3D: { stereoSource == nil ? startStereo() : stopStereo() },
+                          onModalChanged: { chromeOpen = $0 })
                 .frame(width: 640)
-                .glassBackgroundEffect()
+                .padding(.bottom, 80)
         }
         #elseif os(tvOS)
         ZStack(alignment: .bottom) {
@@ -137,113 +173,59 @@ struct FilmPlayerView: View {
                     FilmPhaseStageView(player: player, headTracking: session.headTracking,
                                        recenterRequest: session.recenterRequest)
                 }
-            if session.showMap {
-                FilmObjectMapPanel(player: player)
-                    .frame(width: 760)
-                    .padding(60)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            }
-            TVFilmTransport(player: player)
-                .padding(.bottom, 40)
+            FilmTransport(player: player).frame(width: 820).padding(.bottom, 40)
         }
-        .onPlayPauseCommand {
-            player.isPlaying ? player.pause() : player.play()
-        }
-        #elseif os(iOS)
-        Form {
-            Section(session.loadedItem?.name ?? "") {
-                ZStack {
+        .onPlayPauseCommand { player.isPlaying ? player.pause() : player.play() }
+        #else
+        ZStack(alignment: .bottom) {
+            Color.black.ignoresSafeArea()
+            FilmVideoView(player: player.video)
+                .background {
                     FilmStageView(player: player) { HeadphoneHeadTracker.shared.orientation }
-                    FilmVideoView(player: player.video)
                 }
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .listRowInsets(EdgeInsets())
-                FilmTransport(player: player)
-            }
-            Section("Head Tracking") { FilmHeadTrackingRow() }
-            Section("Objects") {
-                FilmObjectMapPanel(player: player)
-            }
-            Section("Tuning") { FilmTuning() }
-            Section("Telemetry") { FilmTelemetry(player: player) }
+            FilmTransport(player: player).padding(16)
         }
-        .onAppear { HeadphoneHeadTracker.shared.start() }
+        .onAppear { if session.headTracking { HeadphoneHeadTracker.shared.start() } }
         .onDisappear { HeadphoneHeadTracker.shared.stop() }
-        // Someone who paused and turned away comes back facing the picture.
+        .onChange(of: session.headTracking) { _, enabled in
+            if enabled { HeadphoneHeadTracker.shared.start() }
+            else { HeadphoneHeadTracker.shared.stop() }
+        }
         .onChange(of: player.isPlaying) { _, playing in
             if playing { HeadphoneHeadTracker.shared.recenter() }
         }
-        #else
-        // macOS: picture plus Atmos object audio, same as iOS, but without
-        // AirPods head tracking (`HeadphoneHeadTracker` is iOS-only — there's
-        // no Mac equivalent API). `FilmStageView`'s `listenerOrientation`
-        // defaults to identity, which is exactly "no tracking": the sound
-        // stage stays fixed relative to the picture instead of turning with
-        // the listener's head. RAVEFilm's `FilmStageView` already documents
-        // itself as supporting this ("iOS and macOS: a virtual camera").
-        Form {
-            Section(session.loadedItem?.name ?? "") {
-                ZStack {
-                    FilmStageView(player: player)
-                    FilmVideoView(player: player.video)
-                }
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .listRowInsets(EdgeInsets())
-                FilmTransport(player: player)
-            }
-            Section("Objects") {
-                FilmObjectMapPanel(player: player)
-            }
-            Section("Tuning") { FilmTuning() }
-            Section("Telemetry") { FilmTelemetry(player: player) }
-        }
         #endif
     }
+
+    #if os(visionOS)
+    private func startStereo() {
+        guard stereoSource == nil else { return }
+        guard CoreMLDepthProvider.hasAvailableModel(role: .realtime) else {
+            showsDepthSetup = true
+            return
+        }
+        let source = SampleBufferFrameSource(timebase: player.video.timebase)
+        player.video.onSampleBuffer = { source.submit($0) }
+        player.video.onFlush = { source.reset() }
+        mountedDepthModelName = appModel.realtimeDepthModelName
+        stereoSource = source
+        session.stereoEnabled = true
+        // Re-prime from the keyframe containing the current position. The film
+        // transport keeps its play/pause intent and re-anchors Atmos with it.
+        player.seek(to: player.currentTime)
+    }
+
+    private func stopStereo() {
+        player.video.onSampleBuffer = nil
+        player.video.onFlush = nil
+        stereoSource = nil
+        session.stereoEnabled = false
+        mountedDepthModelName = nil
+    }
+    #endif
 }
 
 #if os(tvOS)
-/// tvOS film transport: play/pause plus ±10s, all plain focusable buttons —
-/// there's no drag surface for a scrub bar, and Siri Remote's play/pause
-/// button is wired separately via `.onPlayPauseCommand` on the container.
-struct TVFilmTransport: View {
-    let player: FilmPlayer
-    @Bindable private var session = FilmSession.shared
-    @State private var showsSound = false
-
-    var body: some View {
-        HStack(spacing: 24) {
-            Button { player.seek(to: player.currentTime - 10) } label: {
-                Label("−10s", systemImage: "gobackward.10")
-            }
-            Button {
-                player.isPlaying ? player.pause() : player.play()
-            } label: {
-                Label(player.isPlaying ? "Pause" : "Play", systemImage: player.isPlaying ? "pause.fill" : "play.fill")
-            }
-            Button { player.seek(to: player.currentTime + 10) } label: {
-                Label("+10s", systemImage: "goforward.10")
-            }
-            if player.audio != nil {
-                if session.headTracking {
-                    Button { session.recenterRequest += 1 } label: {
-                        Label("Recenter", systemImage: "scope")
-                    }
-                }
-                Button { showsSound = true } label: {
-                    Label("Sound", systemImage: "speaker.wave.2")
-                }
-                Button { session.showMap.toggle() } label: {
-                    Label(session.showMap ? "Hide Objects" : "Show Objects", systemImage: "circle.grid.cross")
-                }
-            }
-        }
-        .labelStyle(.iconOnly)
-        .padding(24)
-        .background(.ultraThinMaterial, in: Capsule())
-        .sheet(isPresented: $showsSound) { TVFilmSoundSettings() }
-    }
-}
-
 /// The object audio's tuning with the remote: pickers and steps instead of
 /// the other platforms' sliders. Every change applies live and is saved.
 struct TVFilmSoundSettings: View {
@@ -311,6 +293,7 @@ struct TVFilmSoundSettings: View {
                 } footer: {
                     Text("Moves the picture against the sound if speech looks out of step.")
                 }
+                Section("Objects") { FilmObjectMapPanel(player: player) }
             }
             .navigationTitle("Sound")
         }
@@ -337,60 +320,132 @@ struct TVFilmSoundSettings: View {
 }
 #endif
 
+/// The FilmPlayer adapter for the same controls used by general videos and
+/// Raven. It samples the timebase; a scrub preview lives in the SDK controls.
 struct FilmTransport: View {
     let player: FilmPlayer
-    /// Scrubber position while dragging; nil follows playback.
-    @State private var scrubSeconds: Double?
+    var stereoEnabled = false
+    var onToggle3D: (() -> Void)?
+    var onModalChanged: (Bool) -> Void = { _ in }
+    @Bindable private var session = FilmSession.shared
     @State private var now = 0.0
+    @State private var showsSound = false
+    #if os(visionOS)
+    @OpenWindowProxy private var openWindow
+    #endif
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 16) {
-                Button {
-                    player.isPlaying ? player.pause() : player.play()
-                } label: {
-                    Label(player.isPlaying ? "Pause" : "Play", systemImage: player.isPlaying ? "pause.fill" : "play.fill")
+        RAVEPlayerControls(
+            state: RAVEPlayerControlState(currentTime: now, duration: player.duration,
+                bufferedUntil: player.video.bufferedUntil, isPlaying: player.isPlaying, isMuted: player.isMuted),
+            togglePlayback: { player.isPlaying ? player.pause() : player.play() },
+            seek: { player.seek(to: $0) }, toggleMute: { player.isMuted.toggle() }
+        ) {
+            if let onToggle3D {
+                Button(action: onToggle3D) {
+                    Label(stereoEnabled ? "Play as 2D" : "Convert to 3D", systemImage: stereoEnabled ? "rectangle" : "view.3d")
+                        .labelStyle(.iconOnly).ravePlayerControlLabel()
                 }
-                Button { player.seek(to: player.currentTime - 10) } label: {
-                    Label("−10s", systemImage: "gobackward.10")
+                .help(stereoEnabled ? "Play as 2D" : "Convert to 3D")
+            }
+            #if os(iOS) || os(macOS)
+            if session.headTracking, HeadphoneHeadTracker.shared.isTracking {
+                Button { HeadphoneHeadTracker.shared.recenter() } label: {
+                    Label("Recenter Audio", systemImage: "scope").labelStyle(.iconOnly).ravePlayerControlLabel()
                 }
-                Button { player.seek(to: player.currentTime + 10) } label: {
-                    Label("+10s", systemImage: "goforward.10")
+                .help("Recenter audio while facing the picture")
+            }
+            #elseif os(tvOS)
+            if session.headTracking, player.audio != nil {
+                Button { session.recenterRequest += 1 } label: {
+                    Label("Recenter Audio", systemImage: "scope").labelStyle(.iconOnly).ravePlayerControlLabel()
                 }
             }
-            .buttonStyle(.bordered)
-            .labelStyle(.iconOnly)
-            #if !os(tvOS)
-            // Seeks on release, so a drag across a film is one seek, not hundreds.
-            // tvOS has no drag surface for this — the ±10s buttons above are
-            // its only seek control (this view isn't used by the tvOS film
-            // player anyway; see TVFilmPlayerView).
-            Slider(
-                value: Binding(get: { scrubSeconds ?? now }, set: { scrubSeconds = $0 }),
-                in: 0 ... max(player.duration, 1),
-                onEditingChanged: { editing in
-                    if !editing, let target = scrubSeconds {
-                        player.seek(to: target)
-                        scrubSeconds = nil
-                    }
-                }
-            )
             #endif
-            Text("\(Self.clock(scrubSeconds ?? now)) / \(Self.clock(player.duration))")
-                .font(.caption.monospaced())
+            Button {
+                #if os(visionOS)
+                openWindow(id: FilmAdjustmentsView.windowID)
+                #else
+                showsSound = true
+                #endif
+            } label: {
+                Label("Sound and Picture", systemImage: "slider.horizontal.3").labelStyle(.iconOnly).ravePlayerControlLabel()
+            }
+            .help("Sound and picture adjustments")
+        }
+        .sheet(isPresented: $showsSound) {
+            #if os(tvOS)
+            TVFilmSoundSettings()
+            #else
+            FilmAdjustmentsView()
+                .toolbar { Button("Done") { showsSound = false } }
+            #endif
+        }
+        .onChange(of: showsSound) { _, showing in
+            onModalChanged(showing)
+            if !showing { session.saveSound() }
         }
         .task {
-            // The timebase isn't observable; sample it for the scrubber.
             while !Task.isCancelled {
                 now = player.currentTime
                 try? await Task.sleep(for: .milliseconds(250))
             }
         }
     }
+}
 
-    private static func clock(_ seconds: Double) -> String {
-        let s = Int(max(0, seconds))
-        return String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
+/// A separate visionOS window: a sheet shares the stereo picture's depth
+/// region and can be occluded by it. Other platforms present this as a sheet.
+struct FilmAdjustmentsView: View {
+    static let windowID = "film-adjustments"
+    @Bindable private var session = FilmSession.shared
+
+    var body: some View {
+        NavigationStack {
+            #if os(visionOS) || os(macOS)
+            HStack(spacing: 0) {
+                Form { controls }
+                    .frame(minWidth: 360, idealWidth: 400, maxWidth: 440)
+                Divider()
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Objects").font(.headline)
+                    FilmObjectMapPanel(player: session.player)
+                    Spacer(minLength: 0)
+                }
+                .padding(24)
+                .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+            .frame(minWidth: 820, minHeight: 520)
+            .navigationTitle("Sound and Picture")
+            #else
+            Form {
+                controls
+                Section("Objects") { FilmObjectMapPanel(player: session.player) }
+            }
+            .navigationTitle("Sound and Picture")
+            #endif
+        }
+        .onDisappear { session.saveSound() }
+    }
+
+    @ViewBuilder private var controls: some View {
+        #if os(iOS) || os(macOS)
+        Section("Head Tracking") {
+            Toggle("Head Tracking", isOn: $session.headTracking)
+            FilmHeadTrackingRow()
+        }
+        #endif
+        #if os(visionOS)
+        if session.stereoEnabled {
+            Section("3D") {
+                Slider(value: $session.stereoSettings.convergence, in: 0...1)
+                Text("Convergence: higher pushes the scene back; at 1 nothing crosses the window frame.")
+                    .font(.caption)
+            }
+        }
+        #endif
+        Section("Sound") { FilmTuning() }
+        Section("Telemetry") { FilmTelemetry(player: session.player) }
     }
 }
 
@@ -408,7 +463,6 @@ struct FilmTuning: View {
             slider("Ceiling above ears", value: $player.roomHeight, in: 0 ... 3, unit: "m")
             #if os(visionOS)
             slider("You, in front of the window", value: $session.listenerDistance, in: 0.3 ... 4, unit: "m")
-            Toggle("Show object map", isOn: $session.showMap)
             #endif
             VStack(alignment: .leading, spacing: 2) {
                 Text(String(format: "Picture offset: %+.0f ms", player.avOffsetMs)).font(.caption)
@@ -434,7 +488,7 @@ struct FilmTuning: View {
     }
 }
 
-#if os(iOS)
+#if os(iOS) || os(macOS)
 /// Status, Recenter and latency prediction for the AirPods head tracking.
 struct FilmHeadTrackingRow: View {
     @Bindable private var tracker = HeadphoneHeadTracker.shared

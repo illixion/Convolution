@@ -6,9 +6,8 @@
  independent. Styled to match PhotoOrnamentView.
 
  Layout: [Gallery] | [< N/M >] | [ViewMode v] | [Info] | [Share] | [... More v] | [Title]
- Playback transport (play/pause, scrubber with A-B markers, A-B loop, mute)
- lives in the separate VideoControlBar overlay — except in fake-3D, where
- showTransport folds it in as a second ornament row so all chrome is coplanar.
+ Playback and feature actions share RAVEUI's player controls in one ornament
+ in both 2D and fake-3D. The immersive scene owns its own transport.
  The More menu holds Adjustments (opens the standalone video-adjustments window,
  which hosts Flip + the fake-3D stereo sliders), Slideshow, and Pop Out (pushed only).
  */
@@ -35,12 +34,6 @@ struct VideoOrnamentsView: View {
     @Environment(\.ornamentIsScrolling) private var ornamentIsScrolling
     #endif
 
-    /// When true, stack the playback transport (VideoControlBar) above the button
-    /// row as a second ornament row. Used by fake-3D, where the video lives in a
-    /// RealityView volume and a separate 2D control-bar overlay floats at a
-    /// different depth than the video. Folding it into the ornament keeps all
-    /// chrome on one plane.
-    var showTransport: Bool = false
     /// Action to show the main gallery window
     var onGalleryButtonTap: () -> Void
     /// Custom pop-out action (used by pushed windows to open a new window and dismiss self)
@@ -49,13 +42,11 @@ struct VideoOrnamentsView: View {
     private var video: GalleryVideo { windowModel.video }
 
     var body: some View {
-        if showTransport {
-            VStack(spacing: 12) {
-                VideoControlBar(windowModel: windowModel)
-                buttonRow
-            }
+        if windowModel.shouldUse3DMode {
+            // Immersive playback owns its own transport in the immersive scene.
+            buttonRow.padding(12).glassBackgroundEffect()
         } else {
-            buttonRow
+            VideoControlBar(windowModel: windowModel) { buttonRow }
         }
     }
 
@@ -146,9 +137,6 @@ struct VideoOrnamentsView: View {
             // dropdown and dropping taps.
             ConversionStatusRow(videoIdentity: video.identity)
         }
-        .padding(.horizontal, RAVEChromeMetrics.horizontalPadding)
-        .padding(.vertical, RAVEChromeMetrics.verticalPadding)
-        .glassBackgroundEffect()
         #if !os(visionOS)
         // The bar scrolls when it is wider than the screen, and a scroll is
         // not a button press — without this the chrome auto-hides out from

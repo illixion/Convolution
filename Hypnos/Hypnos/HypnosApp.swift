@@ -271,8 +271,18 @@ struct HypnosApp: App {
         // loaded film, so it never restores on its own.
         Window("Film Player", id: FilmPlayerView.windowID) {
             FilmPlayerView()
+                .environment(appModel)
         }
+        .windowStyle(.plain)
         .defaultSize(width: 1280, height: 720)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
+
+        Window("Sound and Picture", id: FilmAdjustmentsView.windowID) {
+            FilmAdjustmentsView()
+        }
+        .defaultSize(width: 900, height: 640)
+        .windowResizability(.contentMinSize)
         .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
     }

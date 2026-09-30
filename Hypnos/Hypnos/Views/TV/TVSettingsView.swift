@@ -180,7 +180,6 @@ private struct TVDeveloperSection: View {
     var body: some View {
         @Bindable var appModel = appModel
         Section {
-            Toggle("Show Object Map", isOn: $film.showMap)
         } header: {
             Text("Film Player")
         } footer: {

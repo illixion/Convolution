@@ -48,10 +48,15 @@ struct VideoWindowView: View {
     @State private var didApplyRestoredSize = false
 
     /// Reserved space below the video so the bottom ornament (which floats at the
-    /// window's bottom edge) doesn't overlap the video. Larger for fake-3D, whose
-    /// two-row ornament is taller and needs more clearance from the video plane.
+    /// window's bottom edge) doesn't overlap the video. The shared timeline,
+    /// transport and feature rows have the same footprint in 2D and fake-3D.
     private var ornamentBottomPadding: CGFloat {
-        windowModel.shouldUsePseudo3D ? 120 : 60
+        if windowModel.shouldUse3DMode { return 60 }
+        #if os(visionOS)
+        return 200
+        #else
+        return 160
+        #endif
     }
 
     /// Depth offset (points, toward the viewer) applied to the fake-3D chrome.
@@ -65,12 +70,9 @@ struct VideoWindowView: View {
     /// slightly behind near subjects.
     private let pseudo3DChromeZOffset: CGFloat = 0
 
-    /// Upward lift (points) for the taller two-row fake-3D ornament so its lower
-    /// transport row keeps clear of the visionOS window controls below the
-    /// window. With the chrome now coplanar (no forward push) this is pure bottom
-    /// padding rather than parallax compensation. visionOS points map to real cm
-    /// at ~10 points/cm, so 50 ≈ 5cm.
-    private let pseudo3DChromeBottomLift: CGFloat = 50
+    /// Lift the shared controls clear of the system window controls. Keep this
+    /// consistent across 2D and fake-3D so a mode switch doesn't move the chrome.
+    private let pseudo3DChromeBottomLift: CGFloat = 80
 
     init(windowValue: VideoWindowValue, appModel: AppModel) {
         // Re-resolve local file URLs in case this is a visionOS scene restoration
@@ -312,19 +314,6 @@ struct VideoWindowView: View {
                 .animation(.easeInOut(duration: 0.3), value: windowModel.showDepthReadyPrompt)
             }
 
-            // Custom playback controls (2D players only). In fake-3D the
-            // transport is folded into the ornament (showTransport) so it shares
-            // the chrome's depth instead of floating at the window plane.
-            if !appModel.allWindowsHidden, !windowModel.shouldUse3DMode,
-               !windowModel.shouldUsePseudo3D, !windowModel.isUIHidden {
-                VStack {
-                    Spacer()
-                    VideoControlBar(windowModel: windowModel)
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, ornamentBottomPadding + 12)
-                }
-                .transition(.opacity)
-            }
         }
         .animation(.easeInOut(duration: 0.2), value: windowModel.isUIHidden)
         .onGeometryChange(for: CGSize.self) { proxy in
@@ -335,13 +324,12 @@ struct VideoWindowView: View {
         .persistentSystemOverlays(windowModel.isWindowControlsHidden ? .hidden : .visible)
         .hidesStatusBar(windowModel.isUIHidden)
         .ornament(
-            visibility: windowModel.isUIHidden ? .hidden : .visible,
+            visibility: windowModel.isUIHidden || appModel.allWindowsHidden ? .hidden : .visible,
             attachmentAnchor: .scene(.bottomFront),
             ornament: {
                 videoOrnament
-                    // Lift the taller two-row ornament so its transport row
-                    // clears the visionOS window controls beneath the window.
-                    .padding(.bottom, windowModel.shouldUsePseudo3D ? pseudo3DChromeBottomLift : 0)
+                    // Keep the transport clear of the system window controls.
+                    .padding(.bottom, PlatformCapabilities.supportsWindowResizing ? pseudo3DChromeBottomLift : 0)
                     // Keep the fake-3D chrome coplanar with the video (which is
                     // pinned to the front glass via .frame(depth:0,.front)) and
                     // the window controls — see pseudo3DChromeZOffset. 0 = no
@@ -511,7 +499,6 @@ struct VideoWindowView: View {
     private var videoOrnament: some View {
         VideoOrnamentsView(
             windowModel: windowModel,
-            showTransport: windowModel.shouldUsePseudo3D,
             onGalleryButtonTap: {
                 appModel.showMainWindow(openWindow: openWindow)
             },
