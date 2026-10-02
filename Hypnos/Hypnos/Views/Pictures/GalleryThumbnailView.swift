@@ -71,12 +71,21 @@ struct GalleryThumbnailView: View {
             if let dioramaPair, appModel.effectiveThumbnailDiorama {
                 // Two-layer diorama: blurred-subject backdrop, masked foreground
                 // popped forward in z for an Apple TV-style parallax pop.
+                // Each layer is clipped to the cell *before* the lift: the pair
+                // is uncropped, so scaledToFill overflows a cell narrower than
+                // the image, and a clip applied only to the stack would cut the
+                // lifted layer in a different plane than the backdrop — the two
+                // then project apart off-axis and during the hover scale.
                 Image(platformImage: dioramaPair.backdrop)
                     .resizable()
                     .scaledToFill()
+                    .frame(width: size.width, height: size.height)
+                    .clipped()
                 Image(platformImage: dioramaPair.foreground)
                     .resizable()
                     .scaledToFill()
+                    .frame(width: size.width, height: size.height)
+                    .clipped()
                     .offset(z: 24)
             } else if let loadedImage {
                 Image(platformImage: loadedImage)
