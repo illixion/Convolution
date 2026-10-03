@@ -27,11 +27,19 @@ Nothing is uploaded: libraries are read on the device, and depth inference runs 
 
 ## Screenshots
 
-![Home](images/home.jpeg)
-![Viewer](images/viewer.jpeg)
-![Filters](images/filters.jpeg)
-![Local](images/local.jpeg)
-![Settings](images/settings.jpeg)
+Captured in the Apple Vision Pro Simulator with the device's Photos library as the source.
+
+**Pictures, original aspect ratio** — every image keeps its own shape, packed into rows that fill the window:
+
+![Pictures grid in original aspect ratio](images/pictures-original-aspect.jpg)
+
+**Pictures, square cells** — the default grid, with the tab bar and slideshow button below it:
+
+![Pictures grid with square cells](images/pictures-square.jpg)
+
+**Settings:**
+
+![Settings](images/settings.jpg)
 
 ## Requirements
 
