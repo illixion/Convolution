@@ -139,14 +139,14 @@ update its callers" a single atomic edit.
 
 Add the source `https://apps.illixion.com/source.json` to [AltStore](https://altstore.io) or [SideStore](https://sidestore.io), or open [apps.illixion.com](https://apps.illixion.com) on the device and tap its button, then install Convolution. It updates from there with every release. The same file is attached to every release as `Convolution-iOS-unsigned.ipa`, and [this link](https://github.com/illixion/Convolution/releases/latest/download/Convolution-iOS-unsigned.ipa) always serves the newest one.
 
-- **iPhone and iPad only.** AltStore and SideStore don't install on Vision Pro, Apple TV or Mac.
+- **Made for iPhone and iPad.** Neither store supports Apple TV or Mac, and neither officially supports Vision Pro (see below).
 - **Your Apple ID signs it.** On a free Apple ID an app expires after 7 days unless AltStore or SideStore refreshes it in time, and only three sideloaded apps can be active at once, the store itself included.
 - **It's the iOS / iPadOS column of [Platforms](#platforms):** no spatial 3D photo conversion, depth-model video or multiple windows.
 - iOS 26.0 or later.
 
 ### Vision Pro
 
-No sideloading store supports visionOS. Every [release](../../releases) carries an unsigned visionOS IPA, `Hypnos-<version>-unsigned.ipa`: sign it with your own Apple ID, or build from source below.
+Neither store officially supports it, but a community port does: [iloader's Vision Pro pull request](https://github.com/nab138/iloader/pull/565) pairs with the headset over Wi-Fi with the code from Settings → General → Remote Devices, the same pairing Xcode uses, and installs a patched SideStore. It needs no Developer Strap. It is unmerged, and untested with this source. Otherwise, every [release](../../releases) carries an unsigned visionOS IPA, `Hypnos-<version>-unsigned.ipa`: sign it with your own Apple ID, or build from source below.
 
 ### Apple TV and Mac
 
