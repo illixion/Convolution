@@ -282,6 +282,15 @@ struct PhotoDisplayView: View {
                 .offset(z: windowModel.isDioramaMode ? 30 : 0)
             }
         }
+        #if os(iOS)
+        // A photo viewer is a full-bleed surface: fit the picture to the whole
+        // screen, not the safe area. Otherwise a tall photo stopped short of the
+        // bottom edge by the home indicator's inset (and a landscape one beside
+        // the Dynamic Island) even with every piece of chrome hidden. The
+        // ornament bar is overlaid by the shim outside this view, so it still
+        // respects the safe area.
+        .ignoresSafeArea()
+        #endif
         .background(
             GeometryReader { geo in
                 Color.clear
