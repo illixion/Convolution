@@ -198,6 +198,11 @@ Two things worth knowing before writing more:
   designed fallback (back to the flat photo, Convert offered again) rather than
   success. Anything else touching `ImagePresentationComponent` needs the same shape.
 
+`VideoWindowUITests` opens a dev-Stash video (see "Testing against Stash"; it skips
+when `scripts/dev-stash.sh up` isn't running) and checks the player ornament's
+geometry, with `autoHideDelay=0` so the chrome can't vanish mid-query. XCUITest's
+own `XCUIScreen` screenshot is black on visionOS; capture with `simctl io` instead.
+
 Not yet covered: any window actually *listed* in the Windows tab, which needs a
 pop-out, which needs media. Seeding that is `simctl addmedia` plus
 `simctl privacy grant photos` from outside the test process — harness work for
