@@ -135,6 +135,25 @@ update its callers" a single atomic edit.
 
 ## Installation
 
+### iPhone and iPad: AltStore or SideStore
+
+Add the source `https://apps.illixion.com/source.json` to [AltStore](https://altstore.io) or [SideStore](https://sidestore.io), or open [apps.illixion.com](https://apps.illixion.com) on the device and tap its button, then install Convolution. It updates from there with every release. The same file is attached to every release as `Convolution-iOS-unsigned.ipa`, and [this link](https://github.com/illixion/Convolution/releases/latest/download/Convolution-iOS-unsigned.ipa) always serves the newest one.
+
+- **iPhone and iPad only.** AltStore and SideStore don't install on Vision Pro, Apple TV or Mac.
+- **Your Apple ID signs it.** On a free Apple ID an app expires after 7 days unless AltStore or SideStore refreshes it in time, and only three sideloaded apps can be active at once, the store itself included.
+- **It's the iOS / iPadOS column of [Platforms](#platforms):** no spatial 3D photo conversion, depth-model video or multiple windows.
+- iOS 26.0 or later.
+
+### Vision Pro
+
+No sideloading store supports visionOS. Every [release](../../releases) carries an unsigned visionOS IPA, `Hypnos-<version>-unsigned.ipa`: sign it with your own Apple ID, or build from source below.
+
+### Apple TV and Mac
+
+No prebuilt download yet; build from source below. An Apple TV build signed with a free Apple ID expires after 7 days, and nothing refreshes it for you.
+
+### From source (every platform)
+
 1. Clone this repository and the three packages into the same parent directory:
    ```bash
    git clone https://github.com/illixion/Convolution.git
