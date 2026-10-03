@@ -104,7 +104,7 @@ update its callers" a single atomic edit.
 
 1. Clone this repository and both packages into the same parent directory:
    ```bash
-   git clone https://github.com/illixion/spatialstash.git
+   git clone https://github.com/illixion/Convolution.git
    git clone https://github.com/illixion/RAVESDK.git
    git clone https://github.com/illixion/RAVEEngine.git
    ```
@@ -113,12 +113,12 @@ update its callers" a single atomic edit.
    some-parent/
    ├── RAVESDK/
    ├── RAVEEngine/
-   └── spatialstash/
+   └── Convolution/
    ```
 
 2. Open the project in Xcode:
    ```bash
-   cd spatialstash
+   cd Convolution
    open Hypnos/Hypnos.xcodeproj
    ```
 
