@@ -1,11 +1,15 @@
 name: Build IPA
 
+# Documentation-only changes don't build or release. Path filters are never applied to
+# tag pushes, so a v* tag always releases.
 on:
   push:
     branches: [main]
     tags: ['v*']
+    paths-ignore: ['**.md']
   pull_request:
     branches: [main]
+    paths-ignore: ['**.md']
   workflow_dispatch:
 
 jobs:
@@ -46,26 +50,37 @@ jobs:
       - name: Set build info
         run: ./scripts/set-build-info.sh
 
-      - name: Build for visionOS
+      # The Vision Pro app, for the visionOS source at apps.illixion.com (SideStore's
+      # visionOS port installs it) and for anyone signing it by hand. Released under one
+      # fixed name, so releases/latest/download/Convolution-visionOS-unsigned.ipa always
+      # points at the newest. Same id pin and build number as the iPhone/iPad archive
+      # below: a sideloader offers an update only when CFBundleVersion grows.
+      - name: Archive for visionOS
         run: |
-          xcodebuild -quiet \
+          xcodebuild -quiet archive \
             -project Hypnos/Hypnos.xcodeproj \
             -scheme Hypnos \
+            -configuration Release \
             -destination 'generic/platform=visionOS' \
-            -derivedDataPath build/DerivedData \
-            CODE_SIGN_IDENTITY="-" \
+            -archivePath "$RUNNER_TEMP/Hypnos-visionOS.xcarchive" \
+            CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
-            build
+            PRODUCT_BUNDLE_IDENTIFIER=com.illixion.hypnos \
+            CURRENT_PROJECT_VERSION="$(git rev-list --count HEAD)"
 
-      - name: Package IPA
+      - name: Package visionOS IPA
         run: |
-          APP_PATH=$(find build/DerivedData -name '*.app' -type d | head -1)
-          mkdir -p build/Payload
-          cp -R "$APP_PATH" build/Payload/
-          cd build && zip -qr Hypnos.ipa Payload
+          APP=$(find "$RUNNER_TEMP/Hypnos-visionOS.xcarchive/Products/Applications" -maxdepth 1 -name '*.app' -type d | head -1)
+          for d in PlugIns Watch Extensions; do
+            [[ ! -d "$APP/$d" ]] || { echo "::error::the visionOS app embeds $d"; exit 1; }
+          done
+          mkdir -p "$RUNNER_TEMP/visionOSPayload/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/visionOSPayload/Payload/"
+          cd "$RUNNER_TEMP/visionOSPayload"
+          zip -qry "$GITHUB_WORKSPACE/Convolution-visionOS-unsigned.ipa" Payload
 
       # The iPhone/iPad app, for the AltStore / SideStore source at apps.illixion.com.
       # The source reads it from every release under one fixed name, so
@@ -107,7 +122,7 @@ jobs:
         with:
           name: Hypnos
           path: |
-            build/Hypnos.ipa
+            Convolution-visionOS-unsigned.ipa
             Convolution-iOS-unsigned.ipa
 
       - name: Create a version string
@@ -122,13 +137,6 @@ jobs:
           fi
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Rename IPA with version
-        id: ipa
-        run: |
-          IPA_NAME="Hypnos-${{ steps.version.outputs.version }}-unsigned.ipa"
-          cp build/Hypnos.ipa "$IPA_NAME"
-          echo "ipa_file=$IPA_NAME" >> $GITHUB_OUTPUT
 
       - name: Generate changelog
         if: github.event_name != 'pull_request'
@@ -147,7 +155,8 @@ jobs:
             echo "EOF"
           } >> $GITHUB_OUTPUT
 
-      # Both IPAs in one call, so a release never exists without the iPhone/iPad one.
+      # Both IPAs in one call, so a release never exists without either. The release tag
+      # carries the version; the file names stay fixed.
       - name: Create GitHub Release
         if: github.event_name != 'pull_request'
         env:
@@ -159,5 +168,5 @@ jobs:
             --title "${{ steps.version.outputs.version }}" \
             --target "$GITHUB_SHA" \
             --notes-file release-notes.md \
-            "${{ steps.ipa.outputs.ipa_file }}" \
+            Convolution-visionOS-unsigned.ipa \
             Convolution-iOS-unsigned.ipa

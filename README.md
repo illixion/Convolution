@@ -146,7 +146,7 @@ Add the source `https://apps.illixion.com/source.json` to [AltStore](https://alt
 
 ### Vision Pro
 
-Neither store officially supports it, but a community port does: [iloader's Vision Pro pull request](https://github.com/nab138/iloader/pull/565) pairs with the headset over Wi-Fi with the code from Settings → General → Remote Devices, the same pairing Xcode uses, and installs a patched SideStore. It needs no Developer Strap. It is unmerged, and untested with this source. Otherwise, every [release](../../releases) carries an unsigned visionOS IPA, `Hypnos-<version>-unsigned.ipa`: sign it with your own Apple ID, or build from source below.
+Neither store officially supports it, but a community port does: [iloader's Vision Pro pull request](https://github.com/nab138/iloader/pull/565) pairs with the headset over Wi-Fi with the code from Settings → General → Remote Devices, the same pairing Xcode uses, and installs a patched SideStore. It needs no Developer Strap. It is unmerged, and untested with this source. Otherwise, every [release](../../releases) carries an unsigned visionOS IPA, `Convolution-visionOS-unsigned.ipa` ([newest](https://github.com/illixion/Convolution/releases/latest/download/Convolution-visionOS-unsigned.ipa)): sign it with your own Apple ID, or build from source below.
 
 ### Apple TV and Mac
 
