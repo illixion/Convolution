@@ -130,8 +130,8 @@ struct PhotoLibraryStateView: View {
                 // Only Vision Pro converts to 3D; on iOS the promise is
                 // browsing, slideshows and enhancements.
                 message: PlatformCapabilities.supportsSpatial3D
-                    ? "Hypnos can browse the \(kind.noun) on this device and convert them to 3D. Your library is read on this device only — nothing is uploaded."
-                    : "Hypnos can browse the \(kind.noun) on this device. Your library is read on this device only — nothing is uploaded.",
+                    ? "Convolution can browse the \(kind.noun) on this device and convert them to 3D. Your library is read on this device only — nothing is uploaded."
+                    : "Convolution can browse the \(kind.noun) on this device. Your library is read on this device only — nothing is uploaded.",
                 actionTitle: "Allow Access to Photos",
                 action: onRequestAccess
             ) {
@@ -145,7 +145,7 @@ struct PhotoLibraryStateView: View {
             MediaLibraryMessageView(
                 icon: "lock.fill",
                 title: "Photo Access Denied",
-                message: "Hypnos can't see your photo library. Allow access in Settings to browse and convert your \(kind.noun), or connect a media server instead.",
+                message: "Convolution can't see your photo library. Allow access in Settings to browse and convert your \(kind.noun), or connect a media server instead.",
                 actionTitle: "Open Settings",
                 action: {
                     #if os(macOS)
@@ -170,7 +170,7 @@ struct PhotoLibraryStateView: View {
             MediaLibraryMessageView(
                 icon: kind.emptyIcon,
                 title: "No \(kind == .photos ? "Photos" : "Videos") to Show",
-                message: "Hypnos can only see the items you selected, and none of them are \(kind.noun). Choose more in Settings › Privacy & Security › Photos."
+                message: "Convolution can only see the items you selected, and none of them are \(kind.noun). Choose more in Settings › Privacy & Security › Photos."
             ) {
                 LibrarySafetyNetView(offersPhotosAccess: false)
             }

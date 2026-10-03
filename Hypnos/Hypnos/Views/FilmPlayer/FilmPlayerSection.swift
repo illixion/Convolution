@@ -51,7 +51,7 @@ struct FilmPlayerSection: View {
                 Text(error).font(.caption).foregroundColor(.red)
             }
 
-            Text("Plays the film's picture (HDR through the system decoder) with its sound objects as spatial sources in a virtual room around you, the screen as its front wall, on one clock. Needs the Hypnos Object Audio plugin on the Jellyfin server; films without object audio play through the Library's own generic player instead.")
+            Text("Plays the film's picture (HDR through the system decoder) with its sound objects as spatial sources in a virtual room around you, the screen as its front wall, on one clock. Needs the Convolution Object Audio plugin on the Jellyfin server; films without object audio play through the Library's own generic player instead.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }

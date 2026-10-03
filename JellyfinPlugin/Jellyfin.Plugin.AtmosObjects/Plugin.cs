@@ -27,12 +27,12 @@ public class Plugin : BasePlugin<PluginConfiguration>
     // avoid the Dolby/Atmos trademarks. The plugin's identity (Id, assembly
     // name, config file name, AtmosObjects/ routes) is unchanged, so an
     // installed copy keeps its configuration and clients keep working.
-    public override string Name => "Hypnos Object Audio";
+    public override string Name => "Convolution Object Audio";
 
     public override Guid Id => Guid.Parse("030dca02-37ea-4c55-a4d7-726bb00db38a");
 
     public override string Description =>
-        "Extracts the sound objects from a film's object-based soundtrack and serves them as FLAC stems with position metadata, for Hypnos's spatial film player.";
+        "Extracts the sound objects from a film's object-based soundtrack and serves them as FLAC stems with position metadata, for Convolution's spatial film player.";
 }
 
 public class PluginConfiguration : MediaBrowser.Model.Plugins.BasePluginConfiguration

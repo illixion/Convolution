@@ -44,7 +44,7 @@ struct TVPhotosLibraryStateView: View {
             ContentUnavailableView {
                 Label("Show Your \(kind == .pictures ? "Pictures" : "Videos")?", systemImage: kind.symbol)
             } description: {
-                Text("Hypnos can show the \(kind.noun) in this Apple TV's iCloud Photos library.")
+                Text("Convolution can show the \(kind.noun) in this Apple TV's iCloud Photos library.")
             } actions: {
                 Button("Allow Photos Access", action: onRequestAccess)
             }

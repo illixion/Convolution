@@ -1,6 +1,6 @@
 # Third-party notices
 
-Hypnos (the visionOS/iOS/tvOS/macOS app) and the Jellyfin Atmos Objects plugin
+Convolution (the visionOS/iOS/tvOS/macOS app) and the Jellyfin Atmos Objects plugin
 (`JellyfinPlugin/`) are two separately-distributed pieces of software, so this
 file separates which notice applies to which. Nothing below is linked into
 both — see each entry's "Used by" line.
@@ -27,7 +27,7 @@ requirement:** Atmos object decoding for E-AC-3 tracks is powered by
 (<http://en.sbence.hu>). Cavern is used unmodified (via NuGet, not a
 source checkout) and must stay confined to the plugin — see
 `~/CLAUDE.md`'s project notes for why it must never be linked into the
-Hypnos app itself.
+Convolution app itself.
 
 Full licence text (`LICENSE.md` in the Cavern repository), reproduced verbatim:
 
@@ -73,7 +73,7 @@ self-contained, and offered upstream as a candidate contribution.
 
 ## Depth Anything V2 (Small)
 
-**Used by:** the Hypnos app (`Pseudo3DVideoPlayerView` / `CoreMLDepthProvider`
+**Used by:** the Convolution app (`Pseudo3DVideoPlayerView` / `CoreMLDepthProvider`
 and the offline `DepthConverter` pipeline) for monocular depth estimation
 driving the 2D→3D "fake 3D" video conversion. Distributed as Core ML
 `.mlpackage`/`.mlmodelc` models, either bundled with the repo
@@ -93,7 +93,7 @@ project licenses the **Small** variant under Apache 2.0, but the **Base** and
 derived from a differently-licensed pretrained backbone. `models/DepthAnythingV2BaseF16.mlmodelc`
 exists in this repo for local experimentation only and must not ship in any
 distributed build, and `convert-depth-model.py --variant base`/`large` must
-carry the same restriction if their output is ever distributed. Hypnos's
+carry the same restriction if their output is ever distributed. Convolution's
 in-app downloader (`DepthModelManagerSheet`) only offers Small variants for
 exactly this reason.
 
@@ -114,7 +114,7 @@ output or distributed with it.
 
 ## Other dependencies scanned for
 
-- **Hypnos app (Swift):** no external Swift Package Manager dependencies.
+- **Convolution app (Swift):** no external Swift Package Manager dependencies.
   `Hypnos.xcodeproj/project.pbxproj` has no `XCRemoteSwiftPackageReference`
   entries — every Swift package here (`RAVESDK`, `RAVEEngine`,
   `Packages/NextcloudMedia`) is a local, same-author package referenced by

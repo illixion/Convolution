@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Hypnos is a visionOS app for Apple Vision Pro that displays images and videos with 2D to 3D spatial photo conversion. It integrates with [Stash](https://stashapp.cc/) media server via GraphQL API, supports local files, and can receive media via the system share sheet.
 
+## Names
+
+**Convolution** is the shipping, user-facing name (decided 2026-10-03; the App Store Connect
+reservation is still pending). **Hypnos** is the internal codename and stays in code: the Xcode
+project/scheme/folders, `Hypnos*` types, the `com.illixion.hypnos` bundle id and the `hypnos://` URL
+scheme. User-visible strings (display name, permission prompts, in-app copy, README, the Jellyfin
+plugin's display name) say Convolution. Never put "Dolby"/"Atmos" in user-facing text — say "object
+audio".
+
 ## Workflow
 
 Always create a git commit at the end of a task, without waiting for the user to ask. Group related changes into a single commit; keep the commit message focused on the "why".

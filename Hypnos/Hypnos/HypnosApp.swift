@@ -77,7 +77,7 @@ struct HypnosApp: App {
         // One window. With `UIApplicationSupportsMultipleScenes` on, iPadOS can
         // still open several instances of it side by side; each is a complete
         // gallery with its own cover stack.
-        WindowGroup("Hypnos", id: "main") {
+        WindowGroup("Convolution", id: "main") {
             IOSRootView(appModel: appModel)
         }
     }
@@ -90,7 +90,7 @@ struct HypnosApp: App {
         // One window, like iOS — but a completely different root (see
         // Views/TV/TVRootView.swift and Hypnos/CLAUDE.md "tvOS"), not
         // `IOSRootView`'s cover-stack-over-a-touch-gallery shape.
-        WindowGroup("Hypnos", id: "main") {
+        WindowGroup("Convolution", id: "main") {
             TVRootView(appModel: appModel)
         }
     }
@@ -103,7 +103,7 @@ struct HypnosApp: App {
     private var visionOSScenes: some Scene {
         // Main gallery window — WindowGroup allows multiple instances.
         // UUID identity ensures each openWindow call creates a new window.
-        WindowGroup("Hypnos", id: "main", for: UUID.self) { $windowId in
+        WindowGroup("Convolution", id: "main", for: UUID.self) { $windowId in
             // Main windows are managed too (inside `MainWindowView`): the app
             // opens several, and one parked in another room is exactly what the
             // Windows tab is for. Each tab lists every main window but its own.
@@ -305,7 +305,7 @@ struct HypnosApp: App {
     /// UIKit dependency (`ConsoleWindowView`, `GPUMemoryMonitorView`).
     @SceneBuilder
     private var macOSScenes: some Scene {
-        WindowGroup("Hypnos", id: "main") {
+        WindowGroup("Convolution", id: "main") {
             MacRootView()
                 .environment(appModel)
         }

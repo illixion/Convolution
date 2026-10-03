@@ -21,7 +21,7 @@ import Observation
 /// reused by both `JellyfinAuth` and `JellyfinLibrary` so the client
 /// identity string can't drift between them.
 enum JellyfinClientIdentity {
-    static let clientName = "Hypnos"
+    static let clientName = "Convolution"
     static let deviceName = platformDeviceName
     /// Stable per-install id; a Jellyfin server uses this to distinguish
     /// "sessions" for the same user across devices.

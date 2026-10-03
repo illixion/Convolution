@@ -27,7 +27,7 @@ struct DepthPipelineSpikeSection: View {
     var body: some View {
         Section("Depth Pipeline Spike") {
             if videos.isEmpty {
-                Text("Put an MP4/MOV in Documents/Videos (Files app → Hypnos → Videos) to have something to measure against.")
+                Text("Put an MP4/MOV in Documents/Videos (Files app → Convolution → Videos) to have something to measure against.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else {

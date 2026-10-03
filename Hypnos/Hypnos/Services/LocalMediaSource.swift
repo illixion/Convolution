@@ -2,7 +2,7 @@
  Hypnos - Local Media Source
 
  Scans the app's Documents folder for local images and videos.
- Files appear in the Files app under "On My Apple Vision Pro" > "Hypnos".
+ Files appear in the Files app under "On My Apple Vision Pro" > "Convolution".
  */
 
 import DebugTrace

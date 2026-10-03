@@ -1,6 +1,6 @@
-# Hypnos
+# Convolution
 
-Hypnos is a cross-platform media viewer and spatial media app for visionOS, iOS/iPadOS, tvOS, and macOS. It brings your photos and videos into a shared media experience: browse your library from [Stash](https://github.com/stashapp/stash), Jellyfin, your device photo library, local files, or the built-in demo content.
+Convolution is a cross-platform media viewer and spatial media app for visionOS, iOS/iPadOS, tvOS, and macOS. It brings your photos and videos into a shared media experience: browse your library from [Stash](https://github.com/stashapp/stash), Jellyfin, your device photo library, local files, or the built-in demo content.
 
 The project is deliberately one codebase with a single app target and platform-specific scene roots. The shared media pipeline — browsing, filters, slideshow, playback, visual adjustments, background removal, remote viewers, pinned web pages, settings backup, and caches — runs everywhere. What stays platform-specific is the windowing and depth-heavy UX: visionOS gets immersive 3D, multi-window scenes, and depth-oriented presentation; tvOS and macOS get their own native root views; iOS/iPadOS keeps the same media functionality in a single-window experience. See [Platforms](#platforms).
 
@@ -39,7 +39,7 @@ The project is deliberately one codebase with a single app target and platform-s
 
 ## Platforms
 
-Hypnos is one shared app target with platform-aware roots. The scene graph differs by platform, but the media model, pipeline, settings, and viewer logic are shared across most of the app.
+Convolution is one shared app target with platform-aware roots. The scene graph differs by platform, but the media model, pipeline, settings, and viewer logic are shared across most of the app.
 
 | Feature | visionOS | iOS / iPadOS | tvOS | macOS |
 |---|---|---|---|---|
@@ -77,7 +77,7 @@ xcodebuild -quiet -project Hypnos/Hypnos.xcodeproj -scheme Hypnos \
 
 ## Dependencies
 
-Hypnos links two shared packages:
+Convolution links two shared packages:
 
 | Package | Products used |
 |---|---|
@@ -216,7 +216,7 @@ A slideshow viewer for displaying images from a [RoboFrame](https://github.com/i
 - **Visual adjustments** shared with the photo/video viewer system (brightness, contrast, saturation)
 
 ### Play Web Videos in 3D (Developer)
-Hypnos can play arbitrary web videos — including YouTube — and convert them to Pseudo 3D on the fly. This is what makes it easy to watch, say, a 4K YouTube video in windowed stereoscopic 3D on Vision Pro. Enable **Web yt-dlp Support** in Settings → Developer.
+Convolution can play arbitrary web videos — including YouTube — and convert them to Pseudo 3D on the fly. This is what makes it easy to watch, say, a 4K YouTube video in windowed stereoscopic 3D on Vision Pro. Enable **Web yt-dlp Support** in Settings → Developer.
 
 - **How it works** — page links (e.g. a YouTube URL) are routed through a self-hosted [web-yt-dlp](https://github.com/illixion/web-yt-dlp) proxy that runs yt-dlp, muxes, and streams the result with HTTP Range support. The app plays the proxied stream directly through the native-Metal player, so the Pseudo 3D pipeline can convert it. Configure the proxy **Endpoint URL** and **Token** in the same section.
 - **Codec / Max Resolution** — two dropdowns control what the proxy re-encodes to: **Codec** (HEVC/H.265, recommended on Apple platforms for smaller files at higher quality; or H.264 for compatibility) and **Max Resolution** (1080p or 2160p/4K). HEVC output is tagged `hvc1` so AVPlayer decodes it natively, and the proxy stream-copies already-HEVC sources rather than transcoding.

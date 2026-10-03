@@ -116,7 +116,7 @@ struct Bench {
         guard let host = flags.first(where: { !$0.hasPrefix("--") }) ?? environment("NC_SERVER") else {
             throw BenchError(message: "usage: ncbench login <server-url>")
         }
-        let flow = NextcloudLoginFlow(userAgent: "Hypnos (ncbench)")
+        let flow = NextcloudLoginFlow(userAgent: "Convolution (ncbench)")
         let session = try await flow.begin(serverURL: host)
         print("Open this and approve:\n\n  \(session.loginURL.absoluteString)\n")
         print("Waiting…")

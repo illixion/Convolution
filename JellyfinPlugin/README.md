@@ -1,7 +1,7 @@
 # Atmos Objects (Jellyfin plugin)
 
 Serves the Atmos objects inside a film's audio track as separate audio stems
-plus their position metadata, so Hypnos can place its own spatial sources on
+plus their position metadata, so Convolution can place its own spatial sources on
 the Vision Pro instead of needing a Dolby renderer. No Dolby code is involved.
 Two source formats are supported, picked per item (TrueHD preferred, since
 it's the higher-quality format and lossless; EAC3 as a fallback):
@@ -15,7 +15,7 @@ it's the higher-quality format and lossless; EAC3 as a fallback):
   the licence terms this brings — Cavern must stay confined to this plugin.
 
 Either way the plugin's own output — `scene.json`, segment Events (DAMF
-room-space positions), FLAC channel groups — is identical, so Hypnos clients
+room-space positions), FLAC channel groups — is identical, so Convolution clients
 need no changes to play either source. See `Eac3AtmosDecoder.cs` for the
 Cavern→DAMF coordinate mapping and why E-AC-3 needs no restart-point search
 the way TrueHD does.
@@ -113,7 +113,7 @@ Events are `{id, t, ramp, gain, pos?}`:
 ## Video
 
 The plugin also serves the film's video track, copied untouched, so a
-client can render it on the same clock as the object audio (Hypnos feeds it
+client can render it on the same clock as the object audio (Convolution feeds it
 to `AVSampleBufferDisplayLayer`, which does the decoding and Dolby Vision
 display management itself).
 

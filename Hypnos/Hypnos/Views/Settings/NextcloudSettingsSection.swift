@@ -25,7 +25,7 @@ struct NextcloudSettingsSection: View {
 
     /// Shown to the user on the server's app-password list, so it needs to say
     /// what it is without further context.
-    private static let loginUserAgent = "Hypnos (Apple Vision Pro)"
+    private static let loginUserAgent = "Convolution (Apple Vision Pro)"
 
     private enum SignInState: Equatable {
         case idle
@@ -55,7 +55,7 @@ struct NextcloudSettingsSection: View {
         } header: {
             Text("Nextcloud")
         } footer: {
-            Text("Browse a Nextcloud server's photos and videos. Signing in opens your server's own login page — Hypnos never sees your password, and the access it gets is listed under Settings → Security on the server, where you can revoke it.")
+            Text("Browse a Nextcloud server's photos and videos. Signing in opens your server's own login page — Convolution never sees your password, and the access it gets is listed under Settings → Security on the server, where you can revoke it.")
         }
         // Keyed on the server so the list refreshes when one is signed into or
         // replaced, rather than only on the sign-in that happened to be

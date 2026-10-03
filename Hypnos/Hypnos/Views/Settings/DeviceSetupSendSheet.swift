@@ -173,9 +173,9 @@ struct DeviceSetupSendSection: View {
 
     private var footer: String {
         #if os(iOS)
-        "On the Apple TV, open Hypnos → Settings → Set Up from Another Device, then point the Camera app at the code. Or take a photo of it and pick it here."
+        "On the Apple TV, open Convolution → Settings → Set Up from Another Device, then point the Camera app at the code. Or take a photo of it and pick it here."
         #else
-        "On the Apple TV, open Hypnos → Settings → Set Up from Another Device, take a photo of the code, and pick it here."
+        "On the Apple TV, open Convolution → Settings → Set Up from Another Device, take a photo of the code, and pick it here."
         #endif
     }
 }

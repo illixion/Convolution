@@ -47,8 +47,8 @@ struct TVDeviceSetupView: View {
                     Button("Done") { state.path.removeAll() }
                 } else {
                     Text("Send Settings from Another Device").font(.title2.bold())
-                    step(1, "On your iPhone or iPad, point the Camera at this code and open it in Hypnos.")
-                    step(2, "Or on any device, take a photo of the code, then in Hypnos go to Settings → Apple TV → Scan a Photo of the Code.")
+                    step(1, "On your iPhone or iPad, point the Camera at this code and open it in Convolution.")
+                    step(2, "Or on any device, take a photo of the code, then in Convolution go to Settings → Apple TV → Scan a Photo of the Code.")
                     step(3, "Choose which servers to send. Their addresses, sign-ins and keys are encrypted to this code.")
                     statusLine
                 }
@@ -73,7 +73,7 @@ struct TVDeviceSetupView: View {
     private var statusLine: some View {
         switch receiver?.status {
         case .failed(let reason):
-            Label("Hypnos can't use the local network (\(reason)). Allow it in Settings → Apps → Hypnos.",
+            Label("Convolution can't use the local network (\(reason)). Allow it in Settings → Apps → Convolution.",
                   systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
         case .starting, nil:

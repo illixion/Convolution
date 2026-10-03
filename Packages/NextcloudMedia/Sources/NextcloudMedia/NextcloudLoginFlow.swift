@@ -54,7 +54,7 @@ public struct NextcloudLoginFlow: Sendable {
     /// deciding what to revoke.
     private let userAgent: String
 
-    public init(session: URLSession = .shared, userAgent: String = "Hypnos") {
+    public init(session: URLSession = .shared, userAgent: String = "Convolution") {
         self.session = session
         self.userAgent = userAgent
     }

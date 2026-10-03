@@ -54,7 +54,7 @@ struct MacRootView: View {
             .navigationSplitViewColumnWidth(min: 160, ideal: 190)
         } detail: {
             content
-                .navigationTitle(selection?.rawValue ?? "Hypnos")
+                .navigationTitle(selection?.rawValue ?? "Convolution")
         }
         .task {
             if appModel.galleryImages.isEmpty {

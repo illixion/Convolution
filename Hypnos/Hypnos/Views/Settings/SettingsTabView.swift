@@ -260,7 +260,7 @@ struct SettingsTabView: View {
                     case .limited:
                         Label("Access limited to selected photos", systemImage: "checkmark.circle")
                             .foregroundStyle(.yellow)
-                        Text("Hypnos can only see the photos you picked. Choose more in Settings → Privacy & Security → Photos.")
+                        Text("Convolution can only see the photos you picked. Choose more in Settings → Privacy & Security → Photos.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     case .denied, .restricted:
@@ -283,7 +283,7 @@ struct SettingsTabView: View {
                     // No toggle — needs no permission and no setup, so unlike
                     // Photos or a media server there is nothing to gate. This
                     // is purely where "where do I put files" gets explained.
-                    Text("Browse and convert files you place in this app's Documents folder — in the Files app, under \"On My \(PlatformCapabilities.deviceFamilyName)\" → Hypnos. Always available as a library alongside Photos and any media server.")
+                    Text("Browse and convert files you place in this app's Documents folder — in the Files app, under \"On My \(PlatformCapabilities.deviceFamilyName)\" → Convolution. Always available as a library alongside Photos and any media server.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -508,7 +508,7 @@ struct SettingsTabView: View {
                     HStack {
                         Text("App Name")
                         Spacer()
-                        Text("Hypnos")
+                        Text("Convolution")
                             .foregroundColor(.secondary)
                     }
                     HStack {
@@ -566,7 +566,7 @@ struct SettingsTabView: View {
                 isPresented: $showExporter,
                 document: exportDocument,
                 contentType: .json,
-                defaultFilename: "Hypnos-Backup-\(backupDateString()).json"
+                defaultFilename: "Convolution-Backup-\(backupDateString()).json"
             ) { _ in
                 exportDocument = nil
             }

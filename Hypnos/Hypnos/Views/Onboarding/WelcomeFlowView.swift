@@ -171,7 +171,7 @@ struct WelcomeFlowView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if PlatformCapabilities.supportsSpatial3D {
-                Text("Hypnos turns flat photos and videos into spatial 3D, right here on the device. Nothing is uploaded.")
+                Text("Convolution turns flat photos and videos into spatial 3D, right here on the device. Nothing is uploaded.")
                     .font(.title3)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -182,7 +182,7 @@ struct WelcomeFlowView: View {
             } else {
                 // The sample's control caption already names the platform
                 // that converts to 3D; no second line about it here.
-                Text("Hypnos browses your photo library, your files and your Stash media server — with slideshows, enhancements and background removal, right here on the device. Nothing is uploaded.")
+                Text("Convolution browses your photo library, your files and your Stash media server — with slideshows, enhancements and background removal, right here on the device. Nothing is uploaded.")
                     .font(.title3)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
