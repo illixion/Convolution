@@ -67,11 +67,48 @@ jobs:
           cp -R "$APP_PATH" build/Payload/
           cd build && zip -qr Hypnos.ipa Payload
 
-      - name: Upload IPA artifact
+      # The iPhone/iPad app, for the AltStore / SideStore source at apps.illixion.com.
+      # The source reads it from every release under one fixed name, so
+      # releases/latest/download/Convolution-iOS-unsigned.ipa always points at the newest
+      # one. The id is pinned because a local, gitignored LocalSigning.xcconfig renames it
+      # on the author's machine. AltStore offers an update only when CFBundleVersion
+      # grows, and every build used to be 1; the commit count on main always grows.
+      - name: Archive for iPhone and iPad
+        run: |
+          xcodebuild -quiet archive \
+            -project Hypnos/Hypnos.xcodeproj \
+            -scheme Hypnos \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath $RUNNER_TEMP/Hypnos-iOS.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            PRODUCT_BUNDLE_IDENTIFIER=com.illixion.hypnos \
+            CURRENT_PROJECT_VERSION=$(git rev-list --count HEAD)
+
+      # AltStore re-signs with the user's Apple ID, and on a free account every embedded
+      # extension or Watch app costs another App ID; the source only ships bare apps.
+      - name: Package iPhone/iPad IPA
+        run: |
+          APP=$(find $RUNNER_TEMP/Hypnos-iOS.xcarchive/Products/Applications -maxdepth 1 -name '*.app' -type d | head -1)
+          for d in PlugIns Watch Extensions; do
+            [[ ! -d "$APP/$d" ]] || { echo "::error::the iOS app embeds $d"; exit 1; }
+          done
+          mkdir -p $RUNNER_TEMP/iOSPayload/Payload
+          cp -R "$APP" $RUNNER_TEMP/iOSPayload/Payload/
+          cd $RUNNER_TEMP/iOSPayload
+          zip -qry "$GITHUB_WORKSPACE/Convolution-iOS-unsigned.ipa" Payload
+
+      - name: Upload IPA artifacts
         uses: actions/upload-artifact@v4
         with:
           name: Hypnos
-          path: build/Hypnos.ipa
+          path: |
+            build/Hypnos.ipa
+            Convolution-iOS-unsigned.ipa
 
       - name: Create a version string
         id: version
@@ -110,26 +147,17 @@ jobs:
             echo "EOF"
           } >> $GITHUB_OUTPUT
 
+      # Both IPAs in one call, so a release never exists without the iPhone/iPad one.
       - name: Create GitHub Release
         if: github.event_name != 'pull_request'
-        id: create_release
-        uses: actions/create-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          release_name: ${{ steps.version.outputs.version }}
-          body: ${{ steps.changelog.outputs.body }}
-          draft: false
-          prerelease: false
-
-      - name: Upload Release Asset
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ steps.ipa.outputs.ipa_file }}
-          asset_name: ${{ steps.ipa.outputs.ipa_file }}
-          asset_content_type: application/octet-stream
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTES: ${{ steps.changelog.outputs.body }}
+        run: |
+          printf '%s\n' "$NOTES" > release-notes.md
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "${{ steps.version.outputs.version }}" \
+            --target "$GITHUB_SHA" \
+            --notes-file release-notes.md \
+            "${{ steps.ipa.outputs.ipa_file }}" \
+            Convolution-iOS-unsigned.ipa
