@@ -27,7 +27,7 @@ Nothing is uploaded: libraries are read on the device, and depth inference runs 
 
 ## Screenshots
 
-Captured in the Apple Vision Pro Simulator with the device's Photos library as the source.
+The Apple Vision Pro shots are from the visionOS Simulator, with sample photos from [Picsum](https://picsum.photos) (Unsplash licence) in the Photos library.
 
 **Pictures, original aspect ratio** — every image keeps its own shape, packed into rows that fill the window:
 
@@ -40,6 +40,23 @@ Captured in the Apple Vision Pro Simulator with the device's Photos library as t
 **Settings:**
 
 ![Settings](images/settings.jpg)
+
+### On other platforms
+
+The same app on iPhone, Apple TV and Mac, each with its own shell around the shared pipeline (captured in the iOS and tvOS Simulators and a macOS debug build):
+
+<table>
+  <tr>
+    <td width="26%"><img src="images/ios-pictures.jpg" alt="Pictures grid on iPhone, original aspect ratio"></td>
+    <td width="74%"><img src="images/macos-pictures.jpg" alt="Pictures grid in a macOS window with a sidebar"></td>
+  </tr>
+  <tr>
+    <td align="center">iPhone</td>
+    <td align="center">Mac</td>
+  </tr>
+</table>
+
+![Pictures on Apple TV](images/tvos-pictures.jpg)
 
 ## Requirements
 
