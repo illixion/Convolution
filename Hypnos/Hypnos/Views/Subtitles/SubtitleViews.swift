@@ -89,9 +89,11 @@ struct SubtitleOverlay: View {
 /// The strip under a stereo picture that subtitles move to while it shows:
 /// SwiftUI drawn over a stereo video plane never comes out in front of it
 /// (device, 2026-10-07), and text at the picture's depth would fight the
-/// scene anyway. The window grows by `height` only while the band shows.
+/// scene anyway. It hangs under the window with the controls (see
+/// `PlayerOrnamentStack`), not inside it: the window has to be the picture
+/// alone for its edge to square the picture's corners.
 struct SubtitleBand: View {
-    static let height: CGFloat = 110
+    static let height: CGFloat = 98
 
     let controller: SubtitleController
     let filmTime: @MainActor () -> Double
@@ -100,8 +102,37 @@ struct SubtitleBand: View {
         RAVESubtitlePanel(track: controller.cues, fontSize: 30) {
             controller.cueTime(forFilmTime: filmTime())
         }
-        .padding(.top, 12)
         .frame(height: Self.height, alignment: .top)
+    }
+}
+
+/// What hangs under a player window: the subtitle band while a stereo
+/// picture has subtitles on, then the controls. The ornament stays up for
+/// the subtitles while the controls auto-hide, so they fade in place
+/// rather than the band jumping; a hidden bar takes no input.
+struct PlayerOrnamentStack<Controls: View>: View {
+    let subtitles: SubtitleController?
+    let controlsVisible: Bool
+    /// Space between the window's bottom edge and whatever hangs first.
+    let gap: CGFloat
+    let filmTime: @MainActor () -> Double
+    @ViewBuilder let controls: Controls
+
+    /// Whether the ornament has anything to show at all.
+    static func isVisible(subtitles: SubtitleController?, controlsVisible: Bool) -> Bool {
+        controlsVisible || subtitles != nil
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let subtitles {
+                SubtitleBand(controller: subtitles, filmTime: filmTime)
+            }
+            controls
+                .opacity(controlsVisible ? 1 : 0)
+                .allowsHitTesting(controlsVisible)
+        }
+        .padding(.top, gap)
     }
 }
 #endif

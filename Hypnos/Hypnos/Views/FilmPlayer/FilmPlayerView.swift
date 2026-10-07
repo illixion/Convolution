@@ -45,6 +45,7 @@ struct FilmPlayerView: View {
 
     #if os(visionOS)
     @Environment(AppModel.self) private var appModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var stereoSource: SampleBufferFrameSource?
     /// Set while a 3D film plays as real 3D (eyes cropped from the frame);
     /// nil while a flat film plays as fake-3D.
@@ -97,6 +98,9 @@ struct FilmPlayerView: View {
                 get: { stereoFailure != nil }, set: { if !$0 { stereoFailure = nil } }
             )) { Button("OK", role: .cancel) {} } message: { Text(stereoFailure ?? "") }
             .onChange(of: session.loadedItem?.id) { _, _ in stopStereo(keepingPosition: false) }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .background { clearLostHolds() }
+            }
             // A 3D film opens in 3D once the server says it is one, and
             // replaces a fake-3D picture the user started before it knew.
             .onChange(of: session.stereoFormat) { _, format in
@@ -204,6 +208,7 @@ struct FilmPlayerView: View {
                     RAVEExternalStereoVideoView(
                         source: source, settings: session.stereoSettings, chromeOpen: chromeOpen,
                         packedStereo: stereoLayout,
+                        squareCorners: !appModel.roundedCorners,
                         onUnavailable: {
                             guard stereoSource === source else { return }
                             stopStereo()
@@ -216,16 +221,18 @@ struct FilmPlayerView: View {
                     subtitleOverlay
                 }
             }
-            .padding(.bottom, showsSubtitleBand ? SubtitleBand.height : 0)
-            if showsSubtitleBand {
-                SubtitleBand(controller: session.subtitles) { player.currentTime }
-            }
         }
         // The controls hang under the window, so the window is all picture;
         // they and the window bar hide together while the film plays.
         .persistentSystemOverlays(chromeVisible ? .visible : .hidden)
-        .ornament(visibility: chromeVisible ? .visible : .hidden,
+        .ornament(visibility: PlayerOrnamentStack<EmptyView>.isVisible(
+                      subtitles: bandSubtitles, controlsVisible: chromeVisible) ? .visible : .hidden,
                   attachmentAnchor: .scene(.bottom), contentAlignment: .top) {
+            PlayerOrnamentStack(
+                subtitles: bandSubtitles, controlsVisible: chromeVisible,
+                gap: stereoSource == nil ? 12 : VideoWindowView.stereoControlsGap,
+                filmTime: { player.currentTime }
+            ) {
             FilmTransport(player: player, stereoEnabled: stereoSource != nil,
                           onToggle3D: { stereoSource == nil ? startStereo() : stopStereo() },
                           onModalChanged: { open in
@@ -234,7 +241,7 @@ struct FilmPlayerView: View {
                           },
                           onInteraction: { revealChrome() },
                           onHold: { holdChrome($0) })
-                .padding(.top, stereoSource == nil ? 12 : VideoWindowView.stereoControlsGap)
+            }
         }
         .animation(.easeInOut(duration: 0.2), value: chromeVisible)
         .onAppear { revealChrome() }
@@ -277,12 +284,16 @@ struct FilmPlayerView: View {
 
     #if os(visionOS)
     private var showsSubtitleBand: Bool { stereoSource != nil && session.subtitles.selected != nil }
+    private var bandSubtitles: SubtitleController? { showsSubtitleBand ? session.subtitles : nil }
 
     // MARK: Chrome auto-hide
 
     private static let chromeHideDelay: Duration = .seconds(4)
 
     private func toggleChrome() {
+        // A tap on the picture closes any open menu first, so none is open,
+        // whatever the holds say (see `clearLostHolds`).
+        clearLostHolds()
         if chromeVisible, chromeHolds == 0 {
             chromeHideTask?.cancel()
             chromeVisible = false
@@ -294,6 +305,15 @@ struct FilmPlayerView: View {
     private func revealChrome() {
         chromeVisible = true
         scheduleChromeHide()
+    }
+
+    /// Menus hold the chrome from their content's appear and disappear, and
+    /// one the system closes while the window is away (the headset sleeping,
+    /// another app's immersive space) never lets go: the picture stayed
+    /// dimmed and the chrome pinned (device, 2026-10-07).
+    private func clearLostHolds() {
+        chromeOpen = false
+        chromeHolds = 0
     }
 
     /// A menu, sheet or scrub is holding the chrome up (true) or let go.

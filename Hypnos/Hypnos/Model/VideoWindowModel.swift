@@ -1148,6 +1148,9 @@ final class VideoWindowModel {
     }
 
     func toggleUIVisibility() {
+        // A tap on the picture closes any open menu first, so none is open
+        // now, whatever the count says (see `clearLostMenus`).
+        clearLostMenus(reason: "picture tapped")
         isUIHidden.toggle()
         isWindowControlsHidden = false
         if !isUIHidden {
@@ -1167,5 +1170,18 @@ final class VideoWindowModel {
         } else if oldPhase == .active && (newPhase == .inactive || newPhase == .background) {
             isInActiveRoom = false
         }
+        // The system closes menus when the window goes away.
+        if newPhase == .background { clearLostMenus(reason: "window backgrounded") }
+    }
+
+    /// Menus count themselves open and closed from their content's appear and
+    /// disappear, and a menu the system closes while the window is
+    /// backgrounded (the headset sleeping) never reports closing. A count left
+    /// at 1 holds the chrome and keeps a stereo picture dimmed for good
+    /// (device, 2026-10-07).
+    func clearLostMenus(reason: String) {
+        guard openOrnamentMenuCount > 0 else { return }
+        AppLogger.videoWindow.info("Clearing \(self.openOrnamentMenuCount, privacy: .public) open menu(s): \(reason, privacy: .public)")
+        openOrnamentMenuCount = 0
     }
 }

@@ -88,6 +88,7 @@ struct Pseudo3DVideoPlayerView: View {
                 engine.startMuted = startMuted
                 engine.loops = loops
                 engine.setContentOpacity(contentOpacity)
+                engine.setSquareCorners(!appModel.roundedCorners)
                 content.add(engine.makeVideoEntity())
                 engine.observeVideoSize(content: content)
                 engine.load(url: videoURL, roomActive: isRoomActive, depthMode: depthMode, startAt: startAtSeconds, startPaused: startPaused,
@@ -121,6 +122,10 @@ struct Pseudo3DVideoPlayerView: View {
             engine.load(url: newURL, roomActive: isRoomActive, depthMode: depthMode,
                         httpHeaderFields: MediaAuthorization.shared.headerFields(for: newURL),
                         packedStereo: packedStereo)
+        }
+        // Follows Settings → Rounded Corners, like the photo viewer.
+        .onChange(of: appModel.roundedCorners) { _, rounded in
+            engine.setSquareCorners(!rounded)
         }
         .onChange(of: depthMode) { _, newMode in
             engine.setDepthMode(newMode)

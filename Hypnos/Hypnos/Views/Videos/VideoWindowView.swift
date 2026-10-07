@@ -51,12 +51,11 @@ struct VideoWindowView: View {
     /// window's bottom edge) doesn't overlap the video. The shared timeline,
     /// transport and feature rows have the same footprint in 2D and fake-3D.
     ///
-    /// visionOS hangs the controls below the window instead, so the window is
-    /// the picture alone, plus the subtitle band while a fake-3D picture has
-    /// subtitles on (see `SubtitleBand`).
+    /// visionOS hangs the controls, and a stereo picture's subtitles, below
+    /// the window instead, so the window is the picture alone.
     private var ornamentBottomPadding: CGFloat {
         #if os(visionOS)
-        return showsSubtitleBand ? SubtitleBand.height : 0
+        return 0
         #else
         if windowModel.shouldUse3DMode { return 60 }
         return 160
@@ -67,6 +66,13 @@ struct VideoWindowView: View {
     /// picture, which reads as nearer than its edge and crowded the bar at
     /// the 12 pt the flat picture uses (device, 2026-10-07).
     static let stereoControlsGap: CGFloat = 44
+
+    #if os(visionOS)
+    /// The subtitles to hang under a stereo picture, if it has them on.
+    private var bandSubtitles: SubtitleController? {
+        showsSubtitleBand ? windowModel.subtitles : nil
+    }
+    #endif
 
     private var showsSubtitleBand: Bool {
         windowModel.showsStereoPicture && windowModel.subtitles.selected != nil && !appModel.allWindowsHidden
@@ -281,18 +287,8 @@ struct VideoWindowView: View {
                     }
                 }
 
-                Group {
-                    #if os(visionOS)
-                    if showsSubtitleBand {
-                        SubtitleBand(controller: windowModel.subtitles) { windowModel.currentTime }
-                    } else {
-                        Spacer()
-                    }
-                    #else
-                    Spacer()
-                    #endif
-                }
-                .frame(height: ornamentBottomPadding)
+                Spacer()
+                    .frame(height: ornamentBottomPadding)
             }
 
             if !appModel.allWindowsHidden, !windowModel.usesImmersiveStereo,
@@ -377,12 +373,17 @@ struct VideoWindowView: View {
         // picture, and the system moves the window bar below the ornament.
         // Both auto-hide together (`isUIHidden` / `isWindowControlsHidden`).
         .ornament(
-            visibility: windowModel.isUIHidden || appModel.allWindowsHidden ? .hidden : .visible,
+            visibility: PlayerOrnamentStack<EmptyView>.isVisible(
+                subtitles: bandSubtitles, controlsVisible: !windowModel.isUIHidden
+            ) && !appModel.allWindowsHidden ? .visible : .hidden,
             attachmentAnchor: .scene(.bottom),
             contentAlignment: .top
         ) {
-            videoOrnament
-                .padding(.top, windowModel.showsStereoPicture ? Self.stereoControlsGap : 12)
+            PlayerOrnamentStack(
+                subtitles: bandSubtitles, controlsVisible: !windowModel.isUIHidden,
+                gap: windowModel.showsStereoPicture ? Self.stereoControlsGap : 12,
+                filmTime: { windowModel.currentTime }
+            ) { videoOrnament }
         }
         .onChange(of: ornamentBottomPadding) { old, new in
             resizeWindowHeight(by: new - old)
