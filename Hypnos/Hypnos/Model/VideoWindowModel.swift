@@ -89,7 +89,10 @@ final class VideoWindowModel {
     /// Distinct from `stereoscopicOverride`, which presents a genuinely
     /// stereoscopic source (SBS / MV-HEVC). Only applies to AVFoundation-
     /// decodable videos (the `.nativeMetal` renderer).
-    var pseudo3DEnabled: Bool = false
+    var pseudo3DEnabled: Bool = false {
+        // Leaving fake-3D mounts a fresh flat player, which starts at 0.
+        didSet { if oldValue, !pseudo3DEnabled { carryPositionToNextRenderer(reason: "leaving fake-3D") } }
+    }
     /// Depth/convergence tuning for the fake-3D warp.
     var pseudo3DSettings: Pseudo3DSettings = .default
 
@@ -301,6 +304,7 @@ final class VideoWindowModel {
         playbackFailure = nil
         isLoadStalled = false
         hasPresentedVideo = false
+        carryPositionToNextRenderer(reason: "retry")
         playbackAttempt += 1
         usingTranscodedStream = false
         pseudo3DEnabled = false
@@ -404,6 +408,8 @@ final class VideoWindowModel {
         dismissDepthReadyPrompt()
         pseudo3DSettings = .default
         pendingPseudo3DEngage = nil
+        // A different video starts from its own beginning.
+        carriedPosition = nil
         // Every video starts on its own original file, whatever the previous
         // one ended up playing.
         usingTranscodedStream = false
@@ -956,6 +962,8 @@ final class VideoWindowModel {
     }
 
     func endScrub(at time: Double) {
+        // The user chose a position; nothing may snap it back.
+        carriedPosition = nil
         let clamped = max(0, duration > 0 ? min(time, duration) : time)
         currentTime = clamped
         seekCommand?(clamped)
@@ -968,9 +976,44 @@ final class VideoWindowModel {
         setMutedCommand?(isMuted)
     }
 
+    // MARK: - Position carry-over
+
+    /// A position the next renderer has to resume at. Every renderer change
+    /// (leaving fake-3D, a retry) builds a new player that starts at 0; the
+    /// playhead must survive that, both on screen and in what progress
+    /// reporting sends to the server.
+    @ObservationIgnored private var carriedPosition: (time: Double, deadline: Date)?
+
+    func carryPositionToNextRenderer(reason: String) {
+        guard currentTime > 1 else { return }
+        carriedPosition = (currentTime, Date().addingTimeInterval(20))
+        AppLogger.videoWindow.info("Carrying \(self.currentTime, format: .fixed(precision: 2))s to the next renderer: \(reason, privacy: .public)")
+    }
+
+    /// True when the report came from a new player that started short of the
+    /// carried position; it has been sent there and the report is dropped.
+    private func resumeCarriedPosition(reportedTime: Double, duration: Double) -> Bool {
+        guard let carried = carriedPosition else { return false }
+        if Date() > carried.deadline {
+            carriedPosition = nil
+            return false
+        }
+        // The outgoing player still reporting the old position: keep waiting.
+        guard reportedTime < carried.time - 2 else { return false }
+        guard duration > 0, let seekCommand else { return true }
+        carriedPosition = nil
+        AppLogger.videoWindow.info("Resuming new renderer at \(carried.time, format: .fixed(precision: 2))s (it reported \(reportedTime, format: .fixed(precision: 2))s)")
+        seekCommand(min(carried.time, max(0, duration - 0.5)))
+        return true
+    }
+
     /// Apply a state report from the JS bridge (ignored mid-scrub).
     func applyPlaybackState(currentTime: Double, duration: Double, paused: Bool, muted: Bool, buffered: Double) {
         guard !isScrubbing else { return }
+        if duration > 0 { self.duration = duration }
+        // Until the new player is at the carried position, the playhead (and
+        // the progress reports read from it) stays where the user was.
+        if resumeCarriedPosition(reportedTime: currentTime, duration: duration) { return }
         self.currentTime = currentTime
         if duration > 0 { self.duration = duration }
         self.isPaused = paused

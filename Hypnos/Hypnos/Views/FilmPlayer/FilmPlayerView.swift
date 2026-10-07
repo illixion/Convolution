@@ -11,10 +11,10 @@
  picture renderer stays primed while only its visible surface changes.
  Atmos transport, seeking and progress reporting stay with FilmPlayer.
 
- Subtitles (FilmSession.subtitles) draw over the picture on its own film
- clock. Over the stereo picture they sit a little in front of the window
- plane: at the default convergence the nearest scene content is on that
- plane, so text there would compete with it for depth.
+ Subtitles (FilmSession.subtitles) draw over the 2D picture on its film
+ clock. While the picture is stereo they move to a panel below the window:
+ SwiftUI over the stereo video plane never shows in front of it (measured on
+ device), and the menus already fade the picture for the same reason.
 
  Switching between 2D and 3D never moves the playhead: both directions
  re-prime the picture at the position the toggle was pressed at.
@@ -191,10 +191,12 @@ struct FilmPlayerView: View {
                 // measured separation keeps Hypnos/Raven controls reachable.
                 .padding(.bottom, 180)
             }
-            subtitleOverlay
-                .padding(.bottom, 180)
-                .offset(z: stereoSource == nil ? 0 : Self.stereoSubtitleLift)
+            if stereoSource == nil {
+                subtitleOverlay
+                    .padding(.bottom, 180)
+            }
         }
+        .subtitlePanel(session.subtitles, isShown: stereoSource != nil) { player.currentTime }
         .ornament(attachmentAnchor: .scene(.bottomFront)) {
             FilmTransport(player: player, stereoEnabled: stereoSource != nil,
                           onToggle3D: { stereoSource == nil ? startStereo() : stopStereo() },
@@ -237,9 +239,6 @@ struct FilmPlayerView: View {
     }
 
     #if os(visionOS)
-    /// Points (≈ mm) the subtitles float in front of the stereo picture.
-    private static let stereoSubtitleLift: CGFloat = 20
-
     private func startStereo() {
         guard stereoSource == nil else { return }
         guard CoreMLDepthProvider.hasAvailableModel(role: .realtime) else {

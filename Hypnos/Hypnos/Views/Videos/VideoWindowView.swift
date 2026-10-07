@@ -242,16 +242,13 @@ struct VideoWindowView: View {
                     }
                 }
                 .overlay {
-                    // Subtitles for the flat and fake-3D renderers; the
-                    // immersive player draws its own in the immersive space.
-                    if !appModel.allWindowsHidden, !windowModel.shouldUse3DMode {
+                    // Subtitles for the flat renderers; the immersive player
+                    // draws its own in the immersive space.
+                    // Fake-3D shows them on a panel below the window instead
+                    // (see SubtitlePanel).
+                    if !appModel.allWindowsHidden, !windowModel.shouldUse3DMode, !windowModel.shouldUsePseudo3D {
                         SubtitleOverlay(controller: windowModel.subtitles,
                                         pictureAspect: windowModel.videoAspectRatio) { windowModel.currentTime }
-                            #if os(visionOS)
-                            // In front of the stereo picture, whose nearest
-                            // content sits on the window plane (see FilmPlayerView).
-                            .offset(z: windowModel.shouldUsePseudo3D ? 20 : 0)
-                            #endif
                     }
                 }
 
@@ -350,6 +347,10 @@ struct VideoWindowView: View {
                     .offset(z: windowModel.shouldUsePseudo3D ? pseudo3DChromeZOffset : 0)
             }
         )
+        #if os(visionOS)
+        .subtitlePanel(windowModel.subtitles,
+                       isShown: windowModel.shouldUsePseudo3D && !appModel.allWindowsHidden) { windowModel.currentTime }
+        #endif
         .sheet(isPresented: $windowModel.showVideo3DSettingsSheet) {
             Video3DSettingsSheet(
                 initialSettings: windowModel.video3DSettings,
