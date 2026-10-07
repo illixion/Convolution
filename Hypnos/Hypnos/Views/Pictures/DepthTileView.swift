@@ -21,6 +21,7 @@
  */
 
 #if os(visionOS)
+import Accelerate
 import DebugTraceUI
 import RAVEMedia
 import RealityKit
@@ -39,9 +40,9 @@ struct DepthTileView: View {
     nonisolated static let span: CGFloat = 32
     nonisolated static let cornerRadius: CGFloat = 12
     nonisolated static let edgeFalloff: CGFloat = 14
-    /// Vertices along the tile's long edge. Depth is low-frequency, and the
-    /// fake-3D warp needs no finer than ~1 vertex per 3 depth texels.
-    nonisolated static let gridLongSide = 72
+    /// Vertices along the tile's long edge. With the depth softened, this
+    /// is dense enough that a subject's outline doesn't read as stepped.
+    nonisolated static let gridLongSide = 112
 
     var body: some View {
         let widthMeters = Float(metrics.convert(size.width, to: .meters))
@@ -91,11 +92,14 @@ struct DepthTileView: View {
         }.value
         guard let built,
               let mesh = try? await MeshResource(from: [built.mesh]),
-              let texture = try? await TextureResource(image: built.texture, options: .init(semantic: .color))
+              let texture = try? await TextureResource(
+                  image: built.texture,
+                  options: .init(semantic: .color, mipmapsMode: .allocateAndGenerateAll)
+              )
         else { return nil }
 
         var material = UnlitMaterial(applyPostProcessToneMap: false)
-        material.color = .init(tint: .white, texture: .init(texture))
+        material.color = .init(tint: .white, texture: clampedTexture(texture))
         material.blending = .transparent(opacity: .init(floatLiteral: 1))
         material.faceCulling = .none
         return ModelEntity(mesh: mesh, materials: [material])
@@ -109,7 +113,7 @@ struct DepthTileView: View {
     }
 
     /// The image-normalized rect a `scaledToFill` cell shows.
-    nonisolated private static func fillCrop(imageWidth: CGFloat, imageHeight: CGFloat, cell: CGSize) -> CGRect {
+    nonisolated static func fillCrop(imageWidth: CGFloat, imageHeight: CGFloat, cell: CGSize) -> CGRect {
         guard imageWidth > 0, imageHeight > 0 else { return CGRect(x: 0, y: 0, width: 1, height: 1) }
         let imageAspect = imageWidth / imageHeight
         let cellAspect = cell.width / cell.height
@@ -123,7 +127,10 @@ struct DepthTileView: View {
     }
 
     /// The visible crop, rounded corners in alpha, at 2 px per point (capped).
-    nonisolated private static func renderTexture(_ image: CGImage, crop: CGRect, cell: CGSize) -> CGImage? {
+    /// `edgeFade` (points) additionally fades alpha to zero toward the cell
+    /// edge: the diorama's subject panel, which otherwise ran flat into the
+    /// edge and showed a seam against the backdrop seen from the side.
+    nonisolated static func renderTexture(_ image: CGImage, crop: CGRect, cell: CGSize, edgeFade: CGFloat = 0) -> CGImage? {
         let scale = min(2, 640 / max(cell.width, cell.height))
         let width = max(Int((cell.width * scale).rounded()), 1)
         let height = max(Int((cell.height * scale).rounded()), 1)
@@ -147,13 +154,56 @@ struct DepthTileView: View {
             width: drawWidth, height: drawHeight
         )
         context.draw(image, in: drawRect)
+        if edgeFade > 0, let data = context.data {
+            fadeEdges(data.assumingMemoryBound(to: UInt8.self), width: width, height: height,
+                      bytesPerRow: context.bytesPerRow, fadePixels: Float(edgeFade * scale))
+        }
         return context.makeImage()
+    }
+
+    /// Premultiplied RGBA, so every channel scales with the alpha.
+    nonisolated private static func fadeEdges(
+        _ pixels: UnsafeMutablePointer<UInt8>, width: Int, height: Int, bytesPerRow: Int, fadePixels: Float
+    ) {
+        func ramp(_ distance: Float) -> Float {
+            let t = min(max(distance / fadePixels, 0), 1)
+            return t * t * (3 - 2 * t)
+        }
+        let columns = (0..<width).map { ramp(Float(min($0, width - 1 - $0)) + 0.5) }
+        for y in 0..<height {
+            let rowFactor = ramp(Float(min(y, height - 1 - y)) + 0.5)
+            let row = pixels + y * bytesPerRow
+            for x in 0..<width {
+                let f = min(rowFactor, columns[x])
+                guard f < 1 else { continue }
+                for c in 0..<4 {
+                    row[x * 4 + c] = UInt8(Float(row[x * 4 + c]) * f + 0.5)
+                }
+            }
+        }
+    }
+
+    /// Clamped to the edge: the default repeat let the top row's filtering
+    /// pull in the bottom row, a 1-px line along the top of some tiles.
+    @MainActor
+    static func clampedTexture(_ resource: TextureResource) -> MaterialParameters.Texture {
+        let descriptor = MTLSamplerDescriptor()
+        descriptor.sAddressMode = .clampToEdge
+        descriptor.tAddressMode = .clampToEdge
+        descriptor.minFilter = .linear
+        descriptor.magFilter = .linear
+        descriptor.mipFilter = .linear
+        return MaterialParameters.Texture(resource, sampler: .init(descriptor))
     }
 
     nonisolated private static func meshDescriptor(
         depth: StillDepthMap, crop: CGRect, cell: CGSize,
         widthMeters: Float, heightMeters: Float, spanMeters: Float
     ) -> MeshDescriptor {
+        // Softened first: a hard depth step lands on the vertex grid as a
+        // staircase along the subject's outline (device, 2026-10-07). Spread
+        // over a few texels, it reads as a slope at any grid density.
+        let depth = softened(depth)
         let longSide = gridLongSide
         let cols = cell.width >= cell.height
             ? longSide
@@ -211,6 +261,32 @@ struct DepthTileView: View {
         descriptor.textureCoordinates = MeshBuffers.TextureCoordinates(uvs)
         descriptor.primitives = .triangles(indices)
         return descriptor
+    }
+
+    /// Tent blur over ~1% of the map's long edge (odd kernel, edges extended).
+    nonisolated private static func softened(_ map: StillDepthMap) -> StillDepthMap {
+        var kernel = max(map.width, map.height) / 100 * 2 + 1
+        kernel = max(kernel, 3)
+        var source = map.values
+        var output = [UInt8](repeating: 0, count: source.count)
+        let error = source.withUnsafeMutableBytes { src in
+            output.withUnsafeMutableBytes { dst in
+                var srcBuffer = vImage_Buffer(
+                    data: src.baseAddress, height: vImagePixelCount(map.height),
+                    width: vImagePixelCount(map.width), rowBytes: map.width
+                )
+                var dstBuffer = vImage_Buffer(
+                    data: dst.baseAddress, height: vImagePixelCount(map.height),
+                    width: vImagePixelCount(map.width), rowBytes: map.width
+                )
+                return vImageTentConvolve_Planar8(
+                    &srcBuffer, &dstBuffer, nil, 0, 0,
+                    UInt32(kernel), UInt32(kernel), 0, vImage_Flags(kvImageEdgeExtend)
+                )
+            }
+        }
+        guard error == kvImageNoError else { return map }
+        return StillDepthMap(width: map.width, height: map.height, values: output)
     }
 
     /// Bilinear sample of the 0…255 map at image-normalized (u, v); 0…1, near = 1.

@@ -71,49 +71,34 @@ struct GalleryThumbnailView: View {
 
     var body: some View {
         ZStack {
-            // Background. Not behind a depth tile: its flat regions sit near
-            // the window plane, and a fill there z-fights with them.
-            if !(depth != nil && loadedImage != nil && appModel.effectiveThumbnailDepth) {
+            // Background. Not behind a 3D tile: the tile's flat parts sit
+            // near the window plane, and a fill there z-fights with them.
+            if !showsTile {
                 Color.secondary.opacity(0.2)
             }
 
+            #if os(visionOS)
             if let depth, let loadedImage, appModel.effectiveThumbnailDepth {
-                #if os(visionOS)
                 DepthTileView(image: loadedImage, depth: depth.map, size: size)
-                // The input target, in front of the tile. RealityKit content
-                // standing proud of the window plane caught the pointer and
-                // hand scrolling even with hit testing off (device,
-                // 2026-10-07); a drawn SwiftUI layer ahead of it gets them
-                // first. Not `.clear`: a fully clear layer isn't targetable.
-                Color.white.opacity(0.001)
-                    .offset(z: DepthTileView.span + 2)
-                #endif
-            } else if let dioramaPair, appModel.effectiveThumbnailDiorama || appModel.effectiveThumbnailDepth {
-                // Two-layer diorama: blurred-subject backdrop, masked foreground
-                // popped forward in z for an Apple TV-style parallax pop.
-                // Each layer is clipped to the cell *before* the lift: the pair
-                // is uncropped, so scaledToFill overflows a cell narrower than
-                // the image, and a clip applied only to the stack would cut the
-                // lifted layer in a different plane than the backdrop — the two
-                // then project apart off-axis and during the hover scale.
-                Image(platformImage: dioramaPair.backdrop)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: size.width, height: size.height)
-                    .clipped()
-                Image(platformImage: dioramaPair.foreground)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: size.width, height: size.height)
-                    .clipped()
-                    .offset(z: 24)
+                tileInputTarget(lift: DepthTileView.span)
+            } else if let dioramaPair, showsDiorama {
+                DioramaTileView(backdrop: dioramaPair.backdrop, foreground: dioramaPair.foreground, size: size)
+                tileInputTarget(lift: DioramaTileView.lift)
             } else if let loadedImage {
                 Image(platformImage: loadedImage)
                     .resizable()
                     .scaledToFill()
-            } else if isLoading {
+            }
+            #else
+            if let loadedImage {
+                Image(platformImage: loadedImage)
+                    .resizable()
+                    .scaledToFill()
+            }
+            #endif
+            if loadedImage == nil, !showsTile, isLoading {
                 ProgressView()
-            } else {
+            } else if loadedImage == nil, !showsTile {
                 // Error state
                 VStack(spacing: 8) {
                     Image(systemName: "photo")
@@ -209,6 +194,29 @@ struct GalleryThumbnailView: View {
             dioramaPair = nil
             depth = nil
         }
+    }
+
+    /// The cell's 3D tile is up, so nothing else may draw on its plane.
+    private var showsTile: Bool {
+        #if os(visionOS)
+        (depth != nil && loadedImage != nil && appModel.effectiveThumbnailDepth) || (dioramaPair != nil && showsDiorama)
+        #else
+        false
+        #endif
+    }
+
+    private var showsDiorama: Bool {
+        appModel.effectiveThumbnailDiorama || appModel.effectiveThumbnailDepth
+    }
+
+    /// The input target, in front of a 3D tile. RealityKit content standing
+    /// proud of the window plane caught the pointer and hand scrolling even
+    /// with hit testing off (device, 2026-10-07); a drawn SwiftUI layer ahead
+    /// of it gets them first. Not `.clear`: a fully clear layer isn't
+    /// targetable.
+    private func tileInputTarget(lift: CGFloat) -> some View {
+        Color.white.opacity(0.001)
+            .offset(z: lift + 2)
     }
 
     /// `.depth` with a model to run it. Without one the style behaves as
