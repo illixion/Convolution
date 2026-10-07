@@ -192,7 +192,12 @@ final class VideoWindowModel {
 
     /// Open ornament menus / popovers. `>0` pauses auto-hide so chrome doesn't
     /// vanish mid-selection.
-    var openOrnamentMenuCount: Int = 0
+    /// The ornament menus that said they opened and haven't said they
+    /// closed, by name: a menu reporting twice (nested menus have) still
+    /// counts once, and every change is logged with the name, so a menu
+    /// that never reports closing can be found from the console.
+    private(set) var openOrnamentMenus: Set<String> = []
+    var openOrnamentMenuCount: Int { openOrnamentMenus.count }
     var showMediaInfo: Bool = false
     var showAdjustments: Bool = false
     var showShareSheet: Bool = false
@@ -1167,16 +1172,19 @@ final class VideoWindowModel {
 
     /// An ornament menu opened or closed: holds the chrome up, and fades a
     /// fake-3D picture so the menu shows (`isChromeModalOpen`).
-    func ornamentMenu(opened: Bool) {
+    func ornamentMenu(_ name: String, opened: Bool) {
         if opened {
-            openOrnamentMenuCount += 1
+            openOrnamentMenus.insert(name)
             cancelAutoHideTimer()
         } else {
-            openOrnamentMenuCount = max(0, openOrnamentMenuCount - 1)
-            if openOrnamentMenuCount == 0 {
+            openOrnamentMenus.remove(name)
+            if openOrnamentMenus.isEmpty {
                 startAutoHideTimer()
             }
         }
+        AppLogger.videoWindow.info(
+            "Menu \(name, privacy: .public) \(opened ? "opened" : "closed", privacy: .public); open: \(self.openOrnamentMenus.sorted().joined(separator: ", "), privacy: .public)"
+        )
     }
 
     func startAutoHideTimer() {
@@ -1247,8 +1255,8 @@ final class VideoWindowModel {
     /// at 1 holds the chrome and keeps a stereo picture dimmed for good
     /// (device, 2026-10-07).
     func clearLostMenus(reason: String) {
-        guard openOrnamentMenuCount > 0 else { return }
-        AppLogger.videoWindow.info("Clearing \(self.openOrnamentMenuCount, privacy: .public) open menu(s): \(reason, privacy: .public)")
-        openOrnamentMenuCount = 0
+        guard !openOrnamentMenus.isEmpty else { return }
+        AppLogger.videoWindow.info("Clearing open menu(s) \(self.openOrnamentMenus.sorted().joined(separator: ", "), privacy: .public): \(reason, privacy: .public)")
+        openOrnamentMenus = []
     }
 }

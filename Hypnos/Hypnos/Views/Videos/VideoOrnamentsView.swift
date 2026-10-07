@@ -107,7 +107,7 @@ struct VideoOrnamentsView: View {
             viewModeMenu
 
             if !windowModel.subtitles.tracks.isEmpty {
-                SubtitleMenu(controller: windowModel.subtitles, onOpenChanged: chromeMenu(opened:))
+                SubtitleMenu(controller: windowModel.subtitles, onOpenChanged: { chromeMenu("Subtitles", opened: $0) })
             }
 
             // Info button (rating & metadata). Stash-only: the sheet fetches
@@ -316,7 +316,7 @@ struct VideoOrnamentsView: View {
                 }
             }
             // Silent inside the bar's More menu, which reports for it.
-            .ravePlayerMenuReporting(chromeMenu(opened:))
+            .ravePlayerMenuReporting { chromeMenu("More Options", opened: $0) }
         } label: {
             OrnamentGlyph(title: "More Options", systemImage: "ellipsis.circle")
                 .padding(6)
@@ -338,8 +338,8 @@ struct VideoOrnamentsView: View {
         windowModel.effectiveVideoAdjustments.isModified || windowModel.isFlipped
     }
 
-    private func chromeMenu(opened: Bool) {
-        windowModel.ornamentMenu(opened: opened)
+    private func chromeMenu(_ name: String, opened: Bool) {
+        windowModel.ornamentMenu(name, opened: opened)
     }
 
     // MARK: - Helpers
@@ -435,7 +435,7 @@ struct VideoOrnamentsView: View {
             }
             }
             // Silent inside the bar's More menu, which reports for it.
-            .ravePlayerMenuReporting(chromeMenu(opened:))
+            .ravePlayerMenuReporting { chromeMenu("View Mode", opened: $0) }
         } label: {
             // Icon-only, .title3 — matches PhotoOrnamentView's 3D menu button
             // (which shows `view.3d` in the flat state). The active-mode

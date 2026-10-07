@@ -32,7 +32,7 @@ struct VideoControlBar<Accessories: View>: View {
             // visionOS hangs the bar under the window, one row high; iOS
             // keeps the stacked bar its edge overlay was laid out for.
             layout: Self.layout,
-            onMenuChanged: { open in windowModel.ornamentMenu(opened: open) }
+            onMenuChanged: { open in windowModel.ornamentMenu("More", opened: open) }
         ) {
             accessories
             Button {
