@@ -51,8 +51,8 @@ struct VideoWindowView: View {
     /// window's bottom edge) doesn't overlap the video. The shared timeline,
     /// transport and feature rows have the same footprint in 2D and fake-3D.
     ///
-    /// visionOS hangs the controls, and a stereo picture's subtitles, below
-    /// the window instead, so the window is the picture alone.
+    /// visionOS hangs the controls below the window instead, so the window is
+    /// the picture alone.
     private var ornamentBottomPadding: CGFloat {
         #if os(visionOS)
         return 0
@@ -67,16 +67,6 @@ struct VideoWindowView: View {
     /// the 12 pt the flat picture uses (device, 2026-10-07).
     static let stereoControlsGap: CGFloat = 44
 
-    #if os(visionOS)
-    /// The subtitles to hang under a stereo picture, if it has them on.
-    private var bandSubtitles: SubtitleController? {
-        showsSubtitleBand ? windowModel.subtitles : nil
-    }
-    #endif
-
-    private var showsSubtitleBand: Bool {
-        windowModel.showsStereoPicture && windowModel.subtitles.selected != nil && !appModel.allWindowsHidden
-    }
 
     /// Clearance above the window's bottom edge for overlays (toasts,
     /// prompts): over the in-window controls elsewhere, just the band on visionOS.
@@ -170,7 +160,9 @@ struct VideoWindowView: View {
                             // a RealityKit tap target instead.
                             onToggleUI: {
                                 windowModel.toggleUIVisibility()
-                            }
+                            },
+                            // Drawn into the picture, in front of its content.
+                            subtitles: windowModel.subtitles
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .id(stereoPlayerID(live: liveLayout))
@@ -282,8 +274,8 @@ struct VideoWindowView: View {
                 .overlay {
                     // Subtitles for the flat renderers; the immersive player
                     // draws its own in the immersive space.
-                    // Fake-3D shows them on a panel below the window instead
-                    // (see SubtitlePanel).
+                    // A stereo picture has them drawn into it instead (see
+                    // StereoSubtitleFeeder).
                     if !appModel.allWindowsHidden, !windowModel.usesImmersiveStereo, !windowModel.showsStereoPicture {
                         SubtitleOverlay(controller: windowModel.subtitles,
                                         pictureAspect: windowModel.videoAspectRatio) { windowModel.currentTime }
@@ -376,16 +368,13 @@ struct VideoWindowView: View {
         // picture, and the system moves the window bar below the ornament.
         // Both auto-hide together (`isUIHidden` / `isWindowControlsHidden`).
         .ornament(
-            visibility: PlayerOrnamentStack<EmptyView>.isVisible(
-                subtitles: bandSubtitles, controlsVisible: !windowModel.isUIHidden
-            ) && !appModel.allWindowsHidden ? .visible : .hidden,
+            visibility: windowModel.isUIHidden || appModel.allWindowsHidden ? .hidden : .visible,
             attachmentAnchor: .scene(.bottom),
             contentAlignment: .top
         ) {
             PlayerOrnamentStack(
-                subtitles: bandSubtitles, controlsVisible: !windowModel.isUIHidden,
-                gap: windowModel.showsStereoPicture ? Self.stereoControlsGap : 12,
-                filmTime: { windowModel.currentTime }
+                controlsVisible: !windowModel.isUIHidden,
+                gap: windowModel.showsStereoPicture ? Self.stereoControlsGap : 12
             ) { videoOrnament }
         }
         .onChange(of: ornamentBottomPadding) { old, new in

@@ -14,9 +14,10 @@
  Atmos transport, seeking and progress reporting stay with FilmPlayer.
 
  Subtitles (FilmSession.subtitles) draw over the 2D picture on its film
- clock. While the picture is stereo they move to a band under it:
- SwiftUI over the stereo video plane never shows in front of it (measured on
- device), and the menus already fade the picture for the same reason.
+ clock. While the picture is stereo they are drawn into it instead, in front
+ of its content (StereoSubtitleFeeder): SwiftUI over the stereo video plane
+ never shows in front of it (measured on device), and the menus already fade
+ the picture for the same reason.
 
  Switching between 2D and 3D never moves the playhead: both directions
  re-prime the picture at the position the toggle was pressed at.
@@ -57,6 +58,8 @@ struct FilmPlayerView: View {
     @State private var chromeHolds = 0
     @State private var chromeHideTask: Task<Void, Never>?
     @State private var stereoFailure: String?
+    /// The subtitles the stereo picture draws, from `StereoSubtitleFeeder`.
+    @State private var stereoSubtitles: RAVEStereoSubtitleFrame?
     #endif
 
     var body: some View {
@@ -209,6 +212,7 @@ struct FilmPlayerView: View {
                         source: source, settings: session.stereoSettings, chromeOpen: chromeOpen,
                         packedStereo: stereoLayout,
                         squareCorners: !appModel.roundedCorners,
+                        subtitles: stereoSubtitles,
                         onUnavailable: {
                             guard stereoSource === source else { return }
                             stopStereo()
@@ -216,6 +220,10 @@ struct FilmPlayerView: View {
                         },
                         onToggleChrome: { toggleChrome() }
                     )
+                    .background {
+                        StereoSubtitleFeeder(controller: session.subtitles, filmTime: { player.currentTime },
+                                             frame: $stereoSubtitles)
+                    }
                 }
                 if stereoSource == nil {
                     subtitleOverlay
@@ -225,13 +233,11 @@ struct FilmPlayerView: View {
         // The controls hang under the window, so the window is all picture;
         // they and the window bar hide together while the film plays.
         .persistentSystemOverlays(chromeVisible ? .visible : .hidden)
-        .ornament(visibility: PlayerOrnamentStack<EmptyView>.isVisible(
-                      subtitles: bandSubtitles, controlsVisible: chromeVisible) ? .visible : .hidden,
+        .ornament(visibility: chromeVisible ? .visible : .hidden,
                   attachmentAnchor: .scene(.bottom), contentAlignment: .top) {
             PlayerOrnamentStack(
-                subtitles: bandSubtitles, controlsVisible: chromeVisible,
-                gap: stereoSource == nil ? 12 : VideoWindowView.stereoControlsGap,
-                filmTime: { player.currentTime }
+                controlsVisible: chromeVisible,
+                gap: stereoSource == nil ? 12 : VideoWindowView.stereoControlsGap
             ) {
             FilmTransport(player: player, stereoEnabled: stereoSource != nil,
                           onToggle3D: { stereoSource == nil ? startStereo() : stopStereo() },
@@ -283,9 +289,6 @@ struct FilmPlayerView: View {
     }
 
     #if os(visionOS)
-    private var showsSubtitleBand: Bool { stereoSource != nil && session.subtitles.selected != nil }
-    private var bandSubtitles: SubtitleController? { showsSubtitleBand ? session.subtitles : nil }
-
     // MARK: Chrome auto-hide
 
     private static let chromeHideDelay: Duration = .seconds(4)
@@ -622,7 +625,12 @@ struct FilmAdjustmentsView: View {
         }
         #endif
         if session.subtitles.selected != nil {
-            Section("Subtitles") { SubtitleDelayControl(controller: session.subtitles) }
+            Section("Subtitles") {
+                SubtitleDelayControl(controller: session.subtitles)
+                #if os(visionOS)
+                if session.stereoEnabled { SubtitleHDRBrightnessControl() }
+                #endif
+            }
         }
         Section("Sound") { FilmTuning() }
         Section("Telemetry") { FilmTelemetry(player: session.player) }

@@ -4,8 +4,10 @@
  `SubtitleMenu` is a player-controls accessory: Off, then each track, with
  image tracks listed but disabled. `SubtitleOverlay` draws the selected
  track on the player's clock through RAVEUI, applying the timing offset.
+ A stereo picture draws them into the picture instead (`StereoSubtitleFeeder`).
  */
 
+import RAVEMedia
 import RAVEUI
 import SwiftUI
 
@@ -86,53 +88,104 @@ struct SubtitleOverlay: View {
 }
 
 #if os(visionOS)
-/// The strip under a stereo picture that subtitles move to while it shows:
-/// SwiftUI drawn over a stereo video plane never comes out in front of it
-/// (device, 2026-10-07), and text at the picture's depth would fight the
-/// scene anyway. It hangs under the window with the controls (see
-/// `PlayerOrnamentStack`), not inside it: the window has to be the picture
-/// alone for its edge to square the picture's corners.
-struct SubtitleBand: View {
-    static let height: CGFloat = 98
+/// Where the HDR luminance of subtitles drawn into a stereo picture is kept.
+enum SubtitleHDRBrightness {
+    static let key = "subtitles.hdrWhiteNits"
+    static let defaultNits = RAVEStereoSubtitleFrame.defaultHDRWhiteNits
+    static let range: ClosedRange<Double> = 80 ... 1000
+}
 
-    let controller: SubtitleController
-    let filmTime: @MainActor () -> Double
+/// The white of subtitles drawn into a stereo HDR picture, in nits. An SDR
+/// picture's subtitles are plain white whatever this says.
+struct SubtitleHDRBrightnessControl: View {
+    @AppStorage(SubtitleHDRBrightness.key) private var nits = SubtitleHDRBrightness.defaultNits
 
     var body: some View {
-        RAVESubtitlePanel(track: controller.cues, fontSize: 30) {
-            controller.cueTime(forFilmTime: filmTime())
+        VStack(alignment: .leading, spacing: 2) {
+            Text("HDR subtitle brightness: \(Int(nits)) nits").font(.caption)
+            Slider(value: $nits, in: SubtitleHDRBrightness.range, step: 10)
+            Text("For HDR videos in 3D. \(Int(SubtitleHDRBrightness.defaultNits)) nits matches HDR reference white.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
-        .frame(height: Self.height, alignment: .top)
     }
 }
 
-/// What hangs under a player window: the subtitle band while a stereo
-/// picture has subtitles on, then the controls. The ornament stays up for
-/// the subtitles while the controls auto-hide, so they fade in place
-/// rather than the band jumping; a hidden bar takes no input.
-struct PlayerOrnamentStack<Controls: View>: View {
-    let subtitles: SubtitleController?
-    let controlsVisible: Bool
-    /// Space between the window's bottom edge and whatever hangs first.
-    let gap: CGFloat
+/// Feeds a stereo player the subtitles to draw into its picture.
+///
+/// SwiftUI drawn over a stereo video plane never comes out in front of it
+/// (device, 2026-10-07), and a band hung under the window sat at the window's
+/// depth while the picture's content reads nearer, so it was covered from an
+/// angle. The pump draws the text into both eyes instead, in front of the
+/// content behind it (RAVEMedia's StereoSubtitles.swift); this renders the
+/// cues showing into images for it, sized for the eye they're drawn into.
+/// Draws nothing itself.
+struct StereoSubtitleFeeder: View {
+    let controller: SubtitleController
     let filmTime: @MainActor () -> Double
-    @ViewBuilder let controls: Controls
+    @Binding var frame: RAVEStereoSubtitleFrame?
 
-    /// Whether the ornament has anything to show at all.
-    static func isVisible(subtitles: SubtitleController?, controlsVisible: Bool) -> Bool {
-        controlsVisible || subtitles != nil
-    }
+    @AppStorage(SubtitleHDRBrightness.key) private var hdrWhiteNits = SubtitleHDRBrightness.defaultNits
+    @State private var version = 0
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let subtitles {
-                SubtitleBand(controller: subtitles, filmTime: filmTime)
-            }
-            controls
-                .opacity(controlsVisible ? 1 : 0)
-                .allowsHitTesting(controlsVisible)
+        RAVESubtitleCues(track: controller.cues, time: { controller.cueTime(forFilmTime: filmTime()) }) { showing in
+            Color.clear
+                .onChange(of: showing, initial: true) { _, cues in publish(cues) }
+                .onChange(of: hdrWhiteNits) { publish(showing) }
+                .onChange(of: controller.selected) { publish(showing) }
         }
-        .padding(.top, gap)
+        .frame(width: 0, height: 0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .onDisappear { frame = nil }
+    }
+
+    private func publish(_ cues: [RAVESubtitleCue]) {
+        guard controller.selected != nil else {
+            frame = nil
+            return
+        }
+        version += 1
+        frame = RAVEStereoSubtitleFrame(version: version, hdrWhiteNits: hdrWhiteNits) { eyeSize in
+            Self.render(cues, eyeSize: eyeSize)
+        }
+    }
+
+    /// The flat players' styling at the flat players' proportions: text a
+    /// twentieth of the picture's height, one image per edge.
+    @MainActor
+    static func render(_ cues: [RAVESubtitleCue], eyeSize: CGSize) -> [RAVEStereoSubtitle] {
+        let fontSize = max(eyeSize.height * 0.05, 14)
+        let groups: [(RAVEStereoSubtitle.Placement, [RAVESubtitleCue])] = [
+            (.top, cues.filter { $0.placement == .top }),
+            (.bottom, cues.filter { $0.placement == .bottom })
+        ]
+        return groups.compactMap { placement, group in
+            guard !group.isEmpty else { return nil }
+            let renderer = ImageRenderer(content: RAVESubtitleText(cues: group, fontSize: fontSize))
+            renderer.proposedSize = ProposedViewSize(width: eyeSize.width, height: nil)
+            // A point per eye pixel: the image is drawn 1:1 into the eye.
+            renderer.scale = 1
+            guard let image = renderer.cgImage else { return nil }
+            return RAVEStereoSubtitle(image: image, placement: placement, referenceEyeHeight: eyeSize.height)
+        }
+    }
+}
+
+/// What hangs under a player window: the controls, a gap below its edge.
+/// A hidden bar takes no input.
+struct PlayerOrnamentStack<Controls: View>: View {
+    let controlsVisible: Bool
+    /// Space between the window's bottom edge and the controls.
+    let gap: CGFloat
+    @ViewBuilder let controls: Controls
+
+    var body: some View {
+        controls
+            .opacity(controlsVisible ? 1 : 0)
+            .allowsHitTesting(controlsVisible)
+            .padding(.top, gap)
     }
 }
 #endif

@@ -60,9 +60,12 @@ struct Pseudo3DVideoPlayerView: View {
     /// Tap on the video surface (toggles chrome) — handled as a RealityKit tap
     /// target because a 2D overlay can't catch gaze over a RealityView.
     var onToggleUI: (() -> Void)? = nil
+    /// Subtitles to draw into the picture (see `StereoSubtitleFeeder`).
+    var subtitles: SubtitleController? = nil
 
     @Environment(AppModel.self) private var appModel
     @State private var engine = Pseudo3DStereoEngine()
+    @State private var subtitleFrame: RAVEStereoSubtitleFrame?
 
     /// Distance (points) the video plane is pulled back toward the window
     /// glass. `.frame(depth: 0, alignment: .front)` pins the slab to the front
@@ -89,6 +92,7 @@ struct Pseudo3DVideoPlayerView: View {
                 engine.loops = loops
                 engine.setContentOpacity(contentOpacity)
                 engine.setSquareCorners(!appModel.roundedCorners)
+                engine.setSubtitles(subtitleFrame)
                 content.add(engine.makeVideoEntity())
                 engine.observeVideoSize(content: content)
                 engine.load(url: videoURL, roomActive: isRoomActive, depthMode: depthMode, startAt: startAtSeconds, startPaused: startPaused,
@@ -118,6 +122,13 @@ struct Pseudo3DVideoPlayerView: View {
         }
         // Align the video plane with the chrome — see videoPlaneZRecess.
         .offset(z: -Self.videoPlaneZRecess)
+        .background {
+            if let subtitles {
+                StereoSubtitleFeeder(controller: subtitles, filmTime: { [engine] in engine.currentTime },
+                                     frame: $subtitleFrame)
+            }
+        }
+        .onChange(of: subtitleFrame) { _, frame in engine.setSubtitles(frame) }
         .onChange(of: videoURL) { _, newURL in
             engine.load(url: newURL, roomActive: isRoomActive, depthMode: depthMode,
                         httpHeaderFields: MediaAuthorization.shared.headerFields(for: newURL),
@@ -270,6 +281,7 @@ struct Pseudo3DVideoPlayerView: View {
     var onDurationKnown: ((Double) -> Void)? = nil
     var onPlaybackError: (() -> Void)? = nil
     var onToggleUI: (() -> Void)? = nil
+    var subtitles: SubtitleController? = nil
 
     var body: some View {
         Color.black
