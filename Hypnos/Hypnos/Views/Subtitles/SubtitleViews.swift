@@ -261,7 +261,7 @@ struct PlayerOrnamentStack<Controls: View>: View {
 
     /// A stereo picture reads nearer than its edge, and from an angle covered
     /// a band at the controls' gap (device, 2026-10-07): the band hangs lower.
-    static var stereoBandGap: CGFloat { 84 }
+    static var stereoBandGap: CGFloat { 120 }
 
     /// Whether the ornament has anything to show at all.
     static func isVisible(subtitles: SubtitleController?, controlsVisible: Bool) -> Bool {

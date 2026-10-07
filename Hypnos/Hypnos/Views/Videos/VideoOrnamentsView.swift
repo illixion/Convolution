@@ -58,7 +58,7 @@ struct VideoOrnamentsView: View {
     }
 
     /// The window's feature buttons: inline on the bar, or items of the
-    /// compact bar's "More" menu when they don't fit (`OrnamentGlyph` gives
+    /// compact bar's "More" popover when they don't fit (`OrnamentGlyph` gives
     /// each a title there).
     @ViewBuilder
     private func ornamentItems(showsTitle: Bool) -> some View {
@@ -613,7 +613,7 @@ private struct ConversionMenuStatus: View {
 }
 
 /// A feature button's icon: the glyph on the bar, title and glyph inside the
-/// compact bar's "More" menu.
+/// compact bar's "More" popover.
 private struct OrnamentGlyph: View {
     let title: String
     let systemImage: String
