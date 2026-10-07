@@ -155,6 +155,7 @@ struct VideoWindowView: View {
                             // Current window mute state, so engaging fake-3D
                             // mid-watch keeps the user's unmute.
                             startMuted: windowModel.isMuted,
+                            loops: windowModel.loopsAtEnd,
                             onPlaybackError: {
                                 // Fall back to the flat native player if the
                                 // stereo pipeline can't decode this source.
@@ -191,6 +192,7 @@ struct VideoWindowView: View {
                                 loopController: windowModel.loopController,
                                 playbackModel: windowModel,
                                 startMuted: windowModel.isMuted,
+                                loops: windowModel.loopsAtEnd,
                                 onPlaybackError: {
                                     windowModel.forceWebKitPlayback()
                                 }
@@ -214,6 +216,7 @@ struct VideoWindowView: View {
                                 onVideoSizeKnown: { size in
                                     lockWindowToVideoAspectRatio(videoSize: size)
                                 },
+                                loop: windowModel.loopsAtEnd,
                                 visualAdjustments: windowModel.effectiveVideoAdjustments,
                                 loopController: windowModel.loopController,
                                 playbackModel: windowModel,

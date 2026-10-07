@@ -277,6 +277,70 @@ final class VideoWindowModel {
         subtitles.load(SubtitleSource.forVideo(video))
     }
 
+    // MARK: - Library titles
+
+    /// The Jellyfin item this window plays, when it came from the Library.
+    var libraryItemId: String? {
+        LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity)
+    }
+
+    /// A clip loops; a Library title plays once. The window was built for
+    /// gallery clips and looped everything, so an episode restarted at its
+    /// end and the progress reporter told Jellyfin it was back at 0:10.
+    var loopsAtEnd: Bool { libraryItemId == nil }
+
+    /// The current title has reached its end and been handled.
+    @ObservationIgnored private var endHandled = false
+    @ObservationIgnored private var nextEpisodeTask: Task<Void, Never>?
+
+    /// How close to the end a stopped player counts as finished. Players
+    /// park within a frame or two of the duration; the margin covers HLS
+    /// durations that run a little past the last frame.
+    private static let endTolerance: Double = 0.75
+
+    /// Every renderer reports a title that doesn't loop as paused at its end,
+    /// so the end is seen here once for all of them.
+    private func noticeEndIfReached(currentTime: Double, duration: Double, paused: Bool) {
+        guard !loopsAtEnd, duration > 0 else { return }
+        // Scrubbed back from the end: it can finish again, and an autoplay
+        // still resolving is called off.
+        if endHandled, currentTime < duration - Self.endTolerance - 2 {
+            endHandled = false
+            nextEpisodeTask?.cancel()
+        }
+        guard !endHandled, paused, !isScrubbing,
+              currentTime >= duration - Self.endTolerance else { return }
+        endHandled = true
+        revealChrome()
+        AppLogger.videoWindow.info("[\(self.videoDisplayName, privacy: .private(mask: .hash))] Library title ended")
+        nextEpisodeTask = Task { [weak self] in await self?.playNextEpisode() }
+    }
+
+    /// Autoplays the next episode in this window, the way the tvOS player
+    /// does (`LibraryPlayback.playNextEpisode`). A film, the last episode, or
+    /// a next episode that needs the object-audio player stays on its last
+    /// frame; the progress reporter has already told Jellyfin it was watched.
+    private func playNextEpisode() async {
+        guard let itemId = libraryItemId, let library = LibraryService.current() else { return }
+        do {
+            let finished = try await library.item(id: itemId)
+            guard finished.kind == .episode, let next = try await library.episode(after: finished) else { return }
+            guard case .genericPlayer(let plan) = try await library.playbackRoute(for: next) else {
+                AppLogger.videoWindow.info("Next episode needs the object-audio player; not autoplaying it here")
+                return
+            }
+            // The user moved on, or back into this one, while it resolved.
+            guard !Task.isCancelled, libraryItemId == itemId, endHandled else { return }
+            let nextVideo = LibraryPlaybackCoordinator.makeGalleryVideo(item: next, plan: plan, library: library)
+            galleryVideos = [nextVideo]
+            currentIndex = 0
+            hasMorePages = false
+            switchToVideo(nextVideo)
+        } catch {
+            AppLogger.videoWindow.error("Next episode failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+        }
+    }
+
     /// Browsing autoplay follows Settings (muted by default). A Library title
     /// is different: someone pressed Play on a film, and a muted start read
     /// as the stream having no audio at all.
@@ -343,6 +407,7 @@ final class VideoWindowModel {
 
     /// Call from onDisappear.
     func cleanup() {
+        nextEpisodeTask?.cancel()
         if popOutWindowValue != nil {
             appModel.unregisterVideoWindow(video: video, windowValueId: windowValueId)
         }
@@ -404,6 +469,7 @@ final class VideoWindowModel {
         }
         video = newVideo
         subtitles.load(SubtitleSource.forVideo(newVideo))
+        endHandled = false
 
         // Reset per-window viewing state
         stereoscopicOverride = nil
@@ -1064,6 +1130,7 @@ final class VideoWindowModel {
         self.isPaused = paused
         self.isMuted = muted
         self.bufferedEnd = buffered
+        noticeEndIfReached(currentTime: currentTime, duration: self.duration, paused: paused)
     }
 
     // MARK: - Share

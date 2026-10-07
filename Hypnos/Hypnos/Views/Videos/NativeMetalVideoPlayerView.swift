@@ -48,6 +48,10 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
     /// Initial mute state applied when a video loads (autoplay always starts
     /// playback; this only controls whether it opens with audio).
     var startMuted: Bool = true
+    /// Restart at the end. A clip loops; a Library title plays once and
+    /// parks on its last frame, reported as paused at the end so the window
+    /// can go on to the next episode.
+    var loops: Bool = true
     var onPlaybackError: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
@@ -81,6 +85,7 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         coordinator.onVideoSizeKnown = onVideoSizeKnown
         coordinator.onPlaybackError = onPlaybackError
         coordinator.startMuted = startMuted
+        coordinator.loops = loops
 
         if let loopController {
             loopController.queryCurrentTime = { [weak coordinator] in
@@ -144,6 +149,7 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         var onPlaybackUpdate: ((PlaybackState) -> Void)?
         var onPlaybackError: (() -> Void)?
         var startMuted = true
+        var loops = true
 
         private var player: AVPlayer?
         private var playerItem: AVPlayerItem?
@@ -214,9 +220,15 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.seek(to: 0)
-                    if self?.isRoomActive == true {
-                        self?.play()
+                    guard let self else { return }
+                    guard self.loops else {
+                        // AVPlayer pauses at the end by itself.
+                        self.reportPlaybackState()
+                        return
+                    }
+                    self.seek(to: 0)
+                    if self.isRoomActive {
+                        self.play()
                     }
                 }
             }
@@ -560,6 +572,7 @@ struct NativeMetalVideoPlayerView: View {
     var loopController: VideoLoopController? = nil
     var playbackModel: VideoWindowModel? = nil
     var startMuted: Bool = true
+    var loops: Bool = true
     var onPlaybackError: (() -> Void)? = nil
 
     var body: some View {
