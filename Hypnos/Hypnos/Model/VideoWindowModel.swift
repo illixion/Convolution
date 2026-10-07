@@ -154,6 +154,12 @@ final class VideoWindowModel {
     /// player view binds its queryCurrentTime/setLoopBounds closures.
     let loopController = VideoLoopController()
 
+    // MARK: - Subtitles
+
+    /// The current video's subtitle tracks (Stash captions, Jellyfin
+    /// streams), drawn by every renderer this window uses.
+    let subtitles = SubtitleController()
+
     // MARK: - Share
 
     var isPreparingShare: Bool = false
@@ -256,6 +262,7 @@ final class VideoWindowModel {
         }
         resolvePlaybackRenderer()
         armLoadStallWatch()
+        subtitles.load(SubtitleSource.forVideo(video))
     }
 
     /// Browsing autoplay follows Settings (muted by default). A Library title
@@ -337,6 +344,7 @@ final class VideoWindowModel {
         photosResolveTask?.cancel()
         photosResolveTask = nil
         loopController.reset()
+        subtitles.reset()
         playCommand = nil
         pauseCommand = nil
         seekCommand = nil
@@ -382,6 +390,7 @@ final class VideoWindowModel {
             )
         }
         video = newVideo
+        subtitles.load(SubtitleSource.forVideo(newVideo))
 
         // Reset per-window viewing state
         stereoscopicOverride = nil

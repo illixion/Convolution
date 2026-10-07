@@ -341,6 +341,58 @@ seed_media() {
 
     mkdir -p "$root/data/tvshows"
     seed_synthetic_library
+    seed_subtitles
+}
+
+# A SubRip file at $1 covering $2 seconds, one cue every 4 s labelled with
+# $3 (a language name), so a glance at the picture says which track and
+# which second is showing. Every fifth cue is italic, every seventh asks for
+# the top of the frame — the two stylings the player keeps.
+gen_srt() {
+    local path="$1" duration="$2" label="$3" n=0 t
+    [[ -f "$path" ]] && return
+    : > "$path"
+    for ((t = 1; t + 3 <= duration; t += 4)); do
+        n=$((n + 1))
+        local text="$label subtitle $n, at ${t}s"
+        ((n % 5 == 0)) && text="<i>$text (italic)</i>"
+        ((n % 7 == 0)) && text="{\\an8}$text (top)"
+        printf '%d\n00:%02d:%02d,000 --> 00:%02d:%02d,500\n%s\nSecond line\n\n' \
+            "$n" $((t / 60)) $((t % 60)) $(((t + 2) / 60)) $(((t + 2) % 60)) "$text" >> "$path"
+    done
+}
+
+# Subtitles for the subtitle paths:
+#   - sidecar English and Spanish SRTs on the Atmos demo (FilmPlayer route)
+#   - "Twin Horizon", a half side-by-side 3D movie that Jellyfin recognises as
+#     3D from its file name (Video3DFormat HalfSideBySide), with an English
+#     mov_text track muxed in (Jellyfin extracts and converts it) plus a
+#     sidecar French SRT — the generic and immersive routes
+seed_subtitles() {
+    gen_srt "$root/data/movies/DolbyElement4K_VisionAtmos.en.srt" 108 "English"
+    gen_srt "$root/data/movies/DolbyElement4K_VisionAtmos.es.srt" 108 "Español"
+
+    local m="$root/data/movies/Twin Horizon (2020)"
+    mkdir -p "$m"
+    local clip="$m/Twin Horizon (2020).3D.HSBS.mp4"
+    if [[ ! -f "$clip" ]]; then
+        gen_srt "$m/.embedded.srt" 30 "Embedded English"
+        # Each eye is a 960x1080 squeeze of the same pattern, the right one
+        # shifted 24 px, so a correct split shows depth and a wrong one shows
+        # a doubled image.
+        ffmpeg -loglevel error -y \
+            -f lavfi -i "testsrc2=size=1920x1080:rate=24:duration=30" \
+            -f lavfi -i "sine=frequency=500:duration=30" \
+            -i "$m/.embedded.srt" \
+            -filter_complex "[0:v]split[l][r];[l]scale=960:1080[left];[r]crop=1896:1080:0:0,pad=1920:1080:24:0,scale=960:1080[right];[left][right]hstack[v]" \
+            -map "[v]" -map 1:a -map 2:s -c:v libx264 -pix_fmt yuv420p -c:a aac -c:s mov_text \
+            -metadata:s:s:0 language=eng "$clip"
+        rm -f "$m/.embedded.srt"
+    fi
+    gen_srt "$m/Twin Horizon (2020).3D.HSBS.fr.srt" 30 "Français"
+    write_movie_nfo "$m/movie.nfo" "Twin Horizon" 2020 "Sci-Fi" \
+        "Two survey drones map the same canyon from a hand's width apart." 7.0
+    gen_art "$m" "TWIN HORIZON" "#3a2b55"
 }
 
 install_plugin_config() {

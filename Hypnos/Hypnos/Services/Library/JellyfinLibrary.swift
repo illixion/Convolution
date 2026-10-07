@@ -147,9 +147,19 @@ private struct JFPlaybackInfo: Decodable {
         struct Stream: Decodable {
             let `Type`: String?
             let Codec: String?
+            let Index: Int?
+            let Language: String?
+            let Title: String?
+            let IsDefault: Bool?
+            let IsForced: Bool?
+            let IsHearingImpaired: Bool?
+            let IsTextSubtitleStream: Bool?
         }
         let Id: String?
         let MediaStreams: [Stream]?
+        /// HalfSideBySide, FullSideBySide, HalfTopAndBottom, FullTopAndBottom
+        /// or MVC, from the file name (`Movie.3D.HSBS.mkv`) or its metadata.
+        let Video3DFormat: String?
     }
     let MediaSources: [MediaSource]?
     let PlaySessionId: String?
@@ -468,6 +478,42 @@ actor JellyfinLibrary: MediaServerLibrary {
             sourceVideoCodec: sourceVideoCodec, playSessionId: playSessionId,
             token: authHeaderToken)
         return .genericPlayer(GenericPlaybackPlan(method: .transcode, streamURL: transcodeURL, resumeSeconds: resumeSeconds))
+    }
+
+    // MARK: - Subtitles
+
+    func subtitleTracks(itemId: String) async throws -> [LibrarySubtitleTrack] {
+        let userId = try await resolveUserId()
+        let info: JFPlaybackInfo = try await get("Items/\(itemId)/PlaybackInfo", query: [
+            .init(name: "userId", value: userId),
+        ])
+        return Self.subtitleTracks(in: info.MediaSources?.first, itemId: itemId)
+    }
+
+    private static func subtitleTracks(in source: JFPlaybackInfo.MediaSource?, itemId: String) -> [LibrarySubtitleTrack] {
+        let sourceId = source?.Id ?? itemId
+        return (source?.MediaStreams ?? []).compactMap { stream in
+            guard stream.Type == "Subtitle", let index = stream.Index else { return nil }
+            return LibrarySubtitleTrack(
+                id: index, sourceId: sourceId, language: stream.Language, name: stream.Title,
+                isDefault: stream.IsDefault ?? false, isForced: stream.IsForced ?? false,
+                isHearingImpaired: stream.IsHearingImpaired ?? false,
+                isText: stream.IsTextSubtitleStream ?? false)
+        }
+    }
+
+    /// `Subtitles/{index}/Stream.vtt` converts any text stream, external or
+    /// embedded, to WebVTT. An embedded stream is extracted from the whole
+    /// file on first request, so this can take a while on a large film.
+    func subtitleData(itemId: String, track: LibrarySubtitleTrack) async throws -> Data {
+        let path = "Videos/\(itemId)/\(track.sourceId)/Subtitles/\(track.id)/Stream.vtt"
+        var request = URLRequest(url: baseURL.appending(path: path))
+        request.setValue(JellyfinClientIdentity.authorizationHeader(token: authHeaderToken), forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 120
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard status == 200 else { throw JellyfinLibraryError.http(path: path, status: status) }
+        return data
     }
 
     /// Jellyfin's HLS stream for a source AVFoundation can't open directly

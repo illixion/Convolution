@@ -20,6 +20,7 @@
 
 import AVFoundation
 import Foundation
+import RAVEUI
 
 enum LibraryHarness {
     private static let launchFlag = "-LibraryHarness"
@@ -212,7 +213,49 @@ enum LibraryHarness {
             }
         }
 
+        if let atmosDemo {
+            await checkSubtitles(library: library, item: atmosDemo)
+            await checkSignedInProgress(server: server, item: atmosDemo)
+        }
+
         log("DONE")
+    }
+
+    /// Lists the item's subtitle streams and fetches and parses each text one
+    /// the way the players do.
+    private static func checkSubtitles(library: JellyfinLibrary, item: LibraryItem) async {
+        do {
+            let tracks = try await library.subtitleTracks(itemId: item.id)
+            log("subtitles(\(item.title)).tracks=\(tracks.map { "\($0.id):\($0.title):text=\($0.isText)" })")
+            for track in tracks where track.isText {
+                let cues = try RAVESubtitleTrack(data: try await library.subtitleData(itemId: item.id, track: track))
+                log("subtitles(\(item.title))[\(track.id)].cues=\(cues.cues.count) first=\"\(cues.cues.first?.plainText ?? "")\" at10s=\(cues.cues(at: 10).map(\.plainText))")
+            }
+        } catch {
+            log("subtitles(\(item.title)) FAILED: \(error)")
+        }
+    }
+
+    /// The film player's start → progress → stop sequence, as a signed-in
+    /// user (`/Sessions/Playing*` silently ignores a bare API key), read back
+    /// through the API. Needs HYPNOS_HARNESS_JELLYFIN_USER / _PASS.
+    private static func checkSignedInProgress(server: URL, item: LibraryItem) async {
+        let env = ProcessInfo.processInfo.environment
+        guard let user = env["HYPNOS_HARNESS_JELLYFIN_USER"], let pass = env["HYPNOS_HARNESS_JELLYFIN_PASS"] else {
+            log("signedInProgress SKIPPED: no HYPNOS_HARNESS_JELLYFIN_USER/_PASS")
+            return
+        }
+        do {
+            let session = try await JellyfinAuth.authenticate(serverURL: server, username: user, password: pass)
+            let library = JellyfinLibrary(baseURL: server, accessToken: session.accessToken, userId: session.userId)
+            await library.reportPlaybackStarted(itemId: item.id, positionSeconds: 30)
+            await library.reportPlaybackProgress(itemId: item.id, positionSeconds: 40, isPaused: false)
+            await library.reportPlaybackStopped(itemId: item.id, positionSeconds: 42)
+            let after = try await library.item(id: item.id)
+            log("signedInProgress(\(item.title)).positionSeconds=\(after.userData.playbackPositionSeconds ?? -1) resume=\(after.userData.resumeSeconds ?? -1) (expect 42)")
+        } catch {
+            log("signedInProgress FAILED: \(error)")
+        }
     }
 
     /// Plays each routed stream through the app's own AVFoundation entry

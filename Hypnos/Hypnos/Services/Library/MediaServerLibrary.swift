@@ -97,6 +97,13 @@ protocol MediaServerLibrary: PlaybackProgressReporting {
     /// Decides how `item` should be played (see `PlaybackRoute`).
     func playbackRoute(for item: LibraryItem) async throws -> PlaybackRoute
 
+    /// The subtitle streams `itemId` offers, text and image alike.
+    func subtitleTracks(itemId: String) async throws -> [LibrarySubtitleTrack]
+
+    /// One text subtitle stream as WebVTT, whatever its original format
+    /// (the server converts SubRip, ASS and embedded text tracks).
+    func subtitleData(itemId: String, track: LibrarySubtitleTrack) async throws -> Data
+
     func setPlayed(itemId: String, played: Bool) async throws
     func setFavorite(itemId: String, favorite: Bool) async throws
 }

@@ -6,6 +6,13 @@
 
 import Foundation
 
+/// One Stash caption file: its language ("en"; "00" when untagged) and
+/// original format ("srt", "vtt").
+struct GalleryCaption: Codable, Hashable, Sendable {
+    let languageCode: String
+    let type: String
+}
+
 struct GalleryVideo: Identifiable, Equatable, Hashable, Codable {
     /// Derived from `identity`, not minted per instance — see
     /// `MediaIdentity.stableID(for:)`. Dropping the stored property also drops
@@ -66,6 +73,12 @@ struct GalleryVideo: Identifiable, Equatable, Hashable, Codable {
     /// Original filename from server (e.g. from files path), used for sharing
     let fileName: String?
 
+    /// Sidecar caption files Stash found beside the scene's file
+    /// (`movie.en.srt`), served converted to WebVTT from `captionsURL`.
+    let captions: [GalleryCaption]
+    /// Stash's `/scene/{id}/caption`; a caption is `?lang=<code>&type=<ext>`.
+    let captionsURL: URL?
+
     init(
         identity: String,
         stashId: String? = nil,
@@ -82,7 +95,9 @@ struct GalleryVideo: Identifiable, Equatable, Hashable, Codable {
         eyesReversed: Bool = false,
         rating100: Int? = nil,
         oCounter: Int? = nil,
-        fileName: String? = nil
+        fileName: String? = nil,
+        captions: [GalleryCaption] = [],
+        captionsURL: URL? = nil
     ) {
         self.identity = identity
         self.stashId = stashId
@@ -100,6 +115,8 @@ struct GalleryVideo: Identifiable, Equatable, Hashable, Codable {
         self.rating100 = rating100
         self.oCounter = oCounter
         self.fileName = fileName
+        self.captions = captions
+        self.captionsURL = captionsURL
     }
 
     // MARK: - Codable
@@ -142,6 +159,8 @@ struct GalleryVideo: Identifiable, Equatable, Hashable, Codable {
         self.rating100 = try c.decodeIfPresent(Int.self, forKey: .rating100)
         self.oCounter = try c.decodeIfPresent(Int.self, forKey: .oCounter)
         self.fileName = try c.decodeIfPresent(String.self, forKey: .fileName)
+        self.captions = try c.decodeIfPresent([GalleryCaption].self, forKey: .captions) ?? []
+        self.captionsURL = try c.decodeIfPresent(URL.self, forKey: .captionsURL)
     }
 
     /// A URL suitable for downloading the full video to disk for AVAssetReader
@@ -227,7 +246,9 @@ extension GalleryVideo {
             eyesReversed: eyesReversed,
             rating100: rating100,
             oCounter: oCounter,
-            fileName: fileName
+            fileName: fileName,
+            captions: captions,
+            captionsURL: captionsURL
         )
     }
 

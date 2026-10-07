@@ -48,6 +48,13 @@ seed_media() {
     [[ -f videos/hevc-4k-test.mp4 ]] || ffmpeg -loglevel error -y \
         -f lavfi -i "testsrc2=size=3840x2160:rate=24:duration=15" \
         -c:v libx265 -tag:v hvc1 -pix_fmt yuv420p10le -x265-params log-level=error videos/hevc-4k-test.mp4
+    # Sidecar captions for the subtitle path: Stash lists a `<file>.<lang>.srt`
+    # beside a scene's file in `scene.captions` and serves it as WebVTT.
+    if [[ ! -f videos/h264-test-1.en.srt ]]; then
+        for t in 1 5 9 13 17; do
+            printf '%d\n00:00:%02d,000 --> 00:00:%02d,500\nStash caption at %ds\n\n' $(((t + 3) / 4)) "$t" $((t + 2)) "$t"
+        done > videos/h264-test-1.en.srt
+    fi
     # Each photo must differ: Stash merges files with the same fingerprint
     # into one image, so identical frames would show up as a single photo.
     # The sizes vary on purpose: the Pictures grid's original-aspect mode needs

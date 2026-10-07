@@ -134,7 +134,9 @@ final class GraphQLVideoSource: VideoSource, @unchecked Sendable {
             eyesReversed: eyesReversed,
             rating100: scene.rating100,
             oCounter: scene.o_counter,
-            fileName: fileName
+            fileName: fileName,
+            captions: (scene.captions ?? []).map { GalleryCaption(languageCode: $0.language_code, type: $0.caption_type) },
+            captionsURL: scene.paths.caption.flatMap { URL(string: $0) }
         )
     }
 

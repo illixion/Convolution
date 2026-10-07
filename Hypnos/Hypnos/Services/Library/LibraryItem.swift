@@ -163,3 +163,36 @@ struct LibraryHome: Sendable {
     var featured: [LibraryItem]
     var shelves: [LibraryShelf]
 }
+
+/// A subtitle stream an item offers. Only text tracks can be drawn by the
+/// app's own players; image subtitles (PGS, VobSub) are listed anyway so a
+/// menu can show them as unavailable rather than leave the user wondering
+/// where the track went.
+struct LibrarySubtitleTrack: Identifiable, Hashable, Sendable {
+    /// The server's stream index within its media source.
+    var id: Int
+    /// The media source the stream belongs to (Jellyfin's MediaSourceId).
+    var sourceId: String
+    /// ISO 639-2, as the server reports it ("eng"); nil when untagged.
+    var language: String?
+    /// The stream's own title, if the file names it ("Commentary", "SDH").
+    var name: String?
+    var isDefault: Bool = false
+    var isForced: Bool = false
+    var isHearingImpaired: Bool = false
+    var isText: Bool = true
+
+    /// "English", "English (Forced)", "English SDH – Commentary".
+    var title: String {
+        var parts: [String] = []
+        let languageName = language.flatMap { Locale.current.localizedString(forLanguageCode: $0) }
+        if let languageName { parts.append(languageName) }
+        if let name, !name.isEmpty, name.caseInsensitiveCompare(languageName ?? "") != .orderedSame {
+            parts.append(parts.isEmpty ? name : "– \(name)")
+        }
+        if parts.isEmpty { parts.append("Track \(id)") }
+        if isHearingImpaired { parts.insert(parts.removeFirst() + " SDH", at: 0) }
+        if isForced { parts.append("(Forced)") }
+        return parts.joined(separator: " ")
+    }
+}

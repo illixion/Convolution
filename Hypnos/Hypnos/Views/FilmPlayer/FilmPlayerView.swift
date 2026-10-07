@@ -11,11 +11,21 @@
  picture renderer stays primed while only its visible surface changes.
  Atmos transport, seeking and progress reporting stay with FilmPlayer.
 
+ Subtitles (FilmSession.subtitles) draw over the picture on its own film
+ clock. Over the stereo picture they sit a little in front of the window
+ plane: at the default convergence the nearest scene content is on that
+ plane, so text there would compete with it for depth.
+
+ Switching between 2D and 3D never moves the playhead: both directions
+ re-prime the picture at the position the toggle was pressed at.
+
  iOS/macOS use the AirPods tracker for the listener; Recenter is beside the
  transport when tracking is active. tvOS keeps its PHASE stage and focusable
  controls. Head tracking recentres on resume on all three platforms.
  */
 
+import CoreMedia
+import DebugTrace
 import RAVEFilm
 import RAVEMedia
 import RAVEUI
@@ -55,7 +65,7 @@ struct FilmPlayerView: View {
             }
             .onDisappear {
                 #if os(visionOS)
-                stopStereo()
+                stopStereo(keepingPosition: false)
                 #endif
                 player.pause()
                 session.isPlayerOpen = false
@@ -78,10 +88,11 @@ struct FilmPlayerView: View {
             .alert("3D unavailable", isPresented: Binding(
                 get: { stereoFailure != nil }, set: { if !$0 { stereoFailure = nil } }
             )) { Button("OK", role: .cancel) {} } message: { Text(stereoFailure ?? "") }
-            .onChange(of: session.loadedItem?.id) { _, _ in stopStereo() }
+            .onChange(of: session.loadedItem?.id) { _, _ in stopStereo(keepingPosition: false) }
             .onChange(of: appModel.realtimeDepthModelName) { _, name in
                 if stereoSource != nil, mountedDepthModelName != name {
-                    stopStereo()
+                    // startStereo re-primes at the current position itself.
+                    stopStereo(keepingPosition: false)
                     startStereo()
                 }
             }
@@ -115,7 +126,9 @@ struct FilmPlayerView: View {
         var lastPosition: Double = 0
         defer {
             if started {
-                Task { await library.reportPlaybackStopped(itemId: itemId, positionSeconds: lastPosition) }
+                // The position at close, not at the last 10 s sample.
+                let position = Self.safeStopPosition(current: player.currentTime, lastReported: lastPosition)
+                Task { await library.reportPlaybackStopped(itemId: itemId, positionSeconds: position) }
             }
         }
         while !Task.isCancelled {
@@ -129,6 +142,27 @@ struct FilmPlayerView: View {
             lastPosition = position
             try? await Task.sleep(for: .seconds(10))
         }
+    }
+
+    /// Where a stop report puts the resume point. A playhead found back at
+    /// the start after a minute or more of reported progress is far more
+    /// likely a player fault than the user rewinding before closing, and
+    /// writing it would erase their place; the last good position is kept.
+    static func safeStopPosition(current: Double, lastReported: Double) -> Double {
+        guard current < 5, lastReported > 60 else { return current }
+        AppLogger.filmPlayer.error("Playhead at \(current, format: .fixed(precision: 1))s on close after \(lastReported, format: .fixed(precision: 1))s reported; keeping the reported position")
+        return lastReported
+    }
+
+    private var pictureAspect: CGFloat? { player.video.format.flatMap(Self.aspect(of:)) }
+
+    private static func aspect(of format: CMVideoFormatDescription) -> CGFloat? {
+        let size = CMVideoFormatDescriptionGetPresentationDimensions(format, usePixelAspectRatio: true, useCleanAperture: true)
+        return size.width > 0 && size.height > 0 ? size.width / size.height : nil
+    }
+
+    private var subtitleOverlay: some View {
+        SubtitleOverlay(controller: session.subtitles, pictureAspect: pictureAspect) { player.currentTime }
     }
 
     @ViewBuilder
@@ -157,6 +191,9 @@ struct FilmPlayerView: View {
                 // measured separation keeps Hypnos/Raven controls reachable.
                 .padding(.bottom, 180)
             }
+            subtitleOverlay
+                .padding(.bottom, 180)
+                .offset(z: stereoSource == nil ? 0 : Self.stereoSubtitleLift)
         }
         .ornament(attachmentAnchor: .scene(.bottomFront)) {
             FilmTransport(player: player, stereoEnabled: stereoSource != nil,
@@ -173,6 +210,7 @@ struct FilmPlayerView: View {
                     FilmPhaseStageView(player: player, headTracking: session.headTracking,
                                        recenterRequest: session.recenterRequest)
                 }
+                .overlay { subtitleOverlay }
             FilmTransport(player: player).frame(width: 820).padding(.bottom, 40)
         }
         .onPlayPauseCommand { player.isPlaying ? player.pause() : player.play() }
@@ -183,6 +221,7 @@ struct FilmPlayerView: View {
                 .background {
                     FilmStageView(player: player) { HeadphoneHeadTracker.shared.orientation }
                 }
+                .overlay { subtitleOverlay }
             FilmTransport(player: player).padding(16)
         }
         .onAppear { if session.headTracking { HeadphoneHeadTracker.shared.start() } }
@@ -198,6 +237,9 @@ struct FilmPlayerView: View {
     }
 
     #if os(visionOS)
+    /// Points (≈ mm) the subtitles float in front of the stereo picture.
+    private static let stereoSubtitleLift: CGFloat = 20
+
     private func startStereo() {
         guard stereoSource == nil else { return }
         guard CoreMLDepthProvider.hasAvailableModel(role: .realtime) else {
@@ -215,12 +257,22 @@ struct FilmPlayerView: View {
         player.seek(to: player.currentTime)
     }
 
-    private func stopStereo() {
+    /// `keepingPosition` false only when something else positions the
+    /// picture next: a different film loading, or 3D restarting at once.
+    private func stopStereo(keepingPosition: Bool = true) {
+        guard stereoSource != nil else { return }
+        let position = player.currentTime
         player.video.onSampleBuffer = nil
         player.video.onFlush = nil
         stereoSource = nil
         session.stereoEnabled = false
         mountedDepthModelName = nil
+        // The flat picture sat hidden while the stereo one showed; re-prime it
+        // at the position the toggle was pressed at, so leaving 3D lands
+        // exactly where 3D was, whatever the hidden renderer did meanwhile.
+        guard keepingPosition, player.video.index != nil else { return }
+        AppLogger.filmPlayer.info("Leaving 3D at \(position, format: .fixed(precision: 2))s")
+        player.seek(to: position)
     }
     #endif
 }
@@ -293,6 +345,9 @@ struct TVFilmSoundSettings: View {
                 } footer: {
                     Text("Moves the picture against the sound if speech looks out of step.")
                 }
+                if session.subtitles.selected != nil {
+                    Section("Subtitles") { SubtitleDelayControl(controller: session.subtitles) }
+                }
                 Section("Objects") { FilmObjectMapPanel(player: player) }
             }
             .navigationTitle("Sound")
@@ -347,6 +402,9 @@ struct FilmTransport: View {
                         .labelStyle(.iconOnly).ravePlayerControlLabel()
                 }
                 .help(stereoEnabled ? "Play as 2D" : "Convert to 3D")
+            }
+            if !session.subtitles.tracks.isEmpty {
+                SubtitleMenu(controller: session.subtitles, onOpenChanged: onModalChanged)
             }
             #if os(iOS) || os(macOS)
             if session.headTracking, HeadphoneHeadTracker.shared.isTracking {
@@ -444,6 +502,9 @@ struct FilmAdjustmentsView: View {
             }
         }
         #endif
+        if session.subtitles.selected != nil {
+            Section("Subtitles") { SubtitleDelayControl(controller: session.subtitles) }
+        }
         Section("Sound") { FilmTuning() }
         Section("Telemetry") { FilmTelemetry(player: session.player) }
     }

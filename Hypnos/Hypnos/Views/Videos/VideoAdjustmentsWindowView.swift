@@ -47,6 +47,10 @@ struct VideoAdjustmentsWindowView: View {
                         ) : nil
                     )
                     .padding(20)
+                    if target.subtitles.selected != nil {
+                        SubtitleDelayControl(controller: target.subtitles)
+                            .padding([.horizontal, .bottom], 20)
+                    }
                 }
                 .frame(minWidth: 340)
                 .navigationTitle(target.videoDisplayName)

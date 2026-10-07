@@ -688,6 +688,12 @@ actor StashAPIClient {
         let files: [StashSceneFile]?
         let tags: [StashSceneTag]?
         let sceneStreams: [StashSceneStreamEndpoint]?
+        let captions: [StashSceneCaption]?
+    }
+
+    struct StashSceneCaption: Decodable {
+        let language_code: String
+        let caption_type: String
     }
 
     struct StashSceneTag: Decodable {
@@ -701,6 +707,8 @@ actor StashAPIClient {
         /// Short auto-generated scene preview clip (`/scene/{id}/preview`),
         /// used for the gallery long-press quick look.
         let preview: String?
+        /// `/scene/{id}/caption`, present whether or not the scene has any.
+        let caption: String?
     }
 
     struct StashSceneFile: Decodable {
@@ -738,6 +746,11 @@ actor StashAPIClient {
                         screenshot
                         stream
                         preview
+                        caption
+                    }
+                    captions {
+                        language_code
+                        caption_type
                     }
                     files {
                         path
@@ -898,6 +911,11 @@ actor StashAPIClient {
                     screenshot
                     stream
                     preview
+                    caption
+                }
+                captions {
+                    language_code
+                    caption_type
                 }
                 files {
                     path

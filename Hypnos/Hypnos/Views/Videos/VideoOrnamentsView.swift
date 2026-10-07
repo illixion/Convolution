@@ -95,6 +95,10 @@ struct VideoOrnamentsView: View {
 
             viewModeMenu
 
+            if !windowModel.subtitles.tracks.isEmpty {
+                SubtitleMenu(controller: windowModel.subtitles, onOpenChanged: chromeMenu(opened:))
+            }
+
             // Info button (rating & metadata)
             Divider()
                 .frame(height: 24)

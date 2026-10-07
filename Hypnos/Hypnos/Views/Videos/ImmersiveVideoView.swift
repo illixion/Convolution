@@ -3,9 +3,17 @@
 
  RealityKit-based immersive view for stereoscopic MV-HEVC video playback.
  Uses VideoMaterial with AVPlayer for true 3D rendering on Vision Pro.
+
+ Subtitles are a view attachment: a transparent virtual screen with the
+ same angular size and direction as the video's (seen from an assumed eye
+ height), but much nearer. The film's own stereo puts the zero-parallax plane
+ at the 50 m screen and lets pop-out content come far closer than that, so
+ text on the screen itself would sit behind whatever pops out; at
+ `subtitleDistance` it stays in front of all but the most extreme pop-out.
  */
 
 import AVKit
+import RAVEUI
 import CoreMedia
 import DebugTrace
 import RAVEMedia
@@ -23,9 +31,20 @@ struct ImmersiveVideoView: View {
     @State private var videoEntity: Entity?
     @State private var endOfPlayObserver: NSObjectProtocol?
     @State private var isLoaded: Bool = false
+    /// Width / height of the picture the subtitles are laid out over.
+    @State private var subtitleAspect: CGFloat = 16 / 9
+    @Environment(\.physicalMetrics) private var physicalMetrics
+
+    /// Metres to the subtitle plane. Untuned on device: nearer keeps text in
+    /// front of more pop-out, further keeps it closer to the screen's vergence.
+    private static let subtitleDistance: Float = 4
+    /// The subtitle attachment's layout width; its height follows the aspect.
+    private static let subtitleLayoutWidth: CGFloat = 1920
+    /// Eye height above the immersive origin (the floor) the screen is seen from.
+    private static let assumedEyeHeight: Float = 1.5
 
     var body: some View {
-        RealityView { content in
+        RealityView { content, attachments in
             guard let videoURL = appModel.immersiveVideoURL else {
                 AppLogger.immersiveVideo.warning("No video URL available")
                 return
@@ -66,6 +85,12 @@ struct ImmersiveVideoView: View {
             videoEntity = entity
             content.add(entity)
 
+            subtitleAspect = videoInfo.size.height > 0 ? videoInfo.size.width / videoInfo.size.height : 16 / 9
+            if let subtitles = attachments.entity(for: "subtitles") {
+                placeSubtitles(subtitles, screen: transform, videoInfo: videoInfo)
+                content.add(subtitles)
+            }
+
             // Start playback
             player.replaceCurrentItem(with: playerItem)
             player.applySpatialAudioPolicy(for: asset)
@@ -81,6 +106,14 @@ struct ImmersiveVideoView: View {
                 Task { @MainActor in
                     player.seek(to: .zero)
                     player.play()
+                }
+            }
+        }
+        attachments: {
+            Attachment(id: "subtitles") {
+                if let subtitles = appModel.immersiveVideoOwner?.subtitles {
+                    SubtitleOverlay(controller: subtitles) { [player] in player.currentTime().seconds }
+                        .frame(width: Self.subtitleLayoutWidth, height: Self.subtitleLayoutWidth / subtitleAspect)
                 }
             }
         }
@@ -103,6 +136,27 @@ struct ImmersiveVideoView: View {
                 material.controller.preferredViewingMode = .stereo
             }
         }
+    }
+
+    // MARK: - Subtitles
+
+    /// Puts the subtitle attachment on the line from the eye to the screen's
+    /// centre, `subtitleDistance` away, scaled to the screen's angular width.
+    private func placeSubtitles(_ entity: Entity, screen: Transform, videoInfo: VideoInfo) {
+        let distance = Self.subtitleDistance
+        let eye = SIMD3<Float>(0, Self.assumedEyeHeight, 0)
+        let fov = (videoInfo.horizontalFieldOfView ?? 65) * .pi / 180
+        let isSphere = videoInfo.projectionType == .equirectangular || videoInfo.projectionType == .halfEquirectangular
+        // Rectilinear: the plane's centre and width. A sphere has neither, so
+        // use a straight-ahead screen of the same field of view.
+        let centre = isSphere ? eye + SIMD3(0, 0, -distance) : screen.translation
+        let screenDistance = simd_length(centre - eye)
+        let screenWidth = isSphere ? 2 * distance * tan(fov / 2) : screen.scale.x
+        let fraction = isSphere ? 1 : distance / screenDistance
+        let layoutWidth = Float(physicalMetrics.convert(Self.subtitleLayoutWidth, to: .meters))
+        guard layoutWidth > 0 else { return }
+        entity.position = eye + (centre - eye) * fraction
+        entity.scale = SIMD3(repeating: screenWidth * fraction / layoutWidth)
     }
 
     // MARK: - Video Info

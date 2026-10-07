@@ -241,6 +241,19 @@ struct VideoWindowView: View {
                             }
                     }
                 }
+                .overlay {
+                    // Subtitles for the flat and fake-3D renderers; the
+                    // immersive player draws its own in the immersive space.
+                    if !appModel.allWindowsHidden, !windowModel.shouldUse3DMode {
+                        SubtitleOverlay(controller: windowModel.subtitles,
+                                        pictureAspect: windowModel.videoAspectRatio) { windowModel.currentTime }
+                            #if os(visionOS)
+                            // In front of the stereo picture, whose nearest
+                            // content sits on the window plane (see FilmPlayerView).
+                            .offset(z: windowModel.shouldUsePseudo3D ? 20 : 0)
+                            #endif
+                    }
+                }
 
                 Spacer()
                     .frame(height: ornamentBottomPadding)

@@ -106,6 +106,9 @@ enum AppLogger {
     /// Library feature: home/detail browsing, playback routing, progress sync
     static let library = DebugLogger(subsystem: subsystem, category: "Library")
 
+    /// Subtitle tracks: listing, fetching, parsing
+    static let subtitles = DebugLogger(subsystem: subsystem, category: "Subtitles")
+
     /// Per-video 3D conversion settings persistence
     static let video3DSettings = DebugLogger(subsystem: subsystem, category: "Video3DSettings")
 

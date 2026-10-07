@@ -21,6 +21,8 @@ final class FilmSession {
     static let shared = FilmSession()
 
     let player = FilmPlayer()
+    /// The loaded item's subtitle tracks, drawn over the picture by the player view.
+    let subtitles = SubtitleController()
 
     var server: String = FilmSession.storedServer {
         didSet {
@@ -191,9 +193,11 @@ final class FilmSession {
         await player.load(FilmServerClient(baseURL: serverURL, token: token, itemID: item.id))
         guard player.video.index != nil else {
             error = player.video.status
+            subtitles.load(nil)
             return false
         }
         loadedItem = item
+        subtitles.load(.jellyfin(itemId: item.id))
         AppLogger.filmPlayer.info("Loaded \(item.name): \(self.player.video.formatSummary, privacy: .public); audio \(self.player.audioStatus, privacy: .public)")
         return true
     }
