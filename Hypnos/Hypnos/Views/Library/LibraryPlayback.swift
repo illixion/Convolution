@@ -152,6 +152,8 @@ private struct LibraryPlaybackPresenter: ViewModifier {
     @Bindable var playback: LibraryPlayback
     #if !os(tvOS)
     @OpenWindowProxy private var openWindow
+    @PushWindowProxy private var pushWindow
+    @Environment(AppModel.self) private var appModel
     #endif
 
     func body(content: Content) -> some View {
@@ -179,7 +181,14 @@ private struct LibraryPlaybackPresenter: ViewModifier {
             .onChange(of: playback.pendingFilmWindow) { _, pending in
                 guard pending else { return }
                 playback.pendingFilmWindow = false
-                openWindow(id: FilmPlayerView.windowID)
+                // Settings → Always Open In New Window, as the galleries do:
+                // off, the player takes this window's place and closing it
+                // comes back here.
+                if appModel.openMediaInNewWindows {
+                    openWindow(id: FilmPlayerView.windowID)
+                } else {
+                    pushWindow(id: FilmPlayerView.windowID)
+                }
             }
             .onChange(of: playback.pendingWindow) { _, presentation in
                 guard let presentation else { return }
@@ -190,9 +199,15 @@ private struct LibraryPlaybackPresenter: ViewModifier {
                 LibraryResumePoints.set(presentation.startSeconds, for: presentation.video.identity)
                 openWindow(id: "video-detail", value: presentation.video)
                 #else
-                var value = VideoWindowValue(video: presentation.video, galleryVideos: [presentation.video])
+                let pushes = !appModel.openMediaInNewWindows
+                var value = VideoWindowValue(video: presentation.video, galleryVideos: [presentation.video],
+                                             wasPushed: pushes)
                 value.startSeconds = presentation.startSeconds
-                openWindow(id: "video-detail", value: value)
+                if pushes {
+                    pushWindow(id: "video-detail", value: value)
+                } else {
+                    openWindow(id: "video-detail", value: value)
+                }
                 #endif
             }
         #endif
