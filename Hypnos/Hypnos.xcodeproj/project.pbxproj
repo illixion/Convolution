@@ -21,6 +21,7 @@
 		AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */ = {isa = PBXBuildFile; productRef = AA12000000000000000000A2 /* RAVEDeviceSetup */; };
 		967834AC244B65FE72E57FB4 /* DebugTrace in Frameworks */ = {isa = PBXBuildFile; productRef = 7ECF8E7CC7BA800706D085EF /* DebugTrace */; };
 		F50CD95ACADCD0B6D7944C97 /* DebugTraceServer in Frameworks */ = {isa = PBXBuildFile; productRef = 35FAAC11FBCE4C04FDB901C5 /* DebugTraceServer */; };
+		D7A1E0C0DEB06A11C0FFEE01 /* DebugTraceUI in Frameworks */ = {isa = PBXBuildFile; productRef = D7A1E0C0DEB06A11C0FFEE02 /* DebugTraceUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -74,6 +75,7 @@
 				AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */,
 				967834AC244B65FE72E57FB4 /* DebugTrace in Frameworks */,
 				F50CD95ACADCD0B6D7944C97 /* DebugTraceServer in Frameworks */,
+				D7A1E0C0DEB06A11C0FFEE01 /* DebugTraceUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -167,6 +169,7 @@
 				AA12000000000000000000A2 /* RAVEDeviceSetup */,
 				7ECF8E7CC7BA800706D085EF /* DebugTrace */,
 				35FAAC11FBCE4C04FDB901C5 /* DebugTraceServer */,
+				D7A1E0C0DEB06A11C0FFEE02 /* DebugTraceUI */,
 			);
 			productName = Hypnos;
 			productReference = 0778651A2D811C5500BCF113 /* Hypnos.app */;
@@ -650,6 +653,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = FF53DB263485AD6DE8BF39A4 /* XCLocalSwiftPackageReference "../../DebugTrace" */;
 			productName = DebugTraceServer;
+		};
+		D7A1E0C0DEB06A11C0FFEE02 /* DebugTraceUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FF53DB263485AD6DE8BF39A4 /* XCLocalSwiftPackageReference "../../DebugTrace" */;
+			productName = DebugTraceUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

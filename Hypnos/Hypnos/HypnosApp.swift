@@ -12,6 +12,7 @@
 
 import DebugTrace
 import DebugTraceServer
+import DebugTraceUI
 import RAVEUI
 import SwiftUI
 
@@ -109,6 +110,7 @@ struct HypnosApp: App {
             // Windows tab is for. Each tab lists every main window but its own.
             MainWindowView(appModel: appModel, windowId: windowId)
                 .handleIncomingMediaURLs(appModel: appModel)
+                .debugApprovalPrompts()
         } defaultValue: {
             UUID()
         }
@@ -126,6 +128,7 @@ struct HypnosApp: App {
                     .environment(appModel)
                     .captureOpenWindowAction()
                     .handleIncomingMediaURLs(appModel: appModel)
+                    .debugApprovalPrompts()
                     .manageWindow(ManagedWindows.photo(windowValue))
             }
         }
@@ -140,6 +143,7 @@ struct HypnosApp: App {
                     .environment(appModel)
                     .captureOpenWindowAction()
                     .handleIncomingMediaURLs(appModel: appModel)
+                    .debugApprovalPrompts()
                     .manageWindow(ManagedWindows.video(windowValue))
             }
         }
@@ -248,6 +252,12 @@ struct HypnosApp: App {
         .defaultLaunchBehavior(.suppressed)
 
         // Immersive space for stereoscopic 3D video playback
+        // The debug server's "Allow debug access?" / "Allow code changes?"
+        // prompt, in a window of its own: the system alert it would otherwise
+        // use attaches to the frontmost window, where a 3D video's content
+        // stands in front of it and hides it.
+        DebugApprovalWindow()
+
         ImmersiveSpace(id: "StereoscopicVideoSpace") {
             ImmersiveVideoView()
                 .environment(appModel)
