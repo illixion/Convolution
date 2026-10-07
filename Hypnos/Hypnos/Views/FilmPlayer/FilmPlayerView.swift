@@ -46,6 +46,9 @@ struct FilmPlayerView: View {
     #if os(visionOS)
     @Environment(AppModel.self) private var appModel
     @State private var stereoSource: SampleBufferFrameSource?
+    /// Set while a 3D film plays as real 3D (eyes cropped from the frame);
+    /// nil while a flat film plays as fake-3D.
+    @State private var stereoLayout: RAVEPackedStereoLayout?
     @State private var mountedDepthModelName: String?
     @State private var showsDepthSetup = false
     @State private var chromeOpen = false
@@ -94,8 +97,15 @@ struct FilmPlayerView: View {
                 get: { stereoFailure != nil }, set: { if !$0 { stereoFailure = nil } }
             )) { Button("OK", role: .cancel) {} } message: { Text(stereoFailure ?? "") }
             .onChange(of: session.loadedItem?.id) { _, _ in stopStereo(keepingPosition: false) }
+            // A 3D film opens in 3D once the server says it is one, and
+            // replaces a fake-3D picture the user started before it knew.
+            .onChange(of: session.stereoFormat) { _, format in
+                guard format != nil, stereoLayout == nil else { return }
+                stopStereo(keepingPosition: false)
+                startStereo()
+            }
             .onChange(of: appModel.realtimeDepthModelName) { _, name in
-                if stereoSource != nil, mountedDepthModelName != name {
+                if stereoSource != nil, stereoLayout == nil, mountedDepthModelName != name {
                     // startStereo re-primes at the current position itself.
                     stopStereo(keepingPosition: false)
                     startStereo()
@@ -193,6 +203,7 @@ struct FilmPlayerView: View {
                 if let source = stereoSource {
                     RAVEExternalStereoVideoView(
                         source: source, settings: session.stereoSettings, chromeOpen: chromeOpen,
+                        packedStereo: stereoLayout,
                         onUnavailable: {
                             guard stereoSource === source else { return }
                             stopStereo()
@@ -310,10 +321,13 @@ struct FilmPlayerView: View {
 
     private func startStereo() {
         guard stereoSource == nil else { return }
-        guard CoreMLDepthProvider.hasAvailableModel(role: .realtime) else {
+        // A 3D film already has both eyes; only a flat one needs depth.
+        let layout = session.stereoFormat?.packedLayout(eyesReversed: false)
+        guard layout != nil || CoreMLDepthProvider.hasAvailableModel(role: .realtime) else {
             showsDepthSetup = true
             return
         }
+        stereoLayout = layout
         let source = SampleBufferFrameSource(timebase: player.video.timebase)
         player.video.onSampleBuffer = { source.submit($0) }
         player.video.onFlush = { source.reset() }
@@ -333,6 +347,7 @@ struct FilmPlayerView: View {
         player.video.onSampleBuffer = nil
         player.video.onFlush = nil
         stereoSource = nil
+        stereoLayout = nil
         session.stereoEnabled = false
         mountedDepthModelName = nil
         // The flat picture sat hidden while the stereo one showed; re-prime it

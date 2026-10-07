@@ -41,7 +41,10 @@ enum LibraryPlaybackCoordinator {
             thumbnailURL: thumbnail,
             streamURL: plan.streamURL,
             title: item.title,
-            duration: item.runtimeSeconds
+            duration: item.runtimeSeconds,
+            // A 3D film opens in live 3D, like a Stash video tagged SBS.
+            isStereoscopic: item.stereoFormat != nil,
+            stereoscopicFormat: item.stereoFormat
         )
     }
 

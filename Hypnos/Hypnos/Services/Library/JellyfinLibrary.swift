@@ -65,6 +65,7 @@ private struct JFItem: Decodable {
     let ParentIndexNumber: Int?  // season number, on an episode
     let IndexNumber: Int?        // episode/season number
     let ItemIds: [String]?       // BoxSet members, when queried with Fields=ItemIds
+    let Video3DFormat: String?   // HalfSideBySide etc.; returned without asking
     // Artwork an episode/season inherits from its series.
     let ParentBackdropItemId: String?
     let ParentBackdropImageTags: [String]?
@@ -105,6 +106,7 @@ private extension LibraryItem {
         seasonNumber = dto.kind == .episode ? dto.ParentIndexNumber : (dto.kind == .season ? dto.IndexNumber : nil)
         episodeNumber = dto.kind == .episode ? dto.IndexNumber : nil
         childItemIds = dto.ItemIds ?? []
+        stereoFormat = StereoscopicFormat(jellyfin: dto.Video3DFormat)
 
         var images: [LibraryImageRef] = []
         if let tag = dto.ImageTags?.Primary {

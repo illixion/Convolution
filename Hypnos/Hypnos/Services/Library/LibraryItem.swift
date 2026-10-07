@@ -116,6 +116,8 @@ struct LibraryItem: Identifiable, Hashable, Sendable {
     var episodeNumber: Int?
     /// For a `.collection` (Jellyfin BoxSet), the member item ids.
     var childItemIds: [String] = []
+    /// How a 3D film packs its eyes; nil for a flat one.
+    var stereoFormat: StereoscopicFormat?
 
     func image(_ kind: LibraryImageKind) -> LibraryImageRef? {
         images.first { $0.kind == kind }

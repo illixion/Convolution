@@ -23,6 +23,11 @@ final class FilmSession {
     let player = FilmPlayer()
     /// The loaded item's subtitle tracks, drawn over the picture by the player view.
     let subtitles = SubtitleController()
+    /// How the loaded film packs its eyes, when it is a 3D film (Jellyfin's
+    /// `Video3DFormat`). The player view plays it as real 3D, cropped per
+    /// eye, instead of the fake-3D warp. Arrives just after the picture.
+    private(set) var stereoFormat: StereoscopicFormat?
+    @ObservationIgnored private var stereoFormatTask: Task<Void, Never>?
 
     var server: String = FilmSession.storedServer {
         didSet {
@@ -190,6 +195,8 @@ final class FilmSession {
         isLoading = true
         error = nil
         defer { isLoading = false }
+        stereoFormatTask?.cancel()
+        stereoFormat = nil
         await player.load(FilmServerClient(baseURL: serverURL, token: token, itemID: item.id))
         guard player.video.index != nil else {
             error = player.video.status
@@ -198,6 +205,11 @@ final class FilmSession {
         }
         loadedItem = item
         subtitles.load(.jellyfin(itemId: item.id))
+        stereoFormatTask = Task { [weak self] in
+            let format = try? await LibraryService.current()?.item(id: item.id).stereoFormat
+            guard !Task.isCancelled, let self, self.loadedItem?.id == item.id else { return }
+            self.stereoFormat = format
+        }
         AppLogger.filmPlayer.info("Loaded \(item.name): \(self.player.video.formatSummary, privacy: .public); audio \(self.player.audioStatus, privacy: .public)")
         return true
     }

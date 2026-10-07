@@ -213,12 +213,29 @@ enum LibraryHarness {
             }
         }
 
+        await checkStereoFormats(library: library)
+
         if let atmosDemo {
             await checkSubtitles(library: library, item: atmosDemo)
             await checkSignedInProgress(server: server, item: atmosDemo)
         }
 
         log("DONE")
+    }
+
+    /// Every movie's 3D format, through browse (the list DTO) and item (the
+    /// detail DTO the film player looks up). The seed's Twin Horizon is HSBS.
+    private static func checkStereoFormats(library: JellyfinLibrary) async {
+        do {
+            let movies = try await library.browse(kind: .movie, startIndex: 0, limit: 100)
+            for movie in movies where movie.stereoFormat != nil {
+                let detail = try await library.item(id: movie.id)
+                log("stereo(\(movie.title)): list=\(movie.stereoFormat?.rawValue ?? "nil") item=\(detail.stereoFormat?.rawValue ?? "nil")")
+            }
+            log("stereo: \(movies.filter { $0.stereoFormat != nil }.count) of \(movies.count) movies are 3D")
+        } catch {
+            log("stereo FAILED: \(error)")
+        }
     }
 
     /// Lists the item's subtitle streams and fetches and parses each text one
