@@ -29,8 +29,8 @@ struct SubtitleMenu: View {
                     .disabled(!track.isText)
                 }
             }
-            .onAppear { onOpenChanged(true) }
-            .onDisappear { onOpenChanged(false) }
+            // Silent inside the bar's More menu, which reports for it.
+            .ravePlayerMenuReporting(onOpenChanged)
         } label: {
             Label("Subtitles", systemImage: controller.selected == nil ? "captions.bubble" : "captions.bubble.fill")
                 .ravePlayerAccessoryLabel()

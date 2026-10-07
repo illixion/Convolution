@@ -315,8 +315,8 @@ struct VideoOrnamentsView: View {
                     }
                 }
             }
-            .onAppear { chromeMenu(opened: true) }
-            .onDisappear { chromeMenu(opened: false) }
+            // Silent inside the bar's More menu, which reports for it.
+            .ravePlayerMenuReporting(chromeMenu(opened:))
         } label: {
             OrnamentGlyph(title: "More Options", systemImage: "ellipsis.circle")
                 .padding(6)
@@ -434,8 +434,8 @@ struct VideoOrnamentsView: View {
                 }
             }
             }
-            .onAppear { chromeMenu(opened: true) }
-            .onDisappear { chromeMenu(opened: false) }
+            // Silent inside the bar's More menu, which reports for it.
+            .ravePlayerMenuReporting(chromeMenu(opened:))
         } label: {
             // Icon-only, .title3 — matches PhotoOrnamentView's 3D menu button
             // (which shows `view.3d` in the flat state). The active-mode
