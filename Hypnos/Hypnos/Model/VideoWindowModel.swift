@@ -1053,6 +1053,20 @@ final class VideoWindowModel {
 
     // MARK: - Auto-Hide
 
+    /// An ornament menu opened or closed: holds the chrome up, and fades a
+    /// fake-3D picture so the menu shows (`isChromeModalOpen`).
+    func ornamentMenu(opened: Bool) {
+        if opened {
+            openOrnamentMenuCount += 1
+            cancelAutoHideTimer()
+        } else {
+            openOrnamentMenuCount = max(0, openOrnamentMenuCount - 1)
+            if openOrnamentMenuCount == 0 {
+                startAutoHideTimer()
+            }
+        }
+    }
+
     func startAutoHideTimer() {
         cancelAutoHideTimer()
         guard appModel.autoHideDelay > 0 else { return }

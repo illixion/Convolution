@@ -6,13 +6,15 @@
  Raven's converted browser video. Sound tuning uses a separate window on visionOS
  and a sheet elsewhere. Mute leaves saved gain levels intact.
 
- visionOS uses a bottom-front ornament and offers realtime 3D. A compressed
+ visionOS hangs a one-row control bar under the window, so the window is
+ all picture; the bar and the window bar hide together while the film
+ plays (tap the picture to bring them back). It offers realtime 3D. A compressed
  sample tap feeds RAVEMedia's clocked SampleBufferFrameSource; the original
  picture renderer stays primed while only its visible surface changes.
  Atmos transport, seeking and progress reporting stay with FilmPlayer.
 
  Subtitles (FilmSession.subtitles) draw over the 2D picture on its film
- clock. While the picture is stereo they move to a panel below the window:
+ clock. While the picture is stereo they move to a band under it:
  SwiftUI over the stereo video plane never shows in front of it (measured on
  device), and the menus already fade the picture for the same reason.
 
@@ -47,6 +49,9 @@ struct FilmPlayerView: View {
     @State private var mountedDepthModelName: String?
     @State private var showsDepthSetup = false
     @State private var chromeOpen = false
+    @State private var chromeVisible = true
+    @State private var chromeHolds = 0
+    @State private var chromeHideTask: Task<Void, Never>?
     @State private var stereoFailure: String?
     #endif
 
@@ -168,41 +173,62 @@ struct FilmPlayerView: View {
     @ViewBuilder
     private var content: some View {
         #if os(visionOS)
-        ZStack {
-            FilmVideoView(player: player.video)
-                .padding(.bottom, 180)
-                .opacity(stereoSource == nil ? 1 : 0)
-                // The audio stage contributes no window depth. It remains
-                // mounted when only the picture changes to stereo.
-                .background {
-                    FilmStageView(player: player, listenerDistance: session.listenerDistance)
-                        .frame(depth: 0)
-                }
-            if let source = stereoSource {
-                RAVEExternalStereoVideoView(
-                    source: source, settings: session.stereoSettings, chromeOpen: chromeOpen,
-                    onUnavailable: {
-                        guard stereoSource === source else { return }
-                        stopStereo()
-                        stereoFailure = "The 3D renderer is unavailable. Playback continues in 2D."
+        ZStack(alignment: .bottom) {
+            Group {
+                FilmVideoView(player: player.video)
+                    .opacity(stereoSource == nil ? 1 : 0)
+                    // The audio stage contributes no window depth. It remains
+                    // mounted when only the picture changes to stereo.
+                    .background {
+                        FilmStageView(player: player, listenerDistance: session.listenerDistance)
+                            .frame(depth: 0)
                     }
-                )
-                // Keep the picture out of the ornament's footprint. The same
-                // measured separation keeps Hypnos/Raven controls reachable.
-                .padding(.bottom, 180)
+                    .overlay {
+                        // Gaze-and-pinch on the flat picture toggles the
+                        // chrome; the stereo picture has its own tap target.
+                        if stereoSource == nil {
+                            Color.clear.contentShape(.rect).onTapGesture { toggleChrome() }
+                        }
+                    }
+                if let source = stereoSource {
+                    RAVEExternalStereoVideoView(
+                        source: source, settings: session.stereoSettings, chromeOpen: chromeOpen,
+                        onUnavailable: {
+                            guard stereoSource === source else { return }
+                            stopStereo()
+                            stereoFailure = "The 3D renderer is unavailable. Playback continues in 2D."
+                        },
+                        onToggleChrome: { toggleChrome() }
+                    )
+                }
+                if stereoSource == nil {
+                    subtitleOverlay
+                }
             }
-            if stereoSource == nil {
-                subtitleOverlay
-                    .padding(.bottom, 180)
+            .padding(.bottom, showsSubtitleBand ? SubtitleBand.height : 0)
+            if showsSubtitleBand {
+                SubtitleBand(controller: session.subtitles) { player.currentTime }
             }
         }
-        .subtitlePanel(session.subtitles, isShown: stereoSource != nil) { player.currentTime }
-        .ornament(attachmentAnchor: .scene(.bottomFront)) {
+        // The controls hang under the window, so the window is all picture;
+        // they and the window bar hide together while the film plays.
+        .persistentSystemOverlays(chromeVisible ? .visible : .hidden)
+        .ornament(visibility: chromeVisible ? .visible : .hidden,
+                  attachmentAnchor: .scene(.bottom), contentAlignment: .top) {
             FilmTransport(player: player, stereoEnabled: stereoSource != nil,
                           onToggle3D: { stereoSource == nil ? startStereo() : stopStereo() },
-                          onModalChanged: { chromeOpen = $0 })
-                .frame(width: 640)
-                .padding(.bottom, 80)
+                          onModalChanged: { open in
+                              chromeOpen = open
+                              holdChrome(open)
+                          },
+                          onInteraction: { revealChrome() },
+                          onHold: { holdChrome($0) })
+                .padding(.top, stereoSource == nil ? 12 : VideoWindowView.stereoControlsGap)
+        }
+        .animation(.easeInOut(duration: 0.2), value: chromeVisible)
+        .onAppear { revealChrome() }
+        .onChange(of: player.isPlaying) { _, playing in
+            if playing { scheduleChromeHide() } else { revealChrome() }
         }
         #elseif os(tvOS)
         ZStack(alignment: .bottom) {
@@ -239,6 +265,49 @@ struct FilmPlayerView: View {
     }
 
     #if os(visionOS)
+    private var showsSubtitleBand: Bool { stereoSource != nil && session.subtitles.selected != nil }
+
+    // MARK: Chrome auto-hide
+
+    private static let chromeHideDelay: Duration = .seconds(4)
+
+    private func toggleChrome() {
+        if chromeVisible, chromeHolds == 0 {
+            chromeHideTask?.cancel()
+            chromeVisible = false
+        } else {
+            revealChrome()
+        }
+    }
+
+    private func revealChrome() {
+        chromeVisible = true
+        scheduleChromeHide()
+    }
+
+    /// A menu, sheet or scrub is holding the chrome up (true) or let go.
+    private func holdChrome(_ held: Bool) {
+        chromeHolds = max(0, chromeHolds + (held ? 1 : -1))
+        if held {
+            chromeHideTask?.cancel()
+            chromeVisible = true
+        } else {
+            scheduleChromeHide()
+        }
+    }
+
+    /// Hides after a quiet spell, only while playing: a paused film keeps
+    /// its controls, the way the system player does.
+    private func scheduleChromeHide() {
+        chromeHideTask?.cancel()
+        guard chromeHolds == 0 else { return }
+        chromeHideTask = Task {
+            try? await Task.sleep(for: Self.chromeHideDelay)
+            guard !Task.isCancelled, player.isPlaying, chromeHolds == 0 else { return }
+            chromeVisible = false
+        }
+    }
+
     private func startStereo() {
         guard stereoSource == nil else { return }
         guard CoreMLDepthProvider.hasAvailableModel(role: .realtime) else {
@@ -381,6 +450,10 @@ struct FilmTransport: View {
     var stereoEnabled = false
     var onToggle3D: (() -> Void)?
     var onModalChanged: (Bool) -> Void = { _ in }
+    /// Any touch of the controls, so auto-hide can restart its countdown.
+    var onInteraction: () -> Void = {}
+    /// A scrub holding the controls up (true) or done.
+    var onHold: (Bool) -> Void = { _ in }
     @Bindable private var session = FilmSession.shared
     @State private var now = 0.0
     @State private var showsSound = false
@@ -393,12 +466,16 @@ struct FilmTransport: View {
             state: RAVEPlayerControlState(currentTime: now, duration: player.duration,
                 bufferedUntil: player.video.bufferedUntil, isPlaying: player.isPlaying, isMuted: player.isMuted),
             togglePlayback: { player.isPlaying ? player.pause() : player.play() },
-            seek: { player.seek(to: $0) }, toggleMute: { player.isMuted.toggle() }
+            seek: { player.seek(to: $0) }, toggleMute: { player.isMuted.toggle() },
+            onInteraction: onInteraction,
+            onScrubbingChanged: onHold,
+            layout: Self.layout,
+            onMenuChanged: onModalChanged
         ) {
             if let onToggle3D {
                 Button(action: onToggle3D) {
                     Label(stereoEnabled ? "Play as 2D" : "Convert to 3D", systemImage: stereoEnabled ? "rectangle" : "view.3d")
-                        .labelStyle(.iconOnly).ravePlayerControlLabel()
+                        .ravePlayerAccessoryLabel()
                 }
                 .help(stereoEnabled ? "Play as 2D" : "Convert to 3D")
             }
@@ -408,14 +485,14 @@ struct FilmTransport: View {
             #if os(iOS) || os(macOS)
             if session.headTracking, HeadphoneHeadTracker.shared.isTracking {
                 Button { HeadphoneHeadTracker.shared.recenter() } label: {
-                    Label("Recenter Audio", systemImage: "scope").labelStyle(.iconOnly).ravePlayerControlLabel()
+                    Label("Recenter Audio", systemImage: "scope").ravePlayerAccessoryLabel()
                 }
                 .help("Recenter audio while facing the picture")
             }
             #elseif os(tvOS)
             if session.headTracking, player.audio != nil {
                 Button { session.recenterRequest += 1 } label: {
-                    Label("Recenter Audio", systemImage: "scope").labelStyle(.iconOnly).ravePlayerControlLabel()
+                    Label("Recenter Audio", systemImage: "scope").ravePlayerAccessoryLabel()
                 }
             }
             #endif
@@ -426,7 +503,7 @@ struct FilmTransport: View {
                 showsSound = true
                 #endif
             } label: {
-                Label("Sound and Picture", systemImage: "slider.horizontal.3").labelStyle(.iconOnly).ravePlayerControlLabel()
+                Label("Sound and Picture", systemImage: "slider.horizontal.3").ravePlayerAccessoryLabel()
             }
             .help("Sound and picture adjustments")
         }
@@ -449,6 +526,14 @@ struct FilmTransport: View {
             }
         }
     }
+
+    #if os(visionOS)
+    /// One row under the window: every row of height is window the film
+    /// doesn't get.
+    private static var layout: RAVEPlayerControlsLayout { .compact }
+    #else
+    private static var layout: RAVEPlayerControlsLayout { .stacked }
+    #endif
 }
 
 /// A separate visionOS window: a sheet shares the stereo picture's depth

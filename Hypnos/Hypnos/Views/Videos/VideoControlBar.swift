@@ -28,7 +28,11 @@ struct VideoControlBar<Accessories: View>: View {
             onScrubbingChanged: { editing in
                 if editing { windowModel.beginScrub() }
                 else { windowModel.isScrubbing = false; windowModel.startAutoHideTimer() }
-            }
+            },
+            // visionOS hangs the bar under the window, one row high; iOS
+            // keeps the stacked bar its edge overlay was laid out for.
+            layout: Self.layout,
+            onMenuChanged: { open in windowModel.ornamentMenu(opened: open) }
         ) {
             accessories
             Button {
@@ -36,7 +40,7 @@ struct VideoControlBar<Accessories: View>: View {
                 Task { await windowModel.loopController.handleButtonTap() }
             } label: {
                 Label(windowModel.loopController.helpText, systemImage: windowModel.loopController.iconName)
-                    .labelStyle(.iconOnly).ravePlayerControlLabel()
+                    .ravePlayerAccessoryLabel()
                     .foregroundStyle(windowModel.loopController.isEngaged ? Color.accentColor : .primary)
             }
             .help(windowModel.loopController.helpText)
@@ -45,10 +49,15 @@ struct VideoControlBar<Accessories: View>: View {
                     windowModel.loopController.clear()
                     windowModel.startAutoHideTimer()
                 } label: {
-                    Label("Clear A-B Loop", systemImage: "xmark.circle").labelStyle(.iconOnly).ravePlayerControlLabel()
+                    Label("Clear A-B Loop", systemImage: "xmark.circle").ravePlayerAccessoryLabel()
                 }
             }
         }
     }
 
+    #if os(visionOS)
+    private static var layout: RAVEPlayerControlsLayout { .compact }
+    #else
+    private static var layout: RAVEPlayerControlsLayout { .stacked }
+    #endif
 }

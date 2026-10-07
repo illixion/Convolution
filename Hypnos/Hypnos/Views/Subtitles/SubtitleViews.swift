@@ -31,7 +31,7 @@ struct SubtitleMenu: View {
             .onDisappear { onOpenChanged(false) }
         } label: {
             Label("Subtitles", systemImage: controller.selected == nil ? "captions.bubble" : "captions.bubble.fill")
-                .labelStyle(.iconOnly).ravePlayerControlLabel()
+                .ravePlayerAccessoryLabel()
         }
         .help(statusText)
         .accessibilityIdentifier("player.subtitles")
@@ -86,10 +86,13 @@ struct SubtitleOverlay: View {
 }
 
 #if os(visionOS)
-/// Subtitles on their own glass panel hanging below the window, used while
-/// the picture is stereo: SwiftUI drawn over a stereo video plane can't come
-/// out in front of it, and text at the picture's depth would fight the scene.
-struct SubtitlePanel: View {
+/// The strip under a stereo picture that subtitles move to while it shows:
+/// SwiftUI drawn over a stereo video plane never comes out in front of it
+/// (device, 2026-10-07), and text at the picture's depth would fight the
+/// scene anyway. The window grows by `height` only while the band shows.
+struct SubtitleBand: View {
+    static let height: CGFloat = 110
+
     let controller: SubtitleController
     let filmTime: @MainActor () -> Double
 
@@ -97,23 +100,8 @@ struct SubtitlePanel: View {
         RAVESubtitlePanel(track: controller.cues, fontSize: 30) {
             controller.cueTime(forFilmTime: filmTime())
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 14)
-        .frame(width: 1000)
-        .glassBackgroundEffect(in: RoundedRectangle(cornerRadius: 28))
-    }
-}
-
-extension View {
-    /// Hangs `SubtitlePanel` below the window while `isShown`.
-    func subtitlePanel(_ controller: SubtitleController, isShown: Bool,
-                       filmTime: @escaping @MainActor () -> Double) -> some View {
-        ornament(visibility: isShown && controller.selected != nil ? .visible : .hidden,
-                 attachmentAnchor: .scene(.bottom), contentAlignment: .top) {
-            SubtitlePanel(controller: controller, filmTime: filmTime)
-                // Clear of the window bar and resize controls under the window.
-                .padding(.top, 60)
-        }
+        .padding(.top, 12)
+        .frame(height: Self.height, alignment: .top)
     }
 }
 #endif

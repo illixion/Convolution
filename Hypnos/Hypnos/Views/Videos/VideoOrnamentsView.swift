@@ -42,52 +42,63 @@ struct VideoOrnamentsView: View {
     private var video: GalleryVideo { windowModel.video }
 
     var body: some View {
+        chromeObservers(bar)
+    }
+
+    @ViewBuilder
+    private var bar: some View {
         if windowModel.shouldUse3DMode {
             // Immersive playback owns its own transport in the immersive scene.
-            buttonRow.padding(12).glassBackgroundEffect()
+            HStack(spacing: RAVEChromeMetrics.spacing) { ornamentItems(showsTitle: true) }
+                .padding(12).glassBackgroundEffect()
         } else {
-            VideoControlBar(windowModel: windowModel) { buttonRow }
+            // The title is the window's own; the one-row bar has no room for it.
+            VideoControlBar(windowModel: windowModel) { ornamentItems(showsTitle: false) }
         }
     }
 
-    private var buttonRow: some View {
-        HStack(spacing: RAVEChromeMetrics.spacing) {
+    /// The window's feature buttons: inline on the bar, or items of the
+    /// compact bar's "More" menu when they don't fit (`OrnamentGlyph` gives
+    /// each a title there).
+    @ViewBuilder
+    private func ornamentItems(showsTitle: Bool) -> some View {
             // Gallery button
             Button(action: onGalleryButtonTap) {
-                Image(systemName: "square.grid.2x2")
-                    .font(.title3)
+                OrnamentGlyph(title: windowModel.wasPushed ? "Videos" : "Gallery", systemImage: "square.grid.2x2")
             }
             .raveChromeButtonStyle()
             .help(windowModel.wasPushed ? "Videos" : "Show Gallery")
 
-            Divider()
-                .frame(height: 24)
+            // Prev/next only browse something: a lone video (a Library film)
+            // has nowhere to go.
+            if windowModel.videoCount > 1 {
+                Divider()
+                    .frame(height: 24)
 
-            // Previous video
-            Button {
-                windowModel.previousVideo()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.title3)
+                // Previous video
+                Button {
+                    windowModel.previousVideo()
+                } label: {
+                    OrnamentGlyph(title: "Previous Video", systemImage: "chevron.left")
+                }
+                .raveChromeButtonStyle()
+                .disabled(!windowModel.hasPreviousVideo)
+
+                // Video counter
+                Text("\(windowModel.currentVideoPosition) / \(windowModel.videoCount)")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+                    .frame(minWidth: 60)
+
+                // Next video
+                Button {
+                    windowModel.nextVideo()
+                } label: {
+                    OrnamentGlyph(title: "Next Video", systemImage: "chevron.right")
+                }
+                .raveChromeButtonStyle()
+                .disabled(!windowModel.hasNextVideo)
             }
-            .raveChromeButtonStyle()
-            .disabled(!windowModel.hasPreviousVideo)
-
-            // Video counter
-            Text("\(windowModel.currentVideoPosition) / \(windowModel.videoCount)")
-                .font(.callout)
-                .foregroundColor(.secondary)
-                .frame(minWidth: 60)
-
-            // Next video
-            Button {
-                windowModel.nextVideo()
-            } label: {
-                Image(systemName: "chevron.right")
-                    .font(.title3)
-            }
-            .raveChromeButtonStyle()
-            .disabled(!windowModel.hasNextVideo)
 
             // View mode toggle (2D/3D)
             Divider()
@@ -99,15 +110,16 @@ struct VideoOrnamentsView: View {
                 SubtitleMenu(controller: windowModel.subtitles, onOpenChanged: chromeMenu(opened:))
             }
 
-            // Info button (rating & metadata)
-            Divider()
-                .frame(height: 24)
-
-            // Stash-only: the sheet fetches scene detail by id and edits it
-            // through GraphQL, so there is nothing for it to show for a local
-            // file or a stream. The photo ornament already gates its Info
-            // button the same way on `image.stashId != nil`.
+            // Info button (rating & metadata). Stash-only: the sheet fetches
+            // scene detail by id and edits it through GraphQL, so there is
+            // nothing for it to show for a local file or a stream. The photo
+            // ornament already gates its Info button the same way on
+            // `image.stashId != nil`. Its divider goes with it, or a hidden
+            // button leaves two separators side by side.
             if video.stashId != nil {
+                Divider()
+                    .frame(height: 24)
+
                 infoButton
             }
 
@@ -124,7 +136,7 @@ struct VideoOrnamentsView: View {
             moreMenu
 
             // Video title if available
-            if let title = video.title, !title.isEmpty {
+            if showsTitle, let title = video.title, !title.isEmpty {
                 Divider()
                     .frame(height: 24)
                 Text(title)
@@ -140,7 +152,11 @@ struct VideoOrnamentsView: View {
             // the manager recreates the Menu ~30-60×/sec, refreshing the open
             // dropdown and dropping taps.
             ConversionStatusRow(videoIdentity: video.identity)
-        }
+    }
+
+    /// Modifiers the feature buttons share, wherever they are shown.
+    private func chromeObservers(_ content: some View) -> some View {
+        content
         #if !os(visionOS)
         // The bar scrolls when it is wider than the screen, and a scroll is
         // not a button press — without this the chrome auto-hides out from
@@ -176,8 +192,7 @@ struct VideoOrnamentsView: View {
         Button {
             windowModel.showMediaInfo.toggle()
         } label: {
-            Image(systemName: video.rating100 != nil ? "info.circle.fill" : "info.circle")
-                .font(.title3)
+            OrnamentGlyph(title: "Info", systemImage: video.rating100 != nil ? "info.circle.fill" : "info.circle")
                 .foregroundColor(video.rating100 != nil ? .yellow : nil)
         }
         .raveChromeButtonStyle()
@@ -224,7 +239,7 @@ struct VideoOrnamentsView: View {
                         .controlSize(.small)
                         .frame(width: videoOrnamentGlyphSize, height: videoOrnamentGlyphSize)
                 } else {
-                    Image(systemName: "square.and.arrow.up")
+                    OrnamentGlyph(title: "Share", systemImage: "square.and.arrow.up")
                 }
             }
             .font(.title3)
@@ -303,8 +318,7 @@ struct VideoOrnamentsView: View {
             .onAppear { chromeMenu(opened: true) }
             .onDisappear { chromeMenu(opened: false) }
         } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(.title3)
+            OrnamentGlyph(title: "More Options", systemImage: "ellipsis.circle")
                 .padding(6)
                 .background(moreMenuHighlighted ? .white.opacity(0.3) : .clear, in: .rect(cornerRadius: 8))
         }
@@ -325,15 +339,7 @@ struct VideoOrnamentsView: View {
     }
 
     private func chromeMenu(opened: Bool) {
-        if opened {
-            windowModel.openOrnamentMenuCount += 1
-            windowModel.cancelAutoHideTimer()
-        } else {
-            windowModel.openOrnamentMenuCount = max(0, windowModel.openOrnamentMenuCount - 1)
-            if windowModel.openOrnamentMenuCount == 0 {
-                windowModel.startAutoHideTimer()
-            }
-        }
+        windowModel.ornamentMenu(opened: opened)
     }
 
     // MARK: - Helpers
@@ -428,8 +434,7 @@ struct VideoOrnamentsView: View {
             // Icon-only, .title3 — matches PhotoOrnamentView's 3D menu button
             // (which shows `view.3d` in the flat state). The active-mode
             // background is the only highlight.
-            Image(systemName: viewModeIcon)
-                .font(.title3)
+            OrnamentGlyph(title: "View Mode", systemImage: viewModeIcon)
                 .padding(6)
                 .background(
                     (windowModel.shouldUse3DMode || windowModel.shouldUsePseudo3D)
@@ -596,6 +601,22 @@ private struct ConversionMenuStatus: View {
             } label: {
                 Label("Cancel Conversion", systemImage: "xmark.circle")
             }
+        }
+    }
+}
+
+/// A feature button's icon: the glyph on the bar, title and glyph inside the
+/// compact bar's "More" menu.
+private struct OrnamentGlyph: View {
+    let title: String
+    let systemImage: String
+    @Environment(\.ravePlayerControlsInMenu) private var inMenu
+
+    var body: some View {
+        if inMenu {
+            Label(title, systemImage: systemImage)
+        } else {
+            Image(systemName: systemImage).font(.title3)
         }
     }
 }

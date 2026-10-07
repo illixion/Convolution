@@ -50,28 +50,41 @@ struct VideoWindowView: View {
     /// Reserved space below the video so the bottom ornament (which floats at the
     /// window's bottom edge) doesn't overlap the video. The shared timeline,
     /// transport and feature rows have the same footprint in 2D and fake-3D.
+    ///
+    /// visionOS hangs the controls below the window instead, so the window is
+    /// the picture alone, plus the subtitle band while a fake-3D picture has
+    /// subtitles on (see `SubtitleBand`).
     private var ornamentBottomPadding: CGFloat {
-        if windowModel.shouldUse3DMode { return 60 }
         #if os(visionOS)
-        return 200
+        return showsSubtitleBand ? SubtitleBand.height : 0
         #else
+        if windowModel.shouldUse3DMode { return 60 }
         return 160
         #endif
     }
 
-    /// Depth offset (points, toward the viewer) applied to the fake-3D chrome.
-    /// Kept at 0 so the ornament stays coplanar with the visionOS window
-    /// controls on the window plane; the video is brought back to that same
-    /// plane by `Pseudo3DVideoPlayerView.videoPlaneZRecess` (its front-aligned
-    /// zero-depth slab measured ~9cm proud of the chrome on-device). An earlier
-    /// 20cm forward push here floated the ornament off the controls plane and
-    /// cast its silhouette over the window controls below. Tunable: nudge a few
-    /// points forward only if residual stereo pop-out makes the chrome read as
-    /// slightly behind near subjects.
-    private let pseudo3DChromeZOffset: CGFloat = 0
+    /// Gap between the window's bottom edge and the controls under a stereo
+    /// picture, which reads as nearer than its edge and crowded the bar at
+    /// the 12 pt the flat picture uses (device, 2026-10-07).
+    static let stereoControlsGap: CGFloat = 44
 
-    /// Lift the shared controls clear of the system window controls. Keep this
-    /// consistent across 2D and fake-3D so a mode switch doesn't move the chrome.
+    private var showsSubtitleBand: Bool {
+        windowModel.shouldUsePseudo3D && windowModel.subtitles.selected != nil && !appModel.allWindowsHidden
+    }
+
+    /// Clearance above the window's bottom edge for overlays (toasts,
+    /// prompts): over the in-window controls elsewhere, just the band on visionOS.
+    private var overlayBottomInset: CGFloat {
+        #if os(visionOS)
+        return ornamentBottomPadding + 24
+        #else
+        return ornamentBottomPadding + 96
+        #endif
+    }
+
+    /// iOS/macOS: lift the in-window controls clear of the system window
+    /// controls. Keep this consistent across 2D and fake-3D so a mode switch
+    /// doesn't move the chrome.
     private let pseudo3DChromeBottomLift: CGFloat = 80
 
     init(windowValue: VideoWindowValue, appModel: AppModel) {
@@ -252,8 +265,18 @@ struct VideoWindowView: View {
                     }
                 }
 
-                Spacer()
-                    .frame(height: ornamentBottomPadding)
+                Group {
+                    #if os(visionOS)
+                    if showsSubtitleBand {
+                        SubtitleBand(controller: windowModel.subtitles) { windowModel.currentTime }
+                    } else {
+                        Spacer()
+                    }
+                    #else
+                    Spacer()
+                    #endif
+                }
+                .frame(height: ornamentBottomPadding)
             }
 
             if !appModel.allWindowsHidden, !windowModel.shouldUse3DMode,
@@ -279,7 +302,7 @@ struct VideoWindowView: View {
                             )
                         Spacer()
                     }
-                    .padding(.bottom, ornamentBottomPadding + 96)
+                    .padding(.bottom, overlayBottomInset)
                 }
                 .allowsHitTesting(false)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -318,7 +341,7 @@ struct VideoWindowView: View {
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
                     .glassBackgroundEffect(in: Capsule())
-                    .padding(.bottom, ornamentBottomPadding + 96) // clear the ornament
+                    .padding(.bottom, overlayBottomInset) // clear the ornament
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .animation(.easeInOut(duration: 0.3), value: windowModel.showDepthReadyPrompt)
@@ -333,6 +356,22 @@ struct VideoWindowView: View {
         }
         .persistentSystemOverlays(windowModel.isWindowControlsHidden ? .hidden : .visible)
         .hidesStatusBar(windowModel.isUIHidden)
+        #if os(visionOS)
+        // Hung under the window, outside it: the window holds only the
+        // picture, and the system moves the window bar below the ornament.
+        // Both auto-hide together (`isUIHidden` / `isWindowControlsHidden`).
+        .ornament(
+            visibility: windowModel.isUIHidden || appModel.allWindowsHidden ? .hidden : .visible,
+            attachmentAnchor: .scene(.bottom),
+            contentAlignment: .top
+        ) {
+            videoOrnament
+                .padding(.top, windowModel.shouldUsePseudo3D ? Self.stereoControlsGap : 12)
+        }
+        .onChange(of: ornamentBottomPadding) { old, new in
+            resizeWindowHeight(by: new - old)
+        }
+        #else
         .ornament(
             visibility: windowModel.isUIHidden || appModel.allWindowsHidden ? .hidden : .visible,
             attachmentAnchor: .scene(.bottomFront),
@@ -340,16 +379,8 @@ struct VideoWindowView: View {
                 videoOrnament
                     // Keep the transport clear of the system window controls.
                     .padding(.bottom, PlatformCapabilities.supportsWindowResizing ? pseudo3DChromeBottomLift : 0)
-                    // Keep the fake-3D chrome coplanar with the video (which is
-                    // pinned to the front glass via .frame(depth:0,.front)) and
-                    // the window controls — see pseudo3DChromeZOffset. 0 = no
-                    // forward push; the constant stays for on-device fine-tuning.
-                    .offset(z: windowModel.shouldUsePseudo3D ? pseudo3DChromeZOffset : 0)
             }
         )
-        #if os(visionOS)
-        .subtitlePanel(windowModel.subtitles,
-                       isShown: windowModel.shouldUsePseudo3D && !appModel.allWindowsHidden) { windowModel.currentTime }
         #endif
         .sheet(isPresented: $windowModel.showVideo3DSettingsSheet) {
             Video3DSettingsSheet(
@@ -630,6 +661,18 @@ struct VideoWindowView: View {
             )
             WindowGeometry.request(scene, size: corrected, restriction: .uniform)
         }
+    }
+
+    /// Grows or shrinks the window by `delta` points of height, keeping its
+    /// width and the picture's size: the subtitle band coming and going. Not
+    /// a re-lock, which would also undo a resize the user made.
+    private func resizeWindowHeight(by delta: CGFloat) {
+        guard delta != 0, PlatformCapabilities.supportsWindowResizing,
+              let scene = resolvedWindowScene else { return }
+        let current = scene.effectiveGeometrySize
+        guard current.width > 0, current.height > 0 else { return }
+        WindowGeometry.request(scene, size: CGSize(width: current.width, height: max(current.height + delta, 100)),
+                               restriction: .uniform)
     }
 
     private func restoreWindowResizing() {
