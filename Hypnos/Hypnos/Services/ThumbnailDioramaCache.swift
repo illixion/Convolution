@@ -21,6 +21,7 @@ import CommonCrypto
 import DebugTrace
 import Foundation
 import ImageIO
+import RAVEMedia
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -55,6 +56,21 @@ final class ThumbnailDioramaCache {
     private var withoutSubject: Set<URL> = []
     private var inFlight: [URL: Task<Pair?, Never>] = [:]
     private var diskLoads: [URL: Task<Pair?, Never>] = [:]
+
+    /// A thumbnail's depth map for the "3D Depth" style, which `DepthTileView`
+    /// turns into one displaced mesh. A class so NSCache can hold it.
+    final class ThumbnailDepth: @unchecked Sendable {
+        let map: StillDepthMap
+        init(map: StillDepthMap) { self.map = map }
+    }
+
+    private let depthCache: NSCache<NSURL, ThumbnailDepth> = {
+        let c = NSCache<NSURL, ThumbnailDepth>()
+        c.totalCostLimit = 24 * 1024 * 1024 // ~200 KB per map
+        return c
+    }()
+    /// Thumbnails the model returned nothing usable for.
+    private var withoutDepth: Set<URL> = []
 
     /// Shared LRU engine (thread-safe) — the disk tier is written from
     /// detached tasks. Budget-derived cap, incremental size tracking.
@@ -140,6 +156,46 @@ final class ThumbnailDioramaCache {
         return result
     }
 
+    // MARK: - Depth
+
+    func cachedDepth(for url: URL) -> ThumbnailDepth? {
+        depthCache.object(forKey: url as NSURL)
+    }
+
+    /// Memory, then disk. Never runs the model.
+    func cachedOrDiskDepth(for url: URL) async -> ThumbnailDepth? {
+        if let mem = depthCache.object(forKey: url as NSURL) { return mem }
+        let map = await Task.detached(priority: .userInitiated) { Self.loadDepthFromDisk(for: url) }.value
+        guard let map else { return nil }
+        return storeDepth(map, for: url)
+    }
+
+    /// Get or generate the depth map for `url`. Runs in the caller's task on
+    /// purpose (no shared in-flight task, unlike the Vision pair): cancelling
+    /// the cell's task is what pulls its request out of the estimator's queue
+    /// before it reaches the model, which is the whole fast-scroll story.
+    func depth(for url: URL, source: () -> UIImage?) async -> ThumbnailDepth? {
+        if let cached = depthCache.object(forKey: url as NSURL) { return cached }
+        if withoutDepth.contains(url) { return nil }
+        guard let cgImage = source()?.cgImage else { return nil }
+        guard let map = await ThumbnailDepthEstimator.shared.depth(for: cgImage) else {
+            // Cancelled (scrolled away) or no model: both retry next time.
+            if !Task.isCancelled, ThumbnailDepthEstimator.shared.isModelAvailable {
+                withoutDepth.insert(url)
+                AppLogger.backgroundRemover.warning("Thumbnail depth inference failed; keeping it flat")
+            }
+            return nil
+        }
+        Task.detached(priority: .utility) { Self.saveDepthToDisk(map, for: url) }
+        return storeDepth(map, for: url)
+    }
+
+    private func storeDepth(_ map: StillDepthMap, for url: URL) -> ThumbnailDepth {
+        let depth = ThumbnailDepth(map: map)
+        depthCache.setObject(depth, forKey: url as NSURL, cost: map.values.count)
+        return depth
+    }
+
     func cancel(for url: URL) {
         inFlight[url]?.cancel()
         inFlight.removeValue(forKey: url)
@@ -148,6 +204,8 @@ final class ThumbnailDioramaCache {
     func clearCache() {
         cache.removeAllObjects()
         withoutSubject.removeAll()
+        depthCache.removeAllObjects()
+        withoutDepth.removeAll()
         inFlight.values.forEach { $0.cancel() }
         inFlight.removeAll()
         diskLoads.values.forEach { $0.cancel() }
@@ -209,6 +267,65 @@ final class ThumbnailDioramaCache {
         } catch {
             AppLogger.diskCache.warning("Failed to persist thumbnail diorama: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
+    }
+
+    // MARK: - Depth disk persistence and masks
+
+    /// Stored as the 8-bit map: a few tens of KB of lossless PNG.
+    nonisolated private static func depthDiskURL(for url: URL) -> URL {
+        let data = Data((url.absoluteString + ":thumbnailDepth:v1").utf8)
+        var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        data.withUnsafeBytes { bytes in
+            _ = CC_SHA256(bytes.baseAddress, CC_LONG(data.count), &hash)
+        }
+        return cacheDirectory.appendingPathComponent(hash.map { String(format: "%02x", $0) }.joined() + ".depth.png")
+    }
+
+    nonisolated private static func saveDepthToDisk(_ map: StillDepthMap, for url: URL) {
+        guard let image = grayImage(map.values, width: map.width, height: map.height) else { return }
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data as CFMutableData, UTType.png.identifier as CFString, 1, nil
+        ) else { return }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { return }
+        let fileURL = depthDiskURL(for: url)
+        let replaced = engine.sizeOnDisk(of: fileURL)
+        do {
+            try (data as Data).write(to: fileURL)
+            engine.noteWrite(at: fileURL, replacing: replaced)
+        } catch {
+            AppLogger.diskCache.warning("Failed to persist thumbnail depth: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+        }
+    }
+
+    nonisolated private static func loadDepthFromDisk(for url: URL) -> StillDepthMap? {
+        let fileURL = depthDiskURL(for: url)
+        guard FileManager.default.fileExists(atPath: fileURL.path),
+              let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        engine.touch(fileURL)
+        let width = image.width, height = image.height
+        var values = [UInt8](repeating: 0, count: width * height)
+        let drawn = values.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width, space: CGColorSpaceCreateDeviceGray(),
+                bitmapInfo: CGImageAlphaInfo.none.rawValue
+            ) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        return drawn ? StillDepthMap(width: width, height: height, values: values) : nil
+    }
+
+    nonisolated private static func grayImage(_ values: [UInt8], width: Int, height: Int) -> CGImage? {
+        guard let provider = CGDataProvider(data: Data(values) as CFData) else { return nil }
+        return CGImage(
+            width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: width,
+            space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent
+        )
     }
 
     nonisolated private static func encodeHeicData(from image: UIImage) -> Data? {

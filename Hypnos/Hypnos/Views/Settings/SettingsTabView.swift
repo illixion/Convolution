@@ -81,6 +81,13 @@ struct SettingsTabView: View {
                             }
                         }
                         .pickerStyle(.menu)
+                        if appModel.thumbnailStyle == .depth {
+                            Text(ThumbnailDepthEstimator.shared.isModelAvailable
+                                 ? "Shows each thumbnail in 3D using the Real-Time 3D Depth Model."
+                                 : "Needs a depth model (Developer → Depth Model Manager). Diorama is used until one is installed.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
 
                     Picker("Pictures Grid", selection: $appModel.galleryGridStyle) {

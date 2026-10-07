@@ -842,8 +842,8 @@ class AppModel {
 
     /// Gallery thumbnail rendering style. `.flat` is a regular 2D
     /// thumbnail; `.diorama` overlays a foreground-popped subject layer
-    /// for Apple TV-style parallax; `.spatial3D` runs each thumbnail
-    /// through RealityKit's 2D→3D converter at low resolution.
+    /// for Apple TV-style parallax; `.depth` renders each thumbnail as one
+    /// mesh displaced by the depth model's map (`DepthTileView`).
     /// Forced to `.flat` when `effectiveReduceMotion` is true — read
     /// `effectiveThumbnailStyle` at use sites.
     var thumbnailStyle: ThumbnailStyle {
@@ -871,6 +871,12 @@ class AppModel {
 
     var effectiveThumbnailDiorama: Bool {
         effectiveThumbnailStyle == .diorama
+    }
+
+    /// `.depth` chosen. The cell falls back to the Vision diorama itself when
+    /// no depth model is installed (`ThumbnailDepthEstimator.isModelAvailable`).
+    var effectiveThumbnailDepth: Bool {
+        effectiveThumbnailStyle == .depth
     }
 
     /// When true, image viewer windows have rounded corners.

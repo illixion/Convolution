@@ -6,10 +6,12 @@
  */
 
 import DebugTrace
+import DebugTraceUI
 import SwiftUI
 
 struct GalleryThumbnailView: View {
     @Environment(AppModel.self) private var appModel
+    @PatchRefresh var patchRefresh
     let image: GalleryImage
     /// Cell size. Square in the square grid; in the original-aspect grid the
     /// width follows the image's ratio at the row's height. The bitmap is
@@ -43,6 +45,10 @@ struct GalleryThumbnailView: View {
     @State private var isLoading = true
     @State private var loadFailed = false
     @State private var dioramaPair: ThumbnailDioramaCache.Pair?
+    @State private var depth: ThumbnailDioramaCache.ThumbnailDepth?
+    /// Settle time before a cell asks for depth. The estimator also drops
+    /// cancelled requests unrun, so this is only the first filter.
+    private static let depthRequestDelay: Duration = .milliseconds(250)
     @State private var pressPhase: PressPhase = .idle
     @State private var growthTask: Task<Void, Never>?
 
@@ -65,10 +71,24 @@ struct GalleryThumbnailView: View {
 
     var body: some View {
         ZStack {
-            // Background
-            Color.secondary.opacity(0.2)
+            // Background. Not behind a depth tile: its flat regions sit near
+            // the window plane, and a fill there z-fights with them.
+            if !(depth != nil && loadedImage != nil && appModel.effectiveThumbnailDepth) {
+                Color.secondary.opacity(0.2)
+            }
 
-            if let dioramaPair, appModel.effectiveThumbnailDiorama {
+            if let depth, let loadedImage, appModel.effectiveThumbnailDepth {
+                #if os(visionOS)
+                DepthTileView(image: loadedImage, depth: depth.map, size: size)
+                // The input target, in front of the tile. RealityKit content
+                // standing proud of the window plane caught the pointer and
+                // hand scrolling even with hit testing off (device,
+                // 2026-10-07); a drawn SwiftUI layer ahead of it gets them
+                // first. Not `.clear`: a fully clear layer isn't targetable.
+                Color.white.opacity(0.001)
+                    .offset(z: DepthTileView.span + 2)
+                #endif
+            } else if let dioramaPair, appModel.effectiveThumbnailDiorama || appModel.effectiveThumbnailDepth {
                 // Two-layer diorama: blurred-subject backdrop, masked foreground
                 // popped forward in z for an Apple TV-style parallax pop.
                 // Each layer is clipped to the cell *before* the lift: the pair
@@ -166,9 +186,18 @@ struct GalleryThumbnailView: View {
             // no foreground pop-in on scroll.
             async let baseTask: Void = loadThumbnail()
             async let cachedDioramaTask: ThumbnailDioramaCache.Pair? = preloadCachedDiorama()
+            async let cachedDepthTask: ThumbnailDioramaCache.ThumbnailDepth? = preloadCachedDepth()
             _ = await baseTask
-            if let pair = await cachedDioramaTask {
-                dioramaPair = pair
+            let cachedDepth = await cachedDepthTask
+            if let cachedDepth { depth = cachedDepth }
+            let cachedPair = await cachedDioramaTask
+            if usesDepth {
+                // A pair left from the Diorama style shows until depth lands;
+                // none is generated for this style (one model pass per cell).
+                dioramaPair = cachedPair
+                if cachedDepth == nil { await generateDepthIfPossible() }
+            } else if let cachedPair {
+                dioramaPair = cachedPair
             } else {
                 await generateDioramaIfPossible()
             }
@@ -178,14 +207,34 @@ struct GalleryThumbnailView: View {
             isLoading = true
             loadFailed = false
             dioramaPair = nil
+            depth = nil
         }
+    }
+
+    /// `.depth` with a model to run it. Without one the style behaves as
+    /// `.diorama`, so choosing it before installing a model isn't a dead end.
+    private var usesDepth: Bool {
+        appModel.effectiveThumbnailDepth && ThumbnailDepthEstimator.shared.isModelAvailable
+    }
+
+    private func preloadCachedDepth() async -> ThumbnailDioramaCache.ThumbnailDepth? {
+        guard appModel.effectiveThumbnailDepth else { return nil }
+        return await ThumbnailDioramaCache.shared.cachedOrDiskDepth(for: image.thumbnailURL)
+    }
+
+    private func generateDepthIfPossible() async {
+        guard let loadedImage else { return }
+        do { try await Task.sleep(for: Self.depthRequestDelay) } catch { return }
+        let result = await ThumbnailDioramaCache.shared.depth(for: image.thumbnailURL) { loadedImage }
+        guard !Task.isCancelled else { return }
+        depth = result
     }
 
     /// Memory + disk lookup only — never invokes Vision. Returns `nil` if
     /// no cached pair exists, in which case the caller falls through to
     /// `generateDioramaIfPossible()` for cold generation.
     private func preloadCachedDiorama() async -> ThumbnailDioramaCache.Pair? {
-        guard appModel.effectiveThumbnailDiorama else { return nil }
+        guard appModel.effectiveThumbnailDiorama || appModel.effectiveThumbnailDepth else { return nil }
         return await ThumbnailDioramaCache.shared.cachedOrDisk(for: image.thumbnailURL, maxPixelSize: Self.thumbnailMaxSize)
     }
 
@@ -194,7 +243,7 @@ struct GalleryThumbnailView: View {
     /// that scroll past quickly.
     private func generateDioramaIfPossible() async {
         guard let loadedImage else { return }
-        guard appModel.effectiveThumbnailDiorama else { return }
+        guard appModel.effectiveThumbnailDiorama || appModel.effectiveThumbnailDepth else { return }
         let key = image.thumbnailURL
         do {
             try await Task.sleep(nanoseconds: 400_000_000)
