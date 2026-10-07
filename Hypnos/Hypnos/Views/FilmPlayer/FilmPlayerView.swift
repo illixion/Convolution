@@ -60,6 +60,7 @@ struct FilmPlayerView: View {
     @State private var stereoFailure: String?
     /// The subtitles the stereo picture draws, from `StereoSubtitleFeeder`.
     @State private var stereoSubtitles: RAVEStereoSubtitleFrame?
+    @AppStorage(StereoSubtitleStyle.key) private var stereoSubtitleStyle = StereoSubtitleStyle.inPicture
     #endif
 
     var body: some View {
@@ -221,8 +222,10 @@ struct FilmPlayerView: View {
                         onToggleChrome: { toggleChrome() }
                     )
                     .background {
-                        StereoSubtitleFeeder(controller: session.subtitles, filmTime: { player.currentTime },
-                                             frame: $stereoSubtitles)
+                        if stereoSubtitleStyle == .inPicture {
+                            StereoSubtitleFeeder(controller: session.subtitles, filmTime: { player.currentTime },
+                                                 frame: $stereoSubtitles)
+                        }
                     }
                 }
                 if stereoSource == nil {
@@ -233,11 +236,14 @@ struct FilmPlayerView: View {
         // The controls hang under the window, so the window is all picture;
         // they and the window bar hide together while the film plays.
         .persistentSystemOverlays(chromeVisible ? .visible : .hidden)
-        .ornament(visibility: chromeVisible ? .visible : .hidden,
+        .ornament(visibility: PlayerOrnamentStack<EmptyView>.isVisible(
+                      subtitles: bandSubtitles, controlsVisible: chromeVisible) ? .visible : .hidden,
                   attachmentAnchor: .scene(.bottom), contentAlignment: .top) {
             PlayerOrnamentStack(
-                controlsVisible: chromeVisible,
-                gap: stereoSource == nil ? 12 : VideoWindowView.stereoControlsGap
+                subtitles: bandSubtitles, controlsVisible: chromeVisible,
+                gap: bandSubtitles != nil ? PlayerOrnamentStack<EmptyView>.stereoBandGap
+                    : stereoSource == nil ? 12 : VideoWindowView.stereoControlsGap,
+                filmTime: { player.currentTime }
             ) {
             FilmTransport(player: player, stereoEnabled: stereoSource != nil,
                           onToggle3D: { stereoSource == nil ? startStereo() : stopStereo() },
@@ -289,6 +295,12 @@ struct FilmPlayerView: View {
     }
 
     #if os(visionOS)
+    /// The subtitles to hang under a stereo picture, if set to show there.
+    private var bandSubtitles: SubtitleController? {
+        stereoSource != nil && session.subtitles.selected != nil && stereoSubtitleStyle == .belowPicture
+            ? session.subtitles : nil
+    }
+
     // MARK: Chrome auto-hide
 
     private static let chromeHideDelay: Duration = .seconds(4)
@@ -628,7 +640,7 @@ struct FilmAdjustmentsView: View {
             Section("Subtitles") {
                 SubtitleDelayControl(controller: session.subtitles)
                 #if os(visionOS)
-                if session.stereoEnabled { SubtitleHDRBrightnessControl() }
+                if session.stereoEnabled { StereoSubtitleSettings() }
                 #endif
             }
         }

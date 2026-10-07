@@ -51,7 +51,7 @@ struct VideoAdjustmentsWindowView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             SubtitleDelayControl(controller: target.subtitles)
                             #if os(visionOS)
-                            if target.showsStereoPicture { SubtitleHDRBrightnessControl() }
+                            if target.showsStereoPicture { StereoSubtitleSettings() }
                             #endif
                         }
                         .padding([.horizontal, .bottom], 20)

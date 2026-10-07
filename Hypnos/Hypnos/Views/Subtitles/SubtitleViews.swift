@@ -88,6 +88,23 @@ struct SubtitleOverlay: View {
 }
 
 #if os(visionOS)
+/// Where a stereo picture shows its subtitles.
+enum StereoSubtitleStyle: String, CaseIterable, Identifiable {
+    /// Drawn into both eyes, in front of the content behind them.
+    case inPicture
+    /// On a band hung under the window (`SubtitleBand`).
+    case belowPicture
+
+    static let key = "subtitles.stereoStyle"
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .inPicture: "In Picture"
+        case .belowPicture: "Below Picture"
+        }
+    }
+}
+
 /// Where the HDR luminance of subtitles drawn into a stereo picture is kept.
 enum SubtitleHDRBrightness {
     static let key = "subtitles.hdrWhiteNits"
@@ -95,19 +112,55 @@ enum SubtitleHDRBrightness {
     static let range: ClosedRange<Double> = 80 ... 1000
 }
 
-/// The white of subtitles drawn into a stereo HDR picture, in nits. An SDR
-/// picture's subtitles are plain white whatever this says.
-struct SubtitleHDRBrightnessControl: View {
+/// How far subtitles drawn into a stereo picture sit from the depth chosen
+/// for them: -1 (nearer) … 1 (farther), 0 being the automatic depth.
+enum SubtitleStereoDepth {
+    static let key = "subtitles.stereoDepth"
+    /// Each eye's shift at the slider's ends, as a fraction of the eye's
+    /// width: about four times the automatic margin in front of the content.
+    static let fullScale = 0.004
+
+    static func depthOffset(_ value: Double) -> Double { value * fullScale }
+}
+
+/// The subtitle settings that only mean something in 3D: where they show
+/// and, drawn into the picture, their depth and HDR brightness.
+struct StereoSubtitleSettings: View {
+    @AppStorage(StereoSubtitleStyle.key) private var style = StereoSubtitleStyle.inPicture
+    @AppStorage(SubtitleStereoDepth.key) private var depth = 0.0
     @AppStorage(SubtitleHDRBrightness.key) private var nits = SubtitleHDRBrightness.defaultNits
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("HDR subtitle brightness: \(Int(nits)) nits").font(.caption)
-            Slider(value: $nits, in: SubtitleHDRBrightness.range, step: 10)
-            Text("For HDR videos in 3D. \(Int(SubtitleHDRBrightness.defaultNits)) nits matches HDR reference white.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 12) {
+            Picker("Subtitles in 3D", selection: $style) {
+                ForEach(StereoSubtitleStyle.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            if style == .inPicture {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Subtitle depth: \(depthLabel)").font(.caption)
+                    HStack {
+                        Text("Nearer").font(.caption2).foregroundStyle(.secondary)
+                        Slider(value: $depth, in: -1 ... 1, step: 0.05)
+                        Text("Farther").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Button("Reset Depth") { depth = 0 }
+                        .font(.caption)
+                        .disabled(depth == 0)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("HDR subtitle brightness: \(Int(nits)) nits").font(.caption)
+                    Slider(value: $nits, in: SubtitleHDRBrightness.range, step: 10)
+                    Text("For HDR videos. \(Int(SubtitleHDRBrightness.defaultNits)) nits matches HDR reference white.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
+    }
+
+    private var depthLabel: String {
+        depth == 0 ? "Automatic" : "\(Int((abs(depth) * 100).rounded()))% \(depth > 0 ? "farther" : "nearer")"
     }
 }
 
@@ -126,6 +179,7 @@ struct StereoSubtitleFeeder: View {
     @Binding var frame: RAVEStereoSubtitleFrame?
 
     @AppStorage(SubtitleHDRBrightness.key) private var hdrWhiteNits = SubtitleHDRBrightness.defaultNits
+    @AppStorage(SubtitleStereoDepth.key) private var depth = 0.0
     @State private var version = 0
 
     var body: some View {
@@ -133,6 +187,7 @@ struct StereoSubtitleFeeder: View {
             Color.clear
                 .onChange(of: showing, initial: true) { _, cues in publish(cues) }
                 .onChange(of: hdrWhiteNits) { publish(showing) }
+                .onChange(of: depth) { publish(showing) }
                 .onChange(of: controller.selected) { publish(showing) }
         }
         .frame(width: 0, height: 0)
@@ -147,7 +202,8 @@ struct StereoSubtitleFeeder: View {
             return
         }
         version += 1
-        frame = RAVEStereoSubtitleFrame(version: version, hdrWhiteNits: hdrWhiteNits) { eyeSize in
+        frame = RAVEStereoSubtitleFrame(version: version, hdrWhiteNits: hdrWhiteNits,
+                                        depthOffset: SubtitleStereoDepth.depthOffset(depth)) { eyeSize in
             Self.render(cues, eyeSize: eyeSize)
         }
     }
@@ -173,19 +229,55 @@ struct StereoSubtitleFeeder: View {
     }
 }
 
-/// What hangs under a player window: the controls, a gap below its edge.
-/// A hidden bar takes no input.
-struct PlayerOrnamentStack<Controls: View>: View {
-    let controlsVisible: Bool
-    /// Space between the window's bottom edge and the controls.
-    let gap: CGFloat
-    @ViewBuilder let controls: Controls
+/// The strip under a stereo picture that subtitles show on with
+/// `StereoSubtitleStyle.belowPicture`. It hangs under the window with the
+/// controls (see `PlayerOrnamentStack`), not inside it: the window has to be
+/// the picture alone for its edge to square the picture's corners.
+struct SubtitleBand: View {
+    static let height: CGFloat = 98
+
+    let controller: SubtitleController
+    let filmTime: @MainActor () -> Double
 
     var body: some View {
-        controls
-            .opacity(controlsVisible ? 1 : 0)
-            .allowsHitTesting(controlsVisible)
-            .padding(.top, gap)
+        RAVESubtitlePanel(track: controller.cues, fontSize: 30) {
+            controller.cueTime(forFilmTime: filmTime())
+        }
+        .frame(height: Self.height, alignment: .top)
+    }
+}
+
+/// What hangs under a player window: the subtitle band if there is one,
+/// then the controls. The ornament stays up for the subtitles while the
+/// controls auto-hide, so they fade in place rather than the band jumping;
+/// a hidden bar takes no input.
+struct PlayerOrnamentStack<Controls: View>: View {
+    var subtitles: SubtitleController? = nil
+    let controlsVisible: Bool
+    /// Space between the window's bottom edge and whatever hangs first.
+    let gap: CGFloat
+    var filmTime: @MainActor () -> Double = { 0 }
+    @ViewBuilder let controls: Controls
+
+    /// A stereo picture reads nearer than its edge, and from an angle covered
+    /// a band at the controls' gap (device, 2026-10-07): the band hangs lower.
+    static var stereoBandGap: CGFloat { 84 }
+
+    /// Whether the ornament has anything to show at all.
+    static func isVisible(subtitles: SubtitleController?, controlsVisible: Bool) -> Bool {
+        controlsVisible || subtitles != nil
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let subtitles {
+                SubtitleBand(controller: subtitles, filmTime: filmTime)
+            }
+            controls
+                .opacity(controlsVisible ? 1 : 0)
+                .allowsHitTesting(controlsVisible)
+        }
+        .padding(.top, gap)
     }
 }
 #endif

@@ -67,6 +67,24 @@ struct VideoWindowView: View {
     /// the 12 pt the flat picture uses (device, 2026-10-07).
     static let stereoControlsGap: CGFloat = 44
 
+    #if os(visionOS)
+    @AppStorage(StereoSubtitleStyle.key) private var stereoSubtitleStyle = StereoSubtitleStyle.inPicture
+
+    /// The subtitles to hang under a stereo picture, if it has them on and
+    /// they are set to show there rather than in the picture.
+    private var bandSubtitles: SubtitleController? {
+        windowModel.showsStereoPicture && windowModel.subtitles.selected != nil && !appModel.allWindowsHidden
+            && stereoSubtitleStyle == .belowPicture ? windowModel.subtitles : nil
+    }
+
+    /// The subtitles the stereo player draws into its picture, if set to.
+    private var inPictureSubtitles: SubtitleController? {
+        stereoSubtitleStyle == .inPicture ? windowModel.subtitles : nil
+    }
+    #else
+    private var inPictureSubtitles: SubtitleController? { nil }
+    #endif
+
 
     /// Clearance above the window's bottom edge for overlays (toasts,
     /// prompts): over the in-window controls elsewhere, just the band on visionOS.
@@ -162,7 +180,7 @@ struct VideoWindowView: View {
                                 windowModel.toggleUIVisibility()
                             },
                             // Drawn into the picture, in front of its content.
-                            subtitles: windowModel.subtitles
+                            subtitles: inPictureSubtitles
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .id(stereoPlayerID(live: liveLayout))
@@ -368,13 +386,17 @@ struct VideoWindowView: View {
         // picture, and the system moves the window bar below the ornament.
         // Both auto-hide together (`isUIHidden` / `isWindowControlsHidden`).
         .ornament(
-            visibility: windowModel.isUIHidden || appModel.allWindowsHidden ? .hidden : .visible,
+            visibility: PlayerOrnamentStack<EmptyView>.isVisible(
+                subtitles: bandSubtitles, controlsVisible: !windowModel.isUIHidden
+            ) && !appModel.allWindowsHidden ? .visible : .hidden,
             attachmentAnchor: .scene(.bottom),
             contentAlignment: .top
         ) {
             PlayerOrnamentStack(
-                controlsVisible: !windowModel.isUIHidden,
-                gap: windowModel.showsStereoPicture ? Self.stereoControlsGap : 12
+                subtitles: bandSubtitles, controlsVisible: !windowModel.isUIHidden,
+                gap: bandSubtitles != nil ? PlayerOrnamentStack<EmptyView>.stereoBandGap
+                    : windowModel.showsStereoPicture ? Self.stereoControlsGap : 12,
+                filmTime: { windowModel.currentTime }
             ) { videoOrnament }
         }
         .onChange(of: ornamentBottomPadding) { old, new in
