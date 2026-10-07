@@ -73,6 +73,9 @@ struct SubtitleSource: Sendable {
         if let itemId = LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity) {
             return .jellyfin(itemId: itemId)
         }
+        if video.streamURL.isFileURL {
+            return .localFile(video.streamURL, identity: video.identity)
+        }
         return .stash(video)
     }
 }
