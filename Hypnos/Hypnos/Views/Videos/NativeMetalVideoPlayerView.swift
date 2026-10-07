@@ -85,6 +85,7 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         coordinator.onVideoSizeKnown = onVideoSizeKnown
         coordinator.onPlaybackError = onPlaybackError
         coordinator.startMuted = startMuted
+        coordinator.startVolume = Float(playbackModel?.volume ?? 1)
         coordinator.loops = loops
 
         if let loopController {
@@ -108,6 +109,9 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             }
             playbackModel.setMutedCommand = { [weak coordinator] muted in
                 coordinator?.setMuted(muted)
+            }
+            playbackModel.setVolumeCommand = { [weak coordinator] volume in
+                coordinator?.setVolume(Float(volume))
             }
             coordinator.onPlaybackUpdate = { [weak playbackModel] state in
                 playbackModel?.applyPlaybackState(
@@ -149,6 +153,7 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         var onPlaybackUpdate: ((PlaybackState) -> Void)?
         var onPlaybackError: (() -> Void)?
         var startMuted = true
+        var startVolume: Float = 1
         var loops = true
 
         private var player: AVPlayer?
@@ -209,6 +214,7 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             let player = AVPlayer(playerItem: item)
             player.applySpatialAudioPolicy(for: asset)
             player.isMuted = startMuted
+            player.volume = startVolume
 
             self.player = player
             self.playerItem = item
@@ -330,6 +336,11 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         func setMuted(_ muted: Bool) {
             player?.isMuted = muted
             reportPlaybackState()
+        }
+
+        func setVolume(_ volume: Float) {
+            startVolume = volume
+            player?.volume = volume
         }
 
         func setLoopBounds(a: Double?, b: Double?) {

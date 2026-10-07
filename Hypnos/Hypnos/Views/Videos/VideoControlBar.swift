@@ -18,7 +18,7 @@ struct VideoControlBar<Accessories: View>: View {
             state: RAVEPlayerControlState(
                 currentTime: windowModel.currentTime, duration: windowModel.duration,
                 bufferedUntil: windowModel.bufferedEnd, isPlaying: !windowModel.isPaused,
-                isMuted: windowModel.isMuted,
+                isMuted: windowModel.isMuted, volume: windowModel.volume,
                 markers: [windowModel.loopController.pointA, windowModel.loopController.pointB].compactMap { $0 }
             ),
             togglePlayback: { windowModel.togglePlayPause() },
@@ -32,7 +32,9 @@ struct VideoControlBar<Accessories: View>: View {
             // visionOS hangs the bar under the window, one row high; iOS
             // keeps the stacked bar its edge overlay was laid out for.
             layout: Self.layout,
-            onMenuChanged: { open in windowModel.ornamentMenu("More", opened: open) }
+            onMenuChanged: { open in windowModel.ornamentMenu("More", opened: open) },
+            setVolume: { windowModel.setVolume($0) },
+            menuDismissal: windowModel.menuDismissals
         ) {
             accessories
             Button {

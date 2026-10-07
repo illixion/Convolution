@@ -24,6 +24,9 @@ struct Pseudo3DVideoPlayerView: View {
     /// When true (a menu/popover/sheet is open), recede the video plane within
     /// the RealityKit scene so it renders behind the presented chrome.
     var chromeOpen: Bool = false
+    /// The open chrome is the control bar's More popover alone, which keeps
+    /// the gaze with the picture still tappable (see `setChromeOpen`).
+    var chromeTakesInput: Bool = false
     var onVideoSizeKnown: ((CGSize) -> Void)? = nil
     var visualAdjustments: VisualAdjustments = VisualAdjustments()
     var settings: Pseudo3DSettings = .default
@@ -89,6 +92,7 @@ struct Pseudo3DVideoPlayerView: View {
                 engine.onPlaybackError = onPlaybackError
                 engine.onDurationKnown = onDurationKnown
                 engine.startMuted = startMuted
+                engine.startVolume = Float(playbackModel?.volume ?? 1)
                 engine.loops = loops
                 engine.setContentOpacity(contentOpacity)
                 engine.setSquareCorners(!appModel.roundedCorners)
@@ -151,12 +155,13 @@ struct Pseudo3DVideoPlayerView: View {
         }
         .onAppear {
             engine.startMuted = startMuted
+            engine.startVolume = Float(playbackModel?.volume ?? 1)
             engine.loops = loops
             engine.onDurationKnown = onDurationKnown
             engine.bindCommands(loopController: loopController, playbackModel: playbackModel)
             engine.configure(adjustments: visualAdjustments.stereoWarpAdjustments, settings: settings, isFlipped: isFlipped)
             engine.setRoomActive(isRoomActive)
-            engine.setChromeOpen(chromeOpen)
+            engine.setChromeOpen(chromeOpen, takesInput: chromeTakesInput)
             engine.setContentOpacity(contentOpacity)
         }
         .onChange(of: loops) { _, new in
@@ -166,7 +171,10 @@ struct Pseudo3DVideoPlayerView: View {
             engine.setContentOpacity(value)
         })
         .onChange(of: chromeOpen) { _, open in
-            engine.setChromeOpen(open)
+            engine.setChromeOpen(open, takesInput: chromeTakesInput)
+        }
+        .onChange(of: chromeTakesInput) { _, takes in
+            engine.setChromeOpen(chromeOpen, takesInput: takes)
         }
         .onChange(of: visualAdjustments) { _, new in
             engine.configure(adjustments: new.stereoWarpAdjustments, settings: settings, isFlipped: isFlipped)
@@ -210,6 +218,7 @@ extension Pseudo3DStereoEngine {
             playbackModel.pauseCommand = { [weak self] in self?.pause() }
             playbackModel.seekCommand = { [weak self] t in self?.seek(to: t) }
             playbackModel.setMutedCommand = { [weak self] m in self?.setMuted(m) }
+            playbackModel.setVolumeCommand = { [weak self] v in self?.setVolume(Float(v)) }
             onPlaybackUpdate = { [weak playbackModel] state in
                 playbackModel?.applyPlaybackState(
                     currentTime: state.currentTime,
@@ -265,6 +274,7 @@ struct Pseudo3DVideoPlayerView: View {
     let videoURL: URL
     var isRoomActive: Bool = true
     var chromeOpen: Bool = false
+    var chromeTakesInput: Bool = false
     var onVideoSizeKnown: ((CGSize) -> Void)? = nil
     var visualAdjustments: VisualAdjustments = VisualAdjustments()
     var settings: Pseudo3DSettings = .default

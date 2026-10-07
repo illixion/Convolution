@@ -129,6 +129,9 @@ final class VideoWindowModel {
     /// Seeded from AppModel.videoAutoplayMuted in init (autoplay defaults to
     /// muted unless the setting says otherwise); toggled via the control bar.
     var isMuted: Bool = true
+    /// 0…1, shared by every player and remembered between launches
+    /// (`PlayerVolume`); mute sits on top of it.
+    var volume: Double = PlayerVolume.saved
     /// End of the last buffered range (seconds).
     var bufferedEnd: Double = 0
     /// True while the user is dragging the scrubber — suppresses incoming
@@ -159,6 +162,7 @@ final class VideoWindowModel {
     @ObservationIgnored var pauseCommand: (@MainActor () -> Void)?
     @ObservationIgnored var seekCommand: (@MainActor (Double) -> Void)?
     @ObservationIgnored var setMutedCommand: (@MainActor (Bool) -> Void)?
+    @ObservationIgnored var setVolumeCommand: (@MainActor (Double) -> Void)?
 
     // MARK: - A-B Loop
 
@@ -209,6 +213,16 @@ final class VideoWindowModel {
     var isChromeModalOpen: Bool {
         showMediaInfo || showShareSheet || showVideo3DSettingsSheet || openOrnamentMenuCount > 0
     }
+
+    /// The control bar's More popover is all that's open: it keeps the gaze
+    /// even with the stereo picture tappable, so a tap on the picture can
+    /// close it. A menu opened from it takes the picture's input away again.
+    var pictureTakesInputWithChrome: Bool {
+        openOrnamentMenus == ["More"] && !showMediaInfo && !showShareSheet && !showVideo3DSettingsSheet
+    }
+
+    /// Bumped to close the control bar's More popover from outside it.
+    private(set) var menuDismissals = 0
 
     /// Whether any chrome is open that should pin the ornament/control bar.
     var hasOpenPopover: Bool {
@@ -432,6 +446,7 @@ final class VideoWindowModel {
         pauseCommand = nil
         seekCommand = nil
         setMutedCommand = nil
+        setVolumeCommand = nil
         // Release the standalone Adjustments window's ref to us (also makes that
         // window dismiss itself), so this closed window's model isn't retained.
         if appModel.videoAdjustmentsTarget === self {
@@ -1092,6 +1107,12 @@ final class VideoWindowModel {
         setMutedCommand?(isMuted)
     }
 
+    func setVolume(_ value: Double) {
+        volume = min(max(value, 0), 1)
+        PlayerVolume.saved = volume
+        setVolumeCommand?(volume)
+    }
+
     // MARK: - Position carry-over
 
     /// A position the next renderer has to resume at. Every renderer change
@@ -1223,9 +1244,15 @@ final class VideoWindowModel {
     }
 
     func toggleUIVisibility() {
-        // A tap on the picture closes any open menu first, so none is open
-        // now, whatever the count says (see `clearLostMenus`).
-        clearLostMenus(reason: "picture tapped")
+        // A tap on the picture with a menu open only closes it; the system
+        // has closed any real menu by now, the More popover closes here, and
+        // a menu that never reported closing is let go (see `clearLostMenus`).
+        if !openOrnamentMenus.isEmpty {
+            clearLostMenus(reason: "picture tapped")
+            menuDismissals += 1
+            startAutoHideTimer()
+            return
+        }
         isUIHidden.toggle()
         isWindowControlsHidden = false
         if !isUIHidden {

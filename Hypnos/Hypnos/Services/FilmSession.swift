@@ -20,7 +20,11 @@ import Observation
 final class FilmSession {
     static let shared = FilmSession()
 
-    let player = FilmPlayer()
+    let player: FilmPlayer = {
+        let player = FilmPlayer()
+        player.volume = Float(PlayerVolume.saved)
+        return player
+    }()
     /// The loaded item's subtitle tracks, drawn over the picture by the player view.
     let subtitles = SubtitleController()
     /// How the loaded film packs its eyes, when it is a 3D film (Jellyfin's

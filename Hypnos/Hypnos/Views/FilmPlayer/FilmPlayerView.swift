@@ -54,6 +54,10 @@ struct FilmPlayerView: View {
     @State private var mountedDepthModelName: String?
     @State private var showsDepthSetup = false
     @State private var chromeOpen = false
+    /// The transport's More popover is open, which keeps the gaze with the
+    /// stereo picture still tappable.
+    @State private var morePopoverOpen = false
+    @State private var menuDismissals = 0
     @State private var chromeVisible = true
     @State private var chromeHolds = 0
     @State private var chromeHideTask: Task<Void, Never>?
@@ -211,6 +215,7 @@ struct FilmPlayerView: View {
                 if let source = stereoSource {
                     RAVEExternalStereoVideoView(
                         source: source, settings: session.stereoSettings, chromeOpen: chromeOpen,
+                        chromeTakesInput: morePopoverOpen && chromeHolds == 1,
                         packedStereo: stereoLayout,
                         squareCorners: !appModel.roundedCorners,
                         subtitles: stereoSubtitles,
@@ -251,6 +256,8 @@ struct FilmPlayerView: View {
                               chromeOpen = open
                               holdChrome(open)
                           },
+                          onMoreChanged: { morePopoverOpen = $0 },
+                          menuDismissal: menuDismissals,
                           onInteraction: { revealChrome() },
                           onHold: { holdChrome($0) })
             }
@@ -306,10 +313,17 @@ struct FilmPlayerView: View {
     private static let chromeHideDelay: Duration = .seconds(4)
 
     private func toggleChrome() {
-        // A tap on the picture closes any open menu first, so none is open,
-        // whatever the holds say (see `clearLostHolds`).
-        clearLostHolds()
-        if chromeVisible, chromeHolds == 0 {
+        // With a menu open a tap on the picture only closes it: the system
+        // has closed a real menu by now, the More popover closes on
+        // `menuDismissals`, and holds that never let go are dropped (see
+        // `clearLostHolds`).
+        if chromeOpen || chromeHolds > 0 {
+            clearLostHolds()
+            menuDismissals += 1
+            revealChrome()
+            return
+        }
+        if chromeVisible {
             chromeHideTask?.cancel()
             chromeVisible = false
         } else {
@@ -328,6 +342,7 @@ struct FilmPlayerView: View {
     /// dimmed and the chrome pinned (device, 2026-10-07).
     private func clearLostHolds() {
         chromeOpen = false
+        morePopoverOpen = false
         chromeHolds = 0
     }
 
@@ -500,6 +515,10 @@ struct FilmTransport: View {
     var stereoEnabled = false
     var onToggle3D: (() -> Void)?
     var onModalChanged: (Bool) -> Void = { _ in }
+    /// The More popover alone (it also reports through `onModalChanged`).
+    var onMoreChanged: (Bool) -> Void = { _ in }
+    /// Bumped by the host to close the More popover.
+    var menuDismissal = 0
     /// Any touch of the controls, so auto-hide can restart its countdown.
     var onInteraction: () -> Void = {}
     /// A scrub holding the controls up (true) or done.
@@ -514,13 +533,22 @@ struct FilmTransport: View {
     var body: some View {
         RAVEPlayerControls(
             state: RAVEPlayerControlState(currentTime: now, duration: player.duration,
-                bufferedUntil: player.video.bufferedUntil, isPlaying: player.isPlaying, isMuted: player.isMuted),
+                bufferedUntil: player.video.bufferedUntil, isPlaying: player.isPlaying, isMuted: player.isMuted,
+                volume: Double(player.volume)),
             togglePlayback: { player.isPlaying ? player.pause() : player.play() },
             seek: { player.seek(to: $0) }, toggleMute: { player.isMuted.toggle() },
             onInteraction: onInteraction,
             onScrubbingChanged: onHold,
             layout: Self.layout,
-            onMenuChanged: onModalChanged
+            onMenuChanged: { open in
+                onMoreChanged(open)
+                onModalChanged(open)
+            },
+            setVolume: { value in
+                player.volume = Float(value)
+                PlayerVolume.saved = value
+            },
+            menuDismissal: menuDismissal
         ) {
             if let onToggle3D {
                 Button(action: onToggle3D) {

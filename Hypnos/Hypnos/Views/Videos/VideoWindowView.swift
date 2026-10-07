@@ -147,6 +147,7 @@ struct VideoWindowView: View {
                             // Recede the video (in-scene) while a menu/popover is
                             // open so it doesn't occlude the presented chrome.
                             chromeOpen: windowModel.isChromeModalOpen,
+                            chromeTakesInput: windowModel.pictureTakesInputWithChrome,
                             onVideoSizeKnown: { size in
                                 lockWindowToVideoAspectRatio(videoSize: size)
                             },

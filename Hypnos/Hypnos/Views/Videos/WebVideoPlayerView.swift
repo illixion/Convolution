@@ -148,6 +148,9 @@ struct WebVideoPlayerView: UIViewRepresentable {
             playbackModel.setMutedCommand = { [weak webView] m in
                 webView?.evaluateJavaScript("{ const p = document.getElementById('player'); if (p) p.muted = \(m ? "true" : "false"); }")
             }
+            playbackModel.setVolumeCommand = { [weak webView] v in
+                webView?.evaluateJavaScript("{ const p = document.getElementById('player'); if (p) p.volume = \(v); }")
+            }
         }
 
         // Only reload the page when the video URL changes
@@ -513,6 +516,7 @@ struct WebVideoPlayerView: UIViewRepresentable {
             </div>
             <script>
                 const video = document.getElementById('player');
+                video.volume = \(min(max(playbackModel?.volume ?? 1, 0), 1));
                 const sharpenCanvas = document.getElementById('sharpen-canvas');
                 const originalSrc = video.src;
                 const fallbackSrc = \(Self.javascriptStringLiteral(fallbackVideoSrc ?? ""));
