@@ -135,6 +135,7 @@ struct Pseudo3DVideoPlayerView: View {
         .onChange(of: subtitleFrame) { _, frame in engine.setSubtitles(frame) }
         .onChange(of: videoURL) { _, newURL in
             engine.load(url: newURL, roomActive: isRoomActive, depthMode: depthMode,
+                        startAt: playbackModel?.takeStreamSwitchStart(),
                         httpHeaderFields: MediaAuthorization.shared.headerFields(for: newURL),
                         packedStereo: packedStereo)
         }

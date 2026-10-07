@@ -39,8 +39,10 @@ struct GalleryVideo: Identifiable, Equatable, Hashable, Codable {
     let thumbnailURL: URL
     /// Primary playback URL — always the server's *original* file (direct
     /// stream). WebKit decodes WebM (VP8/VP9) on-device, so playing the original
-    /// avoids burning server CPU on a transcode nobody asked for.
-    let streamURL: URL
+    /// avoids burning server CPU on a transcode nobody asked for. Settable
+    /// for a Jellyfin stream reopened under a new play session
+    /// (`VideoWindowModel.renewJellyfinStreamAfterBackground`).
+    var streamURL: URL
     /// Server-side live transcode of the same scene (HLS `/stream.m3u8`
     /// preferred, else the fragmented `/stream.mp4`), when the server advertises
     /// one and Settings → Server-Side Transcoding is on. It is *not* used for

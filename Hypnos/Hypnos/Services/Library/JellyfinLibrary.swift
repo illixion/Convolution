@@ -574,6 +574,10 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// running until Jellyfin's idle timer notices.
     func stopTranscoding(itemId: String) async {
         guard let playSessionId = Self.playSessions.withLock({ $0.removeValue(forKey: itemId) }) else { return }
+        await stopEncoding(playSessionId: playSessionId)
+    }
+
+    private func stopEncoding(playSessionId: String) async {
         var request = URLRequest(url: baseURL.appending(path: "Videos/ActiveEncodings").appending(queryItems: [
             .init(name: "deviceId", value: JellyfinClientIdentity.deviceId),
             .init(name: "playSessionId", value: playSessionId),
@@ -581,6 +585,41 @@ actor JellyfinLibrary: MediaServerLibrary {
         request.httpMethod = "DELETE"
         request.setValue(JellyfinClientIdentity.authorizationHeader(token: authHeaderToken), forHTTPHeaderField: "Authorization")
         _ = try? await URLSession.shared.data(for: request)
+    }
+
+    /// The same HLS stream under a new play session, so Jellyfin starts a
+    /// new remux at wherever the player next asks; nil for a stream with no
+    /// session (direct play). The old session's job is ended.
+    ///
+    /// Needed after the player reloads a segment mid-stream (visionOS took
+    /// its decoder away). A remux resumed mid-file cuts its segments at 6 s
+    /// steps from the resume point, while the playlist steps from the start
+    /// of the file, so later segments start up to a GOP away from where the
+    /// playlist puts them (0-5 s on a real x265 episode, 2026-10-07). Played
+    /// straight through, the media's own timestamps hide that; a reload
+    /// places the segment at the playlist's time and the player's clock,
+    /// subtitles with it, runs that far behind the sound and picture. A new
+    /// job starts exactly at the first segment it is asked for.
+    func renewedStreamURL(itemId: String, streamURL: URL) async -> URL? {
+        guard var components = URLComponents(url: streamURL, resolvingAgainstBaseURL: false),
+              let items = components.queryItems, items.contains(where: { $0.name == "PlaySessionId" })
+        else { return nil }
+        let fresh = UUID().uuidString
+        let old = Self.playSessions.withLock { sessions in
+            let old = sessions[itemId]
+            sessions[itemId] = fresh
+            return old
+        }
+        components.queryItems = items.map { $0.name == "PlaySessionId" ? .init(name: "PlaySessionId", value: fresh) : $0 }
+        if let old {
+            // After the swap has had a moment, so the outgoing player isn't
+            // left asking for deleted segments.
+            Task {
+                try? await Task.sleep(for: .seconds(5))
+                await self.stopEncoding(playSessionId: old)
+            }
+        }
+        return components.url
     }
 
     // MARK: - Progress reporting

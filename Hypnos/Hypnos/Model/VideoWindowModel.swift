@@ -1273,7 +1273,13 @@ final class VideoWindowModel {
             isInActiveRoom = false
         }
         // The system closes menus when the window goes away.
-        if newPhase == .background { clearLostMenus(reason: "window backgrounded") }
+        if newPhase == .background {
+            clearLostMenus(reason: "window backgrounded")
+            backgroundedAt = Date()
+        } else if newPhase == .active, let since = backgroundedAt {
+            backgroundedAt = nil
+            if Date().timeIntervalSince(since) >= 2 { renewJellyfinStreamAfterBackground() }
+        }
     }
 
     /// Menus count themselves open and closed from their content's appear and
@@ -1281,6 +1287,42 @@ final class VideoWindowModel {
     /// backgrounded (the headset sleeping) never reports closing. A count left
     /// at 1 holds the chrome and keeps a stereo picture dimmed for good
     /// (device, 2026-10-07).
+    @ObservationIgnored private var backgroundedAt: Date?
+    /// Where a player opening the same video on a new URL starts, rather
+    /// than playing from 0 and seeking: that asked Jellyfin for a job at the
+    /// start, then one at the playhead, and the picture sat frozen with the
+    /// sound playing until the next keyframe (up to 10 s on x265; device,
+    /// 2026-10-07). The flat players still take the carried position.
+    @ObservationIgnored private var streamSwitchStart: Double?
+
+    /// The stereo player's start for a new URL; taking it drops the carry.
+    func takeStreamSwitchStart() -> Double? {
+        guard let start = streamSwitchStart else { return nil }
+        streamSwitchStart = nil
+        carriedPosition = nil
+        return start
+    }
+
+    /// A Jellyfin remux comes back from the background (visionOS took the
+    /// decoder away, so the player reloads a segment) 0-5 s off its own
+    /// clock, subtitles with it; a new play session realigns it. See
+    /// `JellyfinLibrary.renewedStreamURL`. Every Jellyfin client reloads
+    /// the stream the same way.
+    private func renewJellyfinStreamAfterBackground() {
+        guard let itemId = LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity),
+              !usingTranscodedStream, video.streamURL.pathExtension.lowercased() == "m3u8",
+              let library = LibraryService.current() else { return }
+        let streamURL = video.streamURL
+        Task { [weak self] in
+            guard let renewed = await library.renewedStreamURL(itemId: itemId, streamURL: streamURL) else { return }
+            guard let self, self.video.streamURL == streamURL else { return }
+            AppLogger.videoWindow.info("Reopening the Jellyfin stream in a new play session after the background")
+            self.carryPositionToNextRenderer(reason: "new Jellyfin play session")
+            self.streamSwitchStart = self.currentTime
+            self.video.streamURL = renewed
+        }
+    }
+
     func clearLostMenus(reason: String) {
         guard !openOrnamentMenus.isEmpty else { return }
         AppLogger.videoWindow.info("Clearing open menu(s) \(self.openOrnamentMenus.sorted().joined(separator: ", "), privacy: .public): \(reason, privacy: .public)")
