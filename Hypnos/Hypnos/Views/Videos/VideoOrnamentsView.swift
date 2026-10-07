@@ -47,7 +47,7 @@ struct VideoOrnamentsView: View {
 
     @ViewBuilder
     private var bar: some View {
-        if windowModel.shouldUse3DMode {
+        if windowModel.usesImmersiveStereo {
             // Immersive playback owns its own transport in the immersive scene.
             HStack(spacing: RAVEChromeMetrics.spacing) { ornamentItems(showsTitle: true) }
                 .padding(12).glassBackgroundEffect()
@@ -371,8 +371,14 @@ struct VideoOrnamentsView: View {
             if PlatformCapabilities.supportsImmersiveSpaces {
                 Divider()
 
+                // A stereo video plays live in the window; Immersive 3D
+                // downloads and converts it first for the immersive screen.
                 modeButton("3D", mode: .stereoscopic) {
                     Task { await windowModel.enable3DMode() }
+                }
+
+                modeButton("Immersive 3D", mode: .immersive) {
+                    Task { await windowModel.enable3DMode(immersive: true) }
                 }
 
                 if windowModel.shouldUse3DMode {
@@ -454,10 +460,11 @@ struct VideoOrnamentsView: View {
     /// The three window viewing modes, mutually exclusive by construction
     /// (shouldUsePseudo3D already excludes shouldUse3DMode).
     private enum ViewMode {
-        case flat, stereoscopic, pseudo3D
+        case flat, stereoscopic, immersive, pseudo3D
     }
 
     private var currentViewMode: ViewMode {
+        if windowModel.usesImmersiveStereo { return .immersive }
         if windowModel.shouldUse3DMode { return .stereoscopic }
         if windowModel.shouldUsePseudo3D { return .pseudo3D }
         return .flat

@@ -79,7 +79,16 @@ final class VideoWindowModel {
     // MARK: - 3D / Viewing Mode (per-window intent)
 
     /// nil = auto-detect, true = force 3D, false = force 2D.
-    var stereoscopicOverride: Bool?
+    var stereoscopicOverride: Bool? {
+        // 2D and live 3D are different players; each starts at 0.
+        didSet { if oldValue != stereoscopicOverride { carryPositionToNextRenderer(reason: "3D mode change") } }
+    }
+    /// Play this stereo video in the immersive space (downloaded and converted
+    /// to MV-HEVC first) instead of live in the window. Not persisted: a
+    /// restored window opens live, which needs no conversion.
+    var immersiveStereoRequested = false {
+        didSet { if oldValue != immersiveStereoRequested { carryPositionToNextRenderer(reason: "immersive 3D change") } }
+    }
     /// Chosen stereoscopic settings for this window's video.
     var video3DSettings: Video3DSettings?
     /// Drives the per-window Video3DSettingsSheet.
@@ -320,7 +329,7 @@ final class VideoWindowModel {
                   !self.hasPresentedVideo, self.playbackFailure == nil,
                   // Genuine stereoscopic plays in the immersive space and
                   // never reports a size to this window.
-                  !self.shouldUse3DMode else { return }
+                  !self.usesImmersiveStereo else { return }
             AppLogger.videoWindow.error("[\(self.videoDisplayName, privacy: .private(mask: .hash))] no picture after \(Self.loadStallTimeout, privacy: .public)")
             self.isLoadStalled = true
             self.revealChrome()
@@ -466,6 +475,33 @@ final class VideoWindowModel {
         return video.isStereoscopic
     }
 
+    /// A stereo video playing live in the window: the stereo pump crops each
+    /// eye out of the decoded frame, so it streams like any other video, with
+    /// no download or conversion. Needs the AVFoundation renderer (the pump
+    /// pulls decoded frames); a WebKit-only source goes to the immersive
+    /// conversion instead (`usesImmersiveStereo`).
+    var liveStereoLayout: RAVEPackedStereoLayout? {
+        guard PlatformCapabilities.supportsStereoVideo, shouldUse3DMode, !immersiveStereoRequested,
+              playbackRenderer == .nativeMetal else { return nil }
+        return (video3DSettings ?? Video3DSettings.from(video: video) ?? .defaults(for: .sideBySide)).packedLayout
+    }
+
+    /// A stereo video converted to MV-HEVC and played in the immersive space,
+    /// which owns its own transport; the window shows only progress. Waits for
+    /// the renderer probe, so a video that can play live never starts the
+    /// download.
+    var usesImmersiveStereo: Bool {
+        guard shouldUse3DMode, liveStereoLayout == nil else { return false }
+        return immersiveStereoRequested || playbackRenderer == .webKit
+    }
+
+    /// The window's picture is a stereo plane (fake-3D or live 3D): SwiftUI
+    /// can't draw over it, it mirrors in the shader, and the controls sit
+    /// further below it.
+    var showsStereoPicture: Bool {
+        shouldUsePseudo3D || liveStereoLayout != nil
+    }
+
     /// Whether this window should render with the real-time fake-3D player.
     /// Mutually exclusive with the genuine stereoscopic path, and limited to the
     /// AVFoundation (native Metal) renderer since it pulls decoded frames via
@@ -476,6 +512,7 @@ final class VideoWindowModel {
 
     func set2DMode() {
         stereoscopicOverride = false
+        immersiveStereoRequested = false
         pseudo3DEnabled = false
     }
 
@@ -744,8 +781,16 @@ final class VideoWindowModel {
 
     /// Resolve the best 3D settings for the current video and engage 3D, or
     /// open the settings sheet when none can be inferred.
-    func enable3DMode() async {
+    /// - Parameter immersive: play in the immersive space after an MV-HEVC
+    ///   conversion rather than live in the window.
+    func enable3DMode(immersive: Bool = false) async {
+        immersiveStereoRequested = immersive
         pseudo3DEnabled = false
+        // Live 3D needs AVFoundation; a WebKit-only source (WebM) gets there
+        // through the server transcode, as fake-3D does.
+        if !immersive, playbackRenderer == .webKit {
+            _ = switchToTranscodedStream(reason: "live 3D requires the AVFoundation renderer")
+        }
         if let saved = await Video3DSettingsTracker.shared.loadSettings(videoId: video.identity) {
             video3DSettings = saved
             stereoscopicOverride = true

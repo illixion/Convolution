@@ -4,7 +4,9 @@
  Enum and utilities for detecting and handling stereoscopic 3D video formats.
  */
 
+import CoreGraphics
 import Foundation
+import RAVEMedia
 
 /// Stereoscopic video format types
 enum StereoscopicFormat: String, CaseIterable, Codable {
@@ -48,22 +50,22 @@ enum StereoscopicFormat: String, CaseIterable, Codable {
         }
     }
 
-    /// Calculate per-eye dimensions from source dimensions
+    /// One eye's display size for a packed frame of the given size. A half
+    /// format squeezes each eye into half the frame, so its eye is shown at the
+    /// size of the whole frame (stretched back out), not the size of its half.
     func perEyeDimensions(sourceWidth: Int, sourceHeight: Int) -> (width: Int, height: Int) {
-        switch self {
-        case .sideBySide:
-            // Full SBS: each eye is half the width, full height
-            return (sourceWidth / 2, sourceHeight)
-        case .halfSideBySide:
-            // Half SBS: already squeezed, so per-eye is half width (needs horizontal stretch)
-            return (sourceWidth / 2, sourceHeight)
-        case .overUnder:
-            // Full OU: each eye is full width, half height
-            return (sourceWidth, sourceHeight / 2)
-        case .halfOverUnder:
-            // Half OU: already squeezed, so per-eye is half height (needs vertical stretch)
-            return (sourceWidth, sourceHeight / 2)
-        }
+        let eye = packedLayout(eyesReversed: false)
+            .eyeSize(packed: CGSize(width: sourceWidth, height: sourceHeight))
+        return (Int(eye.width), Int(eye.height))
+    }
+
+    /// The layout the stereo pump crops eyes out of.
+    func packedLayout(eyesReversed: Bool) -> RAVEPackedStereoLayout {
+        RAVEPackedStereoLayout(
+            arrangement: isHorizontalSplit ? .sideBySide : .overUnder,
+            isHalfResolution: isHalfResolution,
+            eyesReversed: eyesReversed
+        )
     }
 }
 

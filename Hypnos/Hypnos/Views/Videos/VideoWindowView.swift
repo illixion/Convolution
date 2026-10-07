@@ -69,7 +69,7 @@ struct VideoWindowView: View {
     static let stereoControlsGap: CGFloat = 44
 
     private var showsSubtitleBand: Bool {
-        windowModel.shouldUsePseudo3D && windowModel.subtitles.selected != nil && !appModel.allWindowsHidden
+        windowModel.showsStereoPicture && windowModel.subtitles.selected != nil && !appModel.allWindowsHidden
     }
 
     /// Clearance above the window's bottom edge for overlays (toasts,
@@ -97,13 +97,20 @@ struct VideoWindowView: View {
 
     private var video: GalleryVideo { windowModel.video }
 
+    /// A new stereo player per video, attempt and mode: the engine takes its
+    /// packed layout when it loads.
+    private func stereoPlayerID(live layout: RAVEPackedStereoLayout?) -> String {
+        let mode = layout.map { "live3d_\($0.arrangement.rawValue)_\($0.isHalfResolution)_\($0.eyesReversed)" } ?? "pseudo3d"
+        return "\(video.id)_\(mode)_\(windowModel.playbackAttempt)"
+    }
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
                 Group {
                     if appModel.allWindowsHidden {
                         Color.clear
-                    } else if windowModel.shouldUse3DMode {
+                    } else if windowModel.usesImmersiveStereo {
                         StereoscopicVideoView(
                             video: video,
                             windowModel: windowModel,
@@ -116,7 +123,10 @@ struct VideoWindowView: View {
                             }
                         )
                         .id("\(video.id)_3d")
-                    } else if windowModel.shouldUsePseudo3D {
+                    } else if windowModel.showsStereoPicture {
+                        // Fake-3D of a mono video, or a stereo video live: the
+                        // same player, warping or cropping each eye.
+                        let liveLayout = windowModel.liveStereoLayout
                         Pseudo3DVideoPlayerView(
                             videoURL: windowModel.authenticatedStreamURL,
                             isRoomActive: windowModel.isInActiveRoom,
@@ -129,8 +139,10 @@ struct VideoWindowView: View {
                             visualAdjustments: windowModel.effectiveVideoAdjustments,
                             settings: windowModel.effectivePseudo3DSettings,
                             depthMode: windowModel.pseudo3DDepthMode,
-                            startAtSeconds: windowModel.pseudo3DEngageResumeTime,
-                            startPaused: windowModel.pseudo3DEngagePaused,
+                            // Live 3D resumes through the carried position.
+                            startAtSeconds: liveLayout == nil ? windowModel.pseudo3DEngageResumeTime : nil,
+                            startPaused: liveLayout == nil && windowModel.pseudo3DEngagePaused,
+                            packedStereo: liveLayout,
                             isFlipped: windowModel.isFlipped,
                             loopController: windowModel.loopController,
                             playbackModel: windowModel,
@@ -140,7 +152,11 @@ struct VideoWindowView: View {
                             onPlaybackError: {
                                 // Fall back to the flat native player if the
                                 // stereo pipeline can't decode this source.
-                                windowModel.disablePseudo3D()
+                                if liveLayout != nil {
+                                    windowModel.stereoscopicOverride = false
+                                } else {
+                                    windowModel.disablePseudo3D()
+                                }
                             },
                             // A 2D transparent overlay can't catch gaze over a
                             // RealityView, so the tap-to-toggle lives inside it as
@@ -150,7 +166,7 @@ struct VideoWindowView: View {
                             }
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .id("\(video.id)_pseudo3d_\(windowModel.playbackAttempt)")
+                        .id(stereoPlayerID(live: liveLayout))
                     } else {
                         switch windowModel.playbackRenderer {
                         case .resolving:
@@ -223,12 +239,12 @@ struct VideoWindowView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 // Fake-3D handles the mirror inside the warp shader; mirroring
                 // the RealityView container would invert the stereo pair too.
-                .scaleEffect(x: (windowModel.isFlipped && !windowModel.shouldUsePseudo3D) ? -1 : 1, y: 1)
-                .brightness(windowModel.shouldUse3DMode ? windowModel.effectiveVideoAdjustments.brightness : 0)
-                .contrast(windowModel.shouldUse3DMode ? windowModel.effectiveVideoAdjustments.contrast : 1)
-                .saturation(windowModel.shouldUse3DMode ? windowModel.effectiveVideoAdjustments.saturation : 1)
+                .scaleEffect(x: (windowModel.isFlipped && !windowModel.showsStereoPicture) ? -1 : 1, y: 1)
+                .brightness(windowModel.usesImmersiveStereo ? windowModel.effectiveVideoAdjustments.brightness : 0)
+                .contrast(windowModel.usesImmersiveStereo ? windowModel.effectiveVideoAdjustments.contrast : 1)
+                .saturation(windowModel.usesImmersiveStereo ? windowModel.effectiveVideoAdjustments.saturation : 1)
                 .opacity(
-                    windowModel.shouldUse3DMode || windowModel.playbackRenderer == .nativeMetal
+                    windowModel.usesImmersiveStereo || windowModel.playbackRenderer == .nativeMetal
                         ? windowModel.effectiveVideoAdjustments.opacity
                         : 1
                 )
@@ -246,7 +262,7 @@ struct VideoWindowView: View {
                     // immersive space). The error overlay carries interactive Retry /
                     // Play as 2D buttons, and a tap target stacked above them would
                     // swallow those taps into a UI toggle instead.
-                    if !appModel.allWindowsHidden, !windowModel.shouldUsePseudo3D, !windowModel.shouldUse3DMode {
+                    if !appModel.allWindowsHidden, !windowModel.showsStereoPicture, !windowModel.usesImmersiveStereo {
                         Color.clear
                             .contentShape(.rect)
                             .onTapGesture {
@@ -259,7 +275,7 @@ struct VideoWindowView: View {
                     // draws its own in the immersive space.
                     // Fake-3D shows them on a panel below the window instead
                     // (see SubtitlePanel).
-                    if !appModel.allWindowsHidden, !windowModel.shouldUse3DMode, !windowModel.shouldUsePseudo3D {
+                    if !appModel.allWindowsHidden, !windowModel.usesImmersiveStereo, !windowModel.showsStereoPicture {
                         SubtitleOverlay(controller: windowModel.subtitles,
                                         pictureAspect: windowModel.videoAspectRatio) { windowModel.currentTime }
                     }
@@ -279,7 +295,7 @@ struct VideoWindowView: View {
                 .frame(height: ornamentBottomPadding)
             }
 
-            if !appModel.allWindowsHidden, !windowModel.shouldUse3DMode,
+            if !appModel.allWindowsHidden, !windowModel.usesImmersiveStereo,
                windowModel.playbackFailure != nil || windowModel.isLoadStalled {
                 loadStatusCard
                     .padding(.bottom, ornamentBottomPadding)
@@ -366,7 +382,7 @@ struct VideoWindowView: View {
             contentAlignment: .top
         ) {
             videoOrnament
-                .padding(.top, windowModel.shouldUsePseudo3D ? Self.stereoControlsGap : 12)
+                .padding(.top, windowModel.showsStereoPicture ? Self.stereoControlsGap : 12)
         }
         .onChange(of: ornamentBottomPadding) { old, new in
             resizeWindowHeight(by: new - old)

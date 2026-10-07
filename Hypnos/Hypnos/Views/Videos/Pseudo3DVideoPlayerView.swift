@@ -36,6 +36,9 @@ struct Pseudo3DVideoPlayerView: View {
     /// for a progressive engage mid-conversion so a second decode session
     /// doesn't fight the converter's reader; manual Play starts it.
     var startPaused: Bool = false
+    /// A stereo video that already holds both eyes: played live as real 3D,
+    /// each eye cropped out, with no depth model. Nil warps a mono video.
+    var packedStereo: RAVEPackedStereoLayout? = nil
     var isFlipped: Bool = false
     var loopController: VideoLoopController? = nil
     var playbackModel: VideoWindowModel? = nil
@@ -88,7 +91,8 @@ struct Pseudo3DVideoPlayerView: View {
                 content.add(engine.makeVideoEntity())
                 engine.observeVideoSize(content: content)
                 engine.load(url: videoURL, roomActive: isRoomActive, depthMode: depthMode, startAt: startAtSeconds, startPaused: startPaused,
-                            httpHeaderFields: MediaAuthorization.shared.headerFields(for: videoURL))
+                            httpHeaderFields: MediaAuthorization.shared.headerFields(for: videoURL),
+                            packedStereo: packedStereo)
             } update: { content in
                 // Fit the video plane to the window (VideoPlayerComponent's screen
                 // defaults to ~2× the window otherwise).
@@ -115,7 +119,8 @@ struct Pseudo3DVideoPlayerView: View {
         .offset(z: -Self.videoPlaneZRecess)
         .onChange(of: videoURL) { _, newURL in
             engine.load(url: newURL, roomActive: isRoomActive, depthMode: depthMode,
-                        httpHeaderFields: MediaAuthorization.shared.headerFields(for: newURL))
+                        httpHeaderFields: MediaAuthorization.shared.headerFields(for: newURL),
+                        packedStereo: packedStereo)
         }
         .onChange(of: depthMode) { _, newMode in
             engine.setDepthMode(newMode)
@@ -124,7 +129,7 @@ struct Pseudo3DVideoPlayerView: View {
         // the pump so the new model applies to THIS video immediately, keeping
         // position. (Cached playback is unaffected — its depth is baked.)
         .onChange(of: appModel.realtimeDepthModelName) { _, _ in
-            if case .realtime = depthMode {
+            if case .realtime = depthMode, packedStereo == nil {
                 engine.reloadDepthPipeline()
             }
         }
@@ -250,6 +255,7 @@ struct Pseudo3DVideoPlayerView: View {
     var depthMode: Pseudo3DDepthMode = .realtime
     var startAtSeconds: Double? = nil
     var startPaused: Bool = false
+    var packedStereo: RAVEPackedStereoLayout? = nil
     var isFlipped: Bool = false
     var loopController: VideoLoopController? = nil
     var playbackModel: VideoWindowModel? = nil

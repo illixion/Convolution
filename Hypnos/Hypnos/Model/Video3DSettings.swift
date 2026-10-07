@@ -5,6 +5,7 @@
  */
 
 import Foundation
+import RAVEMedia
 
 /// User-configurable settings for 3D video conversion
 struct Video3DSettings: Codable, Equatable, Hashable {
@@ -39,6 +40,11 @@ struct Video3DSettings: Codable, Equatable, Hashable {
             horizontalFieldOfView: 90.0,
             horizontalDisparityAdjustment: 200.0
         )
+    }
+
+    /// How this video packs its eyes, for live playback in the stereo pump.
+    var packedLayout: RAVEPackedStereoLayout {
+        format.packedLayout(eyesReversed: eyesReversed)
     }
 
     /// Generate a cache key component from all settings
