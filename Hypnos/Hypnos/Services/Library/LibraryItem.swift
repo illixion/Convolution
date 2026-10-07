@@ -75,6 +75,8 @@ struct LibraryUserData: Hashable, Sendable {
     }
     /// 0...100, Jellyfin's own resume-percentage convention.
     var playedPercentage: Double?
+    /// When this user last played the item, if ever. Orders Up Next.
+    var lastPlayedDate: Date?
 
     /// Where Resume starts, or nil when there is nothing to resume. Jellyfin
     /// reports a position of 0 (not null) for an untouched item, and keeps
@@ -164,6 +166,32 @@ struct LibraryShelf: Identifiable, Hashable, Sendable {
 struct LibraryHome: Sendable {
     var featured: [LibraryItem]
     var shelves: [LibraryShelf]
+}
+
+/// A stretch of an episode or film a viewer may want to jump over: the
+/// opening titles, a recap, the credits. Jellyfin 10.10+ serves these as
+/// media segments, filled in by a segment provider plugin (Intro Skipper,
+/// Chapter Segments); a file whose chapters are named "Intro"/"Credits"
+/// gets them from its chapters instead.
+struct LibraryMediaSegment: Hashable, Sendable {
+    enum Kind: String, Sendable {
+        case intro, recap, preview, outro, commercial
+    }
+
+    var kind: Kind
+    var startSeconds: Double
+    var endSeconds: Double
+
+    /// What the skip button says.
+    var skipTitle: String {
+        switch kind {
+        case .intro: "Skip Intro"
+        case .recap: "Skip Recap"
+        case .preview: "Skip Preview"
+        case .outro: "Skip Credits"
+        case .commercial: "Skip Ad"
+        }
+    }
 }
 
 /// A subtitle stream an item offers. Only text tracks can be drawn by the

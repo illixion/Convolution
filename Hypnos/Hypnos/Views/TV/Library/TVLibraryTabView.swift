@@ -33,7 +33,7 @@ struct TVLibraryTabView: View {
             await model.start()
             await openAutoOpenItemIfRequested()
         }
-        .onChange(of: playback.finishedCount) {
+        .onChange(of: LibraryWatchState.shared.revision) {
             Task { await model.refresh() }
         }
     }

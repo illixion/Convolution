@@ -58,9 +58,12 @@ enum LibraryPlaybackCoordinator {
     /// Call as a `.task(id: video.identity) { await ... }` from the generic
     /// player's window view; cancellation on disappear/id-change is what
     /// drives the final stop report.
+    ///
+    /// `currentTime` answers nil when the player no longer shows `video`;
+    /// the stop then reports the last position seen for it.
     static func reportGenericPlaybackProgress(
         video: GalleryVideo,
-        currentTime: @escaping @MainActor () -> Double,
+        currentTime: @escaping @MainActor () -> Double?,
         isPaused: @escaping @MainActor () -> Bool,
         interval: Duration = .seconds(10)
     ) async {
@@ -71,7 +74,9 @@ enum LibraryPlaybackCoordinator {
         var started = false
         var lastPosition: Double = 0
         defer {
-            let position = lastPosition
+            // The position at close, not at the last 10 s sample.
+            let position = FilmPlayerView.safeStopPosition(current: currentTime() ?? lastPosition,
+                                                           lastReported: lastPosition)
             // A stop report also ends the server's transcode for this play;
             // one that never started has to end it explicitly.
             if started {
@@ -82,7 +87,7 @@ enum LibraryPlaybackCoordinator {
         }
 
         while !Task.isCancelled {
-            let position = currentTime()
+            guard let position = currentTime() else { break }
             let paused = isPaused()
             if !started, position > 0 {
                 started = true

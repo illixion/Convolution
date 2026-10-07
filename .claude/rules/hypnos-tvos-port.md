@@ -480,6 +480,29 @@ before touching progress reporting again:**
   `PUT /System/Configuration` on every `up`, so Continue Watching/Next Up
   have something to show against these short clips.
 
+### Watch state, Up Next and Skip Intro (2026-10-08)
+
+- **Every Library screen reloads on `LibraryWatchState.shared.revision`**,
+  which bumps once a stop report has *landed* (and after played/favorite
+  toggles), never on a player closing: the stop is sent from a Task as the
+  player goes away, so a reload keyed on the close read the old position.
+  That was the "Up Next resumes from where I started, not where I stopped"
+  bug, and the non-tvOS home never reloaded at all. `LibraryPlayback.play`
+  waits for any in-flight stop (`settled`) and re-reads the item from the
+  server, and a video window's `startSeconds` (a snapshot, replayed by scene
+  restoration) is likewise replaced by the server's resume point.
+- **Up Next** (`JellyfinLibrary.upNext`) is ordered by when each show was
+  last watched (an extra played-episodes query supplies the date NextUp's
+  unwatched episodes lack), one entry per show. **New Episodes** lists
+  recently added episodes of followed shows past the viewer's place.
+- **Skip Intro / Credits** come from `GET /MediaSegments/{id}` (Jellyfin
+  10.10+, empty without a provider plugin such as Intro Skipper), falling
+  back to chapters named like an intro/recap/credits. `MediaSegmentSkipper`
+  drives every player; tvOS uses `AVPlayerViewController.contextualActions`.
+  The dev seed's `Nebula Drift S01E04` ("Cold Open", 40 s) carries Recap /
+  Intro / Chapter 3 / End Credits chapters; the macOS `-LibraryHarness`
+  checks its segments, Up Next ordering and the fresh-resume path.
+
 ### Library UI: driving it without a remote or taps
 
 DEBUG-only `-UITestDefault` hooks, since the tvOS simulator takes no

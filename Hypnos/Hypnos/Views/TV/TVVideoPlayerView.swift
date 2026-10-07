@@ -53,11 +53,13 @@ struct TVVideoPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var resolvedURL: URL?
     @State private var failureMessage: String?
+    @State private var skipper = MediaSegmentSkipper()
 
     var body: some View {
         Group {
             if let resolvedURL {
                 TVAVPlayerViewControllerRepresentable(url: resolvedURL, startSeconds: startSeconds,
+                                                      segments: skipper.segments,
                                                       onProgress: onProgress, onPlayedToEnd: onPlayedToEnd) {
                     failureMessage = "This video's format isn't supported on Apple TV."
                     self.resolvedURL = nil
@@ -85,6 +87,9 @@ struct TVVideoPlayerView: View {
             }
         }
         .task { await resolve() }
+        .task {
+            await skipper.load(itemId: LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity))
+        }
     }
 
     private func resolve() async {
@@ -121,6 +126,9 @@ struct TVVideoPlayerView: View {
 private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresentable {
     let url: URL
     var startSeconds: Double?
+    /// Offered as the player's own contextual action (Skip Intro) while
+    /// the playhead is in one.
+    var segments: [LibraryMediaSegment] = []
     var onProgress: (Double, Double, Bool) -> Void = { _, _, _ in }
     var onPlayedToEnd: (() -> Void)?
     var onPlaybackFailed: () -> Void = {}
@@ -183,6 +191,32 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
             coordinator.onProgress(time.seconds, duration.isFinite ? duration : 0, player.rate == 0)
         }
 
+        // Skip Intro / Skip Credits: the system player's contextual action,
+        // the button the Apple TV app shows for the same thing.
+        coordinator.segmentObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.5, preferredTimescale: 600),
+            queue: .main
+        ) { [weak coordinator, weak controller, weak player] time in
+            guard let coordinator, let controller, let player else { return }
+            let segment = coordinator.segments.first {
+                time.seconds >= $0.startSeconds - 0.25 && time.seconds < $0.endSeconds - 1
+            }
+            guard segment != coordinator.offeredSegment else { return }
+            coordinator.offeredSegment = segment
+            guard let segment else {
+                controller.contextualActions = []
+                return
+            }
+            let duration = player.currentItem?.duration.seconds ?? 0
+            controller.contextualActions = [
+                UIAction(title: segment.skipTitle, image: UIImage(systemName: "forward.end.fill")) { [weak player] _ in
+                    let target = MediaSegmentSkipper.target(for: segment, duration: duration.isFinite ? duration : 0)
+                    player?.seek(to: CMTime(seconds: target, preferredTimescale: 600),
+                                 toleranceBefore: .zero, toleranceAfter: .zero)
+                },
+            ]
+        }
+
         coordinator.endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
@@ -198,6 +232,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         context.coordinator.onPlaybackFailed = onPlaybackFailed
         context.coordinator.onProgress = onProgress
         context.coordinator.onPlayedToEnd = onPlayedToEnd
+        context.coordinator.segments = segments
     }
 
     func makeCoordinator() -> Coordinator {
@@ -216,6 +251,9 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         }
         if let timeObserver = coordinator.timeObserver {
             uiViewController.player?.removeTimeObserver(timeObserver)
+        }
+        if let segmentObserver = coordinator.segmentObserver {
+            uiViewController.player?.removeTimeObserver(segmentObserver)
         }
         uiViewController.player?.pause()
         uiViewController.player = nil
@@ -236,6 +274,9 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         var endObserver: NSObjectProtocol?
         var statusObservation: NSKeyValueObservation?
         var timeObserver: Any?
+        var segmentObserver: Any?
+        var segments: [LibraryMediaSegment] = []
+        var offeredSegment: LibraryMediaSegment?
 
         init(onPlaybackFailed: @escaping () -> Void, onProgress: @escaping (Double, Double, Bool) -> Void) {
             self.onPlaybackFailed = onPlaybackFailed

@@ -40,6 +40,8 @@ struct FilmPlayerView: View {
 
     @Bindable private var session = FilmSession.shared
     private var player: FilmPlayer { session.player }
+    /// Skip Intro / Skip Credits for the loaded Library title.
+    @State private var skipper = MediaSegmentSkipper()
     #if os(tvOS) || os(iOS)
     @State private var nowPlaying: FilmNowPlaying?
     #endif
@@ -145,6 +147,19 @@ struct FilmPlayerView: View {
             .task(id: session.loadedItem?.id) {
                 await reportFilmPlaybackProgress()
             }
+            .task(id: session.loadedItem?.id) {
+                await skipper.load(itemId: session.loadedItem?.id)
+            }
+    }
+
+    /// The skip button to show now, if any. Platforms whose controls never
+    /// hide offer it for the whole segment.
+    private func skipButton(controlsVisible: Bool) -> SkipSegmentButton? {
+        guard let segment = skipper.offered(at: player.currentTime, controlsVisible: controlsVisible) else { return nil }
+        return SkipSegmentButton(segment: segment) {
+            AppLogger.filmPlayer.info("Skipping \(segment.kind.rawValue, privacy: .public)")
+            player.seek(to: MediaSegmentSkipper.target(for: segment, duration: player.duration))
+        }
     }
 
     private func reportFilmPlaybackProgress() async {
@@ -242,10 +257,12 @@ struct FilmPlayerView: View {
         // they and the window bar hide together while the film plays.
         .persistentSystemOverlays(chromeVisible ? .visible : .hidden)
         .ornament(visibility: PlayerOrnamentStack<EmptyView>.isVisible(
-                      subtitles: bandSubtitles, controlsVisible: chromeVisible) ? .visible : .hidden,
+                      subtitles: bandSubtitles, controlsVisible: chromeVisible,
+                      hasPrompt: skipButton(controlsVisible: chromeVisible) != nil) ? .visible : .hidden,
                   attachmentAnchor: .scene(.bottom), contentAlignment: .top) {
             PlayerOrnamentStack(
                 subtitles: bandSubtitles, controlsVisible: chromeVisible,
+                prompt: skipButton(controlsVisible: chromeVisible).map { AnyView($0) },
                 gap: bandSubtitles != nil ? PlayerOrnamentStack<EmptyView>.stereoBandGap
                     : stereoSource == nil ? 12 : VideoWindowView.stereoControlsGap,
                 filmTime: { player.currentTime }
@@ -278,6 +295,11 @@ struct FilmPlayerView: View {
                 .overlay { subtitleOverlay }
             FilmTransport(player: player).frame(width: 820).padding(.bottom, 40)
         }
+        .overlay(alignment: .bottomTrailing) {
+            skipButton(controlsVisible: true)
+                .padding(.trailing, 90)
+                .padding(.bottom, 60)
+        }
         .onPlayPauseCommand { player.isPlaying ? player.pause() : player.play() }
         #else
         ZStack(alignment: .bottom) {
@@ -288,6 +310,11 @@ struct FilmPlayerView: View {
                 }
                 .overlay { subtitleOverlay }
             FilmTransport(player: player).padding(16)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            skipButton(controlsVisible: true)
+                .padding(.trailing, 24)
+                .padding(.bottom, 140)
         }
         .onAppear { if session.headTracking { HeadphoneHeadTracker.shared.start() } }
         .onDisappear { HeadphoneHeadTracker.shared.stop() }

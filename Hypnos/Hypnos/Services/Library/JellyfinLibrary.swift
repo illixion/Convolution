@@ -32,11 +32,46 @@ enum JellyfinLibraryError: Error, LocalizedError {
 
 // MARK: - DTOs (Jellyfin's own wire shape; never exposed outside this file)
 
+/// Jellyfin writes dates with seven fractional digits
+/// ("2026-10-07T09:59:52.0404237Z"), more than `ISO8601DateFormatter`
+/// accepts, so the fraction is dropped before parsing. Whole seconds are
+/// plenty for ordering by when something was watched.
+enum JellyfinDate {
+    nonisolated(unsafe) private static let formatter = ISO8601DateFormatter()
+
+    static func parse(_ string: String) -> Date? {
+        var trimmed = string
+        if let dot = trimmed.firstIndex(of: ".") {
+            let zone = trimmed[dot...].firstIndex { $0 == "Z" || $0 == "+" || $0 == "-" }
+            trimmed = String(trimmed[..<dot]) + (zone.map { String(trimmed[$0...]) } ?? "Z")
+        } else if !trimmed.hasSuffix("Z"), !trimmed.dropFirst(19).contains(where: { $0 == "+" || $0 == "-" }) {
+            trimmed += "Z"
+        }
+        return formatter.date(from: trimmed)
+    }
+}
+
 private struct JFUserData: Decodable {
     let Played: Bool?
     let IsFavorite: Bool?
     let PlaybackPositionTicks: Int64?
     let PlayedPercentage: Double?
+    let LastPlayedDate: String?
+}
+
+private struct JFChapter: Decodable {
+    let Name: String?
+    let StartPositionTicks: Int64?
+}
+
+/// `GET /MediaSegments/{id}` (Jellyfin 10.10+).
+private struct JFMediaSegments: Decodable {
+    struct Segment: Decodable {
+        let `Type`: String?
+        let StartTicks: Int64?
+        let EndTicks: Int64?
+    }
+    let Items: [Segment]?
 }
 
 private struct JFImageTags: Decodable {
@@ -73,6 +108,8 @@ private struct JFItem: Decodable {
     let ParentLogoImageTag: String?
     let ParentThumbItemId: String?
     let ParentThumbImageTag: String?
+    /// Only on the single-item endpoint (or with Fields=Chapters).
+    let Chapters: [JFChapter]?
 
     var kind: LibraryItemKind {
         switch `Type` {
@@ -138,7 +175,8 @@ private extension LibraryItem {
             isPlayed: dto.UserData?.Played ?? false,
             isFavorite: dto.UserData?.IsFavorite ?? false,
             playbackPositionTicks: dto.UserData?.PlaybackPositionTicks,
-            playedPercentage: dto.UserData?.PlayedPercentage
+            playedPercentage: dto.UserData?.PlayedPercentage,
+            lastPlayedDate: dto.UserData?.LastPlayedDate.flatMap(JellyfinDate.parse)
         )
     }
 }
@@ -219,11 +257,26 @@ actor JellyfinLibrary: MediaServerLibrary {
         async let resume = fetchItems(path: "Users/\(userId)/Items/Resume", query: [
             .init(name: "MediaTypes", value: "Video"),
             .init(name: "Recursive", value: "true"),
-            .init(name: "Limit", value: "12"),
+            .init(name: "Limit", value: "16"),
         ])
         async let nextUp = fetchItems(path: "Shows/NextUp", query: [
             .init(name: "userId", value: userId),
-            .init(name: "Limit", value: "12"),
+            .init(name: "Limit", value: "20"),
+        ])
+        // When each show was last watched, to order Up Next by it: NextUp's
+        // own episodes are unwatched, so they carry no date of their own.
+        async let watchedEpisodes = fetchItems(path: "Users/\(userId)/Items", query: [
+            .init(name: "IncludeItemTypes", value: "Episode"),
+            .init(name: "Recursive", value: "true"),
+            .init(name: "Filters", value: "IsPlayed"),
+            .init(name: "SortBy", value: "DatePlayed"),
+            .init(name: "SortOrder", value: "Descending"),
+            .init(name: "Limit", value: "60"),
+        ])
+        async let latestEpisodes = fetchLatestItems(userId: userId, query: [
+            .init(name: "IncludeItemTypes", value: "Episode"),
+            .init(name: "GroupItems", value: "false"),
+            .init(name: "Limit", value: "40"),
         ])
         async let recentMovies = fetchLatestItems(userId: userId, query: [
             .init(name: "IncludeItemTypes", value: "Movie"),
@@ -240,16 +293,30 @@ actor JellyfinLibrary: MediaServerLibrary {
         ])
 
         var shelves: [LibraryShelf] = []
-        // One "Up Next" row, as in the Apple TV app: in-progress items first,
-        // then each show's next episode. Jellyfin's NextUp also returns an
-        // episode that is already in progress, so separate rows showed the
-        // same episode twice.
         let resumeItems = try await resume
         let nextUpItems = try await nextUp
-        let resumeIds = Set(resumeItems.map(\.id))
-        let upNext = resumeItems + nextUpItems.filter { !resumeIds.contains($0.id) }
+        let watched = (try? await watchedEpisodes) ?? []
+        let upNext = Self.upNext(resume: resumeItems, nextUp: nextUpItems, watchedEpisodes: watched)
         if !upNext.isEmpty {
             shelves.append(LibraryShelf(id: "up-next", title: "Up Next", items: upNext, style: .landscape))
+        }
+        // New episodes of the shows this user watches, past where they are
+        // in each (an unwatched episode before their place isn't news).
+        let followed = Set((watched + resumeItems).compactMap(\.seriesId))
+        var frontier: [String: (Int, Int)] = [:]
+        for item in upNext {
+            if let seriesId = item.seriesId, let season = item.seasonNumber, let number = item.episodeNumber {
+                frontier[seriesId] = (season, number)
+            }
+        }
+        let newEpisodes = ((try? await latestEpisodes) ?? []).filter { episode in
+            guard let seriesId = episode.seriesId, followed.contains(seriesId), !episode.userData.isPlayed else { return false }
+            guard let place = frontier[seriesId] else { return true }
+            guard let season = episode.seasonNumber, let number = episode.episodeNumber else { return false }
+            return (season, number) > place
+        }
+        if !newEpisodes.isEmpty {
+            shelves.append(LibraryShelf(id: "new-episodes", title: "New Episodes", items: newEpisodes, style: .landscape))
         }
         let recentMovieItems = try await recentMovies
         if !recentMovieItems.isEmpty {
@@ -279,6 +346,54 @@ actor JellyfinLibrary: MediaServerLibrary {
         }
 
         return LibraryHome(featured: featured, shelves: shelves)
+    }
+
+    /// One "Up Next" row, as in the Apple TV app: films and episodes in
+    /// progress plus each show's next episode, most recently watched first,
+    /// one entry per show.
+    ///
+    /// Jellyfin's NextUp also returns an episode that is already in
+    /// progress, so the two lists overlap by id. A show can also have both a
+    /// half-watched episode and a different next one (the user moved on
+    /// without finishing): whichever was watched later wins, the paused
+    /// episode on a tie, since that is the one the user left.
+    static func upNext(resume: [LibraryItem], nextUp: [LibraryItem], watchedEpisodes: [LibraryItem]) -> [LibraryItem] {
+        var seriesLastWatched: [String: Date] = [:]
+        for episode in watchedEpisodes + resume {
+            guard let seriesId = episode.seriesId, let date = episode.userData.lastPlayedDate else { continue }
+            seriesLastWatched[seriesId] = max(seriesLastWatched[seriesId] ?? .distantPast, date)
+        }
+        struct Candidate {
+            let item: LibraryItem
+            let date: Date?
+            let isResume: Bool
+            let order: Int
+        }
+        var candidates: [Candidate] = resume.enumerated().map { index, item in
+            Candidate(item: item, date: item.userData.lastPlayedDate, isResume: true, order: index)
+        }
+        let resumeIds = Set(resume.map(\.id))
+        for (index, item) in nextUp.enumerated() where !resumeIds.contains(item.id) {
+            let date = item.seriesId.flatMap { seriesLastWatched[$0] } ?? item.userData.lastPlayedDate
+            candidates.append(Candidate(item: item, date: date, isResume: false, order: resume.count + index))
+        }
+        candidates.sort { lhs, rhs in
+            switch (lhs.date, rhs.date) {
+            case let (l?, r?) where l != r: return l > r
+            case (_?, nil): return true
+            case (nil, _?): return false
+            default:
+                if lhs.isResume != rhs.isResume { return lhs.isResume }
+                return lhs.order < rhs.order
+            }
+        }
+        var seenSeries = Set<String>()
+        return candidates.compactMap { candidate in
+            if let seriesId = candidate.item.seriesId {
+                guard seenSeries.insert(seriesId).inserted else { return nil }
+            }
+            return candidate.item
+        }
     }
 
     // MARK: - Detail
@@ -518,6 +633,71 @@ actor JellyfinLibrary: MediaServerLibrary {
         return data
     }
 
+    // MARK: - Media segments (Skip Intro / Skip Credits)
+
+    /// The skippable stretches of `itemId`, in order. Media segments when
+    /// the server has any (a provider plugin such as Intro Skipper fills
+    /// them in; a bare server has none), else chapters named like an intro
+    /// or the credits. Empty when neither says anything.
+    func mediaSegments(itemId: String) async throws -> [LibraryMediaSegment] {
+        let page: JFMediaSegments? = try? await get("MediaSegments/\(itemId)")
+        let served = (page?.Items ?? []).compactMap { segment -> LibraryMediaSegment? in
+            guard let kind = Self.segmentKind(segment.Type),
+                  let start = segment.StartTicks, let end = segment.EndTicks, end > start
+            else { return nil }
+            return LibraryMediaSegment(kind: kind, startSeconds: Double(start) / 10_000_000,
+                                       endSeconds: Double(end) / 10_000_000)
+        }
+        if !served.isEmpty { return served.sorted { $0.startSeconds < $1.startSeconds } }
+
+        let userId = try await resolveUserId()
+        let dto: JFItem = try await get("Users/\(userId)/Items/\(itemId)")
+        return Self.chapterSegments(dto.Chapters ?? [], runtimeTicks: dto.RunTimeTicks)
+    }
+
+    private static func segmentKind(_ type: String?) -> LibraryMediaSegment.Kind? {
+        switch type {
+        case "Intro": .intro
+        case "Recap": .recap
+        case "Preview": .preview
+        case "Outro": .outro
+        case "Commercial": .commercial
+        default: nil
+        }
+    }
+
+    /// A chapter whose name says what it is runs to the next chapter (or
+    /// the end). "Chapter 3" and the like say nothing and are skipped.
+    private static func chapterSegments(_ chapters: [JFChapter], runtimeTicks: Int64?) -> [LibraryMediaSegment] {
+        let ordered = chapters.compactMap { chapter -> (name: String, start: Int64)? in
+            guard let name = chapter.Name, let start = chapter.StartPositionTicks else { return nil }
+            return (name, start)
+        }.sorted { $0.start < $1.start }
+        var segments: [LibraryMediaSegment] = []
+        for (index, chapter) in ordered.enumerated() {
+            guard let kind = chapterKind(chapter.name) else { continue }
+            let end = index + 1 < ordered.count ? ordered[index + 1].start : (runtimeTicks ?? 0)
+            guard end > chapter.start else { continue }
+            segments.append(LibraryMediaSegment(kind: kind, startSeconds: Double(chapter.start) / 10_000_000,
+                                                endSeconds: Double(end) / 10_000_000))
+        }
+        return segments
+    }
+
+    static func chapterKind(_ name: String) -> LibraryMediaSegment.Kind? {
+        let words = name.lowercased()
+            .split { !$0.isLetter }
+            .map(String.init)
+        let text = words.joined(separator: " ")
+        func has(_ word: String) -> Bool { words.contains(word) }
+        if has("recap") || text.hasPrefix("previously") { return .recap }
+        if has("preview") || text.contains("next episode") || text.contains("next time") { return .preview }
+        if has("intro") || has("introduction") || has("opening") || has("op")
+            || text.contains("title sequence") || text.contains("main titles") { return .intro }
+        if has("credits") || has("outro") || has("ending") || has("ed") || has("closing") { return .outro }
+        return nil
+    }
+
     /// Jellyfin's HLS stream for a source AVFoundation can't open directly
     /// (MKV, WebM). Each parameter is here for a measured reason, all against
     /// the dev instance (10.11) and AVPlayer:
@@ -662,22 +842,28 @@ actor JellyfinLibrary: MediaServerLibrary {
     }
 
     func reportPlaybackStopped(itemId: String, positionSeconds: Double) async {
+        // Screens showing this item's progress reload once the server has
+        // the new position, and a Play pressed meanwhile waits for it.
+        await LibraryWatchState.shared.reportBegan(itemId: itemId)
         await post("Sessions/Playing/Stopped", body: [
             "ItemId": itemId,
             "PlaySessionId": playSessionId(for: itemId),
             "PositionTicks": Int64(positionSeconds * 10_000_000),
         ])
         Self.playSessions.withLock { _ = $0.removeValue(forKey: itemId) }
+        await LibraryWatchState.shared.reportLanded(itemId: itemId)
     }
 
     func setPlayed(itemId: String, played: Bool) async throws {
         let userId = try await resolveUserId()
         try await sendState(path: "Users/\(userId)/PlayedItems/\(itemId)", set: played)
+        await LibraryWatchState.shared.changed()
     }
 
     func setFavorite(itemId: String, favorite: Bool) async throws {
         let userId = try await resolveUserId()
         try await sendState(path: "Users/\(userId)/FavoriteItems/\(itemId)", set: favorite)
+        await LibraryWatchState.shared.changed()
     }
 
     // MARK: - User resolution (API-key fallback)

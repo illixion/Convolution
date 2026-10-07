@@ -104,6 +104,10 @@ protocol MediaServerLibrary: PlaybackProgressReporting {
     /// (the server converts SubRip, ASS and embedded text tracks).
     func subtitleData(itemId: String, track: LibrarySubtitleTrack) async throws -> Data
 
+    /// The intro, credits and other skippable stretches of `itemId`, in
+    /// order; empty when the server knows of none.
+    func mediaSegments(itemId: String) async throws -> [LibraryMediaSegment]
+
     func setPlayed(itemId: String, played: Bool) async throws
     func setFavorite(itemId: String, favorite: Bool) async throws
 }

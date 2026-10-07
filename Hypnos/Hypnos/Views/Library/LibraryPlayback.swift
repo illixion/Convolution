@@ -9,6 +9,9 @@
  - The route comes from `playbackRoute(for:)`: the Atmos `FilmPlayer`, or
    the app's generic video player with a direct or transcoded stream.
  - Resume seeks to the saved position on either route; Start Over doesn't.
+   The position is read from the server when Play is pressed, never from
+   the item the button was built with: that item is whatever the screen
+   loaded, possibly before the last watch (see `LibraryWatchState`).
  - When an episode plays to the end in the tvOS player, the next one starts
    (`episode(after:)`), the way the Apple TV app autoplays a series.
 
@@ -51,10 +54,6 @@ final class LibraryPlayback {
 
     private(set) var progressReporter: GenericProgressReporter?
 
-    /// Bumped whenever a player closes, so screens showing watch state
-    /// (Continue Watching, a detail page's Resume) reload it.
-    private(set) var finishedCount = 0
-
     var isResolving: Bool { resolvingItemId != nil }
 
     /// Plays `item`: a movie or episode directly, a series via its Next Up
@@ -65,8 +64,12 @@ final class LibraryPlayback {
         error = nil
         defer { resolvingItemId = nil }
         do {
+            // A stop report for the last watch may still be on its way.
+            await LibraryWatchState.shared.settled(itemId: item.isPlayable ? item.id : nil)
             var target = item
-            if !item.isPlayable {
+            if item.isPlayable {
+                target = (try? await library.item(id: item.id)) ?? item
+            } else {
                 guard item.kind == .series, let episode = try await library.nextUp(seriesId: item.id) else {
                     error = "Nothing to play in \(item.title) yet."
                     return
@@ -104,13 +107,6 @@ final class LibraryPlayback {
         guard videoPresentation == nil else { return }
         progressReporter?.finish()
         progressReporter = nil
-        finishedCount += 1
-    }
-
-    /// The Atmos player was dismissed (tvOS cover). FilmPlayer reports its
-    /// own progress; this only prompts the reload.
-    func filmDismissed() {
-        finishedCount += 1
     }
 
     private func start(_ item: LibraryItem, fromStart: Bool, library: JellyfinLibrary) async throws {
@@ -159,7 +155,7 @@ private struct LibraryPlaybackPresenter: ViewModifier {
     func body(content: Content) -> some View {
         #if os(tvOS)
         content
-            .fullScreenCover(isPresented: $playback.showsFilmPlayer, onDismiss: { playback.filmDismissed() }) {
+            .fullScreenCover(isPresented: $playback.showsFilmPlayer) {
                 FilmPlayerView()
             }
             .fullScreenCover(item: $playback.videoPresentation, onDismiss: { playback.videoDismissed() }) { presentation in

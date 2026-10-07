@@ -303,6 +303,48 @@ seed_synthetic_library() {
                 "The crew pushes further into the drift, season $season, part $ep."
         done
     done
+
+    # A longer episode whose chapters are named like a recap, an intro and
+    # the credits, so the Skip Intro / Skip Credits path has something to
+    # find on a server with no media-segment provider plugin installed.
+    title="Nebula Drift S01E04"
+    gen_chaptered_clip "$show/Season 01/$title.mp4"
+    write_episode_nfo "$show/Season 01/$title.nfo" "Cold Open" 1 4 \
+        "Previously, then titles, then the crew finally reaches the relay."
+}
+
+# 40 s: Recap 0-5, Intro 5-12, Story 12-32, Credits 32-40.
+gen_chaptered_clip() {
+    local path="$1"
+    [[ -f "$path" ]] && return
+    local meta="$path.chapters.txt"
+    cat > "$meta" <<META
+;FFMETADATA1
+[CHAPTER]
+TIMEBASE=1/1000
+START=0
+END=5000
+title=Recap
+[CHAPTER]
+TIMEBASE=1/1000
+START=5000
+END=12000
+title=Intro
+[CHAPTER]
+TIMEBASE=1/1000
+START=12000
+END=32000
+title=Chapter 3
+[CHAPTER]
+TIMEBASE=1/1000
+START=32000
+END=40000
+title=End Credits
+META
+    ffmpeg -loglevel error -y -f lavfi -i "testsrc2=size=1280x720:rate=24:duration=40" \
+        -f lavfi -i "sine=frequency=300:duration=40" -i "$meta" -map 0 -map 1 -map_metadata 2 -map_chapters 2 \
+        -c:v libx264 -pix_fmt yuv420p -c:a aac "$path"
+    rm -f "$meta"
 }
 
 seed_media() {

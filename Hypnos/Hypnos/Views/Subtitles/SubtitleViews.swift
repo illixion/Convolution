@@ -251,9 +251,15 @@ struct SubtitleBand: View {
 /// then the controls. The ornament stays up for the subtitles while the
 /// controls auto-hide, so they fade in place rather than the band jumping;
 /// a hidden bar takes no input.
+///
+/// A `prompt` (Skip Intro) takes the bar's place while it is hidden and
+/// hangs under it while it shows, so the bar never moves for it. Under the
+/// window rather than over the picture: SwiftUI drawn over a stereo picture
+/// never shows in front of it.
 struct PlayerOrnamentStack<Controls: View>: View {
     var subtitles: SubtitleController? = nil
     let controlsVisible: Bool
+    var prompt: AnyView? = nil
     /// Space between the window's bottom edge and whatever hangs first.
     let gap: CGFloat
     var filmTime: @MainActor () -> Double = { 0 }
@@ -264,8 +270,8 @@ struct PlayerOrnamentStack<Controls: View>: View {
     static var stereoBandGap: CGFloat { 120 }
 
     /// Whether the ornament has anything to show at all.
-    static func isVisible(subtitles: SubtitleController?, controlsVisible: Bool) -> Bool {
-        controlsVisible || subtitles != nil
+    static func isVisible(subtitles: SubtitleController?, controlsVisible: Bool, hasPrompt: Bool = false) -> Bool {
+        controlsVisible || subtitles != nil || hasPrompt
     }
 
     var body: some View {
@@ -273,11 +279,16 @@ struct PlayerOrnamentStack<Controls: View>: View {
             if let subtitles {
                 SubtitleBand(controller: subtitles, filmTime: filmTime)
             }
-            controls
-                .opacity(controlsVisible ? 1 : 0)
-                .allowsHitTesting(controlsVisible)
+            ZStack(alignment: .top) {
+                controls
+                    .opacity(controlsVisible ? 1 : 0)
+                    .allowsHitTesting(controlsVisible)
+                if let prompt, !controlsVisible { prompt }
+            }
+            if let prompt, controlsVisible { prompt.padding(.top, 12) }
         }
         .padding(.top, gap)
+        .animation(.easeInOut(duration: 0.2), value: prompt == nil)
     }
 }
 #endif

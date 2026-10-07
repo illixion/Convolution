@@ -311,6 +311,23 @@ struct VideoWindowView: View {
                     .padding(.bottom, ornamentBottomPadding)
             }
 
+            #if !os(visionOS)
+            // Skip Intro, over the picture above the controls (visionOS hangs
+            // it under the window with them).
+            if !appModel.allWindowsHidden, let skip = skipSegmentButton {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        skip
+                    }
+                    .padding(.trailing, 24)
+                    .padding(.bottom, overlayBottomInset)
+                }
+                .animation(.easeInOut(duration: 0.2), value: windowModel.offeredSegment)
+            }
+            #endif
+
             // Toast notification (A-B loop feedback)
             if let toast = windowModel.loopController.toastMessage {
                 VStack {
@@ -388,13 +405,15 @@ struct VideoWindowView: View {
         // Both auto-hide together (`isUIHidden` / `isWindowControlsHidden`).
         .ornament(
             visibility: PlayerOrnamentStack<EmptyView>.isVisible(
-                subtitles: bandSubtitles, controlsVisible: !windowModel.isUIHidden
+                subtitles: bandSubtitles, controlsVisible: !windowModel.isUIHidden,
+                hasPrompt: windowModel.offeredSegment != nil
             ) && !appModel.allWindowsHidden ? .visible : .hidden,
             attachmentAnchor: .scene(.bottom),
             contentAlignment: .top
         ) {
             PlayerOrnamentStack(
                 subtitles: bandSubtitles, controlsVisible: !windowModel.isUIHidden,
+                prompt: skipSegmentButton.map { AnyView($0) },
                 gap: bandSubtitles != nil ? PlayerOrnamentStack<EmptyView>.stereoBandGap
                     : windowModel.showsStereoPicture ? Self.stereoControlsGap : 12,
                 filmTime: { windowModel.currentTime }
@@ -506,25 +525,49 @@ struct VideoWindowView: View {
         // the coordinator's doc comment for the exact start/progress/stopped
         // sequence this drives.
         .task(id: video.identity) {
+            await windowModel.segmentSkipper.load(itemId: windowModel.libraryItemId)
+        }
+        .task(id: video.identity) {
+            let reported = video
             await applyStartPositionIfNeeded()
             await LibraryPlaybackCoordinator.reportGenericPlaybackProgress(
-                video: video,
-                currentTime: { windowModel.currentTime },
+                video: reported,
+                // Nil once the window has moved on to another video (the
+                // next episode), whose playhead says nothing about this one.
+                currentTime: { windowModel.video.identity == reported.identity ? windowModel.currentTime : nil },
                 isPaused: { windowModel.isPaused }
             )
         }
+    }
+
+    private var skipSegmentButton: SkipSegmentButton? {
+        guard let segment = windowModel.offeredSegment else { return nil }
+        return SkipSegmentButton(segment: segment) { windowModel.skip(segment) }
     }
 
     /// Seeks to `windowValue.startSeconds` (the Library's Resume) once the
     /// renderer is ready to take a seek, for the video the window opened
     /// with only. Gives up quietly after 30 s: a player that never became
     /// ready has bigger problems than a missed resume point.
+    ///
+    /// The value is a snapshot from when Play was pressed, and a restored
+    /// window replays it long after: a Library title resumes from where the
+    /// server says it was left instead, when it says.
     private func applyStartPositionIfNeeded() async {
         guard !appliedStartPosition,
-              let start = windowValue.startSeconds, start > 0,
+              let snapshot = windowValue.startSeconds, snapshot > 0,
               video.identity == windowValue.video.identity
         else { return }
         appliedStartPosition = true
+        var start = snapshot
+        if let itemId = windowModel.libraryItemId, let library = LibraryService.current() {
+            await LibraryWatchState.shared.settled(itemId: itemId)
+            if let fresh = try? await library.item(id: itemId) {
+                // Played since (or never resumable): start over.
+                start = fresh.userData.resumeSeconds ?? 0
+            }
+            guard !Task.isCancelled, start > 0 else { return }
+        }
         for _ in 0..<120 {
             if windowModel.duration > 0, let seek = windowModel.seekCommand {
                 seek(start)

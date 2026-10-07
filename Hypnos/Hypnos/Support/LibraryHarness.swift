@@ -220,6 +220,12 @@ enum LibraryHarness {
             await checkSignedInProgress(server: server, item: atmosDemo)
         }
 
+        checkUpNextOrdering()
+        checkChapterNames()
+        if let series {
+            await checkSegmentsAndFreshResume(library: library, server: server, series: series)
+        }
+
         log("DONE")
     }
 
@@ -272,6 +278,86 @@ enum LibraryHarness {
             log("signedInProgress(\(item.title)).positionSeconds=\(after.userData.playbackPositionSeconds ?? -1) resume=\(after.userData.resumeSeconds ?? -1) (expect 42)")
         } catch {
             log("signedInProgress FAILED: \(error)")
+        }
+    }
+
+    /// Up Next: most recently watched first, one entry per show, a show's
+    /// paused episode beating its next one only when it was the last watched.
+    private static func checkUpNextOrdering() {
+        func episode(_ id: String, series: String, played: Date?) -> LibraryItem {
+            var item = LibraryItem(id: id, kind: .episode, title: id)
+            item.seriesId = series
+            item.userData.lastPlayedDate = played
+            return item
+        }
+        let now = Date()
+        var movie = LibraryItem(id: "movie", kind: .movie, title: "movie")
+        movie.userData.lastPlayedDate = now.addingTimeInterval(-3600)
+        let resume = [movie,
+                      episode("A2-paused", series: "A", played: now.addingTimeInterval(-7200)),
+                      episode("B1-paused", series: "B", played: now.addingTimeInterval(-60))]
+        let nextUp = [episode("A4-next", series: "A", played: nil),
+                      episode("B1-paused", series: "B", played: now.addingTimeInterval(-60)),
+                      episode("C3-next", series: "C", played: nil)]
+        let watched = [episode("A3", series: "A", played: now.addingTimeInterval(-600)),
+                       episode("C2", series: "C", played: now.addingTimeInterval(-30))]
+        let ids = JellyfinLibrary.upNext(resume: resume, nextUp: nextUp, watchedEpisodes: watched).map(\.id)
+        let expected = ["C3-next", "B1-paused", "A4-next", "movie"]
+        log("upNextOrdering=\(ids) \(ids == expected ? "OK" : "FAIL expected \(expected)")")
+    }
+
+    private static func checkChapterNames() {
+        let cases: [(String, LibraryMediaSegment.Kind?)] = [
+            ("Intro", .intro), ("Opening Credits", .intro), ("OP", .intro), ("Recap", .recap),
+            ("Previously on...", .recap), ("End Credits", .outro), ("Credits", .outro), ("ED", .outro),
+            ("Preview", .preview), ("Chapter 3", nil), ("Scene 12", nil), ("Introduction to Physics", .intro),
+        ]
+        let failures = cases.filter { JellyfinLibrary.chapterKind($0.0) != $0.1 }
+        log("chapterNames \(failures.isEmpty ? "OK" : "FAIL \(failures.map { "\($0.0)->\(String(describing: JellyfinLibrary.chapterKind($0.0)))" })")")
+    }
+
+    /// The chaptered seed episode's segments, then the Up Next bug itself:
+    /// a stop report moves the resume point, `LibraryWatchState` bumps once
+    /// the server has it, and a fresh read (what Play does) sees it.
+    @MainActor
+    private static func checkSegmentsAndFreshResume(library: JellyfinLibrary, server: URL, series: LibraryItem) async {
+        do {
+            let seasons = try await library.seasons(seriesId: series.id)
+            var coldOpen: LibraryItem?
+            for season in seasons {
+                coldOpen = try await library.episodes(seasonId: season.id).first { $0.title == "Cold Open" }
+                if coldOpen != nil { break }
+            }
+            guard let coldOpen else {
+                log("segments SKIPPED: no \"Cold Open\" episode (re-run scripts/dev-jellyfin.sh up)")
+                return
+            }
+            let segments = try await library.mediaSegments(itemId: coldOpen.id)
+            log("segments(Cold Open)=\(segments.map { "\($0.kind.rawValue) \($0.startSeconds)-\($0.endSeconds)" })")
+            log("segment.target(credits, duration 40)=\(segments.last.map { MediaSegmentSkipper.target(for: $0, duration: 40) } ?? -1) (expect 39.5)")
+
+            let env = ProcessInfo.processInfo.environment
+            guard let user = env["HYPNOS_HARNESS_JELLYFIN_USER"], let pass = env["HYPNOS_HARNESS_JELLYFIN_PASS"] else {
+                log("freshResume SKIPPED: no HYPNOS_HARNESS_JELLYFIN_USER/_PASS")
+                return
+            }
+            let session = try await JellyfinAuth.authenticate(serverURL: server, username: user, password: pass)
+            let signedIn = JellyfinLibrary(baseURL: server, accessToken: session.accessToken, userId: session.userId)
+            for position in [10.0, 25.0] {
+                let before = LibraryWatchState.shared.revision
+                await signedIn.reportPlaybackStarted(itemId: coldOpen.id, positionSeconds: position - 5)
+                await signedIn.reportPlaybackStopped(itemId: coldOpen.id, positionSeconds: position)
+                let fresh = try await signedIn.item(id: coldOpen.id)
+                let shelf = try await signedIn.home().shelves.first { $0.id == "up-next" }
+                let first = shelf?.items.first
+                log("freshResume(stop at \(position)) revision+\(LibraryWatchState.shared.revision - before) resume=\(fresh.userData.resumeSeconds ?? -1) upNext[0]=\(first?.title ?? "nil")@\(first?.userData.resumeSeconds ?? -1)")
+            }
+            let home = try await signedIn.home()
+            for shelf in home.shelves where shelf.style == .landscape {
+                log("home.\(shelf.id)=\(shelf.items.map { "\($0.seriesName ?? $0.title) \($0.episodeLabel ?? "")" })")
+            }
+        } catch {
+            log("segments/freshResume FAILED: \(error)")
         }
     }
 

@@ -60,7 +60,9 @@ struct LibraryDetailView: View {
         #endif
         .task(id: LibraryService.configurationKey) { await load() }
         .onChange(of: selectedSeasonId) { _, _ in Task { await loadEpisodes() } }
-        .onChange(of: playback.finishedCount) { Task { await reloadWatchState() } }
+        // Whatever changed the watch state (a player closing here, in another
+        // window, or over this one in a pushed stack), once the server has it.
+        .onChange(of: LibraryWatchState.shared.revision) { Task { await reloadWatchState() } }
         .refreshable { await reloadWatchState() }
         .confirmationDialog(resumeChoice.map { $0.episodeLabel ?? $0.title } ?? "",
                             isPresented: Binding(get: { resumeChoice != nil }, set: { if !$0 { resumeChoice = nil } }),
@@ -129,8 +131,8 @@ struct LibraryDetailView: View {
     private func togglePlayed() async {
         guard let library else { return }
         do {
+            // The reload follows from LibraryWatchState.
             try await library.setPlayed(itemId: shown.id, played: !shown.userData.isPlayed)
-            await reloadWatchState()
         } catch {
             actionError = error.localizedDescription
         }
@@ -307,22 +309,44 @@ private struct LibraryDetailContent: View {
             }
             .padding(.horizontal, metrics.gutter)
 
-            ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: metrics.lockupSpacing) {
-                    ForEach(episodes) { episode in
-                        Button { onEpisode(episode) } label: {
-                            LibraryEpisodeLockup(episode: episode, isResolving: playback.resolvingItemId == episode.id)
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    LazyHStack(alignment: .top, spacing: metrics.lockupSpacing) {
+                        ForEach(episodes) { episode in
+                            Button { onEpisode(episode) } label: {
+                                LibraryEpisodeLockup(episode: episode,
+                                                     isUpNext: episode.id == upNextEpisodeId,
+                                                     isResolving: playback.resolvingItemId == episode.id)
+                            }
+                            .buttonStyle(.plain)
+                            .id(episode.id)
                         }
-                        .buttonStyle(.plain)
                     }
+                    .scrollTargetLayout()
                 }
-                .scrollTargetLayout()
-                .padding(.horizontal, metrics.gutter)
+                // Margins rather than padding, so scrolling to the Up Next
+                // episode keeps the gutter beside it.
+                .contentMargins(.horizontal, metrics.gutter, for: .scrollContent)
+                .scrollIndicators(.hidden)
+                .scrollTargetBehavior(.viewAligned)
+                .scrollClipDisabled()
+                // Opens on the episode Play would start, not on episode 1 of
+                // a season half watched.
+                .onChange(of: episodes.map(\.id), initial: true) { scrollToUpNext(proxy) }
+                .onChange(of: upNextEpisodeId) { scrollToUpNext(proxy) }
             }
-            .scrollIndicators(.hidden)
-            .scrollTargetBehavior(.viewAligned)
-            .scrollClipDisabled()
         }
+    }
+
+    /// The series' Next Up episode, when it is in the season shown.
+    private var upNextEpisodeId: String? {
+        guard shown.kind == .series, let target = playTarget, target.kind == .episode else { return nil }
+        return target.id
+    }
+
+    private func scrollToUpNext(_ proxy: ScrollViewProxy) {
+        guard let id = upNextEpisodeId, episodes.contains(where: { $0.id == id }) else { return }
+        proxy.scrollTo(id, anchor: .leading)
     }
 
     // MARK: About
@@ -376,6 +400,8 @@ private struct LibraryDetailContent: View {
 /// "EPISODE 3", title, a two-line synopsis and runtime or time left.
 private struct LibraryEpisodeLockup: View {
     let episode: LibraryItem
+    /// The episode the series' Play button starts.
+    var isUpNext = false
     var isResolving = false
     @Environment(\.libraryMetrics) private var metrics
 
@@ -399,10 +425,16 @@ private struct LibraryEpisodeLockup: View {
                 .libraryLockupHover()
 
             VStack(alignment: .leading, spacing: 2) {
-                if let number = episode.episodeNumber {
-                    Text("EPISODE \(number)")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                if isUpNext || episode.episodeNumber != nil {
+                    HStack(spacing: 6) {
+                        if isUpNext {
+                            Text("UP NEXT").foregroundStyle(.primary)
+                        }
+                        if let number = episode.episodeNumber {
+                            Text("EPISODE \(number)").foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.caption2.weight(.semibold))
                 }
                 Text(episode.title)
                     .font(.subheadline.weight(.semibold))

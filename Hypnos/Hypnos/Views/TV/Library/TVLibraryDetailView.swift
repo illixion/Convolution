@@ -92,7 +92,7 @@ struct TVLibraryDetailView: View {
         .toolbar(.hidden, for: .navigationBar)
         .defaultFocus($focus, .play)
         .task(id: LibraryService.configurationKey) { await load() }
-        .onChange(of: playback.finishedCount) {
+        .onChange(of: LibraryWatchState.shared.revision) {
             Task { await reloadWatchState() }
         }
         .confirmationDialog(resumeChoice.map { $0.episodeLabel ?? $0.title } ?? "",
@@ -324,8 +324,8 @@ struct TVLibraryDetailView: View {
     private func togglePlayed() async {
         guard let library else { return }
         do {
+            // The reload follows from LibraryWatchState.
             try await library.setPlayed(itemId: shown.id, played: !shown.userData.isPlayed)
-            await reloadWatchState()
         } catch {
             actionError = error.localizedDescription
         }

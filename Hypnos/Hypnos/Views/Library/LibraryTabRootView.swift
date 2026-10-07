@@ -14,7 +14,8 @@
 
  The load is keyed on `LibraryService.configurationKey`, so a sign-in that
  lands after the tab appeared (first launch) reloads instead of leaving a
- stale "no server" state up.
+ stale "no server" state up, and reloads again on `LibraryWatchState` so the
+ shelves never show the watch state from before the last play.
  */
 
 import SwiftUI
@@ -64,6 +65,11 @@ struct LibraryTabRootView: View {
         .task(id: LibraryService.configurationKey) {
             await model.start()
             await openAutoOpenItemIfRequested()
+        }
+        // Up Next's positions and badges follow every watch, wherever its
+        // player ran (see `LibraryWatchState`).
+        .onChange(of: LibraryWatchState.shared.revision) {
+            Task { await model.refresh() }
         }
     }
 

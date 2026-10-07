@@ -44,16 +44,31 @@ struct MacVideoPlayerWindow: View {
     /// Library (Jellyfin) videos only: watch progress back to the server.
     @State private var progressReporter: GenericProgressReporter?
     @State private var timeObserver: Any?
+    /// Skip Intro / Skip Credits for a Library video.
+    @State private var skipper = MediaSegmentSkipper()
+    @State private var segmentObserver: Any?
+    @State private var playhead: Double = 0
 
     var body: some View {
         Group {
             if let player {
                 MacAVPlayerView(player: player)
+                    // Above AVPlayerView's floating controls.
+                    .overlay(alignment: .bottomTrailing) {
+                        if let segment = skipper.segment(at: playhead) {
+                            SkipSegmentButton(segment: segment) { skip(segment, player: player) }
+                                .padding(.trailing, 24)
+                                .padding(.bottom, 90)
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.2), value: skipper.segment(at: playhead))
                     .task { await startPlayback(player) }
                     .onDisappear {
                         player.pause()
                         if let timeObserver { player.removeTimeObserver(timeObserver) }
                         timeObserver = nil
+                        if let segmentObserver { player.removeTimeObserver(segmentObserver) }
+                        segmentObserver = nil
                         progressReporter?.finish()
                         progressReporter = nil
                     }
@@ -85,15 +100,34 @@ struct MacVideoPlayerWindow: View {
                               toleranceBefore: .zero, toleranceAfter: .positiveInfinity)
         }
         player.play()
-        guard timeObserver == nil, let reporter = GenericProgressReporter(video: video) else { return }
-        progressReporter = reporter
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 5, preferredTimescale: 1),
-                                                      queue: .main) { [weak player] time in
-            guard let player else { return }
-            MainActor.assumeIsolated {
-                reporter.report(currentTime: time.seconds, isPaused: player.rate == 0)
+        if timeObserver == nil, let reporter = GenericProgressReporter(video: video) {
+            progressReporter = reporter
+            timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 5, preferredTimescale: 1),
+                                                          queue: .main) { [weak player] time in
+                guard let player else { return }
+                MainActor.assumeIsolated {
+                    reporter.report(currentTime: time.seconds, isPaused: player.rate == 0)
+                }
             }
         }
+        await watchSegments(player)
+    }
+
+    /// Loads a Library video's skippable segments and follows the playhead
+    /// while it has any.
+    private func watchSegments(_ player: AVPlayer) async {
+        await skipper.load(itemId: LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity))
+        guard segmentObserver == nil, !skipper.segments.isEmpty else { return }
+        segmentObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600),
+                                                         queue: .main) { time in
+            MainActor.assumeIsolated { playhead = time.seconds }
+        }
+    }
+
+    private func skip(_ segment: LibraryMediaSegment, player: AVPlayer) {
+        let duration = player.currentItem?.duration.seconds ?? 0
+        let target = MediaSegmentSkipper.target(for: segment, duration: duration.isFinite ? duration : 0)
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
     private func resolve() async {

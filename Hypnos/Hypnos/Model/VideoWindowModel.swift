@@ -175,6 +175,8 @@ final class VideoWindowModel {
     /// The current video's subtitle tracks (Stash captions, Jellyfin
     /// streams), drawn by every renderer this window uses.
     let subtitles = SubtitleController()
+    /// Skip Intro / Skip Credits for a Library title.
+    let segmentSkipper = MediaSegmentSkipper()
 
     // MARK: - Share
 
@@ -1100,6 +1102,19 @@ final class VideoWindowModel {
         seekCommand?(clamped)
         isScrubbing = false
         startAutoHideTimer()
+    }
+
+    /// The skip button the window offers now, if any.
+    var offeredSegment: LibraryMediaSegment? {
+        guard libraryItemId != nil, !isScrubbing else { return nil }
+        return segmentSkipper.offered(at: currentTime, controlsVisible: !isUIHidden)
+    }
+
+    /// Jumps past `segment`. Credits that run to the end land just short
+    /// of it, so the title ends on its own and the next episode follows.
+    func skip(_ segment: LibraryMediaSegment) {
+        AppLogger.videoWindow.info("Skipping \(segment.kind.rawValue, privacy: .public)")
+        endScrub(at: MediaSegmentSkipper.target(for: segment, duration: duration))
     }
 
     func toggleMute() {
