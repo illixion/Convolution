@@ -558,6 +558,7 @@ actor JellyfinLibrary: MediaServerLibrary {
             .init(name: "VideoCodec", value: videoCodec),
             .init(name: "AudioCodec", value: "aac"),
             .init(name: "TranscodingMaxAudioChannels", value: "6"),
+            .init(name: "MaxAudioChannels", value: "6"),
             .init(name: "SegmentContainer", value: "mp4"),
             .init(name: "MaxStreamingBitrate", value: String(maxBitrate)),
             .init(name: "VideoBitrate", value: String(maxBitrate - audioBitrate)),
