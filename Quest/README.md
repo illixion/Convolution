@@ -159,8 +159,8 @@ The new Quest library and secondary-window code build successfully. On Quest 3
 OS SDK 207, the Layout SDK reports spatial-window support and the disposable
 Jellyfin login returns 15 catalog entries. The user confirmed the library layout,
 readable text after the theme foreground fix, and Settings appearing as a
-separate movable Home window. Playback dock pause and reopen behavior is awaiting
-the final headset check.
+separate movable Home window. The compact dock pauses from the library and
+reopens the player with its picture surface attached.
 
 Still outside this slice: Stash browsing, full Jellyfin home / pagination /
 Up Next / skip segments, offline downloads, object audio / Opus rendering, MVC
