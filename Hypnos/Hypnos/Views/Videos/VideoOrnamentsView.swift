@@ -273,58 +273,50 @@ struct VideoOrnamentsView: View {
     // MARK: - More Menu
 
     private var moreMenu: some View {
-        Menu {
-            // .onAppear/.onDisappear on the menu content pause the host's
-            // auto-hide while the menu is open (same pattern as PhotoOrnamentView).
-            Group {
-                Button {
-                    // Open the standalone Adjustments window (repositionable,
-                    // never overlaps the video). showAdjustments pauses auto-hide.
-                    appModel.videoAdjustmentsTarget = windowModel
-                    windowModel.showAdjustments = true
-                    openWindow(id: "video-adjustments")
-                } label: {
-                    Label("Adjustments", systemImage: "slider.horizontal.3")
-                }
+        MoreOptionsControl(highlighted: moreMenuHighlighted,
+                           onOpenChanged: { chromeMenu("More Options", opened: $0) }) { close in
+            Button {
+                close()
+                // Open the standalone Adjustments window (repositionable,
+                // never overlaps the video). showAdjustments pauses auto-hide.
+                appModel.videoAdjustmentsTarget = windowModel
+                windowModel.showAdjustments = true
+                openWindow(id: "video-adjustments")
+            } label: {
+                Label("Adjustments", systemImage: "slider.horizontal.3")
+            }
+
+            Button {
+                close()
+                launchVideoSlideshow()
+            } label: {
+                Label("Slideshow", systemImage: "play.fill")
+            }
+
+            if windowModel.wasPushed, onPopOut != nil {
+                Divider()
 
                 Button {
-                    launchVideoSlideshow()
+                    close()
+                    onPopOut?()
                 } label: {
-                    Label("Slideshow", systemImage: "play.fill")
-                }
-
-                if windowModel.wasPushed, onPopOut != nil {
-                    Divider()
-
-                    Button {
-                        onPopOut?()
-                    } label: {
-                        Label("Pop Out", systemImage: "rectangle.portrait.and.arrow.forward")
-                    }
-                }
-
-                // Last-resort fallback for a web-sourced stream the in-app
-                // players (native + WebKit) can't decode — open it in Safari.
-                if isRemoteStream {
-                    Divider()
-
-                    Button {
-                        openURL(windowModel.video.streamURL)
-                    } label: {
-                        Label("Open in Safari", systemImage: "safari")
-                    }
+                    Label("Pop Out", systemImage: "rectangle.portrait.and.arrow.forward")
                 }
             }
-            // Silent inside the bar's More menu, which reports for it.
-            .ravePlayerMenuReporting { chromeMenu("More Options", opened: $0) }
-        } label: {
-            OrnamentGlyph(title: "More Options", systemImage: "ellipsis.circle")
-                .padding(6)
-                .background(moreMenuHighlighted ? .white.opacity(0.3) : .clear, in: .rect(cornerRadius: 8))
+
+            // Last-resort fallback for a web-sourced stream the in-app
+            // players (native + WebKit) can't decode — open it in Safari.
+            if isRemoteStream {
+                Divider()
+
+                Button {
+                    close()
+                    openURL(windowModel.video.streamURL)
+                } label: {
+                    Label("Open in Safari", systemImage: "safari")
+                }
+            }
         }
-        .menuStyle(.button)
-        .raveChromeButtonStyle()
-        .help("More")
     }
 
     /// Whether this window is playing a remote http(s) stream (vs a local file).
@@ -609,6 +601,80 @@ private struct ConversionMenuStatus: View {
                 Label("Cancel Conversion", systemImage: "xmark.circle")
             }
         }
+    }
+}
+
+/// "More Options": a menu on the bar, a nested popover inside the compact
+/// bar's "More" popover.
+///
+/// A Menu inside that popover was rebuilt with every playhead update (the bar
+/// reads the current time, and the popover's content is the bar's
+/// accessories), so its dropdown refreshed every frame and lost its gaze
+/// hover. A popover's own content updates only with what it reads.
+private struct MoreOptionsControl<Items: View>: View {
+    let highlighted: Bool
+    let onOpenChanged: (Bool) -> Void
+    /// The items; each calls the passed closure to close the popover first.
+    @ViewBuilder let items: (_ close: @escaping () -> Void) -> Items
+
+    @Environment(\.ravePlayerControlsInMenu) private var inMenu
+    @State private var showsPopover = false
+
+    var body: some View {
+        #if os(tvOS)
+        // tvOS has no popovers; its "More" is still a Menu.
+        menu
+        #else
+        if inMenu {
+            Button { showsPopover.toggle() } label: {
+                Label("More Options", systemImage: "ellipsis.circle")
+            }
+            .popover(isPresented: $showsPopover, arrowEdge: .trailing) {
+                VStack(alignment: .leading, spacing: 4) {
+                    items { showsPopover = false }
+                }
+                .buttonStyle(MoreOptionsRowStyle())
+                .padding(12)
+                .frame(minWidth: 220)
+            }
+            .onChange(of: showsPopover) { _, open in onOpenChanged(open) }
+            .onDisappear { if showsPopover { onOpenChanged(false) } }
+        } else {
+            menu
+        }
+        #endif
+    }
+
+    private var menu: some View {
+            Menu {
+                Group { items {} }
+                    .ravePlayerMenuReporting(onOpenChanged)
+            } label: {
+                OrnamentGlyph(title: "More Options", systemImage: "ellipsis.circle")
+                    .padding(6)
+                    .background(highlighted ? .white.opacity(0.3) : .clear, in: .rect(cornerRadius: 8))
+            }
+            .menuStyle(.button)
+            .raveChromeButtonStyle()
+            .help("More")
+    }
+}
+
+/// A full-width row in the More Options popover, highlighted under the gaze
+/// or pointer like a menu item.
+private struct MoreOptionsRowStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .labelStyle(.titleAndIcon)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .contentShape(.rect(cornerRadius: 10))
+            #if os(visionOS) || os(iOS)
+            .contentShape(.hoverEffect, .rect(cornerRadius: 10))
+            .hoverEffect(.highlight)
+            #endif
+            .opacity(configuration.isPressed ? 0.6 : 1)
     }
 }
 
