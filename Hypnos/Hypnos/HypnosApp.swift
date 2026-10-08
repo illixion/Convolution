@@ -40,6 +40,7 @@ struct HypnosApp: App {
         let subsystems = [AppLogger.subsystem, "com.illixion.hypnos", "com.illixion.rave", "com.illixion.ravesdk"]
         DebugTrace.configure(.init(subsystems: subsystems.reduce(into: []) { if !$0.contains($1) { $0.append($1) } }))
         DebugTraceServer.startIfRequested()
+        FilmDebugEndpoints.register()
         #if DEBUG
         UITestingConfiguration.applyIfNeeded()
         DevJellyfinSignIn.performIfRequested()

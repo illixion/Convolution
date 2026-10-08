@@ -11,11 +11,18 @@ import RAVEMedia
 import RAVEUI
 import SwiftUI
 
-struct SubtitleMenu: View {
+/// Equatable on its controller alone, and placed with `.equatable()`: the
+/// player bars around it re-render four times a second for their clock, and
+/// the closure made every one of those rebuild the menu, open or not, so an
+/// open menu flickered. The controller is observed, so track changes still
+/// redraw it.
+struct SubtitleMenu: View, @MainActor Equatable {
     let controller: SubtitleController
     /// The menu opened or closed, for a caller that has to move a stereo
     /// picture out of its way (the same signal the video ornament's menus use).
     var onOpenChanged: (Bool) -> Void = { _ in }
+
+    static func == (a: SubtitleMenu, b: SubtitleMenu) -> Bool { a.controller === b.controller }
 
     var body: some View {
         Menu {

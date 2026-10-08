@@ -84,7 +84,13 @@ final class FilmSession {
     // the decoder, while both windows edit this same presentation state.
     var stereoEnabled = false
     var stereoSettings = Pseudo3DSettings.default
+    /// The stereo source whose tap is on the player's picture. A film window
+    /// closing late (after the next one opened) clears only its own.
+    @ObservationIgnored var stereoTapOwner: ObjectIdentifier?
     #endif
+    /// The film player view showing `player` now. One closing after its
+    /// replacement appeared mustn't pause or close the new playback.
+    @ObservationIgnored var activePlayerView: UUID?
 
     /// visionOS: how far in front of the player window the listener is
     /// assumed to sit. A window can't see the head, so this is a guess.

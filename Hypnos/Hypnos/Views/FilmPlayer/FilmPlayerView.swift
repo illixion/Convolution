@@ -42,6 +42,8 @@ struct FilmPlayerView: View {
     private var player: FilmPlayer { session.player }
     /// Skip Intro / Skip Credits for the loaded Library title.
     @State private var skipper = MediaSegmentSkipper()
+    /// This view's claim on the shared player (`FilmSession.activePlayerView`).
+    @State private var viewID = UUID()
     #if os(tvOS) || os(iOS)
     @State private var nowPlaying: FilmNowPlaying?
     #endif
@@ -72,6 +74,7 @@ struct FilmPlayerView: View {
     var body: some View {
         content
             .onAppear {
+                session.activePlayerView = viewID
                 session.isPlayerOpen = true
                 #if os(tvOS) || os(iOS)
                 // Claim Now Playing so the remote's and AirPods' play/pause
@@ -86,6 +89,10 @@ struct FilmPlayerView: View {
                 #if os(visionOS)
                 stopStereo(keepingPosition: false)
                 #endif
+                // A window closing after the next film window appeared (seen
+                // on reopening a film) leaves the player to that one.
+                guard session.activePlayerView == viewID else { return }
+                session.activePlayerView = nil
                 player.pause()
                 session.isPlayerOpen = false
                 session.saveSound()
@@ -408,6 +415,7 @@ struct FilmPlayerView: View {
         let source = SampleBufferFrameSource(timebase: player.video.timebase)
         player.video.onSampleBuffer = { source.submit($0) }
         player.video.onFlush = { source.reset() }
+        session.stereoTapOwner = ObjectIdentifier(source)
         mountedDepthModelName = appModel.realtimeDepthModelName
         stereoSource = source
         session.stereoEnabled = true
@@ -419,14 +427,17 @@ struct FilmPlayerView: View {
     /// `keepingPosition` false only when something else positions the
     /// picture next: a different film loading, or 3D restarting at once.
     private func stopStereo(keepingPosition: Bool = true) {
-        guard stereoSource != nil else { return }
+        guard let source = stereoSource else { return }
         let position = player.currentTime
-        player.video.onSampleBuffer = nil
-        player.video.onFlush = nil
         stereoSource = nil
         stereoLayout = nil
-        session.stereoEnabled = false
         mountedDepthModelName = nil
+        // Another window's 3D may have taken the player since; that stays.
+        guard session.stereoTapOwner == ObjectIdentifier(source) else { return }
+        session.stereoTapOwner = nil
+        player.video.onSampleBuffer = nil
+        player.video.onFlush = nil
+        session.stereoEnabled = false
         // The flat picture sat hidden while the stereo one showed; re-prime it
         // at the position the toggle was pressed at, so leaving 3D lands
         // exactly where 3D was, whatever the hidden renderer did meanwhile.
@@ -585,7 +596,7 @@ struct FilmTransport: View {
                 .help(stereoEnabled ? "Play as 2D" : "Convert to 3D")
             }
             if !session.subtitles.tracks.isEmpty {
-                SubtitleMenu(controller: session.subtitles, onOpenChanged: onModalChanged)
+                SubtitleMenu(controller: session.subtitles, onOpenChanged: onModalChanged).equatable()
             }
             #if os(iOS) || os(macOS)
             if session.headTracking, HeadphoneHeadTracker.shared.isTracking {

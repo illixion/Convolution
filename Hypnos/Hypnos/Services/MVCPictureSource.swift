@@ -27,6 +27,7 @@ import CoreVideo
 import Foundation
 import MVC3D
 import RAVEFilm
+import DebugTrace
 
 final class MVCPictureSource: FilmPictureSource, @unchecked Sendable {
     let durationSeconds: Double
@@ -47,6 +48,34 @@ final class MVCPictureSource: FilmPictureSource, @unchecked Sendable {
     private let packedMaker = StereoPixelBufferMaker(layout: .packed(.topAndBottom))
     private var formats: [CMVideoFormatDescription] = []
 
+    /// What the decoding is doing, for the `film` debug query and the log.
+    struct Diagnostics: Encodable, Sendable {
+        var run = 0
+        var phase = "idle"
+        var phaseSeconds = 0.0
+        var framesOut = 0
+        var lastFrameSeconds: Double?
+        var lastError: String?
+        var runsQueued = 0
+    }
+    private var state = Diagnostics()
+    private var phaseStarted = Date()
+    var diagnostics: Diagnostics {
+        lock.withLock {
+            var d = state
+            d.phaseSeconds = Date().timeIntervalSince(phaseStarted)
+            return d
+        }
+    }
+    private func enter(_ phase: String, run: Int) {
+        lock.withLock {
+            guard state.run == run else { return }
+            state.phase = phase
+            phaseStarted = Date()
+        }
+    }
+
+    private static let logger = DebugLogger(subsystem: "com.illixion.hypnos", category: "MVCPicture")
     private static let queuedFrames = 4
     /// edge264 worker threads: decoding runs at 2-3x realtime per core on
     /// Apple silicon, and a seek decodes up to a second of pictures it drops.
@@ -78,12 +107,27 @@ final class MVCPictureSource: FilmPictureSource, @unchecked Sendable {
         // A seek replaces the run; the old one stops at its next frame.
         previous?.cancel()
         let stereo = stereo && isStereo
+        let run = lock.withLock { () -> Int in
+            state.runsQueued += 1
+            return state.runsQueued
+        }
         queue.async { [self] in
             guard !channel.isCancelled else { return }
+            lock.withLock {
+                state.run = run
+                state.framesOut = 0
+                state.lastError = nil
+            }
+            let began = Date()
+            var frames = 0
+            Self.logger.info("Run \(run): from \(filmTime, format: .fixed(precision: 2)) s\(stereo ? ", stereo" : "")")
             do {
+                enter("opening decoder", run: run)
                 let decoder = try self.decoder ?? PlaylistDecoder(disc: disc, playlist: playlist, threads: Self.decodeThreads)
                 self.decoder = decoder
+                enter("seeking", run: run)
                 try decoder.seek(to: filmTime - originSeconds)
+                enter("decoding", run: run)
                 let origin = Int64((originSeconds * 90_000).rounded())
                 try decoder.decode { frame in
                     guard !channel.isCancelled else { return false }
@@ -92,14 +136,29 @@ final class MVCPictureSource: FilmPictureSource, @unchecked Sendable {
                     let picture = try sampleBuffer(leftMaker.makeBuffers(frame).left, at: time)
                     let packed = stereo && frame.right != nil
                         ? try sampleBuffer(packedMaker.makeBuffers(frame).left, at: time) : nil
-                    return channel.put(FilmPictureFrame(picture: picture, stereo: packed))
+                    enter("waiting for the player", run: run)
+                    let taken = channel.put(FilmPictureFrame(picture: picture, stereo: packed))
+                    frames += 1
+                    lock.withLock {
+                        if state.run == run {
+                            state.framesOut = frames
+                            state.lastFrameSeconds = time.seconds
+                        }
+                    }
+                    enter("decoding", run: run)
+                    return taken
                 }
                 channel.finish(throwing: nil)
+                enter(channel.isCancelled ? "stopped" : "finished", run: run)
             } catch {
                 // The decoder's state is unknown after a failure.
                 self.decoder = nil
                 channel.finish(throwing: error)
+                lock.withLock { if state.run == run { state.lastError = "\(error)" } }
+                enter("failed", run: run)
+                Self.logger.error("Run \(run) failed: \(error.localizedDescription, privacy: .public)")
             }
+            Self.logger.info("Run \(run): \(frames) frames in \(Date().timeIntervalSince(began), format: .fixed(precision: 1)) s")
         }
         // Dropping the stream (the player's feed ended) stops the decoding.
         let stop = StopOnRelease(channel)

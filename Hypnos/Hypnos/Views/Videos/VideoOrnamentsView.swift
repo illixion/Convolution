@@ -107,7 +107,7 @@ struct VideoOrnamentsView: View {
             viewModeMenu
 
             if !windowModel.subtitles.tracks.isEmpty {
-                SubtitleMenu(controller: windowModel.subtitles, onOpenChanged: { chromeMenu("Subtitles", opened: $0) })
+                SubtitleMenu(controller: windowModel.subtitles, onOpenChanged: { chromeMenu("Subtitles", opened: $0) }).equatable()
             }
 
             // Info button (rating & metadata). Stash-only: the sheet fetches
