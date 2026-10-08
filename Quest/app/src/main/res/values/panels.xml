@@ -1,0 +1,11 @@
+<resources>
+    <item type="id" name="quest_video" />
+    <item type="id" name="quest_controls" />
+    <item type="id" name="quest_captions" />
+    <style name="QuestPanelTransparent" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
+</resources>
