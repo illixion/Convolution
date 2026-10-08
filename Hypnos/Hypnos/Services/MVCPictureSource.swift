@@ -136,7 +136,11 @@ private final class FrameChannel: @unchecked Sendable {
     private var cancelled = false
 
     init(capacity: Int) {
-        space = DispatchSemaphore(value: capacity)
+        // Raised from 0 rather than created at `capacity`: libdispatch traps
+        // when a semaphore is released below its starting value, which a
+        // channel dropped mid-stream (a seek) always is.
+        space = DispatchSemaphore(value: 0)
+        for _ in 0 ..< capacity { space.signal() }
     }
 
     /// Decode queue: waits for room. False once the reader is gone.

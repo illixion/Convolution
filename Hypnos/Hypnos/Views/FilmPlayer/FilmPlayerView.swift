@@ -113,7 +113,8 @@ struct FilmPlayerView: View {
             }
             // A 3D film opens in 3D once the server says it is one, and
             // replaces a fake-3D picture the user started before it knew.
-            .onChange(of: session.stereoFormat) { _, format in
+            // Initial too: a Blu-ray disc knows it is 3D before the window opens.
+            .onChange(of: session.stereoFormat, initial: true) { _, format in
                 guard format != nil, stereoLayout == nil else { return }
                 stopStereo(keepingPosition: false)
                 startStereo()
