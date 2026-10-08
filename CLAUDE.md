@@ -247,7 +247,7 @@ pop-out, which needs media. Seeding that is `simctl addmedia` plus
   - **PhotoWindowModel+Spatial3D.swift** - 3D mode activation/deactivation, `ImagePresentationComponent` creation, spatial 3D generation, viewing mode switching, resolution override
   - **PhotoWindowModel+BackgroundRemoval.swift** - Background removal pipeline: toggle, full-resolution processing, cache loading, resolution reloading, state management
   - **PhotoWindowModel+MemoryManagement.swift** - Idle downscale (release/thumbnail/restore), scene phase tracking, lightweight display transition
-  - **PhotoWindowModel+GalleryNavigation.swift** - Gallery image switching, prev/next navigation, lazy loading pagination, rating/O-counter updates
+  - **PhotoWindowModel+GalleryNavigation.swift** - Gallery image switching, prev/next navigation, lazy loading pagination, rating/activity counter updates
   - **PhotoWindowModel+UIControls.swift** - Share sheet, UI auto-hide timers, image flip
 
 ### Windows Tab (window manager)
@@ -457,13 +457,13 @@ The app registers a `hypnos://` custom URL scheme (declared in `Info.plist`, han
 `StashAPIClient` is an actor that handles GraphQL communication with Stash server. Accessible via `appModel.apiClient` (private(set)). Supports:
 - **List queries:** `findImages`, `findScenes`, `findGalleries`, `findTags`, `findStudios`, `findPerformers` (paginated, with filters)
 - **Detail queries:** `fetchImageDetail(id:)` → `ImageDetail`, `fetchSceneDetail(id:)` → `SceneDetail` (on-demand full metadata)
-- **Mutations:** `updateImage`/`updateScene` (full field update), `updateImageRating`/`updateSceneRating`, `incrementImageOCounter`/`decrementImageOCounter`, `incrementSceneOCounter`/`decrementSceneOCounter`
+- **Mutations:** `updateImage`/`updateScene` (full field update), `updateImageRating`/`updateSceneRating`, the image and scene activity-counter increment/decrement mutations
 - **Delete:** `destroyImage`/`destroyScene` (single), `destroyImages`/`destroyScenes` (bulk), with `deleteFile` and `deleteGenerated` options
 - Server config persisted via UserDefaults
 
 ### Media Metadata & Detail Views
 - **MediaMetadata.swift** - Lightweight shared structs: `MediaTag`, `MediaPerformer`, `MediaStudio`, `MediaGalleryRef`, `MediaGroupRef`, plus full detail structs `ImageDetail` and `SceneDetail` (fetched on-demand, not in list queries)
-- **MediaDetailSheet** - Two-tab sheet (Info read-only + Edit) opened from the ornament Info button. Info tab shows file metadata, associations (tags/performers/studio/galleries as chips via `FlowLayout`), and stats. Edit tab has searchable pickers for tags/performers/studio, text fields, rating editor, URL list, and organized toggle. **Edits are committed automatically when the sheet closes** (both the "Done" button and swipe/other dismissal via `onDisappear`) — there is no explicit Save button; `commitChanges(using:)` writes only when `hasUnsavedChanges` (diffed against an `EditSnapshot` baseline). O-counter +/- is committed immediately (separate from the save-on-close path). On a successful save the `onSaved(rating100)` callback lets the presenting ornament update `windowModel.image`/`video.rating100` so the Info icon refreshes live. Delete section at bottom with confirmation dialog ("Remove from Stash" vs "Delete File from Disk")
+- **MediaDetailSheet** - Two-tab sheet (Info read-only + Edit) opened from the ornament Info button. Info tab shows file metadata, associations (tags/performers/studio/galleries as chips via `FlowLayout`), and stats. Edit tab has searchable pickers for tags/performers/studio, text fields, rating editor, URL list, and organized toggle. **Edits are committed automatically when the sheet closes** (both the "Done" button and swipe/other dismissal via `onDisappear`) — there is no explicit Save button; `commitChanges(using:)` writes only when `hasUnsavedChanges` (diffed against an `EditSnapshot` baseline). activity counter +/- is committed immediately (separate from the save-on-close path). On a successful save the `onSaved(rating100)` callback lets the presenting ornament update `windowModel.image`/`video.rating100` so the Info icon refreshes live. Delete section at bottom with confirmation dialog ("Remove from Stash" vs "Delete File from Disk")
 
 ### Multi-Select
 Gallery grids (`GalleryGridView`, `VideoGalleryView`) support multi-select mode:
