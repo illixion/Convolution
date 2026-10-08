@@ -51,8 +51,6 @@ struct GalleryThumbnailView: View {
     /// Settle time before a cell asks for depth. The estimator also drops
     /// cancelled requests unrun, so this is only the first filter.
     private static let depthRequestDelay: Duration = .milliseconds(250)
-    /// Tap press-down flash.
-    @State private var isPressed = false
 
     var body: some View {
         ZStack {
@@ -101,9 +99,11 @@ struct GalleryThumbnailView: View {
         .cornerRadius(12)
         .clipped()
         .contentShape(Rectangle())
-        .modifier(ThumbnailHoverModifier(reduceMotion: appModel.effectiveReduceMotion))
-        .scaleEffect(isPressed ? 0.92 : 1)
-        .opacity(quickLookActive ? 0 : 1)
+        .thumbnailHoverEffect(reduceMotion: appModel.effectiveReduceMotion)
+        // Hidden under its Quick Look, except a 3D tile: the pop rests in
+        // front of the tiles and fades out over the cell when it closes, so
+        // the tile has to be there already to take over.
+        .opacity(quickLookActive && !showsTile ? 0 : 1)
         // The cell-hide / cell-show flip happens in the same render
         // commit as Quick Look's appear/disappear. Any inherited
         // animation context (e.g. a still-settling dismiss spring)
@@ -111,15 +111,12 @@ struct GalleryThumbnailView: View {
         // producing the "thumbnail flies in" glitch on dismiss.
         .animation(nil, value: quickLookActive)
         .background(cellFrameProbe)
-        .onTapGesture {
+        .thumbnailTap(reduceMotion: appModel.effectiveReduceMotion) {
             guard appModel.beginMediaOpenTap() else { return }
-            if !appModel.effectiveReduceMotion {
-                withAnimation(.easeOut(duration: 0.08)) { isPressed = true }
-                withAnimation(.easeOut(duration: 0.15).delay(0.08)) { isPressed = false }
-            }
             onTap?()
         }
-        .contextMenu {
+        .thumbnailMenu(reduceMotion: appModel.effectiveReduceMotion,
+                       quickLook: onQuickLook.map { quickLook in { quickLook(loadedImage) } }) {
             if let contextMenuItems {
                 contextMenuItems { onQuickLook?(loadedImage) }
             }
@@ -262,22 +259,6 @@ struct GalleryThumbnailView: View {
     /// Wraps the thumbnail's hover effect choice. Reduce-motion swaps the
     /// scale-up animation for the system default highlight so gaze still
     /// gives feedback without movement.
-    private struct ThumbnailHoverModifier: ViewModifier {
-        let reduceMotion: Bool
-
-        func body(content: Content) -> some View {
-            #if os(macOS)
-            content.hoverEffect(ScaleHoverEffect())
-            #else
-            if reduceMotion {
-                content.hoverEffect(.highlight)
-            } else {
-                content.hoverEffect(ScaleHoverEffect())
-            }
-            #endif
-        }
-    }
-
     @ViewBuilder
     private var cellFrameProbe: some View {
         if let space = cellCoordinateSpace {

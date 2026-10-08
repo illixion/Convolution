@@ -174,6 +174,7 @@ struct VideoGalleryView: View {
                             }
                             openVideoDetail(video)
                         },
+                        actions: AnyView(contextMenu(for: quickLookVideo, quickLook: nil)),
                         onDismiss: {
                             var t = Transaction()
                             t.disablesAnimations = true
@@ -272,7 +273,9 @@ struct VideoGalleryView: View {
     // MARK: - Context Menu
 
     @ViewBuilder
-    private func contextMenu(for video: GalleryVideo, quickLook: @escaping () -> Void) -> some View {
+    /// The video's quick actions: its context menu, and on visionOS Quick
+    /// Look's side menu (nil `quickLook` leaves the Quick Look item out).
+    private func contextMenu(for video: GalleryVideo, quickLook: (() -> Void)?) -> some View {
         Section {
             Button("Play", systemImage: "play") { openVideoDetail(video) }
             if PlatformCapabilities.supportsMultipleWindows {
@@ -281,7 +284,9 @@ struct VideoGalleryView: View {
                     openWindow(id: "video-detail", value: VideoWindowValue(video: video))
                 }
             }
-            Button("Quick Look", systemImage: "eye", action: quickLook)
+            if let quickLook {
+                Button("Quick Look", systemImage: "eye", action: quickLook)
+            }
         }
         MediaQuickActionMenuItems(target: .video(video), actions: quickActions) {
             guard let stashId = video.stashId else { return }

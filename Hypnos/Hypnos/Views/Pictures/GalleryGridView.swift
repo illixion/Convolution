@@ -134,6 +134,18 @@ struct GalleryGridView: View {
                         containerSize: geo.size,
                         useScalePop: useScalePop,
                         initialImage: quickLookSeedImage,
+                        actions: AnyView(contextMenu(for: quickLookImage, quickLook: nil)),
+                        onOpen: {
+                            let image = quickLookImage
+                            var t = Transaction()
+                            t.disablesAnimations = true
+                            withTransaction(t) {
+                                self.quickLookImage = nil
+                                self.quickLookSeedImage = nil
+                            }
+                            appModel.lastViewedImageId = image.id
+                            onImageSelected?(image)
+                        },
                         onDismiss: {
                             // Suppress any inherited animation context
                             // (visionOS occasionally leaves one behind
@@ -401,7 +413,9 @@ struct GalleryGridView: View {
     // MARK: - Context Menu
 
     @ViewBuilder
-    private func contextMenu(for image: GalleryImage, quickLook: @escaping () -> Void) -> some View {
+    /// The picture's quick actions: its context menu, and on visionOS Quick
+    /// Look's side menu (nil `quickLook` leaves the Quick Look item out).
+    private func contextMenu(for image: GalleryImage, quickLook: (() -> Void)?) -> some View {
         Section {
             Button("Open", systemImage: "arrow.up.forward.app") {
                 appModel.lastViewedImageId = image.id
@@ -413,7 +427,9 @@ struct GalleryGridView: View {
                     appModel.enqueuePhotoWindowOpen(image)
                 }
             }
-            Button("Quick Look", systemImage: "eye", action: quickLook)
+            if let quickLook {
+                Button("Quick Look", systemImage: "eye", action: quickLook)
+            }
         }
         MediaQuickActionMenuItems(target: .image(image), actions: quickActions) {
             guard let stashId = image.stashId else { return }

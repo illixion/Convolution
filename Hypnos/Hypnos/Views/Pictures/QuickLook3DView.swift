@@ -49,6 +49,10 @@ import ImageIO
 /// the underlying grid.
 private let quickLookZOffset: CGFloat = 80
 
+/// The dimmed backdrop's lift: in front of the grid's 3D tiles (their
+/// input targets reach 34 pt), behind the preview.
+private let backdropZOffset: CGFloat = 50
+
 private let sideMenuWidth: CGFloat = 220
 private let previewMenuSpacing: CGFloat = 24
 
@@ -74,6 +78,11 @@ struct QuickLook3DView: View {
     /// can finally nil-out the optional that drives this view's
     /// presence in the hierarchy.
     let onDismiss: () -> Void
+    /// The thumbnail's quick actions (`QuickLookActionRows`), shown in the
+    /// side menu.
+    let actions: AnyView?
+    /// Opens the photo in its viewer: a tap on the preview.
+    let onOpen: (() -> Void)?
 
     @State private var presented = false
     /// Gesture grace period after the view appears. The pinch that
@@ -100,8 +109,12 @@ struct QuickLook3DView: View {
         containerSize: CGSize,
         useScalePop: Bool,
         initialImage: UIImage?,
+        actions: AnyView? = nil,
+        onOpen: (() -> Void)? = nil,
         onDismiss: @escaping () -> Void
     ) {
+        self.actions = actions
+        self.onOpen = onOpen
         self.image = image
         self.sourceFrame = sourceFrame
         self.containerSize = containerSize
@@ -122,13 +135,22 @@ struct QuickLook3DView: View {
         }
     }
 
+    /// Where the pop starts and ends, in z: the cell's plane for flat
+    /// thumbnails; in front of 3D tiles (they stand up to 34 pt proud), or
+    /// the neighbouring tiles cover the preview while it grows and shrinks.
+    private var restingZ: CGFloat {
+        appModel.effectiveThumbnailDepth || appModel.effectiveThumbnailDiorama ? 40 : 0
+    }
+
     var body: some View {
         let menuReserve = sideMenuWidth + previewMenuSpacing
         let maxW = max(containerSize.width * 0.92 - menuReserve, 200)
         let maxH = containerSize.height * 0.92
         let fitted = fittedSize(in: CGSize(width: maxW, height: maxH))
-        let cellSide = sourceFrame?.width ?? 200
-        // Animating the preview's *frame* between (cellSide × cellSide)
+        // The cell's own size: cells aren't square in the original-aspect
+        // grid, and a square start crops differently from the cell.
+        let cellSize = sourceFrame?.size ?? CGSize(width: 200, height: 200)
+        // Animating the preview's *frame* between the cell's size
         // and (fitted.width × fitted.height) makes the inner
         // `.scaledToFill().clipped()` produce a continuous crop
         // transition — at the collapsed end, the image fills a square
@@ -136,7 +158,7 @@ struct QuickLook3DView: View {
         // at the expanded end it fills the natural aspect. No sudden
         // aspect snap when the cell takes over.
         let previewSize = (useScalePop && !presented)
-            ? CGSize(width: cellSide, height: cellSide)
+            ? cellSize
             : fitted
         let cornerR: CGFloat = (useScalePop && !presented) ? 12 : 20
         let offsetVec = popOffset(containerSize: containerSize)
@@ -147,6 +169,10 @@ struct QuickLook3DView: View {
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { animateDismiss() }
+                // In front of the grid's 3D tiles, whose input targets
+                // stand up to 34 pt proud of the window and caught the
+                // taps meant to close Quick Look.
+                .offset(z: backdropZOffset)
 
             HStack(alignment: .center, spacing: previewMenuSpacing) {
                 previewContent(size: previewSize, cornerRadius: cornerR)
@@ -156,13 +182,20 @@ struct QuickLook3DView: View {
                     // preview ends the spring at z=80 and then snaps
                     // backwards to where the cell sits, which reads as
                     // a sudden depth pop on no-diorama thumbnails.
-                    .offset(z: presented ? quickLookZOffset : 0)
+                    .offset(z: presented ? quickLookZOffset : restingZ)
                     // Reduce-motion path uses opacity for the fade.
                     // Scale-pop path keeps opacity at 1 throughout so
                     // the cell→preview handoff is invisible: the
                     // preview is born at the cell's exact position
                     // and size with full opacity, then animates out.
-                    .opacity(useScalePop ? 1 : (presented ? 1 : 0))
+                    .opacity(useScalePop && restingZ == 0 ? 1 : (presented ? 1 : 0))
+                    // Over 3D tiles the pop rests in front of them, not on the
+                    // cell's plane, so it fades in quickly and fades out over the
+                    // end of its shrink, handing over to the tile behind it
+                    // rather than vanishing a few centimetres in front of it.
+                    .animation(restingZ == 0 ? nil
+                               : (presented ? .easeOut(duration: 0.15) : .easeIn(duration: 0.25).delay(0.2)),
+                               value: presented)
 
                 sideMenu
                     .frame(width: sideMenuWidth)
@@ -272,7 +305,14 @@ struct QuickLook3DView: View {
         .frame(width: size.width, height: size.height)
         .cornerRadius(cornerRadius)
         .contentShape(Rectangle())
-        .onTapGesture { animateDismiss() }
+        .onTapGesture {
+            if let onOpen {
+                guard dismissEnabled else { return }
+                onOpen()
+            } else {
+                animateDismiss()
+            }
+        }
         #if !os(tvOS)
         .gesture(
             DragGesture(minimumDistance: 30)
@@ -298,7 +338,7 @@ struct QuickLook3DView: View {
     /// fixed at `containerWidth/2 - (menu + spacing)/2`, regardless
     /// of the preview's own width — so the offset is independent of
     /// the animated frame size. With the preview's frame shrunk to
-    /// `cellSide × cellSide`, applying this offset lands its rendered
+    /// the cell's size, applying this offset lands its rendered
     /// box exactly on the cell.
     private func popOffset(containerSize: CGSize) -> PopOffset {
         guard useScalePop, let frame = sourceFrame else {
@@ -329,6 +369,11 @@ struct QuickLook3DView: View {
                     spatialRequested = true
                 }
 
+                Divider().opacity(0.3)
+            }
+
+            if let actions {
+                QuickLookActionRows(actions: actions) { animateDismiss() }
                 Divider().opacity(0.3)
             }
 

@@ -65,6 +65,9 @@ struct VideoQuickLookView: View {
     /// Invoked AFTER the dismiss animation settles so the host can nil the
     /// optional driving this view's presence.
     let onDismiss: () -> Void
+    /// The thumbnail's quick actions (`QuickLookActionRows`), shown in the
+    /// side menu.
+    let actions: AnyView?
 
     @State private var presented = false
     /// Gesture grace period — the pinch that completes the long-press tends to
@@ -93,8 +96,10 @@ struct VideoQuickLookView: View {
         useScalePop: Bool,
         initialImage: UIImage?,
         onOpenFull: @escaping (GalleryVideo) -> Void,
+        actions: AnyView? = nil,
         onDismiss: @escaping () -> Void
     ) {
+        self.actions = actions
         self.video = video
         self.sourceFrame = sourceFrame
         self.containerSize = containerSize
@@ -127,14 +132,23 @@ struct VideoQuickLookView: View {
         !useWebKit && CoreMLDepthProvider.hasAvailableModel(role: .realtime)
     }
 
+    /// Where the pop starts and ends, in z: the cell's plane for flat
+    /// thumbnails; in front of 3D tiles (they stand up to 34 pt proud), or
+    /// the neighbouring tiles cover the preview while it grows and shrinks.
+    private var restingZ: CGFloat {
+        appModel.effectiveThumbnailDepth || appModel.effectiveThumbnailDiorama ? 40 : 0
+    }
+
     var body: some View {
         let menuReserve = sideMenuWidth + previewMenuSpacing
         let maxW = max(containerSize.width * 0.92 - menuReserve, 200)
         let maxH = containerSize.height * 0.92
         let fitted = fittedSize(in: CGSize(width: maxW, height: maxH))
-        let cellSide = sourceFrame?.width ?? 200
+        // The cell's own size: cells aren't square in the original-aspect
+        // grid, and a square start crops differently from the cell.
+        let cellSize = sourceFrame?.size ?? CGSize(width: 200, height: 200)
         let previewSize = (useScalePop && !presented)
-            ? CGSize(width: cellSide, height: cellSide)
+            ? cellSize
             : fitted
         let cornerR: CGFloat = (useScalePop && !presented) ? 12 : 20
         let offsetVec = popOffset(containerSize: containerSize)
@@ -145,12 +159,22 @@ struct VideoQuickLookView: View {
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { animateDismiss() }
+                // In front of the grid's tiles' input targets, which caught
+                // the taps meant to close Quick Look.
+                .offset(z: 50)
 
             HStack(alignment: .center, spacing: previewMenuSpacing) {
                 previewContent(size: previewSize, cornerRadius: cornerR)
                     .offset(x: presented ? 0 : offsetVec.dx, y: presented ? 0 : offsetVec.dy)
-                    .offset(z: presented ? quickLookZOffset : 0)
-                    .opacity(useScalePop ? 1 : (presented ? 1 : 0))
+                    .offset(z: presented ? quickLookZOffset : restingZ)
+                    .opacity(useScalePop && restingZ == 0 ? 1 : (presented ? 1 : 0))
+                    // Over 3D tiles the pop rests in front of them, not on the
+                    // cell's plane, so it fades in quickly and fades out over the
+                    // end of its shrink, handing over to the tile behind it
+                    // rather than vanishing a few centimetres in front of it.
+                    .animation(restingZ == 0 ? nil
+                               : (presented ? .easeOut(duration: 0.15) : .easeIn(duration: 0.25).delay(0.2)),
+                               value: presented)
 
                 sideMenu
                     .frame(width: sideMenuWidth)
@@ -227,7 +251,11 @@ struct VideoQuickLookView: View {
         .frame(width: size.width, height: size.height)
         .cornerRadius(cornerRadius)
         .contentShape(Rectangle())
-        .onTapGesture { animateDismiss() }
+        // A tap on the preview opens the player, as on a thumbnail.
+        .onTapGesture {
+            guard dismissEnabled else { return }
+            onOpenFull(video)
+        }
         #if !os(tvOS)
         .gesture(
             DragGesture(minimumDistance: 30)
@@ -340,6 +368,11 @@ struct VideoQuickLookView: View {
             }
 
             Divider().opacity(0.3)
+
+            if let actions {
+                QuickLookActionRows(actions: actions) { animateDismiss() }
+                Divider().opacity(0.3)
+            }
 
             menuButton(
                 title: "Close",

@@ -35,8 +35,6 @@ struct VideoThumbnailView: View {
     @State private var loadedImage: UIImage?
     @State private var isLoading = true
     @State private var loadFailed = false
-    /// Tap press-down flash.
-    @State private var isPressed = false
 
     private var displayName: String {
         if let title = video.title, !title.isEmpty {
@@ -141,23 +139,19 @@ struct VideoThumbnailView: View {
         // no longer animates, which is fine on a fast (LAN) source.
         .drawingGroup()
         .contentShape(Rectangle())
-        .hoverEffect(ScaleHoverEffect())
-        .scaleEffect(isPressed ? 0.92 : 1)
+        .thumbnailHoverEffect()
         .opacity(quickLookActive ? 0 : 1)
         // The cell-hide / cell-show flip happens in the same render commit as
         // the quick look preview's appear/disappear. Any inherited animation
         // context would smear the opacity change across a settling spring.
         .animation(nil, value: quickLookActive)
         .background(cellFrameProbe)
-        .onTapGesture {
+        .thumbnailTap(reduceMotion: appModel.effectiveReduceMotion) {
             guard appModel.beginMediaOpenTap() else { return }
-            if !appModel.effectiveReduceMotion {
-                withAnimation(.easeOut(duration: 0.08)) { isPressed = true }
-                withAnimation(.easeOut(duration: 0.15).delay(0.08)) { isPressed = false }
-            }
             onTap?()
         }
-        .contextMenu {
+        .thumbnailMenu(reduceMotion: appModel.effectiveReduceMotion,
+                       quickLook: onQuickLook.map { quickLook in { quickLook(loadedImage) } }) {
             if let contextMenuItems {
                 contextMenuItems { onQuickLook?(loadedImage) }
             }

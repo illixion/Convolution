@@ -157,7 +157,7 @@ struct LocalFolderBrowserView: View {
                                 LocalMediaThumbnailView(file: file) {
                                     openMedia(file)
                                 }
-                                .contextMenu { contextMenu(for: file) }
+                                .thumbnailMenu(reduceMotion: appModel.effectiveReduceMotion) { contextMenu(for: file) }
                             }
 
                             if mediaFiles.isEmpty && subfolders.isEmpty {
@@ -404,7 +404,6 @@ struct LocalMediaThumbnailView: View {
     @State private var loadedImage: UIImage?
     @State private var isLoading = true
     @State private var loadFailed = false
-    @State private var isPressed = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -445,14 +444,9 @@ struct LocalMediaThumbnailView: View {
         .cornerRadius(12)
         .clipped()
         .contentShape(Rectangle())
-        .hoverEffect(ScaleHoverEffect())
-        .scaleEffect(isPressed ? 0.92 : 1.0)
-        .onTapGesture {
+        .thumbnailHoverEffect()
+        .thumbnailTap(reduceMotion: appModel.effectiveReduceMotion) {
             guard appModel.beginMediaOpenTap() else { return }
-            if !appModel.effectiveReduceMotion {
-                withAnimation(.easeOut(duration: 0.08)) { isPressed = true }
-                withAnimation(.easeOut(duration: 0.15).delay(0.08)) { isPressed = false }
-            }
             onTap?()
         }
         .task {
