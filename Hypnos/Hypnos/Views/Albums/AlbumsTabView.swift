@@ -194,6 +194,14 @@ struct AlbumsTabView: View {
                         ) {
                             open(container)
                         }
+                        .contextMenu {
+                            Button(isVideo ? "Show Videos" : "Show Pictures", systemImage: "square.grid.2x2") {
+                                open(container)
+                            }
+                            Button("Play Slideshow", systemImage: "play") {
+                                appModel.startContainerSlideshow(container, isVideo: isVideo)
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 24)

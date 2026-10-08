@@ -37,11 +37,13 @@ struct TVLibraryShelfRow: View {
                                 TVLandscapeLockup(item: item, isResolving: playback.resolvingItemId == item.id)
                             }
                             .buttonStyle(.borderless)
+                            .contextMenu { LibraryItemContextMenu(item: item, playback: playback) }
                         case .poster:
                             NavigationLink(value: item) {
                                 TVPosterLockup(item: item)
                             }
                             .buttonStyle(.borderless)
+                            .contextMenu { LibraryItemContextMenu(item: item, playback: playback, showsDetails: false) }
                         }
                     }
                 }

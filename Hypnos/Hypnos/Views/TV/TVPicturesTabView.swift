@@ -18,6 +18,7 @@ import SwiftUI
 struct TVPicturesTabView: View {
     @Environment(AppModel.self) private var appModel
     @State private var presentedIndex: Int?
+    @State private var quickActions = MediaQuickActions()
 
     private let gridSpacing: CGFloat = 40
     private let preferredCellSize: CGFloat = 280
@@ -41,6 +42,7 @@ struct TVPicturesTabView: View {
                 )
             }
         }
+        .mediaQuickActions(quickActions)
         .task {
             if appModel.galleryImages.isEmpty {
                 await appModel.loadInitialGallery()
@@ -114,6 +116,10 @@ struct TVPicturesTabView: View {
                                 )
                             }
                             .buttonStyle(.card)
+                            .contextMenu {
+                                Button("View", systemImage: "photo") { presentedIndex = index }
+                                MediaQuickActionMenuItems(target: .image(image), actions: quickActions)
+                            }
                             .onAppear {
                                 if image == appModel.galleryImages.last, appModel.hasMorePages {
                                     Task { await appModel.loadNextPage() }

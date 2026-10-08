@@ -14,6 +14,7 @@ import SwiftUI
 struct MacVideosView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.openWindow) private var openWindow
+    @State private var quickActions = MediaQuickActions()
 
     private let gridSpacing: CGFloat = 20
     private let preferredCellSize: CGFloat = 240
@@ -21,6 +22,7 @@ struct MacVideosView: View {
 
     var body: some View {
         content
+            .mediaQuickActions(quickActions)
             .task {
                 if appModel.galleryVideos.isEmpty {
                     await appModel.loadInitialVideos()
@@ -75,6 +77,10 @@ struct MacVideosView: View {
                                 .clipped()
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                Button("Play", systemImage: "play") { openWindow(id: "video-detail", value: video) }
+                                MediaQuickActionMenuItems(target: .video(video), actions: quickActions)
+                            }
                             .onAppear {
                                 if video == appModel.galleryVideos.last, appModel.hasMoreVideoPages {
                                     Task { await appModel.loadNextVideoPage() }

@@ -24,11 +24,12 @@ struct GalleryGridView: View {
 
     @State private var showBulkDeleteConfirmation = false
     @State private var quickLookImage: GalleryImage?
-    /// Snapshot of the source cell's loaded thumbnail at long-press
-    /// time. Seeds the QL view's initial paint so we never show the
+    /// Snapshot of the source cell's loaded thumbnail when Quick Look was
+    /// chosen from its menu. Seeds the QL view's initial paint so we never show the
     /// gray loading state during the pop animation.
     @State private var quickLookSeedImage: UIImage?
     @State private var cellFrames: [UUID: CGRect] = [:]
+    @State private var quickActions = MediaQuickActions()
     /// Re-read on appear and whenever the app returns to the foreground: the
     /// user may have changed the permission in the Settings app, and PhotoKit
     /// publishes no notification for that.
@@ -183,6 +184,7 @@ struct GalleryGridView: View {
                 await appModel.loadInitialGallery()
             }
         }
+        .mediaQuickActions(quickActions)
         .confirmationDialog(
             "Delete \(appModel.selectedImageIds.count) Image\(appModel.selectedImageIds.count == 1 ? "" : "s")",
             isPresented: $showBulkDeleteConfirmation,
@@ -379,7 +381,7 @@ struct GalleryGridView: View {
                     appModel.lastViewedImageId = image.id
                     onImageSelected?(image)
                 },
-                onLongPress: { thumb in
+                onQuickLook: { thumb in
                     // Capture the cell's loaded UIImage so QL can paint
                     // it immediately at the start of the animation.
                     quickLookSeedImage = thumb
@@ -387,9 +389,36 @@ struct GalleryGridView: View {
                     // so we just install it — no withAnimation wrapper.
                     quickLookImage = image
                 },
+                contextMenuItems: { quickLook in
+                    AnyView(contextMenu(for: image, quickLook: quickLook))
+                },
                 quickLookActive: quickLookImage?.id == image.id,
                 cellCoordinateSpace: gallerySpace
             )
+        }
+    }
+
+    // MARK: - Context Menu
+
+    @ViewBuilder
+    private func contextMenu(for image: GalleryImage, quickLook: @escaping () -> Void) -> some View {
+        Section {
+            Button("Open", systemImage: "arrow.up.forward.app") {
+                appModel.lastViewedImageId = image.id
+                onImageSelected?(image)
+            }
+            if PlatformCapabilities.supportsMultipleWindows {
+                Button("Open in New Window", systemImage: "macwindow.badge.plus") {
+                    appModel.lastViewedImageId = image.id
+                    appModel.enqueuePhotoWindowOpen(image)
+                }
+            }
+            Button("Quick Look", systemImage: "eye", action: quickLook)
+        }
+        MediaQuickActionMenuItems(target: .image(image), actions: quickActions) {
+            guard let stashId = image.stashId else { return }
+            appModel.isSelectingImages = true
+            appModel.selectedImageIds.insert(stashId)
         }
     }
 

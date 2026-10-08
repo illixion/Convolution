@@ -48,8 +48,9 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   source/filter/pagination the visionOS/iOS grids use
   (`loadInitialGallery`/`loadNextPage`/`hasMorePages`, and the `Videos`
   equivalents). Cells are plain `Button`s styled `.buttonStyle(.card)` for
-  the standard tvOS focus lift — no custom hover/press gesture code, unlike
-  `GalleryThumbnailView`'s long-press-to-QuickLook handling (touch-only).
+  the standard tvOS focus lift — no custom hover/press gesture code. Holding
+  Select opens the same `.contextMenu` quick actions as the other platforms
+  (`MediaQuickActions`; Library lockups use `LibraryItemContextMenu`).
   Thumbnails load through the existing `MediaThumbnail` view
   (`Views/MediaThumbnail.swift`), already gesture-free and cross-platform.
 - **`TVPhotoViewerView`** — fullscreen image. Siri Remote left/right

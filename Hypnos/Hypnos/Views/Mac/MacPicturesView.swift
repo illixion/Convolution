@@ -25,6 +25,7 @@ struct MacPhotoWindowValue: Codable, Hashable {
 struct MacPicturesView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.openWindow) private var openWindow
+    @State private var quickActions = MediaQuickActions()
 
     private let gridSpacing: CGFloat = 20
     private let preferredCellSize: CGFloat = 200
@@ -32,6 +33,7 @@ struct MacPicturesView: View {
 
     var body: some View {
         content
+            .mediaQuickActions(quickActions)
             .task {
                 if appModel.galleryImages.isEmpty {
                     await appModel.loadInitialGallery()
@@ -78,10 +80,7 @@ struct MacPicturesView: View {
                     LazyVGrid(columns: layout.columns, spacing: gridSpacing) {
                         ForEach(appModel.galleryImages) { image in
                             Button {
-                                openWindow(
-                                    id: "photo-detail",
-                                    value: MacPhotoWindowValue(fullSizeURL: image.fullSizeURL, title: image.title)
-                                )
+                                open(image)
                             } label: {
                                 MediaThumbnail(
                                     url: image.thumbnailURL,
@@ -90,6 +89,10 @@ struct MacPicturesView: View {
                                 )
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                Button("Open", systemImage: "arrow.up.forward.app") { open(image) }
+                                MediaQuickActionMenuItems(target: .image(image), actions: quickActions)
+                            }
                             .onAppear {
                                 if image == appModel.galleryImages.last, appModel.hasMorePages {
                                     Task { await appModel.loadNextPage() }
@@ -101,6 +104,13 @@ struct MacPicturesView: View {
                 }
             }
         }
+    }
+
+    private func open(_ image: GalleryImage) {
+        openWindow(
+            id: "photo-detail",
+            value: MacPhotoWindowValue(fullSizeURL: image.fullSizeURL, title: image.title)
+        )
     }
 }
 

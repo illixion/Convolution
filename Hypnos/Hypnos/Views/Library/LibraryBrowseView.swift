@@ -54,6 +54,12 @@ final class LibraryBrowseViewModel {
         await loadNextPage(token: loadToken)
     }
 
+    /// Swaps in the server's copy of one item after a watched/favorite change.
+    func replace(_ item: LibraryItem) {
+        guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+        items[index] = item
+    }
+
     private func loadNextPage(token: UUID) async {
         guard let library, hasMore, !isLoading else { return }
         isLoading = true
@@ -87,6 +93,7 @@ final class LibraryBrowseViewModel {
 
 struct LibraryBrowseView: View {
     let request: LibraryBrowseRequest
+    let playback: LibraryPlayback
 
     @State private var model = LibraryBrowseViewModel()
     /// Cancelled and replaced on every keystroke so only the last one, after
@@ -123,6 +130,10 @@ struct LibraryBrowseView: View {
                                 LibraryPosterLockup(item: item)
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                LibraryItemContextMenu(item: item, playback: playback, showsDetails: false,
+                                                       onUpdated: { model.replace($0) })
+                            }
                             .onAppear {
                                 guard item == model.items.last else { return }
                                 Task { await model.loadNextPage() }

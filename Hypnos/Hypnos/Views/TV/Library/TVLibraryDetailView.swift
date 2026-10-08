@@ -218,6 +218,10 @@ struct TVLibraryDetailView: View {
                             TVEpisodeLockup(episode: episode, isResolving: playback.resolvingItemId == episode.id)
                         }
                         .buttonStyle(.borderless)
+                        .contextMenu {
+                            LibraryItemContextMenu(item: episode, playback: playback,
+                                                   showsDetails: false, showsSeries: false)
+                        }
                     }
                 }
                 .padding(.horizontal, 90)

@@ -32,7 +32,7 @@ struct LibraryTabRootView: View {
                     LibraryDetailView(item: item, playback: playback)
                 }
                 .navigationDestination(for: LibraryBrowseRequest.self) { request in
-                    LibraryBrowseView(request: request)
+                    LibraryBrowseView(request: request, playback: playback)
                 }
                 .navigationTitle("Library")
                 .toolbar {
@@ -53,6 +53,7 @@ struct LibraryTabRootView: View {
                 .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
                 #endif
         }
+        .environment(\.libraryOpenDetail) { path.append($0) }
         // Dark whatever the system appearance, like the Apple TV app: the
         // page is artwork, and a white page between backdrops glares.
         .environment(\.colorScheme, .dark)

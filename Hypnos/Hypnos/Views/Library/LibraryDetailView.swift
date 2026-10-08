@@ -319,6 +319,10 @@ private struct LibraryDetailContent: View {
                                                      isResolving: playback.resolvingItemId == episode.id)
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                LibraryItemContextMenu(item: episode, playback: playback,
+                                                       showsDetails: false, showsSeries: false)
+                            }
                             .id(episode.id)
                         }
                     }

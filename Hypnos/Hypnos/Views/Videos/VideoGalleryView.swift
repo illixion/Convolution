@@ -15,10 +15,12 @@ struct VideoGalleryView: View {
 
     @State private var showBulkDeleteConfirmation = false
     @State private var quickLookVideo: GalleryVideo?
-    /// Snapshot of the source cell's loaded thumbnail at long-press time.
+    /// Snapshot of the source cell's loaded thumbnail when Quick Look was
+    /// chosen from its menu.
     /// Seeds the quick look's poster so the pop never starts on an empty frame.
     @State private var quickLookSeedImage: UIImage?
     @State private var cellFrames: [UUID: CGRect] = [:]
+    @State private var quickActions = MediaQuickActions()
     private let gallerySpace = "videoGallery"
 
     private let gridSpacing: CGFloat = 16
@@ -208,6 +210,7 @@ struct VideoGalleryView: View {
                 await appModel.loadInitialVideos()
             }
         }
+        .mediaQuickActions(quickActions)
         .confirmationDialog(
             "Delete \(appModel.selectedVideoIds.count) Video\(appModel.selectedVideoIds.count == 1 ? "" : "s")",
             isPresented: $showBulkDeleteConfirmation,
@@ -253,13 +256,37 @@ struct VideoGalleryView: View {
                 onTap: {
                     openVideoDetail(video)
                 },
-                onLongPress: { thumb in
+                onQuickLook: { thumb in
                     quickLookSeedImage = thumb
                     quickLookVideo = video
+                },
+                contextMenuItems: { quickLook in
+                    AnyView(contextMenu(for: video, quickLook: quickLook))
                 },
                 quickLookActive: quickLookVideo?.id == video.id,
                 cellCoordinateSpace: gallerySpace
             )
+        }
+    }
+
+    // MARK: - Context Menu
+
+    @ViewBuilder
+    private func contextMenu(for video: GalleryVideo, quickLook: @escaping () -> Void) -> some View {
+        Section {
+            Button("Play", systemImage: "play") { openVideoDetail(video) }
+            if PlatformCapabilities.supportsMultipleWindows {
+                Button("Open in New Window", systemImage: "macwindow.badge.plus") {
+                    appModel.lastViewedVideoId = video.id
+                    openWindow(id: "video-detail", value: VideoWindowValue(video: video))
+                }
+            }
+            Button("Quick Look", systemImage: "eye", action: quickLook)
+        }
+        MediaQuickActionMenuItems(target: .video(video), actions: quickActions) {
+            guard let stashId = video.stashId else { return }
+            appModel.isSelectingVideos = true
+            appModel.selectedVideoIds.insert(stashId)
         }
     }
 

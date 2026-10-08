@@ -80,11 +80,13 @@ struct LibraryShelfRow: View {
                                 LibraryLandscapeLockup(item: item, isResolving: playback.resolvingItemId == item.id)
                             }
                             .buttonStyle(.plain)
+                            .contextMenu { LibraryItemContextMenu(item: item, playback: playback) }
                         case .poster:
                             NavigationLink(value: item) {
                                 LibraryPosterLockup(item: item)
                             }
                             .buttonStyle(.plain)
+                            .contextMenu { LibraryItemContextMenu(item: item, playback: playback, showsDetails: false) }
                         }
                     }
                 }

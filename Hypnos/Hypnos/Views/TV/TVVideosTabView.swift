@@ -13,6 +13,7 @@ import SwiftUI
 struct TVVideosTabView: View {
     @Environment(AppModel.self) private var appModel
     @State private var presentedVideo: GalleryVideo?
+    @State private var quickActions = MediaQuickActions()
 
     private let gridSpacing: CGFloat = 40
     private let preferredCellSize: CGFloat = 320
@@ -26,6 +27,7 @@ struct TVVideosTabView: View {
         .fullScreenCover(item: $presentedVideo) { video in
             TVVideoPlayerView(video: video)
         }
+        .mediaQuickActions(quickActions)
         .task {
             if appModel.galleryVideos.isEmpty {
                 await appModel.loadInitialVideos()
@@ -95,6 +97,10 @@ struct TVVideosTabView: View {
                                 }
                             }
                             .buttonStyle(.card)
+                            .contextMenu {
+                                Button("Play", systemImage: "play") { presentedVideo = video }
+                                MediaQuickActionMenuItems(target: .video(video), actions: quickActions)
+                            }
                             .onAppear {
                                 if video == appModel.galleryVideos.last, appModel.hasMoreVideoPages {
                                     Task { await appModel.loadNextVideoPage() }

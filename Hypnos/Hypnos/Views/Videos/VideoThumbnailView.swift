@@ -19,11 +19,14 @@ struct VideoThumbnailView: View {
     /// Mirrors `GalleryThumbnailView.onTap`. `nil` in selection mode, where
     /// the grid attaches its own external tap gesture instead.
     var onTap: (() -> Void)? = nil
-    /// Fires when the cell's long-press grow-and-pop gesture completes.
-    /// Receives the cell's already-loaded thumbnail bitmap (if any) so the
-    /// quick look preview can use it as an instant poster seed while the
-    /// preview clip buffers. Mirrors `GalleryThumbnailView.onLongPress`.
-    var onLongPress: ((UIImage?) -> Void)? = nil
+    /// Runs the context menu's Quick Look item. Receives the cell's
+    /// already-loaded thumbnail bitmap (if any) so the quick look preview can
+    /// use it as an instant poster seed while the preview clip buffers.
+    /// Mirrors `GalleryThumbnailView.onQuickLook`.
+    var onQuickLook: ((UIImage?) -> Void)? = nil
+    /// The long-press (right-click) menu. Handed a Quick Look action bound to
+    /// this cell's loaded thumbnail, for the grid to place among its items.
+    var contextMenuItems: ((_ quickLook: @escaping () -> Void) -> AnyView)? = nil
     /// Hides the cell while its quick look preview is up.
     var quickLookActive: Bool = false
     /// Coordinate space name used by the gallery grid to publish the cell's
@@ -32,25 +35,8 @@ struct VideoThumbnailView: View {
     @State private var loadedImage: UIImage?
     @State private var isLoading = true
     @State private var loadFailed = false
-    @State private var pressPhase: PressPhase = .idle
-    @State private var growthTask: Task<Void, Never>?
-
-    private enum PressPhase: Equatable {
-        case idle
-        /// Initial press-down ("button press" feedback).
-        case pressed
-        /// Slow grow toward a slightly-larger-than-natural size that
-        /// telegraphs the impending quick look pop.
-        case anticipating
-    }
-
-    private var pressScale: CGFloat {
-        switch pressPhase {
-        case .idle: return 1.0
-        case .pressed: return 0.92
-        case .anticipating: return 1.08
-        }
-    }
+    /// Tap press-down flash.
+    @State private var isPressed = false
 
     private var displayName: String {
         if let title = video.title, !title.isEmpty {
@@ -156,7 +142,7 @@ struct VideoThumbnailView: View {
         .drawingGroup()
         .contentShape(Rectangle())
         .hoverEffect(ScaleHoverEffect())
-        .scaleEffect(pressScale)
+        .scaleEffect(isPressed ? 0.92 : 1)
         .opacity(quickLookActive ? 0 : 1)
         // The cell-hide / cell-show flip happens in the same render commit as
         // the quick look preview's appear/disappear. Any inherited animation
@@ -166,38 +152,16 @@ struct VideoThumbnailView: View {
         .onTapGesture {
             guard appModel.beginMediaOpenTap() else { return }
             if !appModel.effectiveReduceMotion {
-                withAnimation(.easeOut(duration: 0.08)) { pressPhase = .pressed }
-                withAnimation(.easeOut(duration: 0.15).delay(0.08)) { pressPhase = .idle }
+                withAnimation(.easeOut(duration: 0.08)) { isPressed = true }
+                withAnimation(.easeOut(duration: 0.15).delay(0.08)) { isPressed = false }
             }
             onTap?()
         }
-        .onLongPressGesture(
-            minimumDuration: 0.65,
-            perform: {
-                growthTask?.cancel()
-                onLongPress?(loadedImage)
-                withAnimation(.easeOut(duration: 0.15)) { pressPhase = .idle }
-            },
-            onPressingChanged: { isPressing in
-                growthTask?.cancel()
-                if isPressing {
-                    withAnimation(.easeOut(duration: 0.08)) {
-                        pressPhase = .pressed
-                    }
-                    growthTask = Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 120_000_000)
-                        guard !Task.isCancelled else { return }
-                        withAnimation(.easeInOut(duration: 0.55)) {
-                            pressPhase = .anticipating
-                        }
-                    }
-                } else {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                        pressPhase = .idle
-                    }
-                }
+        .contextMenu {
+            if let contextMenuItems {
+                contextMenuItems { onQuickLook?(loadedImage) }
             }
-        )
+        }
         .task {
             await loadThumbnail()
         }

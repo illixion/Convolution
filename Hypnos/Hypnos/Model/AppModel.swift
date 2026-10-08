@@ -3412,28 +3412,50 @@ class AppModel {
         }
     }
 
+    /// Narrows one media kind's filter to `container`, leaving every other
+    /// filter dimension alone.
+    private static func narrow(imageFilter: inout ImageFilterCriteria,
+                               videoFilter: inout SceneFilterCriteria,
+                               to container: MediaContainer, isVideo: Bool) {
+        switch container.kind {
+        case .album, .smartAlbum:
+            if isVideo {
+                videoFilter.photosCriteria.selectedAlbums = [container.filterItem]
+                videoFilter.photosCriteria.albumModifier = .includes
+            } else {
+                imageFilter.photosCriteria.selectedAlbums = [container.filterItem]
+                imageFilter.photosCriteria.albumModifier = .includes
+            }
+        case .gallery:
+            imageFilter.selectedGalleries = [container.filterItem]
+            imageFilter.galleryModifier = .includesAll
+        case .group:
+            videoFilter.selectedGroups = [container.filterItem]
+            videoFilter.groupModifier = .includesAll
+        }
+    }
+
+    /// A slideshow of one container, from the Albums tab's context menu,
+    /// without applying the container to the Pictures/Videos grids.
+    func startContainerSlideshow(_ container: MediaContainer, isVideo: Bool) {
+        var imageFilter = currentFilter
+        var videoFilter = currentVideoFilter
+        Self.narrow(imageFilter: &imageFilter, videoFilter: &videoFilter, to: container, isVideo: isVideo)
+        if isVideo {
+            startVideoSlideshow(videoSource: videoSource, filter: videoFilter)
+        } else {
+            startGallerySlideshow(imageSource: imageSource, filter: imageFilter)
+        }
+    }
+
     /// Applies a container as the filter for one media kind and reloads.
     ///
     /// Replaces any container selection rather than adding to it — opening an
     /// album from a browser reads as "show me this one" — but leaves every other
     /// filter dimension alone.
     func applyContainer(_ container: MediaContainer, isVideo: Bool) {
-        switch container.kind {
-        case .album, .smartAlbum:
-            if isVideo {
-                currentVideoFilter.photosCriteria.selectedAlbums = [container.filterItem]
-                currentVideoFilter.photosCriteria.albumModifier = .includes
-            } else {
-                currentFilter.photosCriteria.selectedAlbums = [container.filterItem]
-                currentFilter.photosCriteria.albumModifier = .includes
-            }
-        case .gallery:
-            currentFilter.selectedGalleries = [container.filterItem]
-            currentFilter.galleryModifier = .includesAll
-        case .group:
-            currentVideoFilter.selectedGroups = [container.filterItem]
-            currentVideoFilter.groupModifier = .includesAll
-        }
+        Self.narrow(imageFilter: &currentFilter, videoFilter: &currentVideoFilter,
+                    to: container, isVideo: isVideo)
 
         Task {
             if isVideo {

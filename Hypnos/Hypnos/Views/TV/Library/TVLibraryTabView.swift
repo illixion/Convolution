@@ -28,6 +28,7 @@ struct TVLibraryTabView: View {
                     TVLibraryDetailView(item: item, playback: playback)
                 }
         }
+        .environment(\.libraryOpenDetail) { path.append($0) }
         .libraryPlayback(playback)
         .task(id: LibraryService.configurationKey) {
             await model.start()

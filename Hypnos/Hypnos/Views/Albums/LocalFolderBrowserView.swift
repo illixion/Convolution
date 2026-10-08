@@ -43,6 +43,7 @@ struct LocalFolderBrowserView: View {
     @State private var mediaFiles: [LocalMediaFile] = []
     @State private var subfolders: [String] = []
     @State private var isLoading = true
+    @State private var quickActions = MediaQuickActions()
 
     private let gridSpacing: CGFloat = 16
     /// Target tile width; the column count is chosen to keep tiles near this.
@@ -140,12 +141,23 @@ struct LocalFolderBrowserView: View {
                                     .cornerRadius(12)
                                 }
                                 .buttonStyle(.plain)
+                                .contextMenu {
+                                    Button("Open", systemImage: "folder") {
+                                        folderPath.append(subfolder)
+                                    }
+                                    if !isVideo {
+                                        Button("Play Slideshow", systemImage: "play") {
+                                            launchFolderSlideshow(at: currentFolderURL.appendingPathComponent(subfolder, isDirectory: true))
+                                        }
+                                    }
+                                }
                             }
 
                             ForEach(mediaFiles, id: \.id) { file in
                                 LocalMediaThumbnailView(file: file) {
                                     openMedia(file)
                                 }
+                                .contextMenu { contextMenu(for: file) }
                             }
 
                             if mediaFiles.isEmpty && subfolders.isEmpty {
@@ -193,7 +205,11 @@ struct LocalFolderBrowserView: View {
                 .background(.ultraThinMaterial)
             }
         }
-        .onAppear { loadContent() }
+        .mediaQuickActions(quickActions)
+        .onAppear {
+            quickActions.onDeleted = { _ in loadContent() }
+            loadContent()
+        }
         .onChange(of: folderPath) { _, _ in loadContent() }
         .onChange(of: isVideo) { _, _ in
             // A path nested under Photos makes no sense under Videos.
@@ -215,10 +231,34 @@ struct LocalFolderBrowserView: View {
         .accessibilityIdentifier(A11y.Albums.localBrowser)
     }
 
-    private func openMedia(_ file: LocalMediaFile) {
+    @ViewBuilder
+    private func contextMenu(for file: LocalMediaFile) -> some View {
+        Section {
+            Button(isVideo ? "Play" : "Open", systemImage: isVideo ? "play" : "arrow.up.forward.app") {
+                openMedia(file)
+            }
+            if PlatformCapabilities.supportsMultipleWindows {
+                Button("Open in New Window", systemImage: "macwindow.badge.plus") {
+                    openMedia(file, inNewWindow: true)
+                }
+            }
+        }
+        MediaQuickActionMenuItems(target: quickActionTarget(for: file), actions: quickActions)
+    }
+
+    private func quickActionTarget(for file: LocalMediaFile) -> MediaQuickActionTarget {
+        if file.type == .video {
+            return .video(GalleryVideo(identity: MediaIdentity.persistentKey(for: file.url),
+                                       thumbnailURL: file.url, streamURL: file.url, title: file.name))
+        }
+        return .image(GalleryImage(url: file.url, title: file.name, source: .local))
+    }
+
+    private func openMedia(_ file: LocalMediaFile, inNewWindow: Bool = false) {
+        let newWindow = inNewWindow || appModel.openMediaInNewWindows
         if !isVideo {
             let image = GalleryImage(url: file.url, title: file.name, source: .local)
-            if appModel.openMediaInNewWindows {
+            if newWindow {
                 appModel.enqueuePhotoWindowOpen(image)
             } else {
                 pushWindow(id: "photo-detail", value: PhotoWindowValue(image: image, wasPushed: true))
@@ -244,7 +284,7 @@ struct LocalFolderBrowserView: View {
                     streamURL: file.url,
                     title: file.name
                 )
-            if appModel.openMediaInNewWindows {
+            if newWindow {
                 openWindow(id: "video-detail", value: VideoWindowValue(video: video, galleryVideos: siblings))
             } else {
                 pushWindow(id: "video-detail", value: VideoWindowValue(video: video, galleryVideos: siblings, wasPushed: true))
@@ -252,9 +292,9 @@ struct LocalFolderBrowserView: View {
         }
     }
 
-    private func launchFolderSlideshow() {
+    private func launchFolderSlideshow(at folder: URL? = nil) {
         appModel.startGallerySlideshow(
-            imageSource: LocalImageSource(rootURL: currentFolderURL),
+            imageSource: LocalImageSource(rootURL: folder ?? currentFolderURL),
             filter: nil
         )
     }
