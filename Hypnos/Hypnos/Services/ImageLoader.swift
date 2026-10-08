@@ -570,8 +570,12 @@ actor ImageLoader {
             return await loadLocalThumbnail(from: url, maxSize: maxSize)
         }
 
-        // For remote URLs, use the regular loading (they're already thumbnails from server)
-        return try? await loadImage(from: url)
+        // Remote URLs are not necessarily server-side thumbnails: Nextcloud
+        // falls back to the original file when it can render no preview. Go
+        // through the capped path, which downsamples straight from the
+        // encoded bytes instead of decoding and normalizing the full bitmap
+        // (and parking it in the 512 MB memory cache).
+        return await loadRemoteThumbnailCached(from: url, maxSize: maxSize)
     }
 
     /// Load a thumbnail with data (for animated GIF detection)
