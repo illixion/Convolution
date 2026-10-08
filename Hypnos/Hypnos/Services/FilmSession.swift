@@ -223,14 +223,21 @@ final class FilmSession {
                 return false
             }
         }
-        await player.load(FilmServerClient(baseURL: serverURL, token: token, itemID: item.id), picture: disc)
+        let client = FilmServerClient(baseURL: serverURL, token: token, itemID: item.id)
+        if let disc, await (try? client.audioTracks(languages: FilmServerClient.deviceLanguages))?.isEmpty ?? true {
+            // No object audio from the plugin (not installed, or no TrueHD on
+            // the disc): the disc's own 5.1, read from the same image.
+            await player.load(picture: disc, audio: try? disc.audioSource(itemID: item.id))
+        } else {
+            await player.load(client, picture: disc)
+        }
         guard player.video.isLoaded else {
             error = player.video.status
             subtitles.load(nil)
             return false
         }
         loadedItem = item
-        subtitles.load(.jellyfin(itemId: item.id))
+        subtitles.load(disc.map { .disc($0.subtitles, itemId: item.id) } ?? .jellyfin(itemId: item.id))
         if let disc {
             // The eyes come top and bottom out of MVCPictureSource's stereo frames.
             stereoFormat = disc.isStereo ? .overUnder : nil
@@ -244,6 +251,68 @@ final class FilmSession {
         }
         AppLogger.filmPlayer.info("Loaded \(item.name): \(self.player.video.formatSummary, privacy: .public); audio \(self.player.audioStatus, privacy: .public)")
         return true
+    }
+
+    /// Loads a Blu-ray disc image on the device: its picture decoded here,
+    /// its sound the disc's own 5.1 (`DiscAudioSource`), its subtitles the
+    /// disc's PGS. No server involved.
+    func loadLocalDisc(_ url: URL, title: String) async -> Bool {
+        guard !isLoading else { return false }
+        isLoading = true
+        error = nil
+        defer { isLoading = false }
+        stereoFormatTask?.cancel()
+        stereoFormat = nil
+        let disc: MVCPictureSource
+        do {
+            disc = try await MVCPictureSource.open(url: url, headers: [:])
+        } catch {
+            self.error = "The disc couldn't be read: \(error.localizedDescription)"
+            AppLogger.filmPlayer.error("Local disc open failed: \(error.localizedDescription)")
+            subtitles.load(nil)
+            return false
+        }
+        let item = FilmLibraryItem(id: Self.localItemPrefix + UUID().uuidString, name: title, productionYear: nil)
+        let audio: DiscAudioSource?
+        do {
+            audio = try disc.audioSource(itemID: item.id)
+        } catch {
+            audio = nil
+            AppLogger.filmPlayer.error("Local disc audio unavailable: \(error.localizedDescription)")
+        }
+        await player.load(picture: disc, audio: audio)
+        guard player.video.isLoaded else {
+            error = player.video.status
+            subtitles.load(nil)
+            return false
+        }
+        loadedItem = item
+        subtitles.load(.disc(disc.subtitles, itemId: item.id, includeServer: false))
+        stereoFormat = disc.isStereo ? .overUnder : nil
+        AppLogger.filmPlayer.info("Loaded a local disc: \(disc.summary, privacy: .public); audio \(self.player.audioStatus, privacy: .public)")
+        return true
+    }
+
+    /// Plays the loaded disc's own 5.1 instead of the plugin's object audio,
+    /// from where it is (the `filmDiscAudio` debug command: the path a disc
+    /// without the plugin, or on the device, takes). False for a film that
+    /// isn't a disc.
+    func switchToDiscAudio() async -> Bool {
+        guard let disc = player.video.pictureSource as? MVCPictureSource, let item = loadedItem else { return false }
+        let position = player.currentTime
+        let wasPlaying = player.isPlaying
+        await player.load(picture: disc, audio: try? disc.audioSource(itemID: item.id), startAt: position)
+        if wasPlaying { player.play() }
+        return player.hasAudioScene
+    }
+
+    /// Ids of films that aren't Jellyfin items (a disc on the device), which
+    /// mustn't be reported to the server or looked up there.
+    static let localItemPrefix = "local:"
+
+    static func isServerItem(_ id: String?) -> Bool {
+        guard let id else { return false }
+        return !id.hasPrefix(localItemPrefix)
     }
 
     /// Loads a Library-tab item directly by its Jellyfin id, without going

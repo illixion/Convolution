@@ -24,10 +24,10 @@ struct SubtitleMenu: View {
             Button { close(); controller.select(nil) } label: { item("Off", isSelected: controller.selected == nil) }
             ForEach(controller.tracks) { track in
                 Button { close(); controller.select(track) } label: {
-                    item(track.isText ? track.title : "\(track.title) (Image, unsupported)",
+                    item(track.isPlayable ? track.title : "\(track.title) (Image, unsupported)",
                          isSelected: controller.selected == track)
                 }
-                .disabled(!track.isText)
+                .disabled(!track.isPlayable)
             }
         }
         .accessibilityIdentifier("player.subtitles")
@@ -108,8 +108,18 @@ enum SubtitleHDRBrightness {
 
 /// How far subtitles drawn into a stereo picture sit from the depth chosen
 /// for them: -1 (nearer) … 1 (farther), 0 being the automatic depth.
+///
+/// A disc's bitmap subtitles (PGS) keep their own setting: they are placed
+/// where the disc put them, a different height from text subtitles and so
+/// against different content, and read at another depth for the same offset.
 enum SubtitleStereoDepth {
     static let key = "subtitles.stereoDepth"
+    static let discKey = "subtitles.stereoDepthDisc"
+
+    /// The setting for `track`'s kind of subtitles.
+    static func key(for track: LibrarySubtitleTrack?) -> String {
+        track?.isBitmap == true ? discKey : key
+    }
     /// Each eye's shift at the slider's ends, as a fraction of the eye's
     /// width: about four times the automatic margin in front of the content.
     static let fullScale = 0.004
@@ -134,8 +144,11 @@ enum SubtitleBandGap {
 /// The subtitle settings that only mean something in 3D: where they show
 /// and, drawn into the picture, their depth and HDR brightness.
 struct StereoSubtitleSettings: View {
+    /// The player's subtitles: which kind is showing picks the depth setting.
+    var subtitles: SubtitleController?
     @AppStorage(StereoSubtitleStyle.key) private var style = StereoSubtitleStyle.inPicture
-    @AppStorage(SubtitleStereoDepth.key) private var depth = 0.0
+    @AppStorage(SubtitleStereoDepth.key) private var textDepth = 0.0
+    @AppStorage(SubtitleStereoDepth.discKey) private var discDepth = 0.0
     @AppStorage(SubtitleHDRBrightness.key) private var nits = SubtitleHDRBrightness.defaultNits
     @AppStorage(SubtitleBandGap.key) private var bandGap = SubtitleBandGap.defaultPoints
 
@@ -160,10 +173,10 @@ struct StereoSubtitleSettings: View {
             }
             if style == .inPicture {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Subtitle depth: \(depthLabel)").font(.caption)
+                    Text("\(isDisc ? "Disc subtitle depth" : "Subtitle depth"): \(depthLabel)").font(.caption)
                     HStack {
                         Text("Nearer").font(.caption2).foregroundStyle(.secondary)
-                        Slider(value: $depth, in: -1 ... 1, step: 0.05)
+                        Slider(value: depthBinding, in: -1 ... 1, step: 0.05)
                         Text("Farther").font(.caption2).foregroundStyle(.secondary)
                     }
                     Button("Reset Depth") { depth = 0 }
@@ -179,6 +192,17 @@ struct StereoSubtitleSettings: View {
                 }
             }
         }
+    }
+
+    private var isDisc: Bool { subtitles?.selected?.isBitmap == true }
+
+    private var depth: Double {
+        get { isDisc ? discDepth : textDepth }
+        nonmutating set { if isDisc { discDepth = newValue } else { textDepth = newValue } }
+    }
+
+    private var depthBinding: Binding<Double> {
+        Binding(get: { depth }, set: { depth = $0 })
     }
 
     private var depthLabel: String {
@@ -201,15 +225,19 @@ struct StereoSubtitleFeeder: View {
     @Binding var frame: RAVEStereoSubtitleFrame?
 
     @AppStorage(SubtitleHDRBrightness.key) private var hdrWhiteNits = SubtitleHDRBrightness.defaultNits
-    @AppStorage(SubtitleStereoDepth.key) private var depth = 0.0
+    @AppStorage(SubtitleStereoDepth.key) private var textDepth = 0.0
+    @AppStorage(SubtitleStereoDepth.discKey) private var discDepth = 0.0
     @State private var version = 0
+
+    private var depth: Double { controller.selected?.isBitmap == true ? discDepth : textDepth }
 
     var body: some View {
         RAVESubtitleCues(track: controller.cues, time: { controller.cueTime(forFilmTime: filmTime()) }) { showing in
             Color.clear
                 .onChange(of: showing, initial: true) { _, cues in publish(cues) }
                 .onChange(of: hdrWhiteNits) { publish(showing) }
-                .onChange(of: depth) { publish(showing) }
+                .onChange(of: textDepth) { publish(showing) }
+                .onChange(of: discDepth) { publish(showing) }
                 .onChange(of: controller.selected) { publish(showing) }
         }
         .frame(width: 0, height: 0)
@@ -231,15 +259,22 @@ struct StereoSubtitleFeeder: View {
     }
 
     /// The flat players' styling at the flat players' proportions: text a
-    /// twentieth of the picture's height, one image per edge.
+    /// twentieth of the picture's height, one image per edge. A bitmap cue
+    /// (a disc's PGS) goes where the disc put it, at its own size.
     @MainActor
     static func render(_ cues: [RAVESubtitleCue], eyeSize: CGSize) -> [RAVEStereoSubtitle] {
+        let bitmaps = cues.compactMap { cue -> RAVEStereoSubtitle? in
+            guard let image = cue.image, let cgImage = image.makeImage() else { return nil }
+            return RAVEStereoSubtitle(image: cgImage, placement: cue.placement == .top ? .top : .bottom,
+                                      referenceEyeHeight: eyeSize.height, frame: image.frame)
+        }
+        let text = cues.filter { $0.image == nil }
         let fontSize = max(eyeSize.height * 0.05, 14)
         let groups: [(RAVEStereoSubtitle.Placement, [RAVESubtitleCue])] = [
-            (.top, cues.filter { $0.placement == .top }),
-            (.bottom, cues.filter { $0.placement == .bottom })
+            (.top, text.filter { $0.placement == .top }),
+            (.bottom, text.filter { $0.placement == .bottom })
         ]
-        return groups.compactMap { placement, group in
+        return bitmaps + groups.compactMap { placement, group in
             guard !group.isEmpty else { return nil }
             let renderer = ImageRenderer(content: RAVESubtitleText(cues: group, fontSize: fontSize))
             renderer.proposedSize = ProposedViewSize(width: eyeSize.width, height: nil)

@@ -35,7 +35,9 @@ actor LocalMediaSource {
     ]
 
     private static let videoExtensions: Set<String> = [
-        "mp4", "m4v", "mov", "mkv", "webm", "avi", "wmv", "flv", "3gp"
+        "mp4", "m4v", "mov", "mkv", "webm", "avi", "wmv", "flv", "3gp",
+        // Blu-ray disc images: played by the film player (LocalDiscHandoffView).
+        "iso"
     ]
 
     private static let imageMIMETypes: Set<String> = [

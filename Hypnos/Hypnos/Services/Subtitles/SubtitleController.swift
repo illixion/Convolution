@@ -10,7 +10,8 @@
  A track comes from a `SubtitleSource`, so the controller doesn't know which
  server it talks to. Jellyfin converts every text stream it has (sidecar
  SRT/ASS, embedded tracks) to WebVTT; image subtitles are listed but can't
- be selected.
+ be selected, except a disc's own (PGS), which the film player reads from
+ the disc itself (`SubtitleSource.disc`, `DiscSubtitles`).
 
  Which track starts is `SubtitlePreference`: the language last picked, or
  none if the user last turned subtitles off. Until they have chosen either
@@ -29,6 +30,9 @@ struct SubtitleSource: Sendable {
     var id: String
     var tracks: @Sendable () async throws -> [LibrarySubtitleTrack]
     var data: @Sendable (LibrarySubtitleTrack) async throws -> Data
+    /// Cues that grow while the film plays, for bitmap tracks
+    /// (`LibrarySubtitleTrack.isBitmap`): each element replaces the last.
+    var live: (@Sendable (LibrarySubtitleTrack) -> AsyncStream<RAVESubtitleTrack>)? = nil
 
     /// A Jellyfin item's streams, or nil when no server is configured.
     @MainActor
@@ -38,6 +42,35 @@ struct SubtitleSource: Sendable {
             id: "jellyfin:\(itemId)",
             tracks: { try await library.subtitleTracks(itemId: itemId) },
             data: { try await library.subtitleData(itemId: itemId, track: $0) }
+        )
+    }
+
+    /// A Blu-ray disc played from a Jellyfin item: the disc's own PGS tracks,
+    /// read with the picture, then any text tracks Jellyfin has for it
+    /// (sidecar files; it lists the disc's own streams as images).
+    @MainActor
+    static func disc(_ subtitles: DiscSubtitles, itemId: String, includeServer: Bool = true) -> SubtitleSource {
+        let server = includeServer ? jellyfin(itemId: itemId) : nil
+        var seen: [String: Int] = [:]
+        let discTracks = subtitles.tracks.map { track in
+            let key = track.language ?? ""
+            seen[key, default: 0] += 1
+            return LibrarySubtitleTrack(id: Int(track.pid), sourceId: "disc", language: track.language,
+                                        name: seen[key]! > 1 ? "Track \(seen[key]!)" : nil,
+                                        isText: false, isBitmap: true)
+        }
+        return SubtitleSource(
+            // Per opening: each one reads the disc afresh.
+            id: "disc:\(itemId):\(ObjectIdentifier(subtitles).hashValue)",
+            tracks: {
+                let text = (try? await server?.tracks()) ?? []
+                return discTracks + text.filter(\.isText)
+            },
+            data: { track in
+                guard let server else { throw URLError(.resourceUnavailable) }
+                return try await server.data(track)
+            },
+            live: { track in subtitles.cues(pid: UInt16(clamping: track.id)) }
         )
     }
 
@@ -97,7 +130,7 @@ enum SubtitlePreference {
     }
 
     static func initialTrack(in tracks: [LibrarySubtitleTrack]) -> LibrarySubtitleTrack? {
-        let text = tracks.filter(\.isText)
+        let text = tracks.filter(\.isPlayable)
         switch UserDefaults.standard.string(forKey: key) {
         case "off":
             return nil
@@ -147,7 +180,7 @@ final class SubtitleController {
                 if let initial = SubtitlePreference.initialTrack(in: tracks) {
                     self.fetch(initial)
                 }
-                AppLogger.subtitles.info("\(tracks.count, privacy: .public) subtitle tracks, \(tracks.filter(\.isText).count, privacy: .public) text")
+                AppLogger.subtitles.info("\(tracks.count, privacy: .public) subtitle tracks, \(tracks.filter(\.isPlayable).count, privacy: .public) playable")
             } catch {
                 guard !Task.isCancelled else { return }
                 AppLogger.subtitles.error("Subtitle tracks failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
@@ -183,10 +216,22 @@ final class SubtitleController {
     }
 
     private func fetch(_ track: LibrarySubtitleTrack) {
-        guard track.isText, let source else { return }
+        guard track.isPlayable, let source else { return }
         fetchTask?.cancel()
         selected = track
         error = nil
+        if track.isBitmap, let live = source.live {
+            cues = nil
+            isFetching = true
+            fetchTask = Task { [weak self] in
+                for await cues in live(track) {
+                    guard let self, !Task.isCancelled, self.selected == track else { return }
+                    self.cues = cues
+                    self.isFetching = false
+                }
+            }
+            return
+        }
         if let cached = parsed[track.id] {
             cues = cached
             isFetching = false

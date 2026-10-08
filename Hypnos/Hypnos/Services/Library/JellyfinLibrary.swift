@@ -554,6 +554,13 @@ actor JellyfinLibrary: MediaServerLibrary {
     }
 
     func playbackRoute(for item: LibraryItem) async throws -> PlaybackRoute {
+        // A disc plays in the film player whether or not the plugin has object
+        // audio for it: its picture is decoded on the device either way, and
+        // without the plugin its sound is the disc's own 5.1 (`DiscAudioSource`).
+        // Jellyfin's own route for a disc image is a slow 2D remux.
+        if item.isBlurayDisc {
+            return .atmosFilmPlayer
+        }
         if await hasAtmosObjects(itemId: item.id) {
             return .atmosFilmPlayer
         }

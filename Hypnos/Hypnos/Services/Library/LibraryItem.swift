@@ -214,6 +214,11 @@ struct LibrarySubtitleTrack: Identifiable, Hashable, Sendable {
     var isForced: Bool = false
     var isHearingImpaired: Bool = false
     var isText: Bool = true
+    /// An image track (a disc's PGS) that its source can draw.
+    var isBitmap: Bool = false
+
+    /// Whether a player can show it.
+    var isPlayable: Bool { isText || isBitmap }
 
     /// "English", "English (Forced)", "English SDH – Commentary".
     var title: String {

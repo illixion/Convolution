@@ -139,7 +139,10 @@ struct HypnosApp: App {
 
         // Individual video window - pop-out video player
         WindowGroup(id: "video-detail", for: VideoWindowValue.self) { $windowValue in
-            if let windowValue = windowValue {
+            if let windowValue, windowValue.video.isLocalDisc {
+                LocalDiscHandoffView(video: windowValue.video)
+                    .environment(appModel)
+            } else if let windowValue = windowValue {
                 VideoWindowView(windowValue: windowValue, appModel: appModel)
                     .environment(appModel)
                     .captureOpenWindowAction()
@@ -335,7 +338,10 @@ struct HypnosApp: App {
         .defaultSize(width: 1000, height: 760)
 
         WindowGroup(id: "video-detail", for: GalleryVideo.self) { $video in
-            if let video {
+            if let video, video.isLocalDisc {
+                LocalDiscHandoffView(video: video)
+                    .environment(appModel)
+            } else if let video {
                 MacVideoPlayerWindow(video: video)
                     .environment(appModel)
             }

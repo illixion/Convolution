@@ -156,7 +156,7 @@ struct FilmPlayerView: View {
                 await reportFilmPlaybackProgress()
             }
             .task(id: session.loadedItem?.id) {
-                await skipper.load(itemId: session.loadedItem?.id)
+                await skipper.load(itemId: FilmSession.isServerItem(session.loadedItem?.id) ? session.loadedItem?.id : nil)
             }
     }
 
@@ -171,7 +171,8 @@ struct FilmPlayerView: View {
     }
 
     private func reportFilmPlaybackProgress() async {
-        guard let itemId = session.loadedItem?.id, let library = LibraryService.current() else { return }
+        guard let itemId = session.loadedItem?.id, FilmSession.isServerItem(itemId),
+              let library = LibraryService.current() else { return }
         var started = false
         var lastPosition: Double = 0
         defer {
@@ -724,7 +725,7 @@ struct FilmAdjustmentsView: View {
             Section("Subtitles") {
                 SubtitleDelayControl(controller: session.subtitles)
                 #if os(visionOS)
-                if session.stereoEnabled { StereoSubtitleSettings() }
+                if session.stereoEnabled { StereoSubtitleSettings(subtitles: session.subtitles) }
                 #endif
             }
         }

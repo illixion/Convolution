@@ -27,6 +27,11 @@ enum FilmDebugEndpoints {
                    + "isn't ready.") { _ in
                 reply()
             },
+            .command("filmDiscAudio", "For a Blu-ray disc: switch from the plugin's object audio to the disc's own AC-3 "
+                     + "5.1, decoded on the device, keeping the position. Returns the film state after the switch.") { _ in
+                _ = await FilmSession.shared.switchToDiscAudio()
+                return reply()
+            },
         ])
     }
 

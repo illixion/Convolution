@@ -20,6 +20,9 @@
 
  Decoding runs on its own serial queue, at most `queuedFrames` ahead of the
  player taking them; the player keeps under a second queued in its layer.
+
+ The disc's own subtitles (PGS bitmaps) are read from the same bytes as the
+ base view and collected in `subtitles` (`DiscSubtitles`).
  */
 
 import CoreMedia
@@ -36,9 +39,13 @@ final class MVCPictureSource: FilmPictureSource, @unchecked Sendable {
     /// Film time of playlist time 0.
     let originSeconds: Double
     let isStereo: Bool
+    /// The disc's PGS subtitle tracks, collected as the picture is read.
+    let subtitles: DiscSubtitles
 
     private let playlist: BlurayPlaylist
     private let disc: BlurayDisc
+    private let url: URL
+    private let headers: [String: String]
     private let queue = DispatchQueue(label: "com.illixion.hypnos.mvc-decode", qos: .userInitiated)
     private let lock = NSLock()
     private var current: FrameChannel?
@@ -89,13 +96,35 @@ final class MVCPictureSource: FilmPictureSource, @unchecked Sendable {
     }
 
     private init(url: URL, headers: [String: String]) throws {
-        disc = BlurayDisc(fileSystem: try UDFFileSystem(image: HTTPByteSource(url: url, headers: headers)))
+        self.url = url
+        self.headers = headers
+        disc = try Self.openDisc(url: url, headers: headers)
         guard let (name, playlist) = try disc.mainPlaylist() else { throw FormatError("no playlist on the disc") }
         self.playlist = playlist
         isStereo = playlist.isStereo
         originSeconds = Double(playlist.items.first?.inPTS ?? 0) / 90_000
         durationSeconds = originSeconds + playlist.duration
+        subtitles = DiscSubtitles(playlist: playlist, originSeconds: originSeconds)
         summary = "Blu-ray \(isStereo ? "MVC 3D" : "H.264"), playlist \(name), decoded on device"
+    }
+
+    /// A disc image over HTTP (Jellyfin's static stream), or on the device:
+    /// an image file, or a folder holding BDMV. Each call reads the disc's
+    /// file system afresh, so readers on other threads get their own.
+    static func openDisc(url: URL, headers: [String: String] = [:]) throws -> BlurayDisc {
+        guard url.isFileURL else {
+            return BlurayDisc(fileSystem: try UDFFileSystem(image: HTTPByteSource(url: url, headers: headers)))
+        }
+        if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+            return BlurayDisc(fileSystem: DirectoryFileSystem(root: url))
+        }
+        return BlurayDisc(fileSystem: try UDFFileSystem(image: FileByteSource(url: url)))
+    }
+
+    /// The feature playlist's audio, on its own reader of the same disc.
+    func audioSource(itemID: String) throws -> DiscAudioSource {
+        try DiscAudioSource(itemID: itemID, disc: Self.openDisc(url: url, headers: headers),
+                            playlist: playlist, originSeconds: originSeconds)
     }
 
     func frames(from filmTime: Double, stereo: Bool) -> AsyncThrowingStream<FilmPictureFrame, Error> {
@@ -126,6 +155,11 @@ final class MVCPictureSource: FilmPictureSource, @unchecked Sendable {
                 let decoder = try self.decoder ?? PlaylistDecoder(disc: disc, playlist: playlist, threads: Self.decodeThreads)
                 self.decoder = decoder
                 enter("seeking", run: run)
+                // Subtitles come out of the same reads as the picture.
+                decoder.sidePIDs = subtitles.pids
+                let subtitles = self.subtitles
+                decoder.onSidePackets = { subtitles.feed($0) }
+                subtitles.beginRun(at: Int64(((filmTime - originSeconds) * 90_000).rounded()))
                 try decoder.seek(to: filmTime - originSeconds)
                 enter("decoding", run: run)
                 let origin = Int64((originSeconds * 90_000).rounded())
