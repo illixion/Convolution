@@ -23,6 +23,9 @@ android {
     packaging { jniLibs { pickFirsts += ['**/libc++_shared.so', '**/libopenxr_loader.so'] } }
 }
 dependencies {
+    implementation platform('com.meta.metavrx:metavrx-bom:1.2026.0.0')
+    implementation 'com.meta.metavrx.layout:layout-compose-compat'
+    implementation 'com.meta.metavrx.layout:layout-window-compose-compat'
     compileOnly 'com.meta.metavr:metavr-os-jsdk:207'
     implementation 'com.meta.metavrx.util:util:1.0.0'
     implementation 'androidx.activity:activity-compose:1.9.2'

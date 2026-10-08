@@ -6,8 +6,6 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -20,9 +18,15 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import metavrx.layout.compose.SpatialScene
+import metavrx.layout.compose.LocalSpatialSupported
+import metavrx.layout.window.compose.SpatialWindow
+import metavrx.layout.window.compose.layout.WindowModifier
+import metavrx.layout.window.compose.layout.size
+import metavrx.layout.window.compose.state.WindowFallback
 
 /** Authentication/catalog state survives switching presentations, but not process death. */
-private object LibrarySession {
+internal object LibrarySession {
     var server = ""
     var authorization = ""
     var userID = ""
@@ -33,6 +37,7 @@ class MainActivity : ComponentActivity() {
     private var status by mutableStateOf("")
     private var busy by mutableStateOf(false)
     private var selected by mutableStateOf<JSONObject?>(null)
+    private var qualityTarget by mutableStateOf<JSONObject?>(null)
     private var subtitles by mutableStateOf<JSONObject?>(null)
     private var fixture: JSONObject? = null
     override fun onCreate(state: Bundle?) {
@@ -45,36 +50,35 @@ class MainActivity : ComponentActivity() {
                 try { fixture=JSONObject(file.readText()); file.delete() } catch (_: Exception) { file.delete(); status="Invalid developer fixture" }
             }
         }
-        setContent { MaterialTheme { Surface(Modifier.fillMaxSize()) {
-            var server by remember { mutableStateOf(LibrarySession.server) }
-            var username by remember { mutableStateOf("") }; var password by remember { mutableStateOf("") }
-            Column(Modifier.fillMaxSize().padding(24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-                Text("Convolution",style=MaterialTheme.typography.headlineLarge)
-                if(LibrarySession.catalog.isEmpty()) {
-                    OutlinedTextField(server,{server=it},label={Text("Jellyfin server URL")},modifier=Modifier.fillMaxWidth())
-                    OutlinedTextField(username,{username=it},label={Text("Username")},modifier=Modifier.fillMaxWidth())
-                    OutlinedTextField(password,{password=it},label={Text("Password")},visualTransformation=PasswordVisualTransformation(),modifier=Modifier.fillMaxWidth())
-                    Button(enabled=!busy,onClick={val secret=password; password=""; signIn(server,username,secret)}) {Text("Sign in")}
-                } else {
-                    Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-                        PlaybackSession.current()?.let { session -> Button(onClick={openExisting()}) { Text("Resume ${session.title()}") } }
-                        OutlinedButton(onClick={PlaybackSession.current()?.close(); LibrarySession.catalog=emptyList(); LibrarySession.authorization=""; LibrarySession.userID=""}) {Text("Sign out")}
-                    }
-                    LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                        items(LibrarySession.catalog,key={it.getString("id")}) { item ->
-                            OutlinedButton(enabled=!busy,onClick={selected=item},modifier=Modifier.fillMaxWidth()) { Text(item.optString("name")) }
-                        }
-                    }
+        setContent {
+          var settingsOpen by remember { mutableStateOf(false) }
+          var server by remember { mutableStateOf(LibrarySession.server) }
+          var username by remember { mutableStateOf("") }; var password by remember { mutableStateOf("") }
+          SpatialScene(theme = { content -> ConvolutionTheme(content) }) {
+            val layoutSupported = LocalSpatialSupported.current
+            LaunchedEffect(layoutSupported) { Log.i("ConvolutionLayout", "spatial_windows_supported=$layoutSupported") }
+            if (LibrarySession.catalog.isEmpty()) {
+                SignInPanel(server, { server = it }, username, { username = it }, password, { password = it }, busy, status) {
+                    val secret = password; password = ""; signIn(server, username, secret)
                 }
-                if(busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                Text(status)
-                Text("Play in a window alongside your other apps, or switch to a movable screen in spatial view.")
+            } else {
+                LibraryBrowser(
+                    items = LibrarySession.catalog, selected = selected, status = status, busy = busy,
+                    onSelect = { selected = it }, onBack = { selected = null }, onPlay = { item, quality ->
+                        if (quality == "choose") qualityTarget = item else prepare(item, quality)
+                    },
+                    onSignOut = { signOut(); settingsOpen = false },
+                    onOpenSettings = { settingsOpen = true },
+                    onOpenPlayer = ::openExisting,
+                )
             }
-            selected?.let { item -> AlertDialog(onDismissRequest={selected=null},title={Text("Playback quality")},text={Column {
-                listOf("Auto" to "auto","Original" to "original","1080p · 10 Mbps" to "mbps10","720p · 4 Mbps" to "mbps4").forEach { (label,quality) ->
-                    TextButton(onClick={selected=null; prepare(item,quality)}) {Text(label)}
-                }
-            }},confirmButton={},dismissButton={TextButton(onClick={selected=null}) {Text("Cancel")}}) }
+            if (settingsOpen) SpatialWindow(
+                key = "convolution-settings",
+                modifier = WindowModifier.size(440.dp, 560.dp),
+                fallbackStrategy = WindowFallback.Inline,
+            ) {
+                SpatialSettingsPanel(onClose = { settingsOpen = false }, onSignOut = { signOut(); settingsOpen = false }, spatialWindowsSupported = layoutSupported)
+            }
             subtitles?.let { plan ->
                 val tracks=plan.optJSONArray("subtitles").objects().filter {it.optBoolean("playable")}
                 val preference=getPreferences(0).getString("subtitleLanguage","")
@@ -84,8 +88,22 @@ class MainActivity : ComponentActivity() {
                     tracks.forEach { track -> TextButton(onClick={launchPlan(plan,track.optInt("index"))}) {Text(track.optString("name")+if(track==preferred) " · Preferred" else "")} }
                 }},confirmButton={},dismissButton={TextButton(onClick={subtitles=null}) {Text("Cancel")}})
             }
-        } } }
+            qualityTarget?.let { item -> AlertDialog(
+                onDismissRequest = { qualityTarget = null }, title = { Text("Playback quality") },
+                text = { Column {
+                    listOf("Auto" to "auto", "Original" to "original", "1080p · 10 Mbps" to "mbps10", "720p · 4 Mbps" to "mbps4").forEach { (label, quality) ->
+                        TextButton(onClick = { qualityTarget = null; prepare(item, quality) }) { Text(label) }
+                    }
+                } }, confirmButton = {}, dismissButton = { TextButton(onClick = { qualityTarget = null }) { Text("Cancel") } }
+            ) }
+          }
+        }
         fixture?.let { signIn(it.getString("server"),it.getString("username"),it.getString("password")) }
+    }
+    private fun signOut() {
+        PlaybackSession.current()?.close()
+        selected = null; qualityTarget = null
+        LibrarySession.catalog = emptyList(); LibrarySession.authorization = ""; LibrarySession.userID = ""
     }
     private fun command(operation: String)=JSONObject().put("operation",operation).put("server",LibrarySession.server).put("authorization",LibrarySession.authorization).put("userID",LibrarySession.userID)
     private fun signIn(server: String,name: String,secret: String) {

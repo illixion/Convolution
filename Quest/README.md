@@ -10,8 +10,19 @@ not the complete Quest port.
   stall rules, plus authenticated Jellyfin HTTP request construction. RAVEUI
   re-exports the models so Apple players retain their existing API.
 - `RAVESDK/RAVEQuestCore`: dynamic Swift library exposing a UTF-8 JSON C ABI.
-  Login, a first page of movies/episodes, playback planning, subtitle fetching,
-  and watch progress run on an Android worker executor through JNI.
+  Login, a first page of movies/episodes with title metadata, playback planning,
+  subtitle fetching, and watch progress run on an Android worker executor
+  through JNI.
+- The Compose library uses a dark, high-contrast theme, a featured title and
+  horizontal Jellyfin artwork shelves, with a detail page for resume/play and
+  stream-quality choices. Artwork is requested from Jellyfin using the signed-in
+  session. A compact dock shows the retained title and playhead while browsing;
+  opening its Player action reattaches the decoder surface before playback can
+  resume. Library browsing is currently limited to the first 100 titles.
+- The library activity uses Meta VR Layout SDK's `SpatialScene`. Settings are a
+  separate opaque secondary window when supported, with the SDK's inline
+  fallback on older or unsupported systems. The Settings panel is an initial
+  layout spike; its rows do not yet edit playback preferences.
 - Compose owns the library and shared transport UI. An app-scoped Java
   `PlaybackSession` owns Media3 / MediaCodec, soundtrack audio, subtitles and
   watch reports. Activities borrow surfaces; switching presentation preserves
@@ -143,6 +154,13 @@ some softness. The user confirmed picture dragging, caption backgrounds,
 normal-sized controls below the picture, and Window → Spatial mode changes
 preserving the paused playhead. Telemetry also records video grab transitions.
 The retained native presentation was not visually rechecked after this refactor.
+
+The new Quest library and secondary-window code build successfully. On Quest 3
+OS SDK 207, the Layout SDK reports spatial-window support and the disposable
+Jellyfin login returns 15 catalog entries. The user confirmed the library layout,
+readable text after the theme foreground fix, and Settings appearing as a
+separate movable Home window. Playback dock pause and reopen behavior is awaiting
+the final headset check.
 
 Still outside this slice: Stash browsing, full Jellyfin home / pagination /
 Up Next / skip segments, offline downloads, object audio / Opus rendering, MVC
