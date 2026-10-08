@@ -6,6 +6,16 @@ repos' audio updates through Hypnos's `22ee5c8` merge and RAVESDK's `6f41b8e`
 merge. This review is based on source inspection and the earlier recorded
 build/device results; it does not claim fresh headset validation.
 
+Integration handoff (2026-10-08): this roadmap and the Quest implementation are
+merged into primary Hypnos and RAVESDK `main`, retaining subsequent thumbnail
+and depth changes from those repos. Continue from current primary branches.
+Repo `CLAUDE.md` files and Hypnos's `.claude/rules/hypnos-quest-port.md` point
+here. The review findings below remain open; integration does not fix them.
+The combined tree passed the Android Swift core and debug APK builds plus
+visionOS (build-and-sign without deployment), iOS Simulator, tvOS and macOS
+builds. Documentation links and whitespace checks passed. No new headset
+interaction checks or test suites were run for this integration.
+
 ## Assessment
 
 The hybrid architecture is worth continuing. Compose/VR Layout SDK owns Home
@@ -238,7 +248,8 @@ Track first-frame latency, AV drift, dropped frames/channels, memory, thermal
 behavior and surface reattachment. Preserve privacy labels in Apple DebugTrace
 logs and equivalent structured/redacted Android diagnostics.
 
-Work in the existing `apple-worktree`, commit package changes first, land their
-branch refs, then commit app adapters. Primary-repo updates must be deliberately
+Use `apple-worktree` for isolated implementation from current primary branches,
+commit package changes first, land their branch refs, then commit app adapters.
+Primary-repo updates must be deliberately
 synced into the worktree before affected implementation. This document is the
 forward plan; its findings remain open until code fixes and validation are recorded.

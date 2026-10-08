@@ -87,8 +87,9 @@ an arm64-only SDK descriptor to avoid SwiftPM 6.3.3 selecting armv7 resources
 from the multi-architecture SDK. Generated SDK files, libraries and APKs are
 ignored by Git.
 
-This app branch requires RAVESDK commit `36df41b` (available on
-`wt/Hypnos-quest-player` in the package repository).
+The Quest implementation is integrated into Hypnos and RAVESDK `main` as of
+2026-10-08. Build against the matching sibling RAVESDK checkout containing
+`RAVEMediaCore` and `RAVEQuestCore`; the original work branches are historical.
 
 ## Run on USB
 

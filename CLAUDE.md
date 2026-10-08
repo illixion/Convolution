@@ -19,6 +19,34 @@ audio".
 
 Always create a git commit at the end of a task, without waiting for the user to ask. Group related changes into a single commit; keep the commit message focused on the "why".
 
+## Quest / Horizon OS handoff
+
+The development Android port lives in `Quest/` and is part of this repository,
+not a separate app/backend fork. Read `Quest/README.md` for build/deploy commands,
+`docs/plans/quest-parity-roadmap.md` for the architecture review and ordered work,
+and `.claude/rules/hypnos-quest-port.md` before modifying the port.
+
+Compose/VR Layout SDK owns Home windows; Spatial SDK owns the optional movable
+passthrough player. One `PlaybackSession` owns Media3/MediaCodec and lends
+surfaces to presentations. Portable Swift is in RAVESDK's `RAVEMediaCore` and
+`RAVEQuestCore`; important backend behavior must converge there, with Android
+and Apple framework bindings kept outside it. Never reset the playhead when
+changing presentation, quality, decoder or server stream identity.
+
+The Quest implementation and reviewed roadmap are merged into the primary
+Hypnos and RAVESDK repos as of 2026-10-08. Start new work from their current
+`main` branches; the older `quest-player` / `wt/Hypnos-quest-player` branches
+are historical integration work. Use `apple-worktree` for any new worktree.
+
+**Next work is roadmap steps 1 and 2, not object audio:** fix unscoped offline
+ownership/sync, chapter skip boundaries and stream/job reporting identity,
+then converge the duplicated Jellyfin DTO/planner code and introduce typed
+Android state. These are documented open findings, not fixed by the merge.
+Quest 3 previously confirmed Home/spatial picture, captions, geometry, pause
+handoff and the browsing dock. The newer paging/watch/download features have
+build/install evidence but still need headset interaction checks. Quest 2,
+object audio, MVC discs and fake-3D are not validated implementations.
+
 ## Build Commands
 
 Run this command to test your changes:
