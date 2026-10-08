@@ -429,7 +429,7 @@ struct FilmPlayerView: View {
         // The flat picture sat hidden while the stereo one showed; re-prime it
         // at the position the toggle was pressed at, so leaving 3D lands
         // exactly where 3D was, whatever the hidden renderer did meanwhile.
-        guard keepingPosition, player.video.index != nil else { return }
+        guard keepingPosition, player.video.isLoaded else { return }
         AppLogger.filmPlayer.info("Leaving 3D at \(position, format: .fixed(precision: 2))s")
         player.seek(to: position)
     }

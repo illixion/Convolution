@@ -120,6 +120,9 @@ struct LibraryItem: Identifiable, Hashable, Sendable {
     var childItemIds: [String] = []
     /// How a 3D film packs its eyes; nil for a flat one.
     var stereoFormat: StereoscopicFormat?
+    /// A Blu-ray disc image or folder, which the film player decodes itself
+    /// (see `MVCPictureSource`): Jellyfin can only remux it, slowly.
+    var isBlurayDisc = false
 
     func image(_ kind: LibraryImageKind) -> LibraryImageRef? {
         images.first { $0.kind == kind }

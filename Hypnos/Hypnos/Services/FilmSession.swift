@@ -194,21 +194,43 @@ final class FilmSession {
     }
 
     /// Loads `item` into the player. True when its picture is ready to play.
-    func load(_ item: FilmLibraryItem) async -> Bool {
+    /// - Parameter isBlurayDisc: the item is a Blu-ray disc image or folder:
+    ///   its picture is read from the raw disc and decoded on the device
+    ///   (`MVCPictureSource`), the plugin's video segments being unavailable
+    ///   for a disc; the plugin still supplies the audio.
+    func load(_ item: FilmLibraryItem, isBlurayDisc: Bool = false) async -> Bool {
         guard let serverURL, let token = effectiveToken, !isLoading else { return false }
         isLoading = true
         error = nil
         defer { isLoading = false }
         stereoFormatTask?.cancel()
         stereoFormat = nil
-        await player.load(FilmServerClient(baseURL: serverURL, token: token, itemID: item.id))
-        guard player.video.index != nil else {
+        var disc: MVCPictureSource?
+        if isBlurayDisc {
+            let url = serverURL.appending(path: "Videos/\(item.id)/stream").appending(queryItems: [.init(name: "static", value: "true")])
+            do {
+                disc = try await MVCPictureSource.open(url: url, headers: ["X-Emby-Token": token])
+            } catch {
+                self.error = "The disc couldn't be read: \(error.localizedDescription)"
+                AppLogger.filmPlayer.error("Disc open failed: \(error.localizedDescription)")
+                subtitles.load(nil)
+                return false
+            }
+        }
+        await player.load(FilmServerClient(baseURL: serverURL, token: token, itemID: item.id), picture: disc)
+        guard player.video.isLoaded else {
             error = player.video.status
             subtitles.load(nil)
             return false
         }
         loadedItem = item
         subtitles.load(.jellyfin(itemId: item.id))
+        if let disc {
+            // The eyes come top and bottom out of MVCPictureSource's stereo frames.
+            stereoFormat = disc.isStereo ? .overUnder : nil
+            AppLogger.filmPlayer.info("Loaded \(item.name): \(disc.summary, privacy: .public); audio \(self.player.audioStatus, privacy: .public)")
+            return true
+        }
         stereoFormatTask = Task { [weak self] in
             let format = try? await LibraryService.current()?.item(id: item.id).stereoFormat
             guard !Task.isCancelled, let self, self.loadedItem?.id == item.id else { return }
@@ -222,7 +244,7 @@ final class FilmSession {
     /// through `search` first — the Library detail page knows exactly which
     /// item to play. `name`/`productionYear` are for display only (the
     /// tuning section's title, the log line above).
-    func load(itemId: String, name: String, productionYear: Int?) async -> Bool {
-        await load(FilmLibraryItem(id: itemId, name: name, productionYear: productionYear))
+    func load(itemId: String, name: String, productionYear: Int?, isBlurayDisc: Bool = false) async -> Bool {
+        await load(FilmLibraryItem(id: itemId, name: name, productionYear: productionYear), isBlurayDisc: isBlurayDisc)
     }
 }

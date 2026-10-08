@@ -20,6 +20,7 @@
 		AA11000000000000000000A3 /* RAVEFilm in Frameworks */ = {isa = PBXBuildFile; productRef = AA11000000000000000000A2 /* RAVEFilm */; };
 		AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */ = {isa = PBXBuildFile; productRef = AA12000000000000000000A2 /* RAVEDeviceSetup */; };
 		967834AC244B65FE72E57FB4 /* DebugTrace in Frameworks */ = {isa = PBXBuildFile; productRef = 7ECF8E7CC7BA800706D085EF /* DebugTrace */; };
+		C3D000000000000000000B01 /* MVC3D in Frameworks */ = {isa = PBXBuildFile; productRef = C3D000000000000000000D01 /* MVC3D */; };
 		F50CD95ACADCD0B6D7944C97 /* DebugTraceServer in Frameworks */ = {isa = PBXBuildFile; productRef = 35FAAC11FBCE4C04FDB901C5 /* DebugTraceServer */; };
 		D7A1E0C0DEB06A11C0FFEE01 /* DebugTraceUI in Frameworks */ = {isa = PBXBuildFile; productRef = D7A1E0C0DEB06A11C0FFEE02 /* DebugTraceUI */; };
 /* End PBXBuildFile section */
@@ -74,6 +75,7 @@
 				AA11000000000000000000A3 /* RAVEFilm in Frameworks */,
 				AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */,
 				967834AC244B65FE72E57FB4 /* DebugTrace in Frameworks */,
+				C3D000000000000000000B01 /* MVC3D in Frameworks */,
 				F50CD95ACADCD0B6D7944C97 /* DebugTraceServer in Frameworks */,
 				D7A1E0C0DEB06A11C0FFEE01 /* DebugTraceUI in Frameworks */,
 			);
@@ -168,6 +170,7 @@
 				AA11000000000000000000A2 /* RAVEFilm */,
 				AA12000000000000000000A2 /* RAVEDeviceSetup */,
 				7ECF8E7CC7BA800706D085EF /* DebugTrace */,
+				C3D000000000000000000D01 /* MVC3D */,
 				35FAAC11FBCE4C04FDB901C5 /* DebugTraceServer */,
 				D7A1E0C0DEB06A11C0FFEE02 /* DebugTraceUI */,
 			);
@@ -232,6 +235,7 @@
 				AA05000000000000000000B1 /* XCLocalSwiftPackageReference "../../RAVEEngine" */,
 				AA10000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/NextcloudMedia" */,
 				FF53DB263485AD6DE8BF39A4 /* XCLocalSwiftPackageReference "../../DebugTrace" */,
+				C3D000000000000000000A01 /* XCLocalSwiftPackageReference "../../mvc3d" */,
 			);
 			productRefGroup = 0778651B2D811C5500BCF113 /* Products */;
 			projectDirPath = "";
@@ -592,6 +596,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../../DebugTrace;
 		};
+		C3D000000000000000000A01 /* XCLocalSwiftPackageReference "../../mvc3d" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../mvc3d;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -643,6 +651,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AA01000000000000000000A1 /* XCLocalSwiftPackageReference "../../RAVESDK" */;
 			productName = RAVEDeviceSetup;
+		};
+		C3D000000000000000000D01 /* MVC3D */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C3D000000000000000000A01 /* XCLocalSwiftPackageReference "../../mvc3d" */;
+			productName = MVC3D;
 		};
 		7ECF8E7CC7BA800706D085EF /* DebugTrace */ = {
 			isa = XCSwiftPackageProductDependency;

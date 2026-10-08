@@ -113,7 +113,8 @@ final class LibraryPlayback {
         let resume = fromStart ? nil : item.userData.resumeSeconds
         switch try await library.playbackRoute(for: item) {
         case .atmosFilmPlayer:
-            _ = await FilmSession.shared.load(itemId: item.id, name: item.title, productionYear: item.year)
+            _ = await FilmSession.shared.load(itemId: item.id, name: item.title, productionYear: item.year,
+                                              isBlurayDisc: item.isBlurayDisc)
             if let resume { FilmSession.shared.player.seek(to: resume) }
             FilmSession.shared.player.play()
             #if os(tvOS)
