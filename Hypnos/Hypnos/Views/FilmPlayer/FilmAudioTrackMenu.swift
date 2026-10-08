@@ -30,3 +30,39 @@ struct FilmAudioTrackMenu: View {
         .accessibilityIdentifier("player.audio")
     }
 }
+
+/// Lossless or compressed object audio (`ObjectAudioQuality`): Auto picks
+/// compressed on cellular. The choice is remembered and applies at once, the
+/// sound reloading at the current position like a track change.
+struct ObjectAudioQualityMenu: View {
+    let player: FilmPlayer
+    var onOpenChanged: (Bool) -> Void = { _ in }
+    @AppStorage(ObjectAudioQuality.defaultsKey) private var stored = ObjectAudioQuality.auto.rawValue
+
+    private var selected: ObjectAudioQuality { ObjectAudioQuality(rawValue: stored) ?? .auto }
+
+    var body: some View {
+        PlayerChoiceMenu(title: "Audio Quality", systemImage: "waveform.badge.magnifyingglass",
+                         help: "Object audio: \(selected.title)", onOpenChanged: onOpenChanged) { close in
+            ForEach(ObjectAudioQuality.allCases, id: \.self) { quality in
+                Button {
+                    close()
+                    stored = quality.rawValue
+                    Task { await player.setAudioEncoding(quality.encoding) }
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(quality.title)
+                            if let detail = quality.detail {
+                                Text(detail).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    } icon: {
+                        Image(systemName: "checkmark").opacity(quality == selected ? 1 : 0)
+                    }
+                }
+            }
+        }
+        .accessibilityIdentifier("player.audioQuality")
+    }
+}

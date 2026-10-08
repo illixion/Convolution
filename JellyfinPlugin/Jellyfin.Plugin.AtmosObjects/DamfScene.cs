@@ -24,6 +24,11 @@ public sealed class SceneDocument
     /// <summary>Start time of the TrueHD track in the container, for lining up with video.</summary>
     public double StartSeconds { get; set; }
     public List<SceneElement> Elements { get; set; } = [];
+    /// <summary>
+    /// What <c>Segments/{n}/Bundle</c> can serve besides the FLAC groups.
+    /// A client that finds it missing (an older plugin) stays on FLAC.
+    /// </summary>
+    public string[] BundleCodecs { get; set; } = ["aac", "opus"];
 }
 
 public sealed class SceneElement

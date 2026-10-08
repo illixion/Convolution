@@ -17,6 +17,7 @@ namespace Jellyfin.Plugin.AtmosObjects;
 ///   GET  /AtmosObjects/{itemId}/Scene?startSeconds=T     layout
 ///   GET  /AtmosObjects/{itemId}/Segments/{n}/Events      snapshot + events for segment n
 ///   GET  /AtmosObjects/{itemId}/Segments/{n}/{g}         FLAC for segment n, channel group g
+///   GET  /AtmosObjects/{itemId}/Segments/{n}/Bundle      every channel of segment n, lossy (codec=aac|opus, bitrate per channel)
 ///
 /// Every audio request takes an optional <c>audioStream</c> (a track's index
 /// from Tracks; each track is decoded and cached separately) and
@@ -113,6 +114,32 @@ public class AtmosObjectsController : ControllerBase
 
         var path = _scenes.SegmentEvents(scene, segment);
         return path is null ? NotFound() : PhysicalFile(path, MediaTypeNames.Application.Json);
+    }
+
+    [HttpGet("{itemId}/Segments/{segment:int}/Bundle")]
+    public async Task<ActionResult> GetSegmentBundle([FromRoute] Guid itemId, [FromRoute] int segment,
+                                                     [FromQuery] string? codec, [FromQuery] int? bitrate,
+                                                     [FromQuery] int? audioStream, [FromQuery] string? languages, CancellationToken ct)
+    {
+        BundleCodec? kind = codec?.ToLowerInvariant() switch
+        {
+            null or "aac" => BundleCodec.Aac,
+            "opus" => BundleCodec.Opus,
+            _ => null
+        };
+        if (kind is null)
+        {
+            return BadRequest("codec must be aac or opus");
+        }
+
+        if (_scenes.ResolveScene(itemId, audioStream, languages) is not Guid scene
+            || !await _scenes.EnsureSegmentAsync(scene, segment, ct).ConfigureAwait(false))
+        {
+            return NotFound();
+        }
+
+        var path = await _scenes.SegmentBundleAsync(scene, segment, kind.Value, AtmosSceneService.ClampBundleBitrate(bitrate), ct).ConfigureAwait(false);
+        return path is null ? NotFound() : PhysicalFile(path, "application/octet-stream");
     }
 
     [HttpGet("{itemId}/Segments/{segment:int}/{group:int}")]

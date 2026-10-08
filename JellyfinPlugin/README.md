@@ -123,6 +123,7 @@ Every endpoint needs normal Jellyfin authentication (an API key or a user token)
 | `GET /AtmosObjects/{itemId}/Scene?startSeconds=T` | The layout. With nothing cached, it starts a decode at `T` and waits for it. 422 if the track has no objects |
 | `GET /AtmosObjects/{itemId}/Segments/{n}/Events` | Position/gain events for segment `n` |
 | `GET /AtmosObjects/{itemId}/Segments/{n}/{g}` | FLAC audio for segment `n`, channel group `g` |
+| `GET /AtmosObjects/{itemId}/Segments/{n}/Bundle?codec=aac\|opus&bitrate=B` | Every channel of segment `n` in one lossy bundle (see [Compressed bundles](#compressed-bundles)) |
 | `GET /AtmosObjects/{itemId}` | `{state, progressSeconds, durationSeconds, error}`, where `state` is `none`, `partial`, `preparing`, `ready`, `unsupported` or `failed` |
 | `POST /AtmosObjects/{itemId}/Prepare` | Decodes the whole film into the cache in the background |
 | `GET /AtmosObjects/{itemId}/Video` | The video index: segment start times and range info (see [Video](#video)) |
@@ -150,6 +151,59 @@ Events are `{id, t, ramp, gain, pos?}`:
 - A position is reached linearly over `ramp` frames.
 - Each segment's list opens with a snapshot of every element as it stands at
   the segment's first frame, so a segment can be used on its own.
+
+## Compressed bundles
+
+For links that can't carry lossless object audio (cellular), a segment can be
+fetched as one bundle holding a mono AAC (M4A) or Opus (Ogg) stream per
+channel, `bitrate` bits per second each (16–256 kbps, default 64 kbps). The
+scene's `bundleCodecs` lists what the plugin serves; a client that doesn't see
+it stays on FLAC. Bundles are made from the cached FLAC the first time they're
+asked for and kept next to it (`seg/<n>.<codec>-<kbps>k.aob`).
+
+- **One request per segment, whatever the channel count.** A scene with
+  hundreds of objects would otherwise be hundreds of requests per segment.
+- **One mono stream per channel.** Objects are rendered one by one, so joint
+  stereo coding has nothing to exploit, and mono never meets an encoder's
+  channel-layout limits (`libfdk_aac` and Apple's decoders top out at 8
+  channels; Apple won't decode multichannel Ogg Opus at all).
+- **Silent channels aren't sent.** Idle objects cost 12 header bytes. The
+  FLAC is dithered, so "silent" means a peak under −80 dBFS.
+- **Each stream starts with 100 ms of the previous segment** (pre-roll), which
+  the client drops. Measured on a chirp: at a join, the error RMS was 0.0057
+  for one continuous encode, 0.0069 with the pre-roll and 0.0086 without.
+  The decoded audio lines up with the FLAC to the sample.
+- **Per-channel RMS and peak in the header**, so a client that can't decode
+  everything before the segment plays can keep the loudest channels.
+- AAC is AAC-LC through `libfdk_aac`. jellyfin-ffmpeg's build has no HE-AAC
+  ("Unable to set the AOT 5").
+
+Layout, little-endian, version 1:
+
+| Offset | Field |
+|---|---|
+| 0 | `"AOB1"` |
+| 4 | u16 version (1) |
+| 6 | u16 codec: 1 AAC/M4A, 2 Opus/Ogg |
+| 8 | u32 sample rate |
+| 12 | u32 frames in the segment |
+| 16 | u32 pre-roll frames |
+| 20 | u32 channel count (the scene's channels, in channel order) |
+| 24 | per channel, 12 bytes: u32 stream length (0 = silent), f32 RMS dBFS, f32 peak dBFS |
+| … | the streams, in channel order; each decodes to pre-roll + frames samples |
+
+Measured on the Dolby demo (12 channels, 10 s segments, 2 silent): FLAC
+3.99 MB (3.2 Mbps); AAC 96/64/32 kbps 1.25/0.84/0.44 MB (1.0/0.67/0.35 Mbps),
+built in about 0.4 s. Against the FLAC, median waveform SNR is 31/27/20 dB
+(perceptual codecs score low on waveform SNR while sounding transparent).
+Server cost: one encoder run of 64 mono 10 s channels takes 0.71 s (AAC) or
+1.17 s (Opus) in the dev container, and runs go `EncoderParallelism` at a
+time. Client cost (RAVEFilm, M-series Mac): 224 AAC channels × 10 s decode in
+0.34 s on 6 cores.
+
+A client on Android or a Quest decodes the Opus streams with libopus or
+MediaCodec (`audio/opus`, after reading the Ogg pages); the bundle needs
+nothing else from the platform.
 
 ## Video
 

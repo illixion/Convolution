@@ -20,6 +20,7 @@
 
 import AVFoundation
 import Foundation
+import RAVEFilm
 import RAVEUI
 
 enum LibraryHarness {
@@ -174,6 +175,9 @@ enum LibraryHarness {
         }
 
         await checkQuality(library: library)
+        if let atmosDemo {
+            await checkCompressedObjectAudio(server: server, apiKey: apiKey, itemId: atmosDemo.id)
+        }
 
         await checkStreams(library: library, server: server, apiKey: apiKey,
                            items: [wideStatic, crimson].compactMap { $0 }, atmosDemo: atmosDemo)
@@ -458,6 +462,61 @@ enum LibraryHarness {
             fired = budget.update(waiting: false, at: start.addingTimeInterval(3)) || fired
         }
         log("stallMonitor grace=\(inGrace) 4s=\(short) 6.5s=\(long) fourShortStalls=\(fired) (expect false false true true)")
+    }
+
+    /// Compressed object audio against the plugin: each AAC bitrate's
+    /// bundle for two consecutive segments, against the same segments'
+    /// FLAC — size, per-channel SNR, alignment, and the join between them.
+    private static func checkCompressedObjectAudio(server: URL, apiKey: String, itemId: String) async {
+        let lossless = FilmServerClient(baseURL: server, token: apiKey, itemID: itemId)
+        guard let scene = try? await lossless.audioScene(startSeconds: 0), scene.segmentCount > 6 else {
+            log("compressedAudio SKIPPED: no scene")
+            return
+        }
+        log("compressedAudio scene: \(scene.elements.count) channels, bundleCodecs=\(scene.bundleCodecs ?? [])")
+        do {
+            let reference = [try await lossless.audioSegment(5, of: scene), try await lossless.audioSegment(6, of: scene)]
+            for bitrate in [96000, 64000, 32000] {
+                var client = lossless
+                client.encoding = .aac(bitrate: bitrate)
+                let start = ContinuousClock.now
+                let decoded = [try await client.audioSegment(5, of: scene), try await client.audioSegment(6, of: scene)]
+                let took = ContinuousClock.now - start
+                var snrs: [Float] = [], lags: [Int] = [], joins: [String] = []
+                for (g, group) in scene.groups.enumerated() {
+                    for k in group.indices {
+                        let ref = (0 ..< 2).flatMap { samples(reference[$0].buffers[g], k) }
+                        let out = (0 ..< 2).flatMap { samples(decoded[$0].buffers[g], k) }
+                        guard ref.contains(where: { abs($0) > 0.001 }) else { continue }
+                        snrs.append(snr(out, ref))
+                        lags.append((-48 ... 48).max { corr(out, ref, $0) < corr(out, ref, $1) } ?? 99)
+                        let seam = reference[0].buffers[g].frameLength
+                        let at = Int(seam)
+                        joins.append(String(format: "%.1f", rmsError(out, ref, (at - 256) ..< (at + 256)) / max(1e-9, rmsError(out, ref, (at / 2) ..< (at / 2 + 512)))))
+                    }
+                }
+                log("compressedAudio aac \(bitrate / 1000)k: fetch+decode 2 segments \(took), SNR min \(String(format: "%.1f", snrs.min() ?? 0)) median \(String(format: "%.1f", snrs.sorted()[snrs.count / 2])) dB, lags \(Set(lags).sorted()), join/mid error ratio \(joins), dropped \(decoded.map(\.droppedChannels))")
+            }
+        } catch {
+            log("compressedAudio FAILED: \(error)")
+        }
+
+        func samples(_ buffer: AVAudioPCMBuffer, _ channel: Int) -> [Float] {
+            Array(UnsafeBufferPointer(start: buffer.floatChannelData![channel], count: Int(buffer.frameLength)))
+        }
+        func snr(_ out: [Float], _ ref: [Float]) -> Float {
+            var signal: Float = 0, noise: Float = 0
+            for i in ref.indices { signal += ref[i] * ref[i]; noise += (out[i] - ref[i]) * (out[i] - ref[i]) }
+            return 10 * log10(signal / max(noise, 1e-12))
+        }
+        func corr(_ a: [Float], _ b: [Float], _ lag: Int) -> Float {
+            var sum: Float = 0
+            for i in stride(from: 2000, to: a.count - 2000, by: 3) { sum += a[i] * b[i + lag] }
+            return sum
+        }
+        func rmsError(_ out: [Float], _ ref: [Float], _ range: Range<Int>) -> Float {
+            sqrt(range.map { (out[$0] - ref[$0]) * (out[$0] - ref[$0]) }.reduce(0, +) / Float(range.count))
+        }
     }
 
     /// Plays `url` for up to 20 s and describes what came out.

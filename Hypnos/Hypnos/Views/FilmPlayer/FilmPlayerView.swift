@@ -662,6 +662,9 @@ struct FilmTransport: View {
         if player.audioTracks.count > 1 {
             FilmAudioTrackMenu(player: player, onOpenChanged: menuChanged)
         }
+        if player.audioEncoding != nil {
+            ObjectAudioQualityMenu(player: player, onOpenChanged: menuChanged)
+        }
         if !session.subtitles.tracks.isEmpty {
             SubtitleMenu(controller: session.subtitles, onOpenChanged: menuChanged)
         }

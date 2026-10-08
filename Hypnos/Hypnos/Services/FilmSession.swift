@@ -104,6 +104,9 @@ final class FilmSession {
     private init() {
         restoreSound()
         Self.excludeFromOtherCredentials(server)
+        // Starts watching the network, so Auto object-audio quality knows
+        // the path by the time a film loads.
+        _ = NetworkCost.shared
     }
 
     // MARK: Sound settings
@@ -226,7 +229,8 @@ final class FilmSession {
                 return false
             }
         }
-        let client = FilmServerClient(baseURL: serverURL, token: token, itemID: item.id)
+        var client = FilmServerClient(baseURL: serverURL, token: token, itemID: item.id)
+        client.encoding = ObjectAudioQuality.preferred.encoding
         if let disc, await (try? client.audioTracks(languages: FilmServerClient.deviceLanguages))?.isEmpty ?? true {
             // No object audio from the plugin (not installed, or no TrueHD on
             // the disc): the disc's own 5.1, read from the same image.
