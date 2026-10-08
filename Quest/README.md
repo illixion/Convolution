@@ -4,6 +4,9 @@ An Android shell calling portable Swift, with Home-window and spatial
 presentations of Jellyfin playback. This is a development app,
 not the complete Quest port.
 
+The [architecture review and parity roadmap](../docs/plans/quest-parity-roadmap.md)
+records the current code-sharing gaps, correctness findings and ordered next steps.
+
 ## Architecture
 
 - `RAVESDK/RAVEMediaCore`: subtitle parsing, stream quality / stall rules,
@@ -23,7 +26,8 @@ not the complete Quest port.
   locally and queues its latest position for sync at the next sign-in. Artwork
   is requested from Jellyfin using the signed-in session. A compact dock shows the retained title and playhead while browsing;
   opening its Player action reattaches the decoder surface before playback can
-  resume. Library browsing is currently limited to the first 100 titles.
+  resume. Catalog pages load 40 titles at a time; Movies/Episodes currently filter
+  the loaded combined catalog rather than issuing separate type-specific queries.
 - The library activity uses Meta VR Layout SDK's `SpatialScene`. Settings are a
   separate opaque secondary window when supported, with the SDK's inline
   fallback on older or unsupported systems. The Settings panel is an initial
