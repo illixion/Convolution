@@ -103,7 +103,7 @@ private struct IOSDestinationView: View {
             switch destination {
             case .photo(let value):
                 PhotoWindowView(windowValue: value, appModel: appModel)
-            case .video(let value) where value.video.isLocalDisc:
+            case .video(let value) where value.video.opensInFilmPlayer:
                 LocalDiscHandoffView(video: value.video)
             case .video(let value):
                 VideoWindowView(windowValue: value, appModel: appModel)

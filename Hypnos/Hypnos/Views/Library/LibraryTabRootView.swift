@@ -34,8 +34,14 @@ struct LibraryTabRootView: View {
                 .navigationDestination(for: LibraryBrowseRequest.self) { request in
                     LibraryBrowseView(request: request, playback: playback)
                 }
+                .navigationDestination(for: LibraryDownloadsRequest.self) { _ in
+                    LibraryDownloadsView(playback: playback)
+                }
                 .navigationTitle("Library")
                 .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        LibraryDownloadsToolbarButton { path.append(LibraryDownloadsRequest()) }
+                    }
                     ToolbarItem(placement: .primaryAction) {
                         Button {
                             path.append(LibraryBrowseRequest(kind: nil))
@@ -64,12 +70,21 @@ struct LibraryTabRootView: View {
         #endif
         .libraryPlayback(playback)
         .task(id: LibraryService.configurationKey) {
+            await LibraryDownloads.shared.refreshPolicy()
             await model.start()
             await openAutoOpenItemIfRequested()
         }
         // Up Next's positions and badges follow every watch, wherever its
         // player ran (see `LibraryWatchState`).
         .onChange(of: LibraryWatchState.shared.revision) {
+            Task { await model.refresh() }
+        }
+        // The Downloads row follows downloads; coming back online brings the
+        // whole server back in place of the downloads-only home.
+        .onChange(of: LibraryDownloads.shared.revision) {
+            Task { await model.refresh() }
+        }
+        .onChange(of: LibraryDownloads.shared.isOffline) {
             Task { await model.refresh() }
         }
     }

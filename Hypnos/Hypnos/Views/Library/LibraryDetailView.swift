@@ -10,6 +10,7 @@
    is room for them.
  - Actions: Play/Resume (a series names its Next Up episode, "Play S1 E2"),
    Start Over when there is a resume point, and Played and Favorite toggles.
+   Download sits in the toolbar, top right (`LibraryDownloadButton`).
  - A series then gets a season picker and a row of episode lockups that
    play on tap (asking Resume or Start Over when partly watched), then More
    Like This and an About block.
@@ -58,7 +59,15 @@ struct LibraryDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
         #endif
-        .task(id: LibraryService.configurationKey) { await load() }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                LibraryDownloadButton(item: shown, season: seasons.first { $0.id == selectedSeasonId })
+            }
+        }
+        .task(id: LibraryService.configurationKey) {
+            await LibraryDownloads.shared.refreshPolicy()
+            await load()
+        }
         .onChange(of: selectedSeasonId) { _, _ in Task { await loadEpisodes() } }
         // Whatever changed the watch state (a player closing here, in another
         // window, or over this one in a pushed stack), once the server has it.

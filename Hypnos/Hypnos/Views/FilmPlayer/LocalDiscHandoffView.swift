@@ -7,15 +7,30 @@
  it loads the disc into the film player (`FilmSession.loadLocalDisc`: the
  picture decoded on the device, the disc's own 5.1 as sound), opens the
  film player window and closes itself.
+
+ A Library download that plays in the film player (an object-audio film,
+ whose MP4 in Files is its video alone, or a disc) is handed over the same
+ way, so opening it from the Local library keeps its object audio.
  */
 
 import RAVEFilm
 import SwiftUI
 
 extension GalleryVideo {
-    /// A Blu-ray disc image on the device.
-    var isLocalDisc: Bool {
-        streamURL.isFileURL && streamURL.pathExtension.lowercased() == "iso"
+    /// A Blu-ray disc image on the device, or a Library download that
+    /// plays in the film player.
+    var opensInFilmPlayer: Bool {
+        guard streamURL.isFileURL else { return false }
+        return streamURL.pathExtension.lowercased() == "iso" || filmDownload != nil
+    }
+
+    /// The Library download this local file is, when it plays in the film player.
+    var filmDownload: LibraryOfflineRecord? {
+        guard streamURL.isFileURL else { return nil }
+        let path = streamURL.standardizedFileURL.path
+        return LibraryOfflineStore.shared.records.first {
+            $0.playback != .video && LibraryOfflineStore.mediaURL($0).standardizedFileURL.path == path
+        }
     }
 }
 
@@ -32,7 +47,7 @@ struct LocalDiscHandoffView: View {
                     .multilineTextAlignment(.center)
                 Button("Close") { dismissWindow() }
             } else {
-                ProgressView("Opening disc…")
+                ProgressView(video.filmDownload == nil ? "Opening disc…" : "Opening…")
             }
         }
         .padding(40)
@@ -40,7 +55,13 @@ struct LocalDiscHandoffView: View {
         .task {
             let session = FilmSession.shared
             let title = video.title ?? video.streamURL.deletingPathExtension().lastPathComponent
-            guard await session.loadLocalDisc(video.streamURL, title: title) else {
+            let loaded = if let download = video.filmDownload {
+                await session.load(itemId: download.id, name: download.item.title, productionYear: download.item.year,
+                                   isBlurayDisc: download.playback == .disc)
+            } else {
+                await session.loadLocalDisc(video.streamURL, title: title)
+            }
+            guard loaded else {
                 failure = session.error ?? "The disc couldn't be read."
                 return
             }

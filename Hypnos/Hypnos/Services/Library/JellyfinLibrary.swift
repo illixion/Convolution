@@ -103,6 +103,7 @@ private struct JFItem: Decodable {
     let Video3DFormat: String?   // HalfSideBySide etc.; returned without asking
     let VideoType: String?       // VideoFile, Iso, BluRay (a folder), Dvd; returned without asking
     let IsoType: String?         // BluRay or Dvd, for an Iso
+    let CanDownload: Bool?       // on list endpoints only with Fields=CanDownload
     // Artwork an episode/season inherits from its series.
     let ParentBackdropItemId: String?
     let ParentBackdropImageTags: [String]?
@@ -147,6 +148,7 @@ private extension LibraryItem {
         childItemIds = dto.ItemIds ?? []
         stereoFormat = StereoscopicFormat(jellyfin: dto.Video3DFormat)
         isBlurayDisc = dto.VideoType == "BluRay" || (dto.VideoType == "Iso" && dto.IsoType == "BluRay")
+        canDownload = dto.CanDownload
 
         var images: [LibraryImageRef] = []
         if let tag = dto.ImageTags?.Primary {
@@ -197,8 +199,12 @@ private struct JFPlaybackInfo: Decodable {
             let IsForced: Bool?
             let IsHearingImpaired: Bool?
             let IsTextSubtitleStream: Bool?
+            let IsExternal: Bool?
         }
         let Id: String?
+        /// "mkv", or ffprobe's list for the MP4 family ("mov,mp4,m4a,3gp,3g2,mj2").
+        let Container: String?
+        let Size: Int64?
         let MediaStreams: [Stream]?
         /// HalfSideBySide, FullSideBySide, HalfTopAndBottom, FullTopAndBottom
         /// or MVC, from the file name (`Movie.3D.HSBS.mkv`) or its metadata.
@@ -256,6 +262,23 @@ actor JellyfinLibrary: MediaServerLibrary {
     // MARK: - Home
 
     func home() async throws -> LibraryHome {
+        do {
+            var home = try await onlineHome()
+            LibraryConnectivity.reachable()
+            if let shelf = LibraryOfflineCatalog.downloadsShelf() {
+                // After Up Next, which stays first.
+                let index = home.shelves.first?.id == "up-next" ? 1 : 0
+                home.shelves.insert(shelf, at: index)
+            }
+            return home
+        } catch where Self.isUnreachable(error) {
+            LibraryConnectivity.unreachable()
+            guard let home = LibraryOfflineCatalog.home() else { throw error }
+            return home
+        }
+    }
+
+    private func onlineHome() async throws -> LibraryHome {
         let userId = try await resolveUserId()
         async let resume = fetchItems(path: "Users/\(userId)/Items/Resume", query: [
             .init(name: "MediaTypes", value: "Video"),
@@ -402,27 +425,57 @@ actor JellyfinLibrary: MediaServerLibrary {
     // MARK: - Detail
 
     func item(id: String) async throws -> LibraryItem {
-        let userId = try await resolveUserId()
-        let dto: JFItem = try await get("Users/\(userId)/Items/\(id)")
-        return LibraryItem(dto)
+        do {
+            let userId = try await resolveUserId()
+            let dto: JFItem = try await get("Users/\(userId)/Items/\(id)")
+            return LibraryOfflineCatalog.merge(LibraryItem(dto))
+        } catch where Self.isUnreachable(error) {
+            guard let item = LibraryOfflineCatalog.item(id: id) else { throw error }
+            return item
+        }
     }
 
     func seasons(seriesId: String) async throws -> [LibraryItem] {
-        let userId = try await resolveUserId()
-        return try await fetchItems(path: "Shows/\(seriesId)/Seasons", query: [.init(name: "userId", value: userId)])
+        do {
+            let userId = try await resolveUserId()
+            return try await fetchItems(path: "Shows/\(seriesId)/Seasons", query: [.init(name: "userId", value: userId)])
+        } catch where Self.isUnreachable(error) {
+            let seasons = LibraryOfflineCatalog.seasons(seriesId: seriesId)
+            if seasons.isEmpty { throw error }
+            return seasons
+        }
     }
 
     func episodes(seasonId: String) async throws -> [LibraryItem] {
+        do {
+            return try await onlineEpisodes(seasonId: seasonId)
+        } catch where Self.isUnreachable(error) {
+            let episodes = LibraryOfflineCatalog.episodes(seasonId: seasonId)
+            if episodes.isEmpty { throw error }
+            return episodes
+        }
+    }
+
+    private func onlineEpisodes(seasonId: String) async throws -> [LibraryItem] {
         let season = try await item(id: seasonId)
         guard let seriesId = season.seriesId else { return [] }
         let userId = try await resolveUserId()
         return try await fetchItems(path: "Shows/\(seriesId)/Episodes", query: [
             .init(name: "userId", value: userId),
             .init(name: "seasonId", value: seasonId),
-        ])
+        ]).map(LibraryOfflineCatalog.merge)
     }
 
     func nextUp(seriesId: String) async throws -> LibraryItem? {
+        do {
+            return try await onlineNextUp(seriesId: seriesId)
+        } catch where Self.isUnreachable(error) {
+            guard let episode = LibraryOfflineCatalog.nextUp(seriesId: seriesId) else { throw error }
+            return episode
+        }
+    }
+
+    private func onlineNextUp(seriesId: String) async throws -> LibraryItem? {
         let userId = try await resolveUserId()
         // Resume first: Shows/NextUp skips an episode that is only partly
         // watched once a later one has been started.
@@ -449,18 +502,28 @@ actor JellyfinLibrary: MediaServerLibrary {
 
     func episode(after episode: LibraryItem) async throws -> LibraryItem? {
         guard episode.kind == .episode, let seriesId = episode.seriesId else { return nil }
+        let run: [LibraryItem]
+        do {
+            run = try await onlineEpisodeRun(seriesId: seriesId, from: episode.id)
+        } catch where Self.isUnreachable(error) {
+            return LibraryOfflineCatalog.episode(after: episode)
+        }
+        guard run.first?.id == episode.id, run.count > 1 else { return nil }
+        return LibraryOfflineCatalog.merge(run[1])
+    }
+
+    private func onlineEpisodeRun(seriesId: String, from episodeId: String) async throws -> [LibraryItem] {
         let userId = try await resolveUserId()
         // startItemId lists from this episode onward, across seasons.
-        let run = try await fetchItems(path: "Shows/\(seriesId)/Episodes", query: [
+        return try await fetchItems(path: "Shows/\(seriesId)/Episodes", query: [
             .init(name: "userId", value: userId),
-            .init(name: "startItemId", value: episode.id),
+            .init(name: "startItemId", value: episodeId),
             .init(name: "Limit", value: "2"),
         ])
-        guard run.first?.id == episode.id, run.count > 1 else { return nil }
-        return run[1]
     }
 
     func similar(itemId: String) async throws -> [LibraryItem] {
+        if LibraryConnectivity.seemsOffline { return [] }
         let userId = try await resolveUserId()
         return try await fetchItems(path: "Items/\(itemId)/Similar", query: [
             .init(name: "userId", value: userId),
@@ -499,6 +562,11 @@ actor JellyfinLibrary: MediaServerLibrary {
 
     nonisolated func imageURL(item: LibraryItem, kind: LibraryImageKind, size: LibraryImageSize) -> URL? {
         guard let ref = item.image(kind) else { return nil }
+        // Downloaded art is used whenever there is some: it is there offline,
+        // and it opens without a round trip.
+        if let local = LibraryOfflineStore.shared.artworkURL(ownerId: ref.ownerId ?? item.id, kind: kind) {
+            return local
+        }
         let jellyfinType: String
         switch kind {
         case .primary: jellyfinType = "Primary"
@@ -554,6 +622,16 @@ actor JellyfinLibrary: MediaServerLibrary {
     }
 
     func playbackRoute(for item: LibraryItem) async throws -> PlaybackRoute {
+        // A download plays from the device, online or not.
+        if let record = LibraryOfflineStore.shared.record(for: item.id) {
+            switch record.playback {
+            case .video:
+                return .genericPlayer(GenericPlaybackPlan(method: .direct, streamURL: LibraryOfflineStore.mediaURL(record),
+                                                          resumeSeconds: item.userData.resumeSeconds))
+            case .film, .disc:
+                return .atmosFilmPlayer
+            }
+        }
         // A disc plays in the film player whether or not the plugin has object
         // audio for it: its picture is decoded on the device either way, and
         // without the plugin its sound is the disc's own 5.1 (`DiscAudioSource`).
@@ -610,6 +688,9 @@ actor JellyfinLibrary: MediaServerLibrary {
     // MARK: - Subtitles
 
     func subtitleTracks(itemId: String) async throws -> [LibrarySubtitleTrack] {
+        if let record = LibraryOfflineStore.shared.record(for: itemId) {
+            return try await LocalSubtitles.tracks(for: LibraryOfflineStore.mediaURL(record))
+        }
         let userId = try await resolveUserId()
         let info: JFPlaybackInfo = try await get("Items/\(itemId)/PlaybackInfo", query: [
             .init(name: "userId", value: userId),
@@ -633,6 +714,9 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// embedded, to WebVTT. An embedded stream is extracted from the whole
     /// file on first request, so this can take a while on a large film.
     func subtitleData(itemId: String, track: LibrarySubtitleTrack) async throws -> Data {
+        if let record = LibraryOfflineStore.shared.record(for: itemId) {
+            return try await LocalSubtitles.data(for: track, video: LibraryOfflineStore.mediaURL(record))
+        }
         let path = "Videos/\(itemId)/\(track.sourceId)/Subtitles/\(track.id)/Stream.vtt"
         var request = URLRequest(url: baseURL.appending(path: path))
         request.setValue(JellyfinClientIdentity.authorizationHeader(token: authHeaderToken), forHTTPHeaderField: "Authorization")
@@ -650,6 +734,13 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// them in; a bare server has none), else chapters named like an intro
     /// or the credits. Empty when neither says anything.
     func mediaSegments(itemId: String) async throws -> [LibraryMediaSegment] {
+        if let record = LibraryOfflineStore.shared.record(for: itemId) {
+            return record.segments
+        }
+        return try await onlineMediaSegments(itemId: itemId)
+    }
+
+    private func onlineMediaSegments(itemId: String) async throws -> [LibraryMediaSegment] {
         let page: JFMediaSegments? = try? await get("MediaSegments/\(itemId)")
         let served = (page?.Items ?? []).compactMap { segment -> LibraryMediaSegment? in
             guard let kind = Self.segmentKind(segment.Type),
@@ -832,7 +923,7 @@ actor JellyfinLibrary: MediaServerLibrary {
 
     func reportPlaybackStarted(itemId: String, positionSeconds: Double) async {
         let sessionId = playSessionId(for: itemId)
-        await post("Sessions/Playing", body: [
+        _ = await post("Sessions/Playing", body: [
             "ItemId": itemId,
             "PlaySessionId": sessionId,
             "PositionTicks": Int64(positionSeconds * 10_000_000),
@@ -842,31 +933,53 @@ actor JellyfinLibrary: MediaServerLibrary {
     }
 
     func reportPlaybackProgress(itemId: String, positionSeconds: Double, isPaused: Bool) async {
-        await post("Sessions/Playing/Progress", body: [
+        let reached = await post("Sessions/Playing/Progress", body: [
             "ItemId": itemId,
             "PlaySessionId": playSessionId(for: itemId),
             "PositionTicks": Int64(positionSeconds * 10_000_000),
             "IsPaused": isPaused,
             "CanSeek": true,
         ])
+        // A download keeps its own place too, so an offline watch resumes
+        // where it stopped and reaches the server later.
+        LibraryOfflineStore.shared.noteLocalPosition(itemId: itemId, seconds: positionSeconds, synced: reached)
     }
 
     func reportPlaybackStopped(itemId: String, positionSeconds: Double) async {
         // Screens showing this item's progress reload once the server has
         // the new position, and a Play pressed meanwhile waits for it.
         await LibraryWatchState.shared.reportBegan(itemId: itemId)
-        await post("Sessions/Playing/Stopped", body: [
+        let reached = await post("Sessions/Playing/Stopped", body: [
             "ItemId": itemId,
             "PlaySessionId": playSessionId(for: itemId),
             "PositionTicks": Int64(positionSeconds * 10_000_000),
         ])
+        LibraryOfflineStore.shared.noteLocalPosition(itemId: itemId, seconds: positionSeconds, synced: reached)
+        if !reached, LibraryOfflineStore.shared.record(for: itemId) != nil {
+            AppLogger.library.info("Offline: a download's position will be synced later")
+        }
         Self.playSessions.withLock { _ = $0.removeValue(forKey: itemId) }
         await LibraryWatchState.shared.reportLanded(itemId: itemId)
     }
 
     func setPlayed(itemId: String, played: Bool) async throws {
-        let userId = try await resolveUserId()
-        try await sendState(path: "Users/\(userId)/PlayedItems/\(itemId)", set: played)
+        do {
+            let userId = try await resolveUserId()
+            try await sendState(path: "Users/\(userId)/PlayedItems/\(itemId)", set: played)
+            LibraryOfflineStore.shared.update(itemId: itemId) { record in
+                record.item.userData.isPlayed = played
+                record.localPlayed = nil
+                record.localPosition = played ? 0 : record.localPosition
+            }
+        } catch where Self.isUnreachable(error) && LibraryOfflineStore.shared.record(for: itemId) != nil {
+            // Kept on the device until the server can hear it.
+            LibraryOfflineStore.shared.update(itemId: itemId) { record in
+                record.localPlayed = played
+                record.localPosition = 0
+                record.localChangedAt = Date()
+                record.needsSync = true
+            }
+        }
         await LibraryWatchState.shared.changed()
     }
 
@@ -874,6 +987,188 @@ actor JellyfinLibrary: MediaServerLibrary {
         let userId = try await resolveUserId()
         try await sendState(path: "Users/\(userId)/FavoriteItems/\(itemId)", set: favorite)
         await LibraryWatchState.shared.changed()
+    }
+
+    // MARK: - Downloads
+
+    /// Whether this account may download at all (Jellyfin's per-user
+    /// "Allow media downloading" policy). Items carry the same answer as
+    /// `CanDownload`; this is for a show or season, which isn't a file.
+    func downloadsAllowed() async throws -> Bool {
+        struct JFUser: Decodable {
+            struct Policy: Decodable { let EnableContentDownloading: Bool? }
+            let Policy: Policy?
+        }
+        let userId = try await resolveUserId()
+        let user: JFUser = try await get("Users/\(userId)")
+        return user.Policy?.EnableContentDownloading ?? true
+    }
+
+    /// How `item` gets onto the device:
+    /// - a Blu-ray disc as its image (decoded here, like a disc in the
+    ///   Local library), with the plugin's object audio beside it when it
+    ///   has some;
+    /// - a film with object audio as the plugin's own video segments (joined
+    ///   into one MP4) plus its audio scene, so it plays offline in the film
+    ///   player exactly as it does streamed;
+    /// - an MP4 or MOV AVFoundation plays as the original file;
+    /// - anything else (MKV, WebM) as a server remux to MP4: the video copied
+    ///   when Apple decodes its codec, the sound as AAC 5.1. The original
+    ///   wouldn't play on the device at all.
+    func downloadPlan(for item: LibraryItem) async throws -> LibraryDownloadPlan {
+        let userId = try await resolveUserId()
+        let info: JFPlaybackInfo = try await get("Items/\(item.id)/PlaybackInfo", query: [
+            .init(name: "userId", value: userId),
+        ])
+        let source = info.MediaSources?.first
+        let mediaSourceId = source?.Id ?? item.id
+        let streams = source?.MediaStreams ?? []
+        let videoCodec = streams.first { $0.Type == "Video" }?.Codec?.lowercased()
+        let audioCodecs = streams.filter { $0.Type == "Audio" }.compactMap { $0.Codec?.lowercased() }
+        let containers = Set((source?.Container ?? "").lowercased().split(separator: ",").map(String.init))
+        let textTracks = Self.subtitleTracks(in: source, itemId: item.id).filter(\.isText)
+        let external = Set(streams.filter { $0.IsExternal == true }.compactMap(\.Index))
+
+        let original = downloadRequest(itemId: item.id)
+        if item.isBlurayDisc {
+            return LibraryDownloadPlan(playback: .disc, mediaRequest: original, isRemux: false,
+                                       expectedBytes: source?.Size, fileExtension: "iso",
+                                       subtitleTracks: [], objectAudio: await hasAtmosObjects(itemId: item.id))
+        }
+        if await hasAtmosObjects(itemId: item.id) {
+            return LibraryDownloadPlan(playback: .film, mediaRequest: nil, isRemux: false,
+                                       expectedBytes: source?.Size, fileExtension: "mp4",
+                                       subtitleTracks: textTracks, objectAudio: true)
+        }
+        let appleContainer = !containers.isDisjoint(with: ["mp4", "mov", "m4v"])
+        let appleVideo = ["h264", "hevc", "h265"].contains(videoCodec ?? "")
+        let appleAudio = audioCodecs.allSatisfy { ["aac", "ac3", "eac3", "mp3", "alac"].contains($0) }
+        if appleContainer, appleVideo, appleAudio {
+            // Embedded MP4 text tracks are read from the file itself.
+            return LibraryDownloadPlan(playback: .video, mediaRequest: original, isRemux: false,
+                                       expectedBytes: source?.Size, fileExtension: "mp4",
+                                       subtitleTracks: textTracks.filter { external.contains($0.id) }, objectAudio: false)
+        }
+        let remux = Self.remuxURL(baseURL: baseURL, itemId: item.id, mediaSourceId: mediaSourceId,
+                                  sourceVideoCodec: videoCodec, token: authHeaderToken)
+        var request = URLRequest(url: remux)
+        request.setValue(JellyfinClientIdentity.authorizationHeader(token: authHeaderToken), forHTTPHeaderField: "Authorization")
+        return LibraryDownloadPlan(playback: .video, mediaRequest: request, isRemux: true,
+                                   expectedBytes: source?.Size, fileExtension: "mp4",
+                                   subtitleTracks: textTracks, objectAudio: false)
+    }
+
+    /// `Items/{id}/Download`: the original file, as stored on the server.
+    /// Answers 403 when the account or the item may not be downloaded.
+    nonisolated func downloadRequest(itemId: String) -> URLRequest {
+        var request = URLRequest(url: baseURL.appending(path: "Items/\(itemId)/Download"))
+        request.setValue(JellyfinClientIdentity.authorizationHeader(token: authHeaderToken), forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    /// A progressive MP4 remux, the same parameters as `hlsStreamURL` but a
+    /// single fragmented file (measured on the dev instance: an MKV with
+    /// H.264 + E-AC-3 came back as H.264 copied + AAC, with an `mfra` index,
+    /// so it seeks). No Content-Length: it is written as it is remuxed.
+    static func remuxURL(baseURL: URL, itemId: String, mediaSourceId: String,
+                         sourceVideoCodec: String?, token: String) -> URL {
+        let videoCodec = switch sourceVideoCodec {
+        case "hevc", "h265": "hevc"
+        default: "h264"
+        }
+        let maxBitrate = 120_000_000
+        let audioBitrate = 640_000
+        return baseURL.appending(path: "Videos/\(itemId)/stream.mp4").appending(queryItems: [
+            .init(name: "static", value: "false"),
+            .init(name: "MediaSourceId", value: mediaSourceId),
+            .init(name: "DeviceId", value: JellyfinClientIdentity.deviceId),
+            .init(name: "PlaySessionId", value: UUID().uuidString),
+            .init(name: "VideoCodec", value: videoCodec),
+            .init(name: "AudioCodec", value: "aac"),
+            .init(name: "TranscodingMaxAudioChannels", value: "6"),
+            .init(name: "MaxAudioChannels", value: "6"),
+            .init(name: "AllowVideoStreamCopy", value: "true"),
+            .init(name: "MaxStreamingBitrate", value: String(maxBitrate)),
+            .init(name: "VideoBitrate", value: String(maxBitrate - audioBitrate)),
+            .init(name: "AudioBitrate", value: String(audioBitrate)),
+        ])
+    }
+
+    /// One authenticated GET, the body as it came: artwork, subtitles and
+    /// the plugin's files for a download.
+    func data(path: String, query: [URLQueryItem] = [], timeout: TimeInterval = 60) async throws -> Data {
+        var url = baseURL.appending(path: path)
+        if !query.isEmpty { url.append(queryItems: query) }
+        var request = URLRequest(url: url)
+        request.setValue(JellyfinClientIdentity.authorizationHeader(token: authHeaderToken), forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = timeout
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard status == 200 else { throw JellyfinLibraryError.http(path: path, status: status) }
+        return data
+    }
+
+    /// An artwork file for a download, at a size worth keeping.
+    func artworkData(ownerId: String, kind: LibraryImageKind) async throws -> Data {
+        let type = switch kind {
+        case .primary: "Primary"
+        case .backdrop: "Backdrop"
+        case .logo: "Logo"
+        case .thumb: "Thumb"
+        }
+        let width = kind == .backdrop ? 1920 : (kind == .logo ? 900 : 720)
+        return try await data(path: "Items/\(ownerId)/Images/\(type)", query: [
+            .init(name: "maxWidth", value: String(width)),
+            .init(name: "quality", value: "90"),
+        ])
+    }
+
+    /// Asks the plugin to decode a film's whole audio track into its cache
+    /// (it otherwise decodes only what is played), and reports how far it is.
+    func prepareObjectAudio(itemId: String) async {
+        var request = URLRequest(url: baseURL.appending(path: "AtmosObjects/\(itemId)/Prepare"))
+        request.httpMethod = "POST"
+        request.setValue(JellyfinClientIdentity.authorizationHeader(token: authHeaderToken), forHTTPHeaderField: "Authorization")
+        _ = try? await URLSession.shared.data(for: request)
+    }
+
+    /// The plugin's decode state: `ready` once the whole film is cached.
+    func objectAudioState(itemId: String) async throws -> (state: String, progress: Double?) {
+        struct State: Decodable {
+            let state: String
+            let progressSeconds: Double?
+            let durationSeconds: Double?
+        }
+        let state: State = try await get("AtmosObjects/\(itemId)")
+        let progress: Double? = if let done = state.progressSeconds, let total = state.durationSeconds, total > 0 {
+            min(1, done / total)
+        } else { nil }
+        return (state.state, progress)
+    }
+
+    /// Hands the server a download's watch state from the device. Jellyfin
+    /// 10.9+ takes it in one call; older servers have the per-user path.
+    func syncUserData(itemId: String, positionSeconds: Double, played: Bool, lastPlayed: Date?) async throws {
+        let userId = try await resolveUserId()
+        var body: [String: Any] = [
+            "PlaybackPositionTicks": Int64(positionSeconds * 10_000_000),
+            "Played": played,
+        ]
+        if let lastPlayed {
+            body["LastPlayedDate"] = ISO8601DateFormatter().string(from: lastPlayed)
+        }
+        for path in ["UserItems/\(itemId)/UserData", "Users/\(userId)/Items/\(itemId)/UserData"] {
+            var request = URLRequest(url: baseURL.appending(path: path).appending(queryItems: [.init(name: "userId", value: userId)]))
+            request.httpMethod = "POST"
+            request.setValue(JellyfinClientIdentity.authorizationHeader(token: authHeaderToken), forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (_, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            if (200..<300).contains(status) { return }
+            if status != 404 { throw JellyfinLibraryError.http(path: path, status: status) }
+        }
+        throw JellyfinLibraryError.http(path: "UserData", status: 404)
     }
 
     // MARK: - User resolution (API-key fallback)
@@ -901,7 +1196,7 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// and its genre chips empty. Every `fetchItems`/`fetchLatestItems` call
     /// asks for both so home/search/similar don't need a follow-up
     /// `item(id:)` just to show a synopsis.
-    private static let listFields = URLQueryItem(name: "Fields", value: "Overview,Genres")
+    private static let listFields = URLQueryItem(name: "Fields", value: "Overview,Genres,CanDownload")
 
     private func fetchItems(path: String, query: [URLQueryItem]) async throws -> [LibraryItem] {
         let page: JFPage = try await get(path, query: query + [Self.listFields])
@@ -923,26 +1218,55 @@ actor JellyfinLibrary: MediaServerLibrary {
         if !query.isEmpty { url.append(queryItems: query) }
         var request = URLRequest(url: url)
         request.setValue(JellyfinClientIdentity.authorizationHeader(token: authHeaderToken), forHTTPHeaderField: "Authorization")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        // Short while the server is known to be away, so offline screens
+        // don't each wait out a full timeout before showing downloads.
+        request.timeoutInterval = LibraryConnectivity.seemsOffline ? 4 : 20
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch where Self.isUnreachable(error) {
+            LibraryConnectivity.unreachable()
+            throw error
+        }
+        LibraryConnectivity.reachable()
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard status == 200 else { throw JellyfinLibraryError.http(path: path, status: status) }
         return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    /// A failure that means the server can't be reached at all (no network,
+    /// server down, tailnet off), as opposed to one it answered.
+    static func isUnreachable(_ error: Error) -> Bool {
+        guard let error = error as? URLError else { return false }
+        switch error.code {
+        case .notConnectedToInternet, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed,
+             .timedOut, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff:
+            return true
+        default:
+            return false
+        }
     }
 
     private func get<T: Decodable>(_ path: String, as type: T.Type) async throws -> T {
         try await get(path, query: [])
     }
 
-    private func post(_ path: String, body: [String: Any]) async {
+    /// True when the server took the report.
+    @discardableResult
+    private func post(_ path: String, body: [String: Any]) async -> Bool {
         var request = URLRequest(url: baseURL.appending(path: path))
         request.httpMethod = "POST"
         request.setValue(JellyfinClientIdentity.authorizationHeader(token: authHeaderToken), forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         do {
-            _ = try await URLSession.shared.data(for: request)
+            let (_, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            return (200..<300).contains(status)
         } catch {
             AppLogger.library.error("Progress report to \(path, privacy: .public) failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+            return false
         }
     }
 

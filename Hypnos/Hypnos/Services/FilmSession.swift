@@ -205,6 +205,9 @@ final class FilmSession {
     ///   (`MVCPictureSource`), the plugin's video segments being unavailable
     ///   for a disc; the plugin still supplies the audio.
     func load(_ item: FilmLibraryItem, isBlurayDisc: Bool = false) async -> Bool {
+        if let record = LibraryOfflineStore.shared.record(for: item.id), record.playback != .video {
+            return await loadDownloaded(record, item: item)
+        }
         guard let serverURL, let token = effectiveToken, !isLoading else { return false }
         isLoading = true
         error = nil
@@ -250,6 +253,56 @@ final class FilmSession {
             self.stereoFormat = format
         }
         AppLogger.filmPlayer.info("Loaded \(item.name): \(self.player.video.formatSummary, privacy: .public); audio \(self.player.audioStatus, privacy: .public)")
+        return true
+    }
+
+    /// Plays a Library download from the device: an object-audio film from
+    /// its package (the plugin's own video and audio, kept as streamed), a
+    /// disc from its image with the package's object audio when it has one,
+    /// else the disc's 5.1. Works with no server; subtitles are the sidecars.
+    private func loadDownloaded(_ record: LibraryOfflineRecord, item: FilmLibraryItem) async -> Bool {
+        guard !isLoading else { return false }
+        isLoading = true
+        error = nil
+        defer { isLoading = false }
+        stereoFormatTask?.cancel()
+        stereoFormat = nil
+        let media = LibraryOfflineStore.mediaURL(record)
+        // The download's sidecars, through the same Jellyfin-keyed source
+        // (JellyfinLibrary answers a download's subtitles from the device).
+        var subtitleSource = SubtitleSource.jellyfin(itemId: record.id)
+        switch record.playback {
+        case .film:
+            let package = FilmPackage(itemId: record.id, video: media)
+            await player.load(FilmServerClient(itemID: record.id, offline: package))
+            stereoFormat = record.item.stereoFormat
+        case .disc:
+            let disc: MVCPictureSource
+            do {
+                disc = try await MVCPictureSource.open(url: media, headers: [:])
+            } catch {
+                self.error = "The disc couldn't be read: \(error.localizedDescription)"
+                subtitles.load(nil)
+                return false
+            }
+            if record.hasObjectAudio {
+                await player.load(picture: disc, audio: FilmServerClient(itemID: record.id, offline: FilmPackage(itemId: record.id, video: nil)))
+            } else {
+                await player.load(picture: disc, audio: try? disc.audioSource(itemID: record.id))
+            }
+            stereoFormat = disc.isStereo ? .overUnder : nil
+            subtitleSource = .disc(disc.subtitles, itemId: record.id)
+        case .video:
+            return false
+        }
+        guard player.video.isLoaded else {
+            error = player.video.status
+            subtitles.load(nil)
+            return false
+        }
+        loadedItem = item
+        subtitles.load(subtitleSource)
+        AppLogger.filmPlayer.info("Loaded a downloaded \(record.playback.rawValue, privacy: .public) film: \(self.player.video.formatSummary, privacy: .public); audio \(self.player.audioStatus, privacy: .public)")
         return true
     }
 

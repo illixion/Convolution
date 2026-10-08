@@ -88,7 +88,10 @@ enum LocalSubtitles {
                 }
             }
         }
-        track.name = nameWords.isEmpty ? file.pathExtension.uppercased() : nameWords.joined(separator: " ")
+        // A language says enough on its own ("English", not "English – SRT").
+        track.name = nameWords.isEmpty
+            ? (track.language == nil ? file.pathExtension.uppercased() : nil)
+            : nameWords.joined(separator: " ")
         return track
     }
 

@@ -49,6 +49,11 @@ struct HypnosApp: App {
         LibraryHarness.runIfRequested()
         #endif
         _appModel = State(initialValue: AppModel())
+        // Reconnects downloads that ran while the app was closed.
+        LibraryDownloads.shared.start()
+        #if DEBUG && os(macOS)
+        LibraryDownloadHarness.runIfRequested()
+        #endif
         #if os(tvOS) || os(macOS)
         // AVFoundation only decodes VP9/AV1 once the app opts in to the
         // supplemental decoders, and Stash/Jellyfin sources are commonly
@@ -139,7 +144,7 @@ struct HypnosApp: App {
 
         // Individual video window - pop-out video player
         WindowGroup(id: "video-detail", for: VideoWindowValue.self) { $windowValue in
-            if let windowValue, windowValue.video.isLocalDisc {
+            if let windowValue, windowValue.video.opensInFilmPlayer {
                 LocalDiscHandoffView(video: windowValue.video)
                     .environment(appModel)
             } else if let windowValue = windowValue {
@@ -338,7 +343,7 @@ struct HypnosApp: App {
         .defaultSize(width: 1000, height: 760)
 
         WindowGroup(id: "video-detail", for: GalleryVideo.self) { $video in
-            if let video, video.isLocalDisc {
+            if let video, video.opensInFilmPlayer {
                 LocalDiscHandoffView(video: video)
                     .environment(appModel)
             } else if let video {

@@ -2,8 +2,9 @@
  Hypnos - Library item context menu (every platform)
 
  The long-press (right-click on macOS, press-and-hold Select on tvOS) menu
- on a Library lockup: play it, resume or start over, jump to its details or
- its show, and toggle Watched and Favorite without opening the detail page.
+ on a Library lockup: play it, resume or start over, download it (see
+ `LibraryDownloadViews.swift`), jump to its details or its show, and toggle
+ Watched and Favorite without opening the detail page.
 
  Watched/Favorite go through `JellyfinLibrary`, which bumps
  `LibraryWatchState`, so the home shelves and an open detail page reload on
@@ -42,6 +43,7 @@ struct LibraryItemContextMenu: View {
                 }
             }
         }
+        LibraryDownloadMenuItems(item: item)
         if let openDetail {
             Section {
                 if showsDetails {

@@ -48,7 +48,7 @@ struct LibraryImageSize: Hashable, Sendable {
 /// A reference to one piece of artwork: enough to build an image URL lazily
 /// (so the caller controls size/quality per use site) plus an optional
 /// blurhash for an immediate placeholder while the real image loads.
-struct LibraryImageRef: Hashable, Sendable {
+struct LibraryImageRef: Codable, Hashable, Sendable {
     var kind: LibraryImageKind
     var blurhash: String?
     /// Opaque cache-busting tag from the server (Jellyfin's `ImageTags`);
@@ -63,7 +63,7 @@ struct LibraryImageRef: Hashable, Sendable {
 /// Per-user state for an item: resume position, played/unplayed, favorite.
 /// Comes back from the server alongside the item itself (Jellyfin embeds it
 /// as `UserData`) and is what the progress-sync path both reads and writes.
-struct LibraryUserData: Hashable, Sendable {
+struct LibraryUserData: Codable, Hashable, Sendable {
     var isPlayed: Bool = false
     var isFavorite: Bool = false
     /// Resume position, if partially watched. Nil (not zero) means "no
@@ -93,7 +93,7 @@ struct LibraryUserData: Hashable, Sendable {
 /// One movie, series, season, episode or collection, as the Library UI
 /// renders it. Assembled by a `MediaServerLibrary` implementation from that
 /// server's own item representation.
-struct LibraryItem: Identifiable, Hashable, Sendable {
+struct LibraryItem: Identifiable, Codable, Hashable, Sendable {
     var id: String
     var kind: LibraryItemKind
     var title: String
@@ -123,6 +123,10 @@ struct LibraryItem: Identifiable, Hashable, Sendable {
     /// A Blu-ray disc image or folder, which the film player decodes itself
     /// (see `MVCPictureSource`): Jellyfin can only remux it, slowly.
     var isBlurayDisc = false
+    /// Whether the server lets this user download the file (Jellyfin's
+    /// `CanDownload`: the account's download permission, and the item being
+    /// a file at all). Nil when the server didn't say.
+    var canDownload: Bool?
 
     func image(_ kind: LibraryImageKind) -> LibraryImageRef? {
         images.first { $0.kind == kind }
@@ -176,8 +180,8 @@ struct LibraryHome: Sendable {
 /// media segments, filled in by a segment provider plugin (Intro Skipper,
 /// Chapter Segments); a file whose chapters are named "Intro"/"Credits"
 /// gets them from its chapters instead.
-struct LibraryMediaSegment: Hashable, Sendable {
-    enum Kind: String, Sendable {
+struct LibraryMediaSegment: Codable, Hashable, Sendable {
+    enum Kind: String, Codable, Sendable {
         case intro, recap, preview, outro, commercial
     }
 
