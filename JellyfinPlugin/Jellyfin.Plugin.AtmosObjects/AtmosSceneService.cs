@@ -1026,7 +1026,9 @@ public sealed partial class AtmosSceneService
         feed?.Connect(process);
         var output = process.StandardOutput.ReadToEnd();
         process.WaitForExit();
-        return double.TryParse(output.Trim().Split('\n')[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds)
+        // A transport stream's packets carry side data, which csv output appends
+        // as an empty field: "0.541711,".
+        return double.TryParse(output.Trim().Split('\n')[0].Split(',')[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds)
             ? seconds * 1000
             : 0;
     }
