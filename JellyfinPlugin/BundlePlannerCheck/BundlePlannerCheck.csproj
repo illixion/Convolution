@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A self-checking console for BundlePlanner (how a compressed segment's bits
+    are shared out), which is pure arithmetic and so needs none of the plugin's
+    Jellyfin references. Run it with dotnet run on this folder; it exits
+    non-zero if a rule fails. Targets the plugin's framework and rolls forward
+    onto whichever runtime is installed.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../Jellyfin.Plugin.AtmosObjects/BundlePlanner.cs" Link="BundlePlanner.cs" />
+  </ItemGroup>
+
+</Project>

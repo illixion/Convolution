@@ -17,7 +17,7 @@ namespace Jellyfin.Plugin.AtmosObjects;
 ///   GET  /AtmosObjects/{itemId}/Scene?startSeconds=T     layout
 ///   GET  /AtmosObjects/{itemId}/Segments/{n}/Events      snapshot + events for segment n
 ///   GET  /AtmosObjects/{itemId}/Segments/{n}/{g}         FLAC for segment n, channel group g
-///   GET  /AtmosObjects/{itemId}/Segments/{n}/Bundle      every channel of segment n, lossy (codec=aac|opus, bitrate per channel)
+///   GET  /AtmosObjects/{itemId}/Segments/{n}/Bundle      every channel of segment n, lossy (codec=aac|opus, bitrate = average per channel, budget = cap on the whole segment)
 ///
 /// Every audio request takes an optional <c>audioStream</c> (a track's index
 /// from Tracks; each track is decoded and cached separately) and
@@ -118,7 +118,7 @@ public class AtmosObjectsController : ControllerBase
 
     [HttpGet("{itemId}/Segments/{segment:int}/Bundle")]
     public async Task<ActionResult> GetSegmentBundle([FromRoute] Guid itemId, [FromRoute] int segment,
-                                                     [FromQuery] string? codec, [FromQuery] int? bitrate,
+                                                     [FromQuery] string? codec, [FromQuery] int? bitrate, [FromQuery] int? budget,
                                                      [FromQuery] int? audioStream, [FromQuery] string? languages, CancellationToken ct)
     {
         BundleCodec? kind = codec?.ToLowerInvariant() switch
@@ -138,7 +138,8 @@ public class AtmosObjectsController : ControllerBase
             return NotFound();
         }
 
-        var path = await _scenes.SegmentBundleAsync(scene, segment, kind.Value, AtmosSceneService.ClampBundleBitrate(bitrate), ct).ConfigureAwait(false);
+        var path = await _scenes.SegmentBundleAsync(scene, segment, kind.Value, AtmosSceneService.ClampBundleBitrate(bitrate),
+            AtmosSceneService.ClampBundleBudget(budget), ct).ConfigureAwait(false);
         return path is null ? NotFound() : PhysicalFile(path, "application/octet-stream");
     }
 

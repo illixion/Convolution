@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.AtmosObjects;
@@ -19,7 +20,11 @@ public enum BundleCodec : ushort
 /// that can't carry lossless object audio (cellular). Made on request from
 /// the segment's cached FLAC, so the decode pipeline is unchanged:
 ///
-///   GET /AtmosObjects/{itemId}/Segments/{n}/Bundle?codec=aac|opus&amp;bitrate=64000
+///   GET /AtmosObjects/{itemId}/Segments/{n}/Bundle?codec=aac|opus&amp;bitrate=64000&amp;budget=768000
+///
+/// <c>bitrate</c> is the average per audible channel and <c>budget</c> an
+/// optional cap on the whole segment, both in bits per second. The bits are
+/// not shared evenly: see <see cref="BundlePlanner"/>.
 ///
 /// One request per segment whatever the channel count (a film with hundreds
 /// of objects would otherwise be hundreds of requests every segment), and
@@ -36,9 +41,13 @@ public enum BundleCodec : ushort
 ///   12  u32 frames in the segment
 ///   16  u32 pre-roll frames
 ///   20  u32 channel count (the scene's channels, in channel order)
-///   24  per channel, 12 bytes: u32 stream length (0: silent, not sent),
-///       f32 RMS in dBFS, f32 peak in dBFS
+///   24  per channel, 12 bytes: u32 stream length (0: not sent), f32 RMS in
+///       dBFS, f32 peak in dBFS, both as heard: the element's metadata gain
+///       is added, so a channel its gain mutes reads silent
 ///   ..  the streams, in channel order
+///
+/// A channel that isn't sent is silent (peak under -80 dBFS) or, when the
+/// budget couldn't cover everyone, audible and left out (peak above it).
 ///
 /// Each stream decodes to pre-roll + frames samples. The pre-roll is the end
 /// of the previous segment, so a lossy encoder starts warm and the join
@@ -52,31 +61,42 @@ public sealed partial class AtmosSceneService
     private const int BundlePrerollFrames = 4800;
     /// <summary>Channels per encoder process, so a scene with hundreds of channels is several parallel runs rather than one with hundreds of inputs.</summary>
     private const int BundleChannelsPerRun = 64;
+    /// <summary>What an M4A's sample tables add to a 10 s stream, per second of it (measured: a 16 kbps stream comes to 18.8). Ogg's pages cost nothing worth counting.</summary>
+    private const int AacStreamOverhead = 2600;
     /// <summary>Below this peak a channel counts as silent and is left out: 3 LSB of 16-bit, just above the dither.</summary>
     private const float SilentPeakDb = -80;
     private static readonly byte[] BundleMagic = "AOB1"u8.ToArray();
 
     private readonly ConcurrentDictionary<string, Lazy<Task<string?>>> _bundleBuilds = new();
 
-    private string BundlePath(Guid itemId, int segment, BundleCodec codec, int bitrate)
-        => Path.Combine(ItemDirectory(itemId), "seg", $"{segment}.{codec.ToString().ToLowerInvariant()}-{bitrate / 1000}k.aob");
+    /// <summary>"b2": the bits are planned per channel (BundlePlanner); bundles cut at a flat rate have no marker and are never read.</summary>
+    private string BundlePath(Guid itemId, int segment, BundleCodec codec, int bitrate, int? budget)
+        => Path.Combine(ItemDirectory(itemId), "seg",
+            $"{segment}.{codec.ToString().ToLowerInvariant()}-{bitrate / 1000}k{(budget is int b ? $"-t{b / 1000}k" : "")}.b2.aob");
 
-    /// <summary>Per-channel bitrate a request may ask for.</summary>
-    public static int ClampBundleBitrate(int? bitrate) => Math.Clamp(bitrate ?? 64000, 16000, 256000);
+    /// <summary>
+    /// The average per-channel bitrate a request may ask for, in whole steps of
+    /// 8 kbps: each distinct value is a file kept on disk for every segment.
+    /// </summary>
+    public static int ClampBundleBitrate(int? bitrate) => Math.Clamp(((bitrate ?? 64000) + 4000) / 8000 * 8000, BundlePlanner.MinBitrate, BundlePlanner.MaxBitrate);
+
+    /// <summary>The cap on a whole segment's bits per second, in steps of 32 kbps (64 kbps to 16 Mbps); null for none.</summary>
+    public static int? ClampBundleBudget(int? budget)
+        => budget is > 0 ? Math.Clamp(budget.Value / 32000 * 32000, 64000, 16_000_000) : null;
 
     /// <summary>
     /// The bundle for a segment that is already cached as FLAC, built if
     /// needed. Concurrent requests for the same bundle share one build.
     /// </summary>
-    public async Task<string?> SegmentBundleAsync(Guid itemId, int segment, BundleCodec codec, int bitrate, CancellationToken ct)
+    public async Task<string?> SegmentBundleAsync(Guid itemId, int segment, BundleCodec codec, int bitrate, int? budget, CancellationToken ct)
     {
-        var path = BundlePath(itemId, segment, codec, bitrate);
+        var path = BundlePath(itemId, segment, codec, bitrate, budget);
         if (File.Exists(path))
         {
             return path;
         }
 
-        var build = _bundleBuilds.GetOrAdd(path, _ => new Lazy<Task<string?>>(() => BuildBundleAsync(itemId, segment, codec, bitrate, path)));
+        var build = _bundleBuilds.GetOrAdd(path, _ => new Lazy<Task<string?>>(() => BuildBundleAsync(itemId, segment, codec, bitrate, budget, path)));
         try
         {
             return await build.Value.WaitAsync(ct).ConfigureAwait(false);
@@ -90,7 +110,7 @@ public sealed partial class AtmosSceneService
         }
     }
 
-    private async Task<string?> BuildBundleAsync(Guid itemId, int segment, BundleCodec codec, int bitrate, string path)
+    private async Task<string?> BuildBundleAsync(Guid itemId, int segment, BundleCodec codec, int bitrate, int? budget, string path)
     {
         var state = GetState(itemId);
         if (state is null || ReadLayout(itemId, state) is not { } layout)
@@ -119,19 +139,32 @@ public sealed partial class AtmosSceneService
         Directory.CreateDirectory(work);
         try
         {
+            // What each element's metadata does to it in this segment: where
+            // it sits, and the loudest its gain gets. The gain is applied on
+            // the client, so a channel it mutes is silent whatever its PCM
+            // says, and every level below is as heard.
+            var heard = ReadSegmentEvents(itemId, segment);
             var levels = new (float Rms, float Peak)[channels];
-            var audible = new List<int>();
+            var audible = new List<BundleSource>();
             for (var ch = 0; ch < channels; ch++)
             {
-                levels[ch] = Levels(current[ch]);
+                var (rms, peak) = Levels(current[ch]);
+                var element = layout.Elements[ch];
+                var known = heard.TryGetValue(element.Id, out var meta);
+                var gain = known ? meta.GainDb : 0f;
+                levels[ch] = (Math.Max(-120f, rms + gain), Math.Max(-120f, peak + gain));
                 // The FLAC was written with TPDF dither, so a silent channel
                 // reads as ±1 LSB (-90 dBFS) of noise, not zero.
-                if (levels[ch].Peak < SilentPeakDb)
+                if (levels[ch].Peak >= SilentPeakDb)
                 {
-                    continue;
+                    audible.Add(new BundleSource(ch, IsLfe(element), levels[ch].Rms, known ? meta.Position : null));
                 }
+            }
 
-                audible.Add(ch);
+            var plan = BundlePlanner.Plan(audible, bitrate, budget, codec == BundleCodec.Aac ? AacStreamOverhead : 0);
+            foreach (var entry in plan.Encode)
+            {
+                var ch = entry.Channel;
                 var mono = new byte[(preroll + frames) * 2];
                 var o = 0;
                 if (previous is not null)
@@ -153,12 +186,12 @@ public sealed partial class AtmosSceneService
             }
 
             using var limit = new SemaphoreSlim(Math.Max(1, Config.EncoderParallelism));
-            await Task.WhenAll(audible.Chunk(BundleChannelsPerRun).Select(async batch =>
+            await Task.WhenAll(plan.Encode.Chunk(BundleChannelsPerRun).Select(async batch =>
             {
                 await limit.WaitAsync().ConfigureAwait(false);
                 try
                 {
-                    await EncodeMonoStreamsAsync(work, batch, codec, bitrate).ConfigureAwait(false);
+                    await EncodeMonoStreamsAsync(work, batch, codec).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -167,17 +200,17 @@ public sealed partial class AtmosSceneService
             })).ConfigureAwait(false);
 
             var streams = new byte[channels][];
-            foreach (var ch in audible)
+            foreach (var entry in plan.Encode)
             {
-                streams[ch] = await File.ReadAllBytesAsync(Path.Combine(work, $"{ch}.{Extension(codec)}")).ConfigureAwait(false);
+                streams[entry.Channel] = await File.ReadAllBytesAsync(Path.Combine(work, $"{entry.Channel}.{Extension(codec)}")).ConfigureAwait(false);
             }
 
             var bundle = Assemble(codec, layout.SampleRate, frames, preroll, levels, streams);
             if (preroll > 0 || segment == 0)
             {
                 WriteAtomically(path, bundle);
-                _logger.LogDebug("Bundle {Segment} {Codec} {Bitrate}: {Audible}/{Channels} channels, {Bytes} bytes in {Ms} ms",
-                    segment, codec, bitrate, audible.Count, channels, bundle.Length, (DateTime.UtcNow - started).TotalMilliseconds);
+                _logger.LogDebug("Bundle {Segment} {Codec} {Bitrate}/{Budget}: {Sent} sent of {Audible} audible of {Channels} channels ({Omitted} left out), {Planned} bps planned, {Bytes} bytes in {Ms} ms",
+                    segment, codec, bitrate, budget, plan.Encode.Count, audible.Count, channels, plan.Omitted.Count, plan.TotalBitrate, bundle.Length, (DateTime.UtcNow - started).TotalMilliseconds);
                 return path;
             }
 
@@ -240,18 +273,18 @@ public sealed partial class AtmosSceneService
         return channels;
     }
 
-    /// <summary>One encoder run for a batch of mono channels: an input and an output per channel.</summary>
-    private async Task EncodeMonoStreamsAsync(string work, int[] batch, BundleCodec codec, int bitrate)
+    /// <summary>One encoder run for a batch of mono channels: an input and an output per channel, each at its own rate.</summary>
+    private async Task EncodeMonoStreamsAsync(string work, ChannelPlan[] batch, BundleCodec codec)
     {
         var args = new List<string> { "-v", "error", "-y" };
-        foreach (var ch in batch)
+        foreach (var entry in batch)
         {
-            args.AddRange(["-f", "s16le", "-ar", SampleRate.ToString(CultureInfo.InvariantCulture), "-ac", "1", "-i", Path.Combine(work, $"{ch}.raw")]);
+            args.AddRange(["-f", "s16le", "-ar", SampleRate.ToString(CultureInfo.InvariantCulture), "-ac", "1", "-i", Path.Combine(work, $"{entry.Channel}.raw")]);
         }
 
-        var rate = bitrate.ToString(CultureInfo.InvariantCulture);
         for (var i = 0; i < batch.Length; i++)
         {
+            var rate = batch[i].Bitrate.ToString(CultureInfo.InvariantCulture);
             args.AddRange(["-map", $"{i}:a"]);
             args.AddRange(codec switch
             {
@@ -260,7 +293,7 @@ public sealed partial class AtmosSceneService
                 BundleCodec.Aac => ["-c:a", "libfdk_aac", "-b:a", rate, "-f", "ipod"],
                 _ => ["-c:a", "libopus", "-b:a", rate, "-application", "audio", "-f", "ogg"]
             });
-            args.Add(Path.Combine(work, $"{batch[i]}.{Extension(codec)}"));
+            args.Add(Path.Combine(work, $"{batch[i].Channel}.{Extension(codec)}"));
         }
 
         using var process = StartProcess(_mediaEncoder.EncoderPath, args, redirectInput: false);
@@ -271,6 +304,43 @@ public sealed partial class AtmosSceneService
         {
             throw new InvalidOperationException($"{codec} encode failed: {(await stderr.ConfigureAwait(false)).Trim()}");
         }
+    }
+
+    /// <summary>The low-frequency bed. Its name is whatever the DAMF header called it.</summary>
+    private static bool IsLfe(SceneElement element)
+        => element.Kind == "bed" && element.BedChannel?.StartsWith("LFE", StringComparison.OrdinalIgnoreCase) == true;
+
+    /// <summary>
+    /// Per element id, where it sits at the start of the segment and the
+    /// loudest its gain gets within it. An element with no events has no entry.
+    /// </summary>
+    private Dictionary<int, (float[]? Position, float GainDb)> ReadSegmentEvents(Guid itemId, int segment)
+    {
+        var result = new Dictionary<int, (float[]? Position, float GainDb)>();
+        var path = EventsPath(itemId, segment);
+        if (!File.Exists(path))
+        {
+            return result;
+        }
+
+        List<SceneEvent>? events;
+        try
+        {
+            events = JsonSerializer.Deserialize<List<SceneEvent>>(File.ReadAllBytes(path), JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return result;
+        }
+
+        foreach (var group in (events ?? []).GroupBy(e => e.Id))
+        {
+            var ordered = group.OrderBy(e => e.T).ToList();
+            var position = ordered.FirstOrDefault(e => e.Pos is { Length: >= 3 })?.Pos?.Select(v => (float)v).ToArray();
+            result[group.Key] = (position, (float)ordered.Max(e => e.Gain));
+        }
+
+        return result;
     }
 
     private static string Extension(BundleCodec codec) => codec == BundleCodec.Aac ? "m4a" : "ogg";

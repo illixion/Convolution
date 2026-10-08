@@ -497,6 +497,42 @@ enum LibraryHarness {
                 }
                 log("compressedAudio aac \(bitrate / 1000)k: fetch+decode 2 segments \(took), SNR min \(String(format: "%.1f", snrs.min() ?? 0)) median \(String(format: "%.1f", snrs.sorted()[snrs.count / 2])) dB, lags \(Set(lags).sorted()), join/mid error ratio \(joins), dropped \(decoded.map(\.droppedChannels))")
             }
+
+            // Auto on four paths: the tier it picks, and what a link too slow
+            // for any tier does (the server leaves out the quietest channels).
+            let paths: [(String, FilmAudioGovernor.Link, Double?)] = [
+                ("unmetered, unmeasured", .init(), nil), ("cellular", .init(isExpensive: true), nil),
+                ("2 Mbps", .init(), 2), ("0.25 Mbps", .init(), 0.25),
+            ]
+            for (label, link, mbps) in paths {
+                let governor = FilmAudioGovernor(link: { link })
+                if let mbps { governor.recordTransfer(bytes: 500_000, seconds: 500_000 * 8 / (mbps * 1e6)) }
+                var client = lossless
+                client.governor = governor
+                let plan = governor.plan(for: scene)
+                let start = ContinuousClock.now
+                let out = try await client.audioSegment(5, of: scene)
+                let took = ContinuousClock.now - start
+                var snrs: [Float] = []
+                for (g, group) in scene.groups.enumerated() {
+                    for k in group.indices {
+                        let ref = samples(reference[0].buffers[g], k), got = samples(out.buffers[g], k)
+                        guard ref.contains(where: { abs($0) > 0.001 }) else { continue }
+                        snrs.append(snr(got, ref))
+                    }
+                }
+                log("compressedAudio auto [\(label)]: \(plan.encoding.summary)\(plan.budget.map { " budget \($0 / 1000) kbps" } ?? ""), \(took), SNR median \(String(format: "%.1f", snrs.sorted()[snrs.count / 2])) dB, left out \(out.omittedChannels) of \(scene.elements.count) channels")
+            }
+
+            // Fetching ahead: the bytes wait, and the decode is all that's left to do.
+            var ahead = lossless
+            ahead.encoding = .aac(bitrate: 64000)
+            let fetchStart = ContinuousClock.now
+            let fetched = await ahead.prefetchAudio([7, 8], of: scene)
+            let fetchTook = ContinuousClock.now - fetchStart
+            let decodeStart = ContinuousClock.now
+            _ = try await ahead.audioSegment(7, of: scene)
+            log("compressedAudio fetched ahead: \(fetched), fetch \(fetchTook), then decode only \(ContinuousClock.now - decodeStart)")
         } catch {
             log("compressedAudio FAILED: \(error)")
         }

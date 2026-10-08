@@ -230,7 +230,7 @@ final class FilmSession {
             }
         }
         var client = FilmServerClient(baseURL: serverURL, token: token, itemID: item.id)
-        client.encoding = ObjectAudioQuality.preferred.encoding
+        ObjectAudioQuality.preferred.apply(to: &client)
         if let disc, await (try? client.audioTracks(languages: FilmServerClient.deviceLanguages))?.isEmpty ?? true {
             // No object audio from the plugin (not installed, or no TrueHD on
             // the disc): the disc's own 5.1, read from the same image.

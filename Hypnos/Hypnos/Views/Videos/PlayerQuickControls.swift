@@ -121,9 +121,10 @@ struct PlayerAccessoryLayout<Bar: View, MenuContent: View>: View {
 /// the skip button, where it reads over any picture, stereo included.
 struct StreamQualityNotice: View {
     let text: String
+    var systemImage = "gauge.with.dots.needle.33percent"
 
     var body: some View {
-        Label(text, systemImage: "gauge.with.dots.needle.33percent")
+        Label(text, systemImage: systemImage)
             .font(.callout)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)

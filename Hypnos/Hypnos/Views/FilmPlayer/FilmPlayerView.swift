@@ -42,6 +42,10 @@ struct FilmPlayerView: View {
     private var player: FilmPlayer { session.player }
     /// Skip Intro / Skip Credits for the loaded Library title.
     @State private var skipper = MediaSegmentSkipper()
+    /// Said for a few seconds when Auto lowers the object audio's quality for the connection.
+    @State private var audioNotice: String?
+    @State private var audioNoticeTask: Task<Void, Never>?
+    @State private var lastAudioTier: FilmAudioGovernor.Tier?
     /// This view's claim on the shared player (`FilmSession.activePlayerView`).
     @State private var viewID = UUID()
     #if os(tvOS) || os(iOS)
@@ -165,6 +169,38 @@ struct FilmPlayerView: View {
             .task(id: session.loadedItem?.id) {
                 await skipper.load(itemId: FilmSession.isServerItem(session.loadedItem?.id) ? session.loadedItem?.id : nil)
             }
+            .onChange(of: player.audioQuality) { noteAudioQuality() }
+            .animation(.easeInOut(duration: 0.2), value: audioNotice)
+    }
+
+    /// Auto lowering the sound for the link is said, and a fixed choice
+    /// never changes, so only a step down under Auto speaks (the first
+    /// choice at the start, and every step back up, are not news).
+    private func noteAudioQuality() {
+        guard ObjectAudioQuality.preferred == .auto, let tier = ObjectAudioQuality.autoGovernor.tier else {
+            lastAudioTier = nil
+            return
+        }
+        defer { lastAudioTier = tier }
+        guard let last = lastAudioTier, tier.rawValue > last.rawValue else { return }
+        let encoding = ObjectAudioQuality.autoGovernor.currentEncoding.summary
+        AppLogger.filmPlayer.info("Auto lowered the object audio to \(encoding, privacy: .public)")
+        audioNotice = "Sound reduced to \(encoding) for this connection"
+        audioNoticeTask?.cancel()
+        audioNoticeTask = Task {
+            try? await Task.sleep(for: .seconds(8))
+            if !Task.isCancelled { audioNotice = nil }
+        }
+    }
+
+    /// What hangs beside the controls: the audio notice and the skip button.
+    private func prompt(controlsVisible: Bool) -> AnyView? {
+        let skip = skipButton(controlsVisible: controlsVisible)
+        guard audioNotice != nil || skip != nil else { return nil }
+        return AnyView(HStack(spacing: 12) {
+            audioNotice.map { StreamQualityNotice(text: $0, systemImage: "waveform") }
+            skip
+        })
     }
 
     /// The skip button to show now, if any. Platforms whose controls never
@@ -274,11 +310,11 @@ struct FilmPlayerView: View {
         .persistentSystemOverlays(chromeVisible ? .visible : .hidden)
         .ornament(visibility: PlayerOrnamentStack<EmptyView>.isVisible(
                       subtitles: bandSubtitles, controlsVisible: chromeVisible,
-                      hasPrompt: skipButton(controlsVisible: chromeVisible) != nil) ? .visible : .hidden,
+                      hasPrompt: prompt(controlsVisible: chromeVisible) != nil) ? .visible : .hidden,
                   attachmentAnchor: .scene(.bottom), contentAlignment: .top) {
             PlayerOrnamentStack(
                 subtitles: bandSubtitles, controlsVisible: chromeVisible,
-                prompt: skipButton(controlsVisible: chromeVisible).map { AnyView($0) },
+                prompt: prompt(controlsVisible: chromeVisible),
                 gap: stereoSource == nil ? 12 : VideoWindowView.stereoControlsGap,
                 filmTime: { player.currentTime }
             ) {
@@ -311,9 +347,11 @@ struct FilmPlayerView: View {
             FilmTransport(player: player).frame(width: 820).padding(.bottom, 40)
         }
         .overlay(alignment: .bottomTrailing) {
-            skipButton(controlsVisible: true)
-                .padding(.trailing, 90)
-                .padding(.bottom, 60)
+            if let prompt = prompt(controlsVisible: true) {
+                prompt
+                    .padding(.trailing, 90)
+                    .padding(.bottom, 60)
+            }
         }
         .onPlayPauseCommand { player.isPlaying ? player.pause() : player.play() }
         #else
@@ -327,9 +365,11 @@ struct FilmPlayerView: View {
             FilmTransport(player: player).padding(16)
         }
         .overlay(alignment: .bottomTrailing) {
-            skipButton(controlsVisible: true)
-                .padding(.trailing, 24)
-                .padding(.bottom, 140)
+            if let prompt = prompt(controlsVisible: true) {
+                prompt
+                    .padding(.trailing, 24)
+                    .padding(.bottom, 140)
+            }
         }
         .onAppear { if session.headTracking { HeadphoneHeadTracker.shared.start() } }
         .onDisappear { HeadphoneHeadTracker.shared.stop() }

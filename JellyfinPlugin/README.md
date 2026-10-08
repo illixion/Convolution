@@ -123,7 +123,7 @@ Every endpoint needs normal Jellyfin authentication (an API key or a user token)
 | `GET /AtmosObjects/{itemId}/Scene?startSeconds=T` | The layout. With nothing cached, it starts a decode at `T` and waits for it. 422 if the track has no objects |
 | `GET /AtmosObjects/{itemId}/Segments/{n}/Events` | Position/gain events for segment `n` |
 | `GET /AtmosObjects/{itemId}/Segments/{n}/{g}` | FLAC audio for segment `n`, channel group `g` |
-| `GET /AtmosObjects/{itemId}/Segments/{n}/Bundle?codec=aac\|opus&bitrate=B` | Every channel of segment `n` in one lossy bundle (see [Compressed bundles](#compressed-bundles)) |
+| `GET /AtmosObjects/{itemId}/Segments/{n}/Bundle?codec=aac\|opus&bitrate=B&budget=T` | Every channel of segment `n` in one lossy bundle: `B` the average bits per second per audible channel, `T` an optional cap on the whole segment (see [Compressed bundles](#compressed-bundles)) |
 | `GET /AtmosObjects/{itemId}` | `{state, progressSeconds, durationSeconds, error}`, where `state` is `none`, `partial`, `preparing`, `ready`, `unsupported` or `failed` |
 | `POST /AtmosObjects/{itemId}/Prepare` | Decodes the whole film into the cache in the background |
 | `GET /AtmosObjects/{itemId}/Video` | The video index: segment start times and range info (see [Video](#video)) |
@@ -154,13 +154,41 @@ Events are `{id, t, ramp, gain, pos?}`:
 
 ## Compressed bundles
 
-For links that can't carry lossless object audio (cellular), a segment can be
-fetched as one bundle holding a mono AAC (M4A) or Opus (Ogg) stream per
-channel, `bitrate` bits per second each (16–256 kbps, default 64 kbps). The
-scene's `bundleCodecs` lists what the plugin serves; a client that doesn't see
-it stays on FLAC. Bundles are made from the cached FLAC the first time they're
-asked for and kept next to it (`seg/<n>.<codec>-<kbps>k.aob`).
+For links that can't carry lossless object audio (cellular, a hotel's Wi-Fi), a
+segment can be fetched as one bundle holding a mono AAC (M4A) or Opus (Ogg)
+stream per channel. The scene's `bundleCodecs` lists what the plugin serves; a
+client that doesn't see it stays on FLAC. Bundles are made from the cached FLAC
+the first time they're asked for and kept next to it
+(`seg/<n>.<codec>-<kbps>k[-t<kbps>k].b2.aob`).
 
+- **`bitrate` is the average per audible channel, `budget` the cap on the
+  whole segment.** `bitrate` is 16–256 kbps in steps of 8 (default 64): each
+  distinct value is a file kept for every segment, so a request is rounded to
+  it. `budget` is bits per second as sent, containers included, in steps of
+  32 kbps from 64 kbps; with it a client says what its link carries however
+  many channels the scene has (128 audible channels at 64 kbps would be
+  8 Mbps).
+- **The bits are not shared evenly** (`BundlePlanner`). Every channel is its
+  own stream, so a flat rate spends as much on the low-frequency bed and on a
+  whisper under the mix as on the dialogue. Instead:
+  - The LFE gets a third of the average (16–32 kbps), and what it doesn't use
+    goes to the others. It is not low-passed first: a 160 Hz biquad delays it
+    1.5 ms against every other channel for a 1% saving, which the encoder's
+    own bandwidth at that rate gives anyway.
+  - Roles come from **where the element sits** in the segment's events, not
+    from its bed name: a Dolby Atmos track's only bed is usually the LFE (the
+    speaker channels arrive as objects; the demo's centre is an object at
+    (0, 1, 0)). Front centre, where dialogue is, weighs 1.5; the rest of the
+    front stage 1.25.
+  - Coding noise is heard against the mix, so a channel far under the loudest
+    needs fewer bits: weight 1 within 12 dB of it, falling to 0.45 at 48 dB
+    under (about 1 kbps per dB at 64 kbps).
+  - Nobody gets under half the average, or over twice it.
+  - Levels include the element's metadata gain, which the client applies: a
+    channel its gain mutes is silent whatever its PCM holds, and isn't sent.
+  - Under a budget the floors fall to 16 kbps, and past that the quietest
+    channels are **left out** rather than every channel coded badly. A left-out
+    channel has no stream but an audible peak in the header.
 - **One request per segment, whatever the channel count.** A scene with
   hundreds of objects would otherwise be hundreds of requests per segment.
 - **One mono stream per channel.** Objects are rendered one by one, so joint
@@ -172,11 +200,14 @@ asked for and kept next to it (`seg/<n>.<codec>-<kbps>k.aob`).
 - **Each stream starts with 100 ms of the previous segment** (pre-roll), which
   the client drops. Measured on a chirp: at a join, the error RMS was 0.0057
   for one continuous encode, 0.0069 with the pre-roll and 0.0086 without.
-  The decoded audio lines up with the FLAC to the sample.
-- **Per-channel RMS and peak in the header**, so a client that can't decode
-  everything before the segment plays can keep the loudest channels.
+  The decoded audio lines up with the FLAC to the sample, on every channel
+  (check lags, not just SNR: an aligned comparison hid a filter's delay once).
+- **Per-channel RMS and peak in the header**, as heard (gain included), so a
+  client that can't decode everything before the segment plays can keep the
+  loudest channels.
 - AAC is AAC-LC through `libfdk_aac`. jellyfin-ffmpeg's build has no HE-AAC
-  ("Unable to set the AOT 5").
+  ("Unable to set the AOT 5"). Its M4A container costs about 2.6 kbps a stream
+  (a 16 kbps stream comes to 18.8): `budget` accounts for it.
 
 Layout, little-endian, version 1:
 
@@ -189,21 +220,40 @@ Layout, little-endian, version 1:
 | 12 | u32 frames in the segment |
 | 16 | u32 pre-roll frames |
 | 20 | u32 channel count (the scene's channels, in channel order) |
-| 24 | per channel, 12 bytes: u32 stream length (0 = silent), f32 RMS dBFS, f32 peak dBFS |
+| 24 | per channel, 12 bytes: u32 stream length (0 = not sent), f32 RMS dBFS, f32 peak dBFS (both as heard). Not sent with a peak under −80: silent. Not sent above it: left out for the budget |
 | … | the streams, in channel order; each decodes to pre-roll + frames samples |
 
-Measured on the Dolby demo (12 channels, 10 s segments, 2 silent): FLAC
-3.99 MB (3.2 Mbps); AAC 96/64/32 kbps 1.25/0.84/0.44 MB (1.0/0.67/0.35 Mbps),
-built in about 0.4 s. Against the FLAC, median waveform SNR is 31/27/20 dB
-(perceptual codecs score low on waveform SNR while sounding transparent).
-Server cost: one encoder run of 64 mono 10 s channels takes 0.71 s (AAC) or
-1.17 s (Opus) in the dev container, and runs go `EncoderParallelism` at a
-time. Client cost (RAVEFilm, M-series Mac): 224 AAC channels × 10 s decode in
-0.34 s on 6 cores.
+Measured on the Dolby demo (12 channels, 10 s segments; 8–10 audible), against
+the same audio at a flat rate and the same bytes (waveform SNR of the sum of
+all channels against the sum of their errors, as a stand-in for what is heard
+against the mix):
+
+| Segment, rate | Flat | Planned |
+|---|---|---|
+| 3 @ 64 kbps | 18.96 dB | 19.17 dB |
+| 5 @ 64 kbps | 25.24 dB | 27.17 dB |
+| 5 @ 32 kbps | 17.45 dB | 19.18 dB |
+| 9 @ 32 kbps | 25.42 dB | 27.43 dB |
+| 2 @ 32 kbps | 24.38 dB | 24.50 dB |
+
+The gain is small where the channels are alike and up to 2 dB where the LFE or
+a quiet channel was being overpaid; it was never negative. The centre gains
+1.8 dB of its own SNR. The LFE at a third of the average still decodes at 29–40
+dB SNR, with its noise 67–72 dB under full scale. The budget holds: 192 / 96 /
+64 kbps requests came to 196 / 96 / 65 kbps on the wire.
+
+Overall: FLAC 3.99 MB (3.2 Mbps) against 0.67–0.84 MB (AAC at 64 kbps); built
+in about 0.4 s. Server cost: one encoder run of 64 mono 10 s channels takes
+0.71 s (AAC) or 1.17 s (Opus) in the dev container, and runs go
+`EncoderParallelism` at a time. Client cost (RAVEFilm, M-series Mac): 224 AAC
+channels × 10 s decode in 0.31 s on 6 cores. `dotnet run` on
+`JellyfinPlugin/BundlePlannerCheck` checks the planner's rules.
 
 A client on Android or a Quest decodes the Opus streams with libopus or
 MediaCodec (`audio/opus`, after reading the Ogg pages); the bundle needs
-nothing else from the platform.
+nothing else from the platform. Ogg's pages cost nothing worth counting and
+the encoder runs variable-rate, so an Opus bundle comes in at or under what
+was asked.
 
 ## Video
 

@@ -31,9 +31,10 @@ struct FilmAudioTrackMenu: View {
     }
 }
 
-/// Lossless or compressed object audio (`ObjectAudioQuality`): Auto picks
-/// compressed on cellular. The choice is remembered and applies at once, the
-/// sound reloading at the current position like a track change.
+/// Lossless or compressed object audio (`ObjectAudioQuality`): Auto follows
+/// the connection, segment by segment, and the menu says where it is now.
+/// A choice is remembered and applies at once, the sound reloading at the
+/// current position like a track change.
 struct ObjectAudioQualityMenu: View {
     let player: FilmPlayer
     var onOpenChanged: (Bool) -> Void = { _ in }
@@ -43,17 +44,18 @@ struct ObjectAudioQualityMenu: View {
 
     var body: some View {
         PlayerChoiceMenu(title: "Audio Quality", systemImage: "waveform.badge.magnifyingglass",
-                         help: "Object audio: \(selected.title)", onOpenChanged: onOpenChanged) { close in
+                         help: "Object audio: \(player.audioQuality.isEmpty ? selected.title : player.audioQuality)",
+                         onOpenChanged: onOpenChanged) { close in
             ForEach(ObjectAudioQuality.allCases, id: \.self) { quality in
                 Button {
                     close()
                     stored = quality.rawValue
-                    Task { await player.setAudioEncoding(quality.encoding) }
+                    Task { await player.setAudioEncoding(quality.encoding, governor: quality.governor) }
                 } label: {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(quality.title)
-                            if let detail = quality.detail {
+                            if let detail = detail(of: quality) {
                                 Text(detail).font(.caption).foregroundStyle(.secondary)
                             }
                         }
@@ -64,5 +66,11 @@ struct ObjectAudioQualityMenu: View {
             }
         }
         .accessibilityIdentifier("player.audioQuality")
+    }
+
+    /// Under Auto, where it is now ("Now AAC 64 kbps").
+    private func detail(of quality: ObjectAudioQuality) -> String? {
+        guard quality == .auto, selected == .auto, let now = player.audioQuality.split(separator: "·").last else { return quality.detail }
+        return "\(quality.detail ?? "") · Now \(now.trimmingCharacters(in: .whitespaces))"
     }
 }
