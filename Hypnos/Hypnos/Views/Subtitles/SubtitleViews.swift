@@ -11,38 +11,25 @@ import RAVEMedia
 import RAVEUI
 import SwiftUI
 
-/// Equatable on its controller alone, and placed with `.equatable()`: the
-/// player bars around it re-render four times a second for their clock, and
-/// the closure made every one of those rebuild the menu, open or not, so an
-/// open menu flickered. The controller is observed, so track changes still
-/// redraw it.
-struct SubtitleMenu: View, @MainActor Equatable {
+struct SubtitleMenu: View {
     let controller: SubtitleController
     /// The menu opened or closed, for a caller that has to move a stereo
     /// picture out of its way (the same signal the video ornament's menus use).
     var onOpenChanged: (Bool) -> Void = { _ in }
 
-    static func == (a: SubtitleMenu, b: SubtitleMenu) -> Bool { a.controller === b.controller }
-
     var body: some View {
-        Menu {
-            Group {
-                Button { controller.select(nil) } label: { item("Off", isSelected: controller.selected == nil) }
-                ForEach(controller.tracks) { track in
-                    Button { controller.select(track) } label: {
-                        item(track.isText ? track.title : "\(track.title) (Image, unsupported)",
-                             isSelected: controller.selected == track)
-                    }
-                    .disabled(!track.isText)
+        PlayerChoiceMenu(title: "Subtitles",
+                         systemImage: controller.selected == nil ? "captions.bubble" : "captions.bubble.fill",
+                         help: statusText, onOpenChanged: onOpenChanged) { close in
+            Button { close(); controller.select(nil) } label: { item("Off", isSelected: controller.selected == nil) }
+            ForEach(controller.tracks) { track in
+                Button { close(); controller.select(track) } label: {
+                    item(track.isText ? track.title : "\(track.title) (Image, unsupported)",
+                         isSelected: controller.selected == track)
                 }
+                .disabled(!track.isText)
             }
-            // Silent inside the bar's More menu, which reports for it.
-            .ravePlayerMenuReporting(onOpenChanged)
-        } label: {
-            Label("Subtitles", systemImage: controller.selected == nil ? "captions.bubble" : "captions.bubble.fill")
-                .ravePlayerAccessoryLabel()
         }
-        .help(statusText)
         .accessibilityIdentifier("player.subtitles")
     }
 

@@ -52,6 +52,15 @@ enum FilmDebugEndpoints {
         var scheduledSkewMs: Double?
         var muted: Bool
         var volume: Float
+        /// The audio's render playhead and where the picture's clock puts it:
+        /// far apart, the sound plays the wrong part of the film (or silence).
+        var audioFrame: Int?
+        var expectedAudioFrame: Int?
+        /// Loudest element level the stage measured lately, 0…1: zero while
+        /// playing means silence is being rendered, not lost downstream.
+        var peakLevel: Float
+        var audioStream: Int?
+        var audioTracks: Int
         var picture: Picture
         var disc: MVCPictureSource.Diagnostics?
     }
@@ -74,6 +83,11 @@ enum FilmDebugEndpoints {
             scheduledSkewMs: player.scheduledSkewMs,
             muted: player.isMuted,
             volume: player.volume,
+            audioFrame: player.audio == nil ? nil : player.currentFrame,
+            expectedAudioFrame: player.scene.map { Int(((video.currentTime - $0.startSeconds) * Double($0.sampleRate)).rounded()) },
+            peakLevel: player.levels.max() ?? 0,
+            audioStream: player.audioStream,
+            audioTracks: player.audioTracks.count,
             picture: .init(
                 source: disc != nil ? "disc" : (video.index != nil ? "segments" : "none"),
                 status: video.status,

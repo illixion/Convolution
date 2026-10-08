@@ -563,6 +563,11 @@ struct FilmTransport: View {
     var onHold: (Bool) -> Void = { _ in }
     @Bindable private var session = FilmSession.shared
     @State private var now = 0.0
+    /// One of the bar's menus is open: the bar then reads nothing that moves
+    /// (the clock stops updating `now`, the buffered position isn't read),
+    /// since every update re-renders and re-lays out the bar, and an open
+    /// visionOS menu redrew with it each time (device, 2026-10-08).
+    @State private var menuOpen = false
     @State private var showsSound = false
     #if os(visionOS)
     @OpenWindowProxy private var openWindow
@@ -570,8 +575,10 @@ struct FilmTransport: View {
 
     var body: some View {
         RAVEPlayerControls(
+            // While a menu is open the bar reads nothing that moves (see `menuOpen`):
+            // the buffered position updates twice a second too.
             state: RAVEPlayerControlState(currentTime: now, duration: player.duration,
-                bufferedUntil: player.video.bufferedUntil, isPlaying: player.isPlaying, isMuted: player.isMuted,
+                bufferedUntil: menuOpen ? now : player.video.bufferedUntil, isPlaying: player.isPlaying, isMuted: player.isMuted,
                 volume: Double(player.volume)),
             togglePlayback: { player.isPlaying ? player.pause() : player.play() },
             seek: { player.seek(to: $0) }, toggleMute: { player.isMuted.toggle() },
@@ -595,8 +602,11 @@ struct FilmTransport: View {
                 }
                 .help(stereoEnabled ? "Play as 2D" : "Convert to 3D")
             }
+            if player.audioTracks.count > 1 {
+                FilmAudioTrackMenu(player: player, onOpenChanged: menuChanged)
+            }
             if !session.subtitles.tracks.isEmpty {
-                SubtitleMenu(controller: session.subtitles, onOpenChanged: onModalChanged).equatable()
+                SubtitleMenu(controller: session.subtitles, onOpenChanged: menuChanged)
             }
             #if os(iOS) || os(macOS)
             if session.headTracking, HeadphoneHeadTracker.shared.isTracking {
@@ -635,12 +645,20 @@ struct FilmTransport: View {
             onModalChanged(showing)
             if !showing { session.saveSound() }
         }
+        // The host closes every menu with this; a menu that never reported
+        // closing mustn't leave the clock stopped.
+        .onChange(of: menuDismissal) { menuOpen = false }
         .task {
             while !Task.isCancelled {
-                now = player.currentTime
+                if !menuOpen { now = player.currentTime }
                 try? await Task.sleep(for: .milliseconds(250))
             }
         }
+    }
+
+    private func menuChanged(_ open: Bool) {
+        menuOpen = open
+        onModalChanged(open)
     }
 
     #if os(visionOS)

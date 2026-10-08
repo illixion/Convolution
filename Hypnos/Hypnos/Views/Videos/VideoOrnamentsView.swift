@@ -107,7 +107,7 @@ struct VideoOrnamentsView: View {
             viewModeMenu
 
             if !windowModel.subtitles.tracks.isEmpty {
-                SubtitleMenu(controller: windowModel.subtitles, onOpenChanged: { chromeMenu("Subtitles", opened: $0) }).equatable()
+                SubtitleMenu(controller: windowModel.subtitles, onOpenChanged: { chromeMenu("Subtitles", opened: $0) })
             }
 
             // Info button (rating & metadata). Stash-only: the sheet fetches
@@ -637,7 +637,7 @@ private struct MoreOptionsControl<Items: View>: View {
                 VStack(alignment: .leading, spacing: 4) {
                     items { showsPopover = false }
                 }
-                .buttonStyle(MoreOptionsRowStyle())
+                .buttonStyle(PlayerPopoverRowStyle())
                 .padding(12)
                 .frame(minWidth: 220)
             }
@@ -664,24 +664,6 @@ private struct MoreOptionsControl<Items: View>: View {
             .menuStyle(.button)
             .raveChromeButtonStyle()
             .help("More")
-    }
-}
-
-/// A full-width row in the More Options popover, highlighted under the gaze
-/// or pointer like a menu item.
-private struct MoreOptionsRowStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .labelStyle(.titleAndIcon)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .contentShape(.rect(cornerRadius: 10))
-            #if os(visionOS) || os(iOS)
-            .contentShape(.hoverEffect, .rect(cornerRadius: 10))
-            .hoverEffect(.highlight)
-            #endif
-            .opacity(configuration.isPressed ? 0.6 : 1)
     }
 }
 
