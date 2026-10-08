@@ -216,11 +216,19 @@ final class VideoWindowModel {
         showMediaInfo || showShareSheet || showVideo3DSettingsSheet || openOrnamentMenuCount > 0
     }
 
-    /// The control bar's More popover is all that's open: it keeps the gaze
-    /// even with the stereo picture tappable, so a tap on the picture can
-    /// close it. A menu opened from it takes the picture's input away again.
+    /// The ornament "menus" that are popovers: the control bar's More, and
+    /// More Options nested in it (on the bar, More Options is a real Menu
+    /// and reports as "More Options").
+    static let popoverMenuNames: Set<String> = ["More", "More Options popover"]
+
+    /// Only popovers are open: they keep the gaze even with the stereo
+    /// picture tappable, so a tap on the picture can close them. A real menu
+    /// opened from them takes the picture's input away again. With the
+    /// nested More Options counted as a menu, a tap on the picture closed
+    /// nothing (device, 2026-10-08).
     var pictureTakesInputWithChrome: Bool {
-        openOrnamentMenus == ["More"] && !showMediaInfo && !showShareSheet && !showVideo3DSettingsSheet
+        !openOrnamentMenus.isEmpty && openOrnamentMenus.isSubset(of: Self.popoverMenuNames)
+            && !showMediaInfo && !showShareSheet && !showVideo3DSettingsSheet
     }
 
     /// Bumped to close the control bar's More popover from outside it.

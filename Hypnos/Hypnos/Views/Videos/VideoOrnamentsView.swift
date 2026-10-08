@@ -274,7 +274,9 @@ struct VideoOrnamentsView: View {
 
     private var moreMenu: some View {
         MoreOptionsControl(highlighted: moreMenuHighlighted,
-                           onOpenChanged: { chromeMenu("More Options", opened: $0) }) { close in
+                           onOpenChanged: { opened, asPopover in
+                               chromeMenu(asPopover ? "More Options popover" : "More Options", opened: opened)
+                           }) { close in
             Button {
                 close()
                 // Open the standalone Adjustments window (repositionable,
@@ -613,7 +615,9 @@ private struct ConversionMenuStatus: View {
 /// hover. A popover's own content updates only with what it reads.
 private struct MoreOptionsControl<Items: View>: View {
     let highlighted: Bool
-    let onOpenChanged: (Bool) -> Void
+    /// Opened or closed, and whether as the popover (which leaves the
+    /// stereo picture tappable) or the menu.
+    let onOpenChanged: (_ opened: Bool, _ asPopover: Bool) -> Void
     /// The items; each calls the passed closure to close the popover first.
     @ViewBuilder let items: (_ close: @escaping () -> Void) -> Items
 
@@ -637,8 +641,11 @@ private struct MoreOptionsControl<Items: View>: View {
                 .padding(12)
                 .frame(minWidth: 220)
             }
-            .onChange(of: showsPopover) { _, open in onOpenChanged(open) }
-            .onDisappear { if showsPopover { onOpenChanged(false) } }
+            .onChange(of: showsPopover) { _, open in onOpenChanged(open, true) }
+            .onDisappear {
+                if showsPopover { onOpenChanged(false, true) }
+                showsPopover = false
+            }
         } else {
             menu
         }
@@ -648,7 +655,7 @@ private struct MoreOptionsControl<Items: View>: View {
     private var menu: some View {
             Menu {
                 Group { items {} }
-                    .ravePlayerMenuReporting(onOpenChanged)
+                    .ravePlayerMenuReporting { onOpenChanged($0, false) }
             } label: {
                 OrnamentGlyph(title: "More Options", systemImage: "ellipsis.circle")
                     .padding(6)
