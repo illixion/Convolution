@@ -24,11 +24,34 @@ Decoding is live: a client can start or seek anywhere in a film and the
 plugin decodes from that point on request. It serves the first segment about
 a second later, and each segment it decodes is cached for next time.
 
+## Blu-ray discs (ISO or BDMV folder)
+
+ffmpeg reads a disc only through its `bluray:` input (libbluray), which reads
+an ISO at a few MB/s and can't seek in usable time: on servo a cut an hour
+into *Bumblebee 3D* took 75 s to start, and passing the raw `.iso` path the
+way a file is passed fails outright. For a disc item (`VideoType` BluRay, or
+an ISO whose `IsoType` is BluRay) the plugin instead feeds ffmpeg through its
+stdin from `mvc3d stream DISC --seek S` (`DiscFeed.cs`). mvc3d is an MIT
+Swift Blu-ray reader (not yet published) that jumps to the clip entry point
+before `S` straight from the disc's EP map. It writes the feature
+playlist's own clips, so ffmpeg sees the streams in the order Jellyfin's
+`bluray:` probe lists them, and with the clip's own timestamps, which `bluray:` passes
+through as well. The stream indexes in MediaStreams, the origin probe and the
+seek arithmetic are unchanged; mvc3d seeks in playlist time, so the plugin
+subtracts the origin. Measured on servo with the same pipeline: first decoded
+audio 3.7 s after a seek to one hour, then about 6.5× realtime.
+
+Blu-ray carries object audio only in TrueHD, so a disc has no E-AC-3 path.
+Known limits: both tools pick the feature as the longest title (mvc3d the
+longest 3D one), which agrees on ordinary discs; a feature made of several
+clips restarts its timestamps at each clip, as it does through `bluray:`.
+
 ## Dependencies
 
 | Library | Used for | Distribution | Licence |
 |---|---|---|---|
 | [truehdd](https://github.com/truehdd/truehdd) | TrueHD decode (external subprocess) | Source pinned + patched, built locally (`truehdd/build.sh`) | Apache-2.0 |
+| mvc3d | Reading Blu-ray ISOs and folders (external subprocess, disc items only) | Built from source (`swift build -c release`) | MIT |
 | [Cavern](https://github.com/VoidXH/Cavern) / `Cavern.Format` | E-AC-3 JOC decode (in-process) | Official NuGet packages, `Cavern`/`Cavern.Format` 2.1.0, referenced by the `.csproj` | Custom, free but requires crediting the creator — see below |
 
 Full licence texts and the required Cavern credit are in
@@ -55,6 +78,7 @@ credit is in the notices file; don't drop it if this plugin is redistributed.
    ```xml
    <PluginConfiguration>
      <TruehddPath>/path/to/truehdd/checkout/target/release/truehdd</TruehddPath>
+     <Mvc3dPath />                 <!-- empty: mvc3d next to the default truehdd; only Blu-ray items need it -->
      <CacheDirectory />            <!-- empty: <jellyfin cache>/atmos-objects -->
      <SegmentSeconds>10</SegmentSeconds>
      <EncoderParallelism>4</EncoderParallelism>

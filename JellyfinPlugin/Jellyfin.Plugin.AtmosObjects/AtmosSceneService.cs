@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using MediaBrowser.Common.Configuration;
+using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Model.Entities;
@@ -108,6 +109,10 @@ public sealed partial class AtmosSceneService
     private string TruehddPath => string.IsNullOrWhiteSpace(Config.TruehddPath)
         ? Path.Combine(Plugin.Instance?.DataFolderPath ?? _paths.PluginConfigurationsPath, "truehdd")
         : Config.TruehddPath;
+
+    private string Mvc3dPath => string.IsNullOrWhiteSpace(Config.Mvc3dPath)
+        ? Path.Combine(Plugin.Instance?.DataFolderPath ?? _paths.PluginConfigurationsPath, "mvc3d")
+        : Config.Mvc3dPath;
 
     private string ItemDirectory(Guid itemId) => Path.Combine(CacheRoot, itemId.ToString("N"));
 
@@ -253,7 +258,14 @@ public sealed partial class AtmosSceneService
 
     // MARK: Item state
 
-    private sealed record ItemSource(string Path, int StreamIndex, double DurationSeconds, double OriginMs, AudioCodecKind Codec);
+    /// <param name="IsDisc">A Blu-ray ISO or BDMV folder, read through <see cref="DiscFeed"/>.</param>
+    private sealed record ItemSource(string Path, int StreamIndex, double DurationSeconds, double OriginMs, AudioCodecKind Codec, bool IsDisc = false);
+
+    /// <summary>A Blu-ray disc image or folder: ffmpeg can only read it through <c>bluray:</c>, which can't seek in usable time.</summary>
+    private static bool IsBluray(BaseItem item) => item is Video
+    {
+        VideoType: VideoType.BluRay
+    } or Video { VideoType: VideoType.Iso, IsoType: IsoType.BluRay };
 
     private sealed class ItemState
     {
@@ -295,16 +307,18 @@ public sealed partial class AtmosSceneService
         DeleteStale(ItemDirectory(itemId), "work-*");
         var audioStreams = _mediaSourceManager.GetMediaStreams(itemId).Where(s => s.Type == MediaStreamType.Audio).ToList();
         var truehd = audioStreams.FirstOrDefault(s => string.Equals(s.Codec, "truehd", StringComparison.OrdinalIgnoreCase));
+        var disc = IsBluray(item);
         // No TrueHD Atmos track: fall back to E-AC-3, decoded in-process by Cavern
         // (Eac3AtmosDecoder.cs). Whether it actually carries JOC objects isn't known
         // until the first decode attempt — see RunEac3SessionAsync's NoObjects outcome.
-        var eac3 = truehd is null
+        // Blu-ray carries objects only in TrueHD, so a disc has no E-AC-3 path.
+        var eac3 = truehd is null && !disc
             ? audioStreams.FirstOrDefault(s => string.Equals(s.Codec, "eac3", StringComparison.OrdinalIgnoreCase))
             : null;
         var stream = truehd ?? eac3;
         if (stream is null)
         {
-            MarkUnsupported(itemId, "No TrueHD or EAC3 audio track.");
+            MarkUnsupported(itemId, disc ? "No TrueHD audio track on the disc." : "No TrueHD or EAC3 audio track.");
         }
         else
         {
@@ -312,8 +326,9 @@ public sealed partial class AtmosSceneService
                 item.Path,
                 stream.Index,
                 item.RunTimeTicks is long ticks ? TimeSpan.FromTicks(ticks).TotalSeconds : 0,
-                ProbeOriginMs(item.Path, stream.Index),
-                truehd is not null ? AudioCodecKind.TrueHd : AudioCodecKind.Eac3);
+                ProbeOriginMs(item.Path, stream.Index, disc),
+                truehd is not null ? AudioCodecKind.TrueHd : AudioCodecKind.Eac3,
+                disc);
         }
 
         return _items.GetOrAdd(itemId, state);
@@ -400,16 +415,20 @@ public sealed partial class AtmosSceneService
         _logger.LogInformation("Atmos session for {ItemId}: segment {Segment}, seek {Seek:F1} s, to end {ToEnd}", itemId, session.FirstSegment, seekSeconds, session.ToEnd);
 
         var ffmpegArgs = new List<string> { "-v", "error", "-nostdin" };
-        if (!atStreamStart)
+        // A disc is cut by mvc3d, in playlist time, which starts at the origin.
+        using var feed = source.IsDisc ? DiscFeed.Start(Mvc3dPath, source.Path, atStreamStart ? 0 : seekSeconds - (source.OriginMs / 1000)) : null;
+        if (!atStreamStart && feed is null)
         {
             ffmpegArgs.AddRange(["-ss", seekSeconds.ToString("F3", CultureInfo.InvariantCulture)]);
         }
 
-        ffmpegArgs.AddRange(["-i", source.Path, "-map", $"0:{source.StreamIndex}", "-c", "copy", "-copyts", "-f", "matroska", "pipe:1"]);
-        using var ffmpeg = StartProcess(_mediaEncoder.EncoderPath, ffmpegArgs, redirectInput: false);
+        ffmpegArgs.AddRange(["-i", feed is null ? source.Path : "pipe:0", "-map", $"0:{source.StreamIndex}", "-c", "copy", "-copyts", "-f", "matroska", "pipe:1"]);
+        using var ffmpeg = StartProcess(_mediaEncoder.EncoderPath, ffmpegArgs, redirectInput: feed is not null);
+        feed?.Connect(ffmpeg);
         using var truehdd = StartProcess(TruehddPath, ["--loglevel", "error", "decode", "-", "--audio-stdout", "--output-path", basePath], redirectInput: true);
         using var kill = ct.Register(() =>
         {
+            feed?.Dispose();
             TryKill(ffmpeg);
             TryKill(truehdd);
         });
@@ -464,7 +483,8 @@ public sealed partial class AtmosSceneService
         {
             TryKill(ffmpeg);
             TryKill(truehdd);
-            var errors = $"{(await ffmpegErr.ConfigureAwait(false)).Trim()} {(await truehddErr.ConfigureAwait(false)).Trim()}".Trim();
+            var feedErrors = feed is null ? string.Empty : await feed.ErrorsAsync().ConfigureAwait(false);
+            var errors = $"{feedErrors} {(await ffmpegErr.ConfigureAwait(false)).Trim()} {(await truehddErr.ConfigureAwait(false)).Trim()}".Trim();
             if (errors.Length > 0)
             {
                 _logger.LogWarning("Atmos session tool output: {Errors}", errors);
@@ -994,14 +1014,16 @@ public sealed partial class AtmosSceneService
     }
 
     /// <summary>Timestamp of the track's first packet: scene frame 0.</summary>
-    private double ProbeOriginMs(string mediaPath, int streamIndex)
+    private double ProbeOriginMs(string mediaPath, int streamIndex, bool disc)
     {
+        using var feed = disc ? DiscFeed.Start(Mvc3dPath, mediaPath, 0) : null;
         var args = new List<string>
         {
-            "-v", "error", "-i", mediaPath, "-select_streams", streamIndex.ToString(CultureInfo.InvariantCulture),
+            "-v", "error", "-i", feed is null ? mediaPath : "pipe:0", "-select_streams", streamIndex.ToString(CultureInfo.InvariantCulture),
             "-read_intervals", "%+#1", "-show_entries", "packet=pts_time", "-of", "csv=p=0"
         };
-        using var process = StartProcess(_mediaEncoder.ProbePath, args, redirectInput: false);
+        using var process = StartProcess(_mediaEncoder.ProbePath, args, redirectInput: feed is not null);
+        feed?.Connect(process);
         var output = process.StandardOutput.ReadToEnd();
         process.WaitForExit();
         return double.TryParse(output.Trim().Split('\n')[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds)
