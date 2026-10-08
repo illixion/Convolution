@@ -226,7 +226,8 @@ extension Pseudo3DStereoEngine {
                     duration: state.duration,
                     paused: state.paused,
                     muted: state.muted,
-                    buffered: state.buffered
+                    buffered: state.buffered,
+                    waiting: state.waiting
                 )
             }
         }

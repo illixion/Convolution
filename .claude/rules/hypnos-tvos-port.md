@@ -501,7 +501,10 @@ before touching progress reporting again:**
   back to chapters named like an intro/recap/credits. `MediaSegmentSkipper`
   drives every player; tvOS uses `AVPlayerViewController.contextualActions`.
   The dev seed's `Nebula Drift S01E04` ("Cold Open", 40 s) carries Recap /
-  Intro / Chapter 3 / End Credits chapters; the macOS `-LibraryHarness`
+  Intro / Chapter 3 / End Credits chapters, and the 3D `Twin Horizon` has
+  Intro (0-8 s) / End Credits (22-30 s), for checking the button under a
+  stereo picture. The log line "No skippable segments: MediaSegments …"
+  says why a title offers none. The macOS `-LibraryHarness`
   checks its segments, Up Next ordering and the fresh-resume path.
 
 ### Library UI: driving it without a remote or taps

@@ -178,6 +178,24 @@ final class VideoWindowModel {
     /// Skip Intro / Skip Credits for a Library title.
     let segmentSkipper = MediaSegmentSkipper()
 
+    // MARK: - Streaming Quality (Library titles; see +StreamQuality)
+
+    /// What the viewer chose: the saved preference, until they pick another.
+    var qualityPreference: LibraryStreamQuality = .preferred
+    /// A new stream at another quality is being fetched.
+    var isChangingQuality = false
+    /// Shown under the window for a few seconds after Auto lowered quality.
+    var qualityNotice: String?
+    /// The player is waiting for data while it means to play.
+    var isBuffering = false
+    @ObservationIgnored var stallMonitor = StreamStallMonitor()
+    @ObservationIgnored var stallPollTask: Task<Void, Never>?
+    @ObservationIgnored var qualityNoticeTask: Task<Void, Never>?
+    @ObservationIgnored var qualitySwitchTask: Task<Void, Never>?
+    @ObservationIgnored var startupQualityTask: Task<Void, Never>?
+    /// The current title's own bitrate, once asked.
+    @ObservationIgnored var sourceBitrate: (itemId: String, bitrate: Int?)?
+
     // MARK: - Share
 
     var isPreparingShare: Bool = false
@@ -303,6 +321,7 @@ final class VideoWindowModel {
         }
         resolvePlaybackRenderer()
         armLoadStallWatch()
+        armStartupQualityWatch()
         subtitles.load(SubtitleSource.forVideo(video))
     }
 
@@ -448,6 +467,7 @@ final class VideoWindowModel {
         playbackRendererTask = nil
         loadStallTask?.cancel()
         loadStallTask = nil
+        cancelStreamQualityTasks()
         photosResolveTask?.cancel()
         photosResolveTask = nil
         loopController.reset()
@@ -536,6 +556,8 @@ final class VideoWindowModel {
         isLoadStalled = false
         playbackFailure = nil
         armLoadStallWatch()
+        resetStreamQualityState()
+        armStartupQualityWatch()
     }
 
     func loadMoreVideos() async {
@@ -979,7 +1001,7 @@ final class VideoWindowModel {
         reportPlaybackFailure("The server didn't send a video this device can play. Check that the server is reachable and that you're still signed in.")
     }
 
-    private func resolvePlaybackRenderer() {
+    func resolvePlaybackRenderer() {
         playbackRendererTask?.cancel()
         photosResolveTask?.cancel()
         playbackRenderer = .resolving
@@ -1091,6 +1113,8 @@ final class VideoWindowModel {
         }
         // Optimistic flip; reconciled by the next videoPlayback message.
         isPaused.toggle()
+        // A resumed player refills its buffer first, on any link.
+        stallMonitor.restartGrace(at: .now)
     }
 
     func beginScrub() {
@@ -1109,6 +1133,7 @@ final class VideoWindowModel {
         currentTime = clamped
         seekCommand?(clamped)
         isScrubbing = false
+        stallMonitor.restartGrace(at: .now)
         startAutoHideTimer()
         scheduleJellyfinRenewAfterSeek()
     }
@@ -1169,7 +1194,9 @@ final class VideoWindowModel {
     }
 
     /// Apply a state report from the JS bridge (ignored mid-scrub).
-    func applyPlaybackState(currentTime: Double, duration: Double, paused: Bool, muted: Bool, buffered: Double) {
+    func applyPlaybackState(currentTime: Double, duration: Double, paused: Bool, muted: Bool, buffered: Double,
+                            waiting: Bool = false) {
+        noteBuffering(waiting)
         guard !isScrubbing else { return }
         if duration > 0 { self.duration = duration }
         // Until the new player is at the carried position, the playhead (and
@@ -1317,7 +1344,7 @@ final class VideoWindowModel {
     /// start, then one at the playhead, and the picture sat frozen with the
     /// sound playing until the next keyframe (up to 10 s on x265; device,
     /// 2026-10-07). The flat players still take the carried position.
-    @ObservationIgnored private var streamSwitchStart: Double?
+    @ObservationIgnored var streamSwitchStart: Double?
 
     /// The stereo player's start for a new URL; taking it drops the carry.
     func takeStreamSwitchStart() -> Double? {
@@ -1373,6 +1400,7 @@ final class VideoWindowModel {
             AppLogger.videoWindow.info("Reopening the Jellyfin stream in a new play session \(reason, privacy: .public) at \(self.currentTime, format: .fixed(precision: 2))s")
             self.carryPositionToNextRenderer(reason: "new Jellyfin play session")
             self.streamSwitchStart = self.currentTime
+            self.stallMonitor.restartGrace(at: .now)
             self.video.streamURL = renewed
         }
     }

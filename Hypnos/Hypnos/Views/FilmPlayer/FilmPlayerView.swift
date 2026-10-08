@@ -596,43 +596,30 @@ struct FilmTransport: View {
             },
             menuDismissal: menuDismissal
         ) {
-            if let onToggle3D {
-                Button(action: onToggle3D) {
-                    Label(stereoEnabled ? "Play as 2D" : "Convert to 3D", systemImage: stereoEnabled ? "rectangle" : "view.3d")
-                        .ravePlayerAccessoryLabel()
-                }
-                .help(stereoEnabled ? "Play as 2D" : "Convert to 3D")
-            }
-            if player.audioTracks.count > 1 {
-                FilmAudioTrackMenu(player: player, onOpenChanged: menuChanged)
-            }
-            if !session.subtitles.tracks.isEmpty {
-                SubtitleMenu(controller: session.subtitles, onOpenChanged: menuChanged)
-            }
-            #if os(iOS) || os(macOS)
-            if session.headTracking, HeadphoneHeadTracker.shared.isTracking {
-                Button { HeadphoneHeadTracker.shared.recenter() } label: {
-                    Label("Recenter Audio", systemImage: "scope").ravePlayerAccessoryLabel()
-                }
-                .help("Recenter audio while facing the picture")
-            }
-            #elseif os(tvOS)
-            if session.headTracking, player.audio != nil {
-                Button { session.recenterRequest += 1 } label: {
-                    Label("Recenter Audio", systemImage: "scope").ravePlayerAccessoryLabel()
-                }
-            }
-            #endif
-            Button {
+            PlayerAccessoryLayout {
+                playbackItems
+                soundAndPictureButton
+            } menu: {
+                PlayerPopoverSectionHeader("Playback")
+                playbackItems
+                Divider()
+                PlayerPopoverSectionHeader("Sound and Picture")
                 #if os(visionOS)
-                openWindow(id: FilmAdjustmentsView.windowID)
-                #else
-                showsSound = true
+                if stereoEnabled {
+                    PlayerStepRow(title: "Convergence",
+                                  value: String(format: "%.2f", session.stereoSettings.convergence),
+                                  decrease: { nudgeConvergence(-0.05) }, increase: { nudgeConvergence(0.05) })
+                }
                 #endif
-            } label: {
-                Label("Sound and Picture", systemImage: "slider.horizontal.3").ravePlayerAccessoryLabel()
+                if session.subtitles.selected != nil {
+                    PlayerStepRow(title: "Subtitle Timing",
+                                  value: String(format: "%+.1f s", session.subtitles.delay),
+                                  decrease: { session.subtitles.delay -= 0.5 },
+                                  increase: { session.subtitles.delay += 0.5 },
+                                  reset: session.subtitles.delay == 0 ? nil : { session.subtitles.delay = 0 })
+                }
+                soundAndPictureButton
             }
-            .help("Sound and picture adjustments")
         }
         .sheet(isPresented: $showsSound) {
             #if os(tvOS)
@@ -656,6 +643,55 @@ struct FilmTransport: View {
             }
         }
     }
+
+    @ViewBuilder private var playbackItems: some View {
+        if let onToggle3D {
+            Button(action: onToggle3D) {
+                Label(stereoEnabled ? "Play as 2D" : "Convert to 3D", systemImage: stereoEnabled ? "rectangle" : "view.3d")
+                    .ravePlayerAccessoryLabel()
+            }
+            .help(stereoEnabled ? "Play as 2D" : "Convert to 3D")
+        }
+        if player.audioTracks.count > 1 {
+            FilmAudioTrackMenu(player: player, onOpenChanged: menuChanged)
+        }
+        if !session.subtitles.tracks.isEmpty {
+            SubtitleMenu(controller: session.subtitles, onOpenChanged: menuChanged)
+        }
+        #if os(iOS) || os(macOS)
+        if session.headTracking, HeadphoneHeadTracker.shared.isTracking {
+            Button { HeadphoneHeadTracker.shared.recenter() } label: {
+                Label("Recenter Audio", systemImage: "scope").ravePlayerAccessoryLabel()
+            }
+            .help("Recenter audio while facing the picture")
+        }
+        #elseif os(tvOS)
+        if session.headTracking, player.audio != nil {
+            Button { session.recenterRequest += 1 } label: {
+                Label("Recenter Audio", systemImage: "scope").ravePlayerAccessoryLabel()
+            }
+        }
+        #endif
+    }
+
+    private var soundAndPictureButton: some View {
+        Button {
+            #if os(visionOS)
+            openWindow(id: FilmAdjustmentsView.windowID)
+            #else
+            showsSound = true
+            #endif
+        } label: {
+            Label("Sound and Picture…", systemImage: "slider.horizontal.3").ravePlayerAccessoryLabel()
+        }
+        .help("Sound and picture adjustments")
+    }
+
+    #if os(visionOS)
+    private func nudgeConvergence(_ delta: Double) {
+        session.stereoSettings.convergence = min(max(session.stereoSettings.convergence + delta, 0), 1)
+    }
+    #endif
 
     private func menuChanged(_ open: Bool) {
         menuOpen = open

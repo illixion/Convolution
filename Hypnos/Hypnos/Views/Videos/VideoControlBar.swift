@@ -37,23 +37,6 @@ struct VideoControlBar<Accessories: View>: View {
             menuDismissal: windowModel.menuDismissals
         ) {
             accessories
-            Button {
-                windowModel.startAutoHideTimer()
-                Task { await windowModel.loopController.handleButtonTap() }
-            } label: {
-                Label(windowModel.loopController.helpText, systemImage: windowModel.loopController.iconName)
-                    .ravePlayerAccessoryLabel()
-                    .foregroundStyle(windowModel.loopController.isEngaged ? Color.accentColor : .primary)
-            }
-            .help(windowModel.loopController.helpText)
-            if windowModel.loopController.pointA != nil {
-                Button {
-                    windowModel.loopController.clear()
-                    windowModel.startAutoHideTimer()
-                } label: {
-                    Label("Clear A-B Loop", systemImage: "xmark.circle").ravePlayerAccessoryLabel()
-                }
-            }
         }
     }
 
@@ -62,4 +45,30 @@ struct VideoControlBar<Accessories: View>: View {
     #else
     private static var layout: RAVEPlayerControlsLayout { .stacked }
     #endif
+}
+
+/// The A-B loop: set A, set B (engages), clear. One of the window's
+/// accessories, so the More popover can group it with playback.
+struct LoopControls: View {
+    @Bindable var windowModel: VideoWindowModel
+
+    var body: some View {
+        Button {
+            windowModel.startAutoHideTimer()
+            Task { await windowModel.loopController.handleButtonTap() }
+        } label: {
+            Label(windowModel.loopController.helpText, systemImage: windowModel.loopController.iconName)
+                .ravePlayerAccessoryLabel()
+                .foregroundStyle(windowModel.loopController.isEngaged ? Color.accentColor : .primary)
+        }
+        .help(windowModel.loopController.helpText)
+        if windowModel.loopController.pointA != nil {
+            Button {
+                windowModel.loopController.clear()
+                windowModel.startAutoHideTimer()
+            } label: {
+                Label("Clear A-B Loop", systemImage: "xmark.circle").ravePlayerAccessoryLabel()
+            }
+        }
+    }
 }

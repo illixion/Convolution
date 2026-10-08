@@ -296,6 +296,10 @@ private struct LibraryDetailContent: View {
             .buttonBorderShape(.circle)
             .controlSize(.large)
             .help(shown.userData.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+
+            if playTarget != nil {
+                LibraryQualityButton()
+            }
         }
     }
 
@@ -466,5 +470,32 @@ private struct LibraryEpisodeLockup: View {
             }
             .frame(width: metrics.landscape.width, alignment: .leading)
         }
+    }
+}
+
+/// The streaming quality to start at, before pressing Play: on a slow link,
+/// a capped level skips the direct-play attempt entirely. The same saved
+/// preference the player's Quality menu changes.
+private struct LibraryQualityButton: View {
+    @AppStorage(LibraryStreamQuality.defaultsKey) private var stored = LibraryStreamQuality.auto.rawValue
+
+    private var selected: LibraryStreamQuality { LibraryStreamQuality(rawValue: stored) ?? .auto }
+
+    var body: some View {
+        Menu {
+            ForEach(LibraryStreamQuality.allCases, id: \.self) { quality in
+                Button { stored = quality.rawValue } label: {
+                    StreamQualityRow(quality: quality, isSelected: quality == selected)
+                }
+            }
+        } label: {
+            Label("Quality: \(selected.shortTitle)", systemImage: "gauge.with.dots.needle.67percent")
+                .labelStyle(.iconOnly)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.circle)
+        .controlSize(.large)
+        .help("Streaming quality: \(selected.title)")
+        .accessibilityIdentifier("library.quality")
     }
 }

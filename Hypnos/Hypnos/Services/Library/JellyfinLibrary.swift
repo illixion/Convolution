@@ -205,6 +205,8 @@ private struct JFPlaybackInfo: Decodable {
         /// "mkv", or ffprobe's list for the MP4 family ("mov,mp4,m4a,3gp,3g2,mj2").
         let Container: String?
         let Size: Int64?
+        /// Total bitrate in bits per second.
+        let Bitrate: Int?
         let MediaStreams: [Stream]?
         /// HalfSideBySide, FullSideBySide, HalfTopAndBottom, FullTopAndBottom
         /// or MVC, from the file name (`Movie.3D.HSBS.mkv`) or its metadata.
@@ -621,7 +623,7 @@ actor JellyfinLibrary: MediaServerLibrary {
         }
     }
 
-    func playbackRoute(for item: LibraryItem) async throws -> PlaybackRoute {
+    func playbackRoute(for item: LibraryItem, quality: LibraryStreamQuality) async throws -> PlaybackRoute {
         // A download plays from the device, online or not.
         if let record = LibraryOfflineStore.shared.record(for: item.id) {
             switch record.playback {
@@ -642,47 +644,90 @@ actor JellyfinLibrary: MediaServerLibrary {
         if await hasAtmosObjects(itemId: item.id) {
             return .atmosFilmPlayer
         }
+        return .genericPlayer(try await streamPlan(itemId: item.id, quality: quality,
+                                                   resumeSeconds: item.userData.resumeSeconds))
+    }
 
+    /// The file's own bitrate, for choosing the first step down from it.
+    func sourceBitrate(itemId: String) async -> Int? {
+        guard let userId = try? await resolveUserId(),
+              let info: JFPlaybackInfo = try? await get("Items/\(itemId)/PlaybackInfo", query: [
+                  .init(name: "userId", value: userId),
+              ])
+        else { return nil }
+        return info.MediaSources?.first?.Bitrate
+    }
+
+    /// The generic player's stream for `itemId` at `quality`: the original
+    /// (direct play when AVFoundation opens the file, else a full-quality
+    /// remux), or a bitrate-capped transcode. A cap at or above the file's
+    /// own bitrate plays the original. Also how a playing window changes
+    /// quality: the same item, a new plan.
+    func streamPlan(itemId: String, quality: LibraryStreamQuality,
+                    resumeSeconds: Double? = nil) async throws -> GenericPlaybackPlan {
         // Header-authenticated, so a token the server no longer accepts
         // fails here, under the Play button, rather than as a player window
         // that never shows a frame (every stream URL below authenticates by
         // query parameter and AVPlayer reports its 401 as nothing at all).
         let userId = try await resolveUserId()
-        let info: JFPlaybackInfo = try await get("Items/\(item.id)/PlaybackInfo", query: [
+        let info: JFPlaybackInfo = try await get("Items/\(itemId)/PlaybackInfo", query: [
             .init(name: "userId", value: userId),
         ])
         let source = info.MediaSources?.first
-        let mediaSourceId = source?.Id ?? item.id
+        let mediaSourceId = source?.Id ?? itemId
         // One id per play. Jellyfin names a transcode's output after the
         // media, device and play session, so without one every play of an
         // item on this device maps onto the same job, including a stale one
         // left behind by a player that vanished mid-stream (a headset
         // reboot). It also lets the stop report end this play's transcode.
         let playSessionId = info.PlaySessionId ?? UUID().uuidString
-        Self.playSessions.withLock { $0[item.id] = playSessionId }
+        let previous = Self.playSessions.withLock { sessions in
+            let previous = sessions[itemId]
+            sessions[itemId] = playSessionId
+            return previous
+        }
+        if let previous, previous != playSessionId {
+            // A quality change replaces a playing stream: end its job once
+            // the outgoing player has let go of it.
+            Task {
+                try? await Task.sleep(for: .seconds(5))
+                await self.stopEncoding(playSessionId: previous)
+            }
+        }
+        let sourceVideoCodec = source?.MediaStreams?
+            .first { $0.Type == "Video" }?.Codec?.lowercased()
+        let sourceBitrate = source?.Bitrate
+
+        if quality.caps(sourceBitrate: sourceBitrate) {
+            let capped = Self.hlsStreamURL(
+                baseURL: baseURL, itemId: itemId, mediaSourceId: mediaSourceId,
+                sourceVideoCodec: sourceVideoCodec, playSessionId: playSessionId,
+                token: authHeaderToken, quality: quality)
+            return GenericPlaybackPlan(method: .transcode, streamURL: capped, resumeSeconds: resumeSeconds,
+                                       quality: quality, sourceBitrate: sourceBitrate)
+        }
 
         // Confirmed directly against the dev instance: `/Items/{id}/stream`
         // (as opposed to `/Videos/{id}/stream`) is a flat 404 — Jellyfin's
         // direct-play route lives under `Videos`, not `Items`.
-        let directURL = baseURL.appending(path: "Videos/\(item.id)/stream")
+        let directURL = baseURL.appending(path: "Videos/\(itemId)/stream")
             .appending(queryItems: [
                 .init(name: "static", value: "true"),
                 .init(name: "MediaSourceId", value: mediaSourceId),
                 .init(name: "api_key", value: authHeaderToken),
             ])
-        let resumeSeconds = item.userData.resumeSeconds
 
         if await NativeVideoDecodeProbe.canPlayNatively(url: directURL, timeout: 5) {
-            return .genericPlayer(GenericPlaybackPlan(method: .direct, streamURL: directURL, resumeSeconds: resumeSeconds))
+            return GenericPlaybackPlan(method: .direct, streamURL: directURL, resumeSeconds: resumeSeconds,
+                                       sourceBitrate: sourceBitrate)
         }
 
-        let sourceVideoCodec = source?.MediaStreams?
-            .first { $0.Type == "Video" }?.Codec?.lowercased()
         let transcodeURL = Self.hlsStreamURL(
-            baseURL: baseURL, itemId: item.id, mediaSourceId: mediaSourceId,
+            baseURL: baseURL, itemId: itemId, mediaSourceId: mediaSourceId,
             sourceVideoCodec: sourceVideoCodec, playSessionId: playSessionId,
             token: authHeaderToken)
-        return .genericPlayer(GenericPlaybackPlan(method: .transcode, streamURL: transcodeURL, resumeSeconds: resumeSeconds))
+        return GenericPlaybackPlan(method: .transcode, streamURL: transcodeURL, resumeSeconds: resumeSeconds,
+                                   sourceBitrate: sourceBitrate)
     }
 
     // MARK: - Subtitles
@@ -753,7 +798,14 @@ actor JellyfinLibrary: MediaServerLibrary {
 
         let userId = try await resolveUserId()
         let dto: JFItem = try await get("Users/\(userId)/Items/\(itemId)")
-        return Self.chapterSegments(dto.Chapters ?? [], runtimeTicks: dto.RunTimeTicks)
+        let fromChapters = Self.chapterSegments(dto.Chapters ?? [], runtimeTicks: dto.RunTimeTicks)
+        if fromChapters.isEmpty {
+            // Why a title offers no skip, for the device log: no segment
+            // provider plugin answered (nil = the endpoint itself failed, as
+            // on servers before 10.10), and no chapter is named like one.
+            AppLogger.library.info("No skippable segments: MediaSegments \(page.map { "answered \($0.Items?.count ?? 0)" } ?? "unavailable", privacy: .public), \(dto.Chapters?.count ?? 0, privacy: .public) chapter(s), none named intro/recap/credits")
+        }
+        return fromChapters
     }
 
     private static func segmentKind(_ type: String?) -> LibraryMediaSegment.Kind? {
@@ -824,29 +876,40 @@ actor JellyfinLibrary: MediaServerLibrary {
     ///   surfaces only as "resource unavailable".
     /// - `DeviceId` and `PlaySessionId` key the server's transcode job, which
     ///   `api_key` query auth otherwise leaves unset.
+    ///
+    /// A capped `quality` encodes H.264 at its bitrate and picture size, but
+    /// still lists the source's codec so a file already within the cap is
+    /// copied rather than encoded (the caller skips caps above the source's
+    /// bitrate, so that is rare). Verified on the dev instance: an H.264 MKV
+    /// at the 1.5 Mbps level came back as 852x480 H.264 in fMP4 segments.
     static func hlsStreamURL(baseURL: URL, itemId: String, mediaSourceId: String,
                              sourceVideoCodec: String?, playSessionId: String,
-                             token: String) -> URL {
-        let videoCodec = switch sourceVideoCodec {
+                             token: String, quality: LibraryStreamQuality = .original) -> URL {
+        let sourceCodec = switch sourceVideoCodec {
         case "hevc", "h265": "hevc"
         default: "h264"
         }
-        let maxBitrate = 120_000_000
-        let audioBitrate = 640_000
-        return baseURL.appending(path: "Videos/\(itemId)/main.m3u8").appending(queryItems: [
+        let maxBitrate = quality.maxBitrate ?? 120_000_000
+        let audioBitrate = quality.audioBitrate
+        var query: [URLQueryItem] = [
             .init(name: "api_key", value: token),
             .init(name: "MediaSourceId", value: mediaSourceId),
             .init(name: "DeviceId", value: JellyfinClientIdentity.deviceId),
             .init(name: "PlaySessionId", value: playSessionId),
-            .init(name: "VideoCodec", value: videoCodec),
+            .init(name: "VideoCodec", value: quality.maxBitrate == nil || sourceCodec == "h264" ? sourceCodec : "h264,hevc"),
             .init(name: "AudioCodec", value: "aac"),
-            .init(name: "TranscodingMaxAudioChannels", value: "6"),
-            .init(name: "MaxAudioChannels", value: "6"),
+            .init(name: "TranscodingMaxAudioChannels", value: String(quality.audioChannels)),
+            .init(name: "MaxAudioChannels", value: String(quality.audioChannels)),
             .init(name: "SegmentContainer", value: "mp4"),
             .init(name: "MaxStreamingBitrate", value: String(maxBitrate)),
             .init(name: "VideoBitrate", value: String(maxBitrate - audioBitrate)),
             .init(name: "AudioBitrate", value: String(audioBitrate)),
-        ])
+        ]
+        if let width = quality.maxWidth, let height = quality.maxHeight {
+            query.append(.init(name: "MaxWidth", value: String(width)))
+            query.append(.init(name: "MaxHeight", value: String(height)))
+        }
+        return baseURL.appending(path: "Videos/\(itemId)/main.m3u8").appending(queryItems: query)
     }
 
     /// Ends this play's transcode on the server. A stop report does the same

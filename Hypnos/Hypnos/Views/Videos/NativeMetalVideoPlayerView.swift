@@ -119,7 +119,8 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
                     duration: state.duration,
                     paused: state.paused,
                     muted: state.muted,
-                    buffered: state.buffered
+                    buffered: state.buffered,
+                    waiting: state.waiting
                 )
             }
         }
@@ -143,6 +144,8 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             let paused: Bool
             let muted: Bool
             let buffered: Double
+            /// Waiting for data while it means to play.
+            let waiting: Bool
         }
 
         weak var mtkView: MTKView?
@@ -431,7 +434,8 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
                     duration: duration.isFinite ? duration : 0,
                     paused: player.timeControlStatus != .playing,
                     muted: player.isMuted,
-                    buffered: buffered
+                    buffered: buffered,
+                    waiting: player.timeControlStatus == .waitingToPlayAtSpecifiedRate
                 )
             )
         }

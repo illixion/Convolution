@@ -41,6 +41,10 @@ struct GenericPlaybackPlan: Sendable {
     var streamURL: URL
     /// Seconds to resume from, if the item has a saved position.
     var resumeSeconds: Double?
+    /// The capped level this stream was built at; nil is the original.
+    var quality: LibraryStreamQuality? = nil
+    /// The file's own bitrate, when the server knows it.
+    var sourceBitrate: Int? = nil
 }
 
 /// start/progress/stop calls a player makes as it plays an item, so the
@@ -95,7 +99,7 @@ protocol MediaServerLibrary: PlaybackProgressReporting {
     func imageURL(item: LibraryItem, kind: LibraryImageKind, size: LibraryImageSize) -> URL?
 
     /// Decides how `item` should be played (see `PlaybackRoute`).
-    func playbackRoute(for item: LibraryItem) async throws -> PlaybackRoute
+    func playbackRoute(for item: LibraryItem, quality: LibraryStreamQuality) async throws -> PlaybackRoute
 
     /// The subtitle streams `itemId` offers, text and image alike.
     func subtitleTracks(itemId: String) async throws -> [LibrarySubtitleTrack]
@@ -110,4 +114,11 @@ protocol MediaServerLibrary: PlaybackProgressReporting {
 
     func setPlayed(itemId: String, played: Bool) async throws
     func setFavorite(itemId: String, favorite: Bool) async throws
+}
+
+extension MediaServerLibrary {
+    /// The route at the saved quality preference.
+    func playbackRoute(for item: LibraryItem) async throws -> PlaybackRoute {
+        try await playbackRoute(for: item, quality: .preferred)
+    }
 }

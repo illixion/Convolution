@@ -419,17 +419,38 @@ seed_subtitles() {
     local clip="$m/Twin Horizon (2020).3D.HSBS.mp4"
     if [[ ! -f "$clip" ]]; then
         gen_srt "$m/.embedded.srt" 30 "Embedded English"
+        # Intro and End Credits chapters, so Skip Intro / Skip Credits can be
+        # checked on a stereo picture (the button hangs under the window).
+        cat > "$m/.chapters.txt" <<META
+;FFMETADATA1
+[CHAPTER]
+TIMEBASE=1/1000
+START=0
+END=8000
+title=Intro
+[CHAPTER]
+TIMEBASE=1/1000
+START=8000
+END=22000
+title=Canyon
+[CHAPTER]
+TIMEBASE=1/1000
+START=22000
+END=30000
+title=End Credits
+META
         # Each eye is a 960x1080 squeeze of the same pattern, the right one
         # shifted 24 px, so a correct split shows depth and a wrong one shows
         # a doubled image.
         ffmpeg -loglevel error -y \
             -f lavfi -i "testsrc2=size=1920x1080:rate=24:duration=30" \
             -f lavfi -i "sine=frequency=500:duration=30" \
-            -i "$m/.embedded.srt" \
+            -i "$m/.embedded.srt" -i "$m/.chapters.txt" \
             -filter_complex "[0:v]split[l][r];[l]scale=960:1080[left];[r]crop=1896:1080:0:0,pad=1920:1080:24:0,scale=960:1080[right];[left][right]hstack[v]" \
-            -map "[v]" -map 1:a -map 2:s -c:v libx264 -pix_fmt yuv420p -c:a aac -c:s mov_text \
+            -map "[v]" -map 1:a -map 2:s -map_metadata 3 -map_chapters 3 \
+            -c:v libx264 -pix_fmt yuv420p -c:a aac -c:s mov_text \
             -metadata:s:s:0 language=eng "$clip"
-        rm -f "$m/.embedded.srt"
+        rm -f "$m/.embedded.srt" "$m/.chapters.txt"
     fi
     gen_srt "$m/Twin Horizon (2020).3D.HSBS.fr.srt" 30 "Français"
     write_movie_nfo "$m/movie.nfo" "Twin Horizon" 2020 "Sci-Fi" \

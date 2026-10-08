@@ -173,6 +173,8 @@ enum LibraryHarness {
             }
         }
 
+        await checkQuality(library: library)
+
         await checkStreams(library: library, server: server, apiKey: apiKey,
                            items: [wideStatic, crimson].compactMap { $0 }, atmosDemo: atmosDemo)
 
@@ -409,6 +411,53 @@ enum LibraryHarness {
                 log("playbackRoute(revokedToken) failed as expected: \(error.localizedDescription)")
             }
         }
+    }
+
+    /// Streaming quality: plans per level for the 3D movie (3.9 Mbps
+    /// source), a capped stream actually playing at its size, the level read
+    /// back off a URL, Auto's step-down choices and the stall monitor; also
+    /// the 3D movie's Skip Intro / Credits chapters.
+    private static func checkQuality(library: JellyfinLibrary) async {
+        guard let twin = try? await library.search("Twin Horizon").first else {
+            log("quality SKIPPED: no \"Twin Horizon\" (re-run scripts/dev-jellyfin.sh up)")
+            return
+        }
+        do {
+            let segments = try await library.mediaSegments(itemId: twin.id)
+            log("segments(Twin Horizon 3D)=\(segments.map { "\($0.kind.rawValue) \($0.startSeconds)-\($0.endSeconds)" }) (expect intro 0-8, outro 22-30)")
+            for quality in [LibraryStreamQuality.auto, .original, .mbps40, .mbps4, .mbps1_5] {
+                let plan = try await library.streamPlan(itemId: twin.id, quality: quality)
+                let level = LibraryStreamQuality.level(ofStream: plan.streamURL)
+                log("streamPlan(Twin, \(quality.rawValue))=\(plan.method) \(plan.streamURL.lastPathComponent) level=\(level?.rawValue ?? "original") source=\(plan.sourceBitrate ?? -1)")
+                if quality == .mbps1_5 {
+                    log("play(Twin, 1.5 Mbps)=\(await playProbe(plan.streamURL)) (expect 854x480)")
+                }
+            }
+        } catch {
+            log("quality FAILED: \(error)")
+        }
+        let cases: [(LibraryStreamQuality?, Int?)] = [(nil, 3_955_936), (nil, 86_000_000), (.mbps20, nil), (.mbps1_5, nil)]
+        let steps = cases
+            .map { "\($0.0?.rawValue ?? "original")@\($0.1.map(String.init) ?? "?")→\(LibraryStreamQuality.stepDown(from: $0.0, sourceBitrate: $0.1)?.rawValue ?? "none")" }
+        log("stepDown=\(steps) (expect mbps1_5, mbps40, mbps10, none)")
+
+        var monitor = StreamStallMonitor()
+        let t0 = Date(timeIntervalSince1970: 1000)
+        monitor.noteStepped(at: t0.addingTimeInterval(-100))
+        monitor.restartGrace(at: t0)
+        let inGrace = monitor.update(waiting: true, at: t0.addingTimeInterval(2))
+        _ = monitor.update(waiting: true, at: t0.addingTimeInterval(5))
+        let short = monitor.update(waiting: true, at: t0.addingTimeInterval(9))
+        let long = monitor.update(waiting: true, at: t0.addingTimeInterval(11.5))
+        var budget = StreamStallMonitor()
+        budget.noteStepped(at: t0.addingTimeInterval(-100))
+        var fired = false
+        for i in 0..<4 {  // four 3 s stalls, 10 s apart
+            let start = t0.addingTimeInterval(Double(i) * 10 + 10)
+            _ = budget.update(waiting: true, at: start)
+            fired = budget.update(waiting: false, at: start.addingTimeInterval(3)) || fired
+        }
+        log("stallMonitor grace=\(inGrace) 4s=\(short) 6.5s=\(long) fourShortStalls=\(fired) (expect false false true true)")
     }
 
     /// Plays `url` for up to 20 s and describes what came out.

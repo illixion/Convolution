@@ -5,11 +5,15 @@
  All per-window state is read from VideoWindowModel so multiple video windows are
  independent. Styled to match PhotoOrnamentView.
 
- Layout: [Gallery] | [< N/M >] | [ViewMode v] | [Info] | [Share] | [... More v] | [Title]
+ Bar layout: [Gallery] | [< N/M >] | [ViewMode v] [Subtitles v] [Quality v] [A-B] |
+ [Info] [Share] | [... More v] | [Title]
  Playback and feature actions share RAVEUI's player controls in one ornament
  in both 2D and fake-3D. The immersive scene owns its own transport.
- The More menu holds Adjustments (opens the standalone video-adjustments window,
- which hosts Flip + the fake-3D stereo sliders), Slideshow, and Pop Out (pushed only).
+ The More menu holds Flip, All Adjustments (the standalone video-adjustments
+ window), Slideshow, and Pop Out (pushed only).
+ When the bar is too narrow, the compact bar's own More popover shows the
+ same accessories as grouped rows instead (`menuSections`): Playback,
+ Picture (flip, convergence and subtitle timing nudged in place), Window.
  */
 
 import RAVEMedia
@@ -57,79 +61,55 @@ struct VideoOrnamentsView: View {
         }
     }
 
-    /// The window's feature buttons: inline on the bar, or items of the
-    /// compact bar's "More" popover when they don't fit (`OrnamentGlyph` gives
-    /// each a title there).
-    @ViewBuilder
+    /// The window's feature buttons: inline on the bar, or grouped rows in
+    /// the compact bar's "More" popover when they don't fit.
     private func ornamentItems(showsTitle: Bool) -> some View {
-            // Gallery button
-            Button(action: onGalleryButtonTap) {
-                OrnamentGlyph(title: windowModel.wasPushed ? "Videos" : "Gallery", systemImage: "square.grid.2x2")
-            }
-            .raveChromeButtonStyle()
-            .help(windowModel.wasPushed ? "Videos" : "Show Gallery")
+        PlayerAccessoryLayout {
+            barItems(showsTitle: showsTitle)
+        } menu: {
+            menuSections
+        }
+    }
+
+    /// On the bar: icons, the quickest choices first.
+    @ViewBuilder
+    private func barItems(showsTitle: Bool) -> some View {
+            galleryButton
 
             // Prev/next only browse something: a lone video (a Library film)
             // has nowhere to go.
             if windowModel.videoCount > 1 {
                 Divider()
                     .frame(height: 24)
-
-                // Previous video
-                Button {
-                    windowModel.previousVideo()
-                } label: {
-                    OrnamentGlyph(title: "Previous Video", systemImage: "chevron.left")
-                }
-                .raveChromeButtonStyle()
-                .disabled(!windowModel.hasPreviousVideo)
-
-                // Video counter
-                Text("\(windowModel.currentVideoPosition) / \(windowModel.videoCount)")
-                    .font(.callout)
-                    .foregroundColor(.secondary)
-                    .frame(minWidth: 60)
-
-                // Next video
-                Button {
-                    windowModel.nextVideo()
-                } label: {
-                    OrnamentGlyph(title: "Next Video", systemImage: "chevron.right")
-                }
-                .raveChromeButtonStyle()
-                .disabled(!windowModel.hasNextVideo)
+                previousButton
+                videoCounter
+                nextButton
             }
 
-            // View mode toggle (2D/3D)
             Divider()
                 .frame(height: 24)
 
             viewModeMenu
-
-            if !windowModel.subtitles.tracks.isEmpty {
-                SubtitleMenu(controller: windowModel.subtitles, onOpenChanged: { chromeMenu("Subtitles", opened: $0) })
+            subtitleMenu
+            qualityMenu
+            // The immersive scene has its own transport, loop included.
+            if !showsTitle {
+                LoopControls(windowModel: windowModel)
             }
 
             // Info button (rating & metadata). Stash-only: the sheet fetches
             // scene detail by id and edits it through GraphQL, so there is
             // nothing for it to show for a local file or a stream. The photo
             // ornament already gates its Info button the same way on
-            // `image.stashId != nil`. Its divider goes with it, or a hidden
-            // button leaves two separators side by side.
-            if video.stashId != nil {
-                Divider()
-                    .frame(height: 24)
-
-                infoButton
-            }
-
-            // Share button
+            // `image.stashId != nil`.
             Divider()
                 .frame(height: 24)
-
+            if video.stashId != nil {
+                infoButton
+            }
             shareButton
 
-            // More menu (adjustments, flip, slideshow, pop out)
+            // More menu (flip, adjustments, slideshow, pop out)
             Divider()
                 .frame(height: 24)
 
@@ -152,6 +132,120 @@ struct VideoOrnamentsView: View {
             // the manager recreates the Menu ~30-60×/sec, refreshing the open
             // dropdown and dropping taps.
             ConversionStatusRow(videoIdentity: video.identity)
+    }
+
+    /// In the More popover: one level of grouped rows, with the settings
+    /// people reach for mid-film (flip, convergence, subtitle timing) right
+    /// here rather than in the Adjustments window.
+    @ViewBuilder
+    private var menuSections: some View {
+        PlayerPopoverSectionHeader("Playback")
+        viewModeMenu
+        subtitleMenu
+        qualityMenu
+        LoopControls(windowModel: windowModel)
+        ConversionStatusRow(videoIdentity: video.identity)
+
+        Divider()
+        PlayerPopoverSectionHeader("Picture")
+        flipButton
+        if windowModel.shouldUsePseudo3D {
+            let convergence = windowModel.effectivePseudo3DSettings.convergence
+            PlayerStepRow(title: "Convergence", value: String(format: "%.2f", convergence),
+                          decrease: { nudgeConvergence(-0.05) }, increase: { nudgeConvergence(0.05) })
+        }
+        if windowModel.subtitles.selected != nil {
+            PlayerStepRow(title: "Subtitle Timing",
+                          value: String(format: "%+.1f s", windowModel.subtitles.delay),
+                          decrease: { windowModel.subtitles.delay -= 0.5 },
+                          increase: { windowModel.subtitles.delay += 0.5 },
+                          reset: windowModel.subtitles.delay == 0 ? nil : { windowModel.subtitles.delay = 0 })
+        }
+        adjustmentsButton(close: {})
+
+        Divider()
+        PlayerPopoverSectionHeader("Window")
+        if windowModel.videoCount > 1 {
+            HStack(spacing: 4) {
+                previousButton
+                videoCounter
+                nextButton
+            }
+        }
+        galleryButton
+        if video.stashId != nil {
+            infoButton
+        }
+        shareButton
+        windowItems(close: {})
+    }
+
+    private var galleryButton: some View {
+        Button(action: onGalleryButtonTap) {
+            OrnamentGlyph(title: windowModel.wasPushed ? "Videos" : "Gallery", systemImage: "square.grid.2x2")
+        }
+        .raveChromeButtonStyle()
+        .help(windowModel.wasPushed ? "Videos" : "Show Gallery")
+    }
+
+    private var previousButton: some View {
+        Button {
+            windowModel.previousVideo()
+        } label: {
+            OrnamentGlyph(title: "Previous Video", systemImage: "chevron.left")
+        }
+        .raveChromeButtonStyle()
+        .disabled(!windowModel.hasPreviousVideo)
+    }
+
+    private var nextButton: some View {
+        Button {
+            windowModel.nextVideo()
+        } label: {
+            OrnamentGlyph(title: "Next Video", systemImage: "chevron.right")
+        }
+        .raveChromeButtonStyle()
+        .disabled(!windowModel.hasNextVideo)
+    }
+
+    private var videoCounter: some View {
+        Text("\(windowModel.currentVideoPosition) / \(windowModel.videoCount)")
+            .font(.callout)
+            .foregroundColor(.secondary)
+            .frame(minWidth: 60)
+    }
+
+    @ViewBuilder
+    private var subtitleMenu: some View {
+        if !windowModel.subtitles.tracks.isEmpty {
+            SubtitleMenu(controller: windowModel.subtitles, onOpenChanged: { chromeMenu("Subtitles", opened: $0) })
+        }
+    }
+
+    @ViewBuilder
+    private var qualityMenu: some View {
+        if windowModel.offersQualityChoice {
+            StreamQualityMenu(selected: windowModel.qualityPreference, label: windowModel.qualityLabel,
+                              isChanging: windowModel.isChangingQuality,
+                              onOpenChanged: { chromeMenu("Quality", opened: $0) }) { quality in
+                windowModel.setQuality(quality)
+            }
+        }
+    }
+
+    private var flipButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.3)) { windowModel.toggleFlip() }
+        } label: {
+            Label(windowModel.isFlipped ? "Unflip" : "Flip Horizontally",
+                  systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+        }
+    }
+
+    private func nudgeConvergence(_ delta: Double) {
+        var settings = windowModel.effectivePseudo3DSettings
+        settings.convergence = min(max(settings.convergence + delta, 0), 1)
+        windowModel.pseudo3DSettings = settings
     }
 
     /// Modifiers the feature buttons share, wherever they are shown.
@@ -279,44 +373,57 @@ struct VideoOrnamentsView: View {
                            }) { close in
             Button {
                 close()
-                // Open the standalone Adjustments window (repositionable,
-                // never overlaps the video). showAdjustments pauses auto-hide.
-                appModel.videoAdjustmentsTarget = windowModel
-                windowModel.showAdjustments = true
-                openWindow(id: "video-adjustments")
+                withAnimation(.easeInOut(duration: 0.3)) { windowModel.toggleFlip() }
             } label: {
-                Label("Adjustments", systemImage: "slider.horizontal.3")
+                Label(windowModel.isFlipped ? "Unflip" : "Flip Horizontally",
+                      systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
             }
+            adjustmentsButton(close: close)
+            Divider()
+            windowItems(close: close)
+        }
+    }
 
+    /// Opens the standalone Adjustments window (repositionable, never
+    /// overlaps the video). showAdjustments pauses auto-hide.
+    private func adjustmentsButton(close: @escaping () -> Void) -> some View {
+        Button {
+            close()
+            appModel.videoAdjustmentsTarget = windowModel
+            windowModel.showAdjustments = true
+            openWindow(id: "video-adjustments")
+        } label: {
+            Label("All Adjustments…", systemImage: "slider.horizontal.3")
+        }
+    }
+
+    /// Slideshow, Pop Out (pushed only) and the Safari fallback.
+    @ViewBuilder
+    private func windowItems(close: @escaping () -> Void) -> some View {
+        Button {
+            close()
+            launchVideoSlideshow()
+        } label: {
+            Label("Slideshow", systemImage: "play.fill")
+        }
+
+        if windowModel.wasPushed, onPopOut != nil {
             Button {
                 close()
-                launchVideoSlideshow()
+                onPopOut?()
             } label: {
-                Label("Slideshow", systemImage: "play.fill")
+                Label("Pop Out", systemImage: "rectangle.portrait.and.arrow.forward")
             }
+        }
 
-            if windowModel.wasPushed, onPopOut != nil {
-                Divider()
-
-                Button {
-                    close()
-                    onPopOut?()
-                } label: {
-                    Label("Pop Out", systemImage: "rectangle.portrait.and.arrow.forward")
-                }
-            }
-
-            // Last-resort fallback for a web-sourced stream the in-app
-            // players (native + WebKit) can't decode — open it in Safari.
-            if isRemoteStream {
-                Divider()
-
-                Button {
-                    close()
-                    openURL(windowModel.video.streamURL)
-                } label: {
-                    Label("Open in Safari", systemImage: "safari")
-                }
+        // Last-resort fallback for a web-sourced stream the in-app
+        // players (native + WebKit) can't decode — open it in Safari.
+        if isRemoteStream, !windowModel.offersQualityChoice {
+            Button {
+                close()
+                openURL(windowModel.video.streamURL)
+            } label: {
+                Label("Open in Safari", systemImage: "safari")
             }
         }
     }

@@ -314,17 +314,18 @@ struct VideoWindowView: View {
             #if !os(visionOS)
             // Skip Intro, over the picture above the controls (visionOS hangs
             // it under the window with them).
-            if !appModel.allWindowsHidden, let skip = skipSegmentButton {
+            if !appModel.allWindowsHidden, let prompt = ornamentPrompt {
                 VStack {
                     Spacer()
                     HStack {
                         Spacer()
-                        skip
+                        prompt
                     }
                     .padding(.trailing, 24)
                     .padding(.bottom, overlayBottomInset)
                 }
                 .animation(.easeInOut(duration: 0.2), value: windowModel.offeredSegment)
+                .animation(.easeInOut(duration: 0.2), value: windowModel.qualityNotice)
             }
             #endif
 
@@ -406,14 +407,14 @@ struct VideoWindowView: View {
         .ornament(
             visibility: PlayerOrnamentStack<EmptyView>.isVisible(
                 subtitles: bandSubtitles, controlsVisible: !windowModel.isUIHidden,
-                hasPrompt: windowModel.offeredSegment != nil
+                hasPrompt: ornamentPrompt != nil
             ) && !appModel.allWindowsHidden ? .visible : .hidden,
             attachmentAnchor: .scene(.bottom),
             contentAlignment: .top
         ) {
             PlayerOrnamentStack(
                 subtitles: bandSubtitles, controlsVisible: !windowModel.isUIHidden,
-                prompt: skipSegmentButton.map { AnyView($0) },
+                prompt: ornamentPrompt,
                 gap: windowModel.showsStereoPicture ? Self.stereoControlsGap : 12,
                 filmTime: { windowModel.currentTime }
             ) { videoOrnament }
@@ -542,6 +543,19 @@ struct VideoWindowView: View {
     private var skipSegmentButton: SkipSegmentButton? {
         guard let segment = windowModel.offeredSegment else { return nil }
         return SkipSegmentButton(segment: segment) { windowModel.skip(segment) }
+    }
+
+    /// What hangs under the window outside the controls: Auto's quality
+    /// notice and the skip button, side by side. Outside the window on
+    /// visionOS because SwiftUI drawn over a stereo picture never shows.
+    private var ornamentPrompt: AnyView? {
+        let notice = windowModel.qualityNotice
+        let skip = skipSegmentButton
+        guard notice != nil || skip != nil else { return nil }
+        return AnyView(HStack(spacing: 12) {
+            notice.map { StreamQualityNotice(text: $0) }
+            skip
+        })
     }
 
     /// Seeks to `windowValue.startSeconds` (the Library's Resume) once the
