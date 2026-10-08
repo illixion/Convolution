@@ -1,0 +1,17 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-feature android:name="android.hardware.vr.headtracking" android:version="1" android:required="true" />
+    <uses-feature android:glEsVersion="0x00030001" android:required="true" />
+    <application android:label="Convolution" android:allowBackup="false" android:usesCleartextTraffic="true" android:theme="@android:style/Theme.Material.NoActionBar">
+        <meta-data android:name="com.oculus.supportedDevices" android:value="quest2|quest3|quest3s" />
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity>
+        <activity android:name=".PlayerActivity" android:exported="false" android:launchMode="singleTask" android:screenOrientation="landscape"
+                  android:configChanges="density|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|uiMode"
+                  android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+            <meta-data android:name="android.app.lib_name" android:value="quest_player" />
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="com.oculus.intent.category.VR" /></intent-filter>
+        </activity>
+    </application>
+</manifest>

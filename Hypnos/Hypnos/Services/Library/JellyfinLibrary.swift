@@ -12,6 +12,7 @@
 
 import DebugTrace
 import Foundation
+import RAVEUI
 import os
 
 enum JellyfinLibraryError: Error, LocalizedError {
@@ -1160,10 +1161,9 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// One authenticated GET, the body as it came: artwork, subtitles and
     /// the plugin's files for a download.
     func data(path: String, query: [URLQueryItem] = [], timeout: TimeInterval = 60) async throws -> Data {
-        var url = baseURL.appending(path: path)
-        if !query.isEmpty { url.append(queryItems: query) }
-        var request = URLRequest(url: url)
-        request.setValue(JellyfinClientIdentity.authorizationHeader(token: authHeaderToken), forHTTPHeaderField: "Authorization")
+        var request = JellyfinHTTP(baseURL: baseURL,
+            authorization: JellyfinClientIdentity.authorizationHeader(token: authHeaderToken))
+            .request(path, query: query)
         request.timeoutInterval = timeout
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -1277,10 +1277,9 @@ actor JellyfinLibrary: MediaServerLibrary {
     }
 
     private func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {
-        var url = baseURL.appending(path: path)
-        if !query.isEmpty { url.append(queryItems: query) }
-        var request = URLRequest(url: url)
-        request.setValue(JellyfinClientIdentity.authorizationHeader(token: authHeaderToken), forHTTPHeaderField: "Authorization")
+        var request = JellyfinHTTP(baseURL: baseURL,
+            authorization: JellyfinClientIdentity.authorizationHeader(token: authHeaderToken))
+            .request(path, query: query)
         // Short while the server is known to be away, so offline screens
         // don't each wait out a full timeout before showing downloads.
         request.timeoutInterval = LibraryConnectivity.seemsOffline ? 4 : 20
