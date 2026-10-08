@@ -15,6 +15,7 @@ import androidx.media3.exoplayer.*;
 import androidx.media3.exoplayer.analytics.AnalyticsListener;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.datasource.DefaultDataSource;
 import org.json.*;
 import java.util.Collections;
 import java.util.concurrent.*;
@@ -56,6 +57,9 @@ public final class PlaybackSession {
     private int layout;
     private long lastReport = 0, lastStallCheck = 0;
     private boolean changingQuality = false;
+    private volatile JSONObject skipSuggestion;
+    private volatile boolean skipCheckPending = false;
+    private long lastSkipCheck = 0;
     private PlaybackSession(Context context, JSONObject plan) {
         this.context = context; this.plan = plan;
         String format = plan.optString("stereo");
@@ -91,7 +95,8 @@ public final class PlaybackSession {
             DefaultHttpDataSource.Factory http = new DefaultHttpDataSource.Factory()
                 .setDefaultRequestProperties(Collections.singletonMap("Authorization",plan.optString("authorization")))
                 .setConnectTimeoutMs(20000).setReadTimeoutMs(20000);
-            player = new ExoPlayer.Builder(context).setMediaSourceFactory(new DefaultMediaSourceFactory(http)).build();
+            player = new ExoPlayer.Builder(context).setMediaSourceFactory(
+                new DefaultMediaSourceFactory(new DefaultDataSource.Factory(context,http))).build();
             player.setVideoSurface(videoSurface);
             player.setAudioAttributes(new AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),true);
             // Captions are fetched/parsed by the Swift core and placed on their own XR layer.
@@ -185,6 +190,19 @@ public final class PlaybackSession {
                 report("progress"); lastReport = now;
                 Log.i("ConvolutionMedia","position_ms="+player.getCurrentPosition()+" buffered_ms="+player.getTotalBufferedDuration()+" playing="+player.isPlaying());
             }
+            if (now-lastSkipCheck>500 && !skipCheckPending && plan.optJSONArray("segments")!=null) {
+                lastSkipCheck=now; skipCheckPending=true;
+                try {
+                    JSONObject request=command("skip").put("segments",plan.getJSONArray("segments"))
+                        .put("currentTime",player.getCurrentPosition()/1000.0).put("duration",duration())
+                        .put("controlsVisible",true);
+                    worker.execute(() -> {
+                        try { JSONObject result=CoreBridge.call(request).optJSONObject("segment"); skipSuggestion=result; }
+                        catch(Exception ignored) { skipSuggestion=null; }
+                        finally { skipCheckPending=false; }
+                    });
+                } catch(JSONException ignored) { skipCheckPending=false; }
+            }
             main.postDelayed(this,50);
         }
     };
@@ -250,6 +268,11 @@ public final class PlaybackSession {
     }
     private void report(String operation) {
         if (player == null) return;
+        if (plan.optBoolean("offline")) {
+            context.getSharedPreferences("library-downloads",Context.MODE_PRIVATE).edit()
+                .putLong("offline_position_"+plan.optString("itemID"),player.getCurrentPosition()).apply();
+            return;
+        }
         try {
             JSONObject request = command(operation).put("position",player.getCurrentPosition()/1000.0).put("paused",!player.isPlaying());
             worker.execute(() -> { try { CoreBridge.call(request); } catch (Exception e) { Log.w("ConvolutionMedia","watch_report_failed"); } });
@@ -258,6 +281,13 @@ public final class PlaybackSession {
     public void toggleVideo() { main.post(() -> { if (player != null) { if (player.getPlaybackState()==Player.STATE_ENDED) { player.seekTo(0); intendedPlay = true; } else intendedPlay = !intendedPlay; player.setPlayWhenReady(active && intendedPlay); report("seekGrace"); report("progress"); } }); }
     public void seekVideo(int seconds) { main.post(() -> { if (player != null) { player.seekTo(Math.max(0,player.getCurrentPosition()+seconds*1000L)); report("seekGrace"); report("progress"); } }); }
     public void seekTo(double seconds) { main.post(() -> { if (player != null) { player.seekTo(Math.max(0,(long)(seconds*1000))); report("seekGrace"); report("progress"); } }); }
+    public JSONObject skipSuggestion() { return skipSuggestion; }
+    public void skipSegment() {
+        JSONObject suggestion=skipSuggestion;
+        if(suggestion==null) return;
+        seekTo(suggestion.optDouble("target",position()));
+        skipSuggestion=null;
+    }
     public void suspendVideo() { onMainSync(() -> {
         active = false;
         main.removeCallbacks(tick);

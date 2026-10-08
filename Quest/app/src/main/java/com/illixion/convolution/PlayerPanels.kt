@@ -39,8 +39,9 @@ fun PlayerControls(session: PlaybackSession, spatial: Boolean, switchMode: () ->
     var duration by remember { mutableDoubleStateOf(session.duration()) }
     var paused by remember { mutableStateOf(session.paused()) }
     var scrub by remember { mutableStateOf<Float?>(null) }
+    var skip by remember { mutableStateOf<org.json.JSONObject?>(session.skipSuggestion()) }
     LaunchedEffect(session) {
-        while (true) { position = session.position(); duration = session.duration(); paused = session.paused(); delay(200) }
+        while (true) { position = session.position(); duration = session.duration(); paused = session.paused(); skip=session.skipSuggestion(); delay(200) }
     }
     Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.large) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -53,6 +54,7 @@ fun PlayerControls(session: PlaybackSession, spatial: Boolean, switchMode: () ->
                 Button(onClick = { session.seekVideo(-10) }) { Text("−10s") }
                 Button(onClick = { session.toggleVideo() }) { Text(if (paused) "Play" else "Pause") }
                 Button(onClick = { session.seekVideo(10) }) { Text("+10s") }
+                skip?.let { suggestion -> Button(onClick={session.skipSegment()}) {Text(suggestion.optString("title","Skip segment"))} }
                 OutlinedButton(onClick = switchMode, enabled = !spatial || session.packing() == 0 || WindowStereo.supported()) { Text(if (spatial) "Window" else "Spatial view") }
                 OutlinedButton(onClick = leave) { Text("Library") }
             }

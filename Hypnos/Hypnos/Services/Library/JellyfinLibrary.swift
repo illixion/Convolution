@@ -387,42 +387,14 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// without finishing): whichever was watched later wins, the paused
     /// episode on a tie, since that is the one the user left.
     static func upNext(resume: [LibraryItem], nextUp: [LibraryItem], watchedEpisodes: [LibraryItem]) -> [LibraryItem] {
-        var seriesLastWatched: [String: Date] = [:]
-        for episode in watchedEpisodes + resume {
-            guard let seriesId = episode.seriesId, let date = episode.userData.lastPlayedDate else { continue }
-            seriesLastWatched[seriesId] = max(seriesLastWatched[seriesId] ?? .distantPast, date)
+        let entries = { (items: [LibraryItem], isResume: Bool) in
+            items.map { LibraryUpNextEntry(id: $0.id, seriesID: $0.seriesId,
+                                           lastPlayedAt: $0.userData.lastPlayedDate,
+                                           isResume: isResume) }
         }
-        struct Candidate {
-            let item: LibraryItem
-            let date: Date?
-            let isResume: Bool
-            let order: Int
-        }
-        var candidates: [Candidate] = resume.enumerated().map { index, item in
-            Candidate(item: item, date: item.userData.lastPlayedDate, isResume: true, order: index)
-        }
-        let resumeIds = Set(resume.map(\.id))
-        for (index, item) in nextUp.enumerated() where !resumeIds.contains(item.id) {
-            let date = item.seriesId.flatMap { seriesLastWatched[$0] } ?? item.userData.lastPlayedDate
-            candidates.append(Candidate(item: item, date: date, isResume: false, order: resume.count + index))
-        }
-        candidates.sort { lhs, rhs in
-            switch (lhs.date, rhs.date) {
-            case let (l?, r?) where l != r: return l > r
-            case (_?, nil): return true
-            case (nil, _?): return false
-            default:
-                if lhs.isResume != rhs.isResume { return lhs.isResume }
-                return lhs.order < rhs.order
-            }
-        }
-        var seenSeries = Set<String>()
-        return candidates.compactMap { candidate in
-            if let seriesId = candidate.item.seriesId {
-                guard seenSeries.insert(seriesId).inserted else { return nil }
-            }
-            return candidate.item
-        }
+        let byID = Dictionary((resume + nextUp).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return LibraryUpNextOrdering.orderedIDs(resume: entries(resume, true), nextUp: entries(nextUp, false),
+                                                watchedEpisodes: entries(watchedEpisodes, false)).compactMap { byID[$0] }
     }
 
     // MARK: - Detail
@@ -810,14 +782,7 @@ actor JellyfinLibrary: MediaServerLibrary {
     }
 
     private static func segmentKind(_ type: String?) -> LibraryMediaSegment.Kind? {
-        switch type {
-        case "Intro": .intro
-        case "Recap": .recap
-        case "Preview": .preview
-        case "Outro": .outro
-        case "Commercial": .commercial
-        default: nil
-        }
+        LibraryMediaSegment.Kind.serverType(type)
     }
 
     /// A chapter whose name says what it is runs to the next chapter (or
@@ -839,17 +804,7 @@ actor JellyfinLibrary: MediaServerLibrary {
     }
 
     static func chapterKind(_ name: String) -> LibraryMediaSegment.Kind? {
-        let words = name.lowercased()
-            .split { !$0.isLetter }
-            .map(String.init)
-        let text = words.joined(separator: " ")
-        func has(_ word: String) -> Bool { words.contains(word) }
-        if has("recap") || text.hasPrefix("previously") { return .recap }
-        if has("preview") || text.contains("next episode") || text.contains("next time") { return .preview }
-        if has("intro") || has("introduction") || has("opening") || has("op")
-            || text.contains("title sequence") || text.contains("main titles") { return .intro }
-        if has("credits") || has("outro") || has("ending") || has("ed") || has("closing") { return .outro }
-        return nil
+        LibraryMediaSegment.Kind.chapterName(name)
     }
 
     /// Jellyfin's HLS stream for a source AVFoundation can't open directly

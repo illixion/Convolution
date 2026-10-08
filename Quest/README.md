@@ -6,17 +6,22 @@ not the complete Quest port.
 
 ## Architecture
 
-- `RAVESDK/RAVEMediaCore`: the existing subtitle parser and stream quality /
-  stall rules, plus authenticated Jellyfin HTTP request construction. RAVEUI
-  re-exports the models so Apple players retain their existing API.
+- `RAVESDK/RAVEMediaCore`: subtitle parsing, stream quality / stall rules,
+  Jellyfin HTTP request construction, Up Next ordering and skip-segment policy.
+  RAVEUI re-exports the shared models so Apple players retain their existing API.
 - `RAVESDK/RAVEQuestCore`: dynamic Swift library exposing a UTF-8 JSON C ABI.
-  Login, a first page of movies/episodes with title metadata, playback planning,
-  subtitle fetching, and watch progress run on an Android worker executor
-  through JNI.
+  The versioned boundary handles sign-in, paged catalogs and search, Jellyfin
+  home shelves, playback planning, subtitles, favorite/watched changes, skip
+  segment discovery and watch progress. Calls run on Android's worker executor
+  through JNI; errors have stable codes and never include credentials.
 - The Compose library uses a dark, high-contrast theme, a featured title and
   horizontal Jellyfin artwork shelves, with a detail page for resume/play and
-  stream-quality choices. Artwork is requested from Jellyfin using the signed-in
-  session. A compact dock shows the retained title and playhead while browsing;
+  stream-quality choices. Shelves include Continue Watching, Up Next and recent
+  movies/shows. Catalog browsing is paged, and search, favorite/watched actions,
+  skip-intro/credits controls, and permitted Jellyfin downloads are available.
+  Downloaded files use Android's background DownloadManager; playback resumes
+  locally and queues its latest position for sync at the next sign-in. Artwork
+  is requested from Jellyfin using the signed-in session. A compact dock shows the retained title and playhead while browsing;
   opening its Player action reattaches the decoder surface before playback can
   resume. Library browsing is currently limited to the first 100 titles.
 - The library activity uses Meta VR Layout SDK's `SpatialScene`. Settings are a
@@ -162,8 +167,9 @@ readable text after the theme foreground fix, and Settings appearing as a
 separate movable Home window. The compact dock pauses from the library and
 reopens the player with its picture surface attached.
 
-Still outside this slice: Stash browsing, full Jellyfin home / pagination /
-Up Next / skip segments, offline downloads, object audio / Opus rendering, MVC
-discs, separate confirmation of controller versus hand input, rich subtitle styling and adjustable stereo subtitle depth,
+Still outside this slice: series/season drill-down, Stash browsing, offline
+subtitle sidecars and film-package downloads, object audio / Opus rendering, MVC
+discs, separate confirmation of controller versus hand input, rich subtitle
+styling and adjustable stereo subtitle depth,
 HDR tone-mapping validation, and depth-based 2D→3D. No comparison against
 Bigscreen's sampling path or other players has been established.

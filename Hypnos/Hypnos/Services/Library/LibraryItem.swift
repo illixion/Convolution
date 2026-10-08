@@ -9,6 +9,7 @@
  */
 
 import Foundation
+import RAVEUI
 
 /// What kind of thing a `LibraryItem` is. Mirrors Jellyfin's `BaseItemKind`
 /// loosely, but only the cases the Library feature actually renders — v1 is
@@ -173,32 +174,6 @@ struct LibraryShelf: Identifiable, Hashable, Sendable {
 struct LibraryHome: Sendable {
     var featured: [LibraryItem]
     var shelves: [LibraryShelf]
-}
-
-/// A stretch of an episode or film a viewer may want to jump over: the
-/// opening titles, a recap, the credits. Jellyfin 10.10+ serves these as
-/// media segments, filled in by a segment provider plugin (Intro Skipper,
-/// Chapter Segments); a file whose chapters are named "Intro"/"Credits"
-/// gets them from its chapters instead.
-struct LibraryMediaSegment: Codable, Hashable, Sendable {
-    enum Kind: String, Codable, Sendable {
-        case intro, recap, preview, outro, commercial
-    }
-
-    var kind: Kind
-    var startSeconds: Double
-    var endSeconds: Double
-
-    /// What the skip button says.
-    var skipTitle: String {
-        switch kind {
-        case .intro: "Skip Intro"
-        case .recap: "Skip Recap"
-        case .preview: "Skip Preview"
-        case .outro: "Skip Credits"
-        case .commercial: "Skip Ad"
-        }
-    }
 }
 
 /// A subtitle stream an item offers. Only text tracks can be drawn by the

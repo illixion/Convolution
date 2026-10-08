@@ -7,10 +7,12 @@ final class CoreBridge {
     static { System.loadLibrary("quest_player"); }
     private static native byte[] callBytes(byte[] input);
     static JSONObject call(JSONObject request) throws Exception {
+        if (!request.has("protocolVersion")) request.put("protocolVersion",1);
         byte[] result = callBytes(request.toString().getBytes(StandardCharsets.UTF_8));
         if (result == null) throw new Exception("Swift core unavailable");
         JSONObject reply = new JSONObject(new String(result, StandardCharsets.UTF_8));
         if (reply.has("error")) throw new Exception(reply.getString("error"));
+        if (reply.has("protocolVersion") && reply.getInt("protocolVersion") != 1) throw new Exception("Unsupported Swift core protocol version");
         return reply;
     }
 }

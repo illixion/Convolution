@@ -18,6 +18,7 @@
 import DebugTrace
 import Foundation
 import Observation
+import RAVEUI
 import SwiftUI
 
 @MainActor
@@ -27,9 +28,7 @@ final class MediaSegmentSkipper {
     @ObservationIgnored private var loadedItemId: String?
 
     /// How long a segment's button shows without the controls.
-    static let promptSeconds: Double = 8
-    /// Shorter segments aren't worth a button that would vanish as it appears.
-    private static let minimumLength: Double = 4
+    static let promptSeconds = LibrarySegmentSkipPolicy.promptSeconds
 
     /// Loads `itemId`'s segments, or clears them for nil (not a Library title).
     func load(itemId: String?) async {
@@ -39,7 +38,7 @@ final class MediaSegmentSkipper {
         guard let itemId, let library = LibraryService.current() else { return }
         let loaded = (try? await library.mediaSegments(itemId: itemId)) ?? []
         guard loadedItemId == itemId else { return }
-        segments = loaded.filter { $0.endSeconds - $0.startSeconds >= Self.minimumLength }
+        segments = loaded.filter(LibrarySegmentSkipPolicy.eligible)
         if !segments.isEmpty {
             AppLogger.library.info("Skippable segments: \(self.segments.map { "\($0.kind.rawValue) \(Int($0.startSeconds))-\(Int($0.endSeconds))" }.joined(separator: ", "), privacy: .public)")
         }
@@ -47,20 +46,18 @@ final class MediaSegmentSkipper {
 
     /// The segment `time` is in, if a skip would still save something.
     func segment(at time: Double) -> LibraryMediaSegment? {
-        segments.first { time >= $0.startSeconds - 0.25 && time < $0.endSeconds - 1 }
+        LibrarySegmentSkipPolicy.segment(at: time, in: segments)
     }
 
     /// The segment to offer a skip for: within its first seconds always,
     /// later only with the controls up.
     func offered(at time: Double, controlsVisible: Bool) -> LibraryMediaSegment? {
-        guard let segment = segment(at: time) else { return nil }
-        return controlsVisible || time < segment.startSeconds + Self.promptSeconds ? segment : nil
+        LibrarySegmentSkipPolicy.offered(at: time, controlsVisible: controlsVisible, in: segments)
     }
 
     /// Where skipping `segment` lands.
     nonisolated static func target(for segment: LibraryMediaSegment, duration: Double) -> Double {
-        guard duration > 1 else { return segment.endSeconds }
-        return min(segment.endSeconds, duration - 0.5)
+        LibrarySegmentSkipPolicy.target(for: segment, duration: duration)
     }
 }
 
