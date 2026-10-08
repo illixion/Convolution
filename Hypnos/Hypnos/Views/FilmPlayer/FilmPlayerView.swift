@@ -133,6 +133,13 @@ struct FilmPlayerView: View {
                     startStereo()
                 }
             }
+            // Stable Depth is read when the realtime source is built.
+            .onChange(of: appModel.stableDepth) { _, _ in
+                if stereoSource != nil, stereoLayout == nil {
+                    stopStereo(keepingPosition: false)
+                    startStereo()
+                }
+            }
             .task(id: stereoSource.map(ObjectIdentifier.init)) {
                 guard let source = stereoSource else { return }
                 while !Task.isCancelled {

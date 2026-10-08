@@ -154,6 +154,12 @@ struct Pseudo3DVideoPlayerView: View {
                 engine.reloadDepthPipeline()
             }
         }
+        // Stable Depth is read when the realtime source is built.
+        .onChange(of: appModel.stableDepth) { _, _ in
+            if case .realtime = depthMode, packedStereo == nil {
+                engine.reloadDepthPipeline()
+            }
+        }
         .onAppear {
             engine.startMuted = startMuted
             engine.startVolume = Float(playbackModel?.volume ?? 1)

@@ -171,6 +171,10 @@ struct SettingsTabView: View {
                             selection: $appModel.preprocessDepthModelName
                         )
                         Toggle("Real-Time 3D for All Videos", isOn: $appModel.defaultRealtimePseudo3D)
+                        Toggle("Stable Depth", isOn: $appModel.stableDepth)
+                        Text("Real-Time 3D holds the room's depth steady when someone walks up to the camera, eases close-ups into the nearest depth instead of clipping them, and keeps depth edges on the picture's edges. Turn off to compare with the previous behavior.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                         Text("Convert to 3D uses these models: Real-Time for instant playback (fast model recommended), Pre-Process for background conversion (a larger model can be used). Manage installed models under Developer. With Real-Time 3D for All Videos on, compatible videos open already converted — using this video's pre-processed conversion when available, otherwise real-time.")
                             .font(.caption)
                             .foregroundColor(.secondary)

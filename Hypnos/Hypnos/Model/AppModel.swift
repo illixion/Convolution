@@ -966,6 +966,20 @@ class AppModel {
         }
     }
 
+    /// Studio depth refinement for real-time 3D (RAVEMedia's
+    /// `RAVEDepthRefinement`): the room holds its depth when someone walks up
+    /// to the camera, close-ups ease into the near end instead of clipping,
+    /// and depth edges follow the picture. Read by the realtime depth source
+    /// when a 3D picture starts, so players reload their pipeline on change.
+    /// Pre-processed conversions always use it.
+    var stableDepth: Bool {
+        didSet {
+            if stableDepth != oldValue {
+                UserDefaults.standard.set(stableDepth, forKey: RAVEDepthRefinement.enabledDefaultsKey)
+            }
+        }
+    }
+
     /// When true (default), videos open with audio muted; autoplay always
     /// starts playback either way. Off = videos open with sound. Applies to
     /// the video player windows and the gallery long-press quick look.
@@ -1540,6 +1554,7 @@ class AppModel {
         let loadedRealtimeDepthModelName = UserDefaults.standard.string(forKey: "realtimeDepthModelName") ?? legacyDepthModelName
         let loadedPreprocessDepthModelName = UserDefaults.standard.string(forKey: "preprocessDepthModelName") ?? legacyDepthModelName
         let loadedDefaultRealtimePseudo3D = loadBool("defaultRealtimePseudo3D", default: false)
+        let loadedStableDepth = loadBool(RAVEDepthRefinement.enabledDefaultsKey, default: true)
         let loadedVideoAutoplayMuted = loadBool("videoAutoplayMuted", default: true)
 
         // Load default image viewing mode (default: 2D / mono)
@@ -1652,6 +1667,7 @@ class AppModel {
         self.realtimeDepthModelName = loadedRealtimeDepthModelName
         self.preprocessDepthModelName = loadedPreprocessDepthModelName
         self.defaultRealtimePseudo3D = loadedDefaultRealtimePseudo3D
+        self.stableDepth = loadedStableDepth
         self.videoAutoplayMuted = loadedVideoAutoplayMuted
         self.rememberImageEnhancements = loadedRememberImageEnhancements
         self.autoRestoreSpatial3D = loadedAutoRestoreSpatial3D
@@ -2517,6 +2533,7 @@ class AppModel {
             realtimeDepthModelName: realtimeDepthModelName,
             preprocessDepthModelName: preprocessDepthModelName,
             defaultRealtimePseudo3D: defaultRealtimePseudo3D,
+            stableDepth: stableDepth,
             videoAutoplayMuted: videoAutoplayMuted,
             useLossyTextureCompression: useLossyTextureCompression,
             globalPseudo3DSettings: try? JSONEncoder().encode(globalPseudo3DSettings),
@@ -2564,6 +2581,7 @@ class AppModel {
         if let v = backup.realtimeDepthModelName { realtimeDepthModelName = v }
         if let v = backup.preprocessDepthModelName { preprocessDepthModelName = v }
         if let v = backup.defaultRealtimePseudo3D { defaultRealtimePseudo3D = v }
+        if let v = backup.stableDepth { stableDepth = v }
         if let v = backup.videoAutoplayMuted { videoAutoplayMuted = v }
         if let v = backup.useLossyTextureCompression { useLossyTextureCompression = v }
         if let data = backup.globalPseudo3DSettings,
