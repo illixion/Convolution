@@ -1102,6 +1102,7 @@ final class VideoWindowModel {
         seekCommand?(clamped)
         isScrubbing = false
         startAutoHideTimer()
+        scheduleJellyfinRenewAfterSeek()
     }
 
     /// The skip button the window offers now, if any.
@@ -1293,7 +1294,7 @@ final class VideoWindowModel {
             backgroundedAt = Date()
         } else if newPhase == .active, let since = backgroundedAt {
             backgroundedAt = nil
-            if Date().timeIntervalSince(since) >= 2 { renewJellyfinStreamAfterBackground() }
+            if Date().timeIntervalSince(since) >= 2 { renewJellyfinStream(reason: "after the background") }
         }
     }
 
@@ -1318,20 +1319,50 @@ final class VideoWindowModel {
         return start
     }
 
+    @ObservationIgnored private var seekRenewTask: Task<Void, Never>?
+
+    /// How long seeking has to stop before the stream is reopened, so a run
+    /// of ±10 s presses costs one reload, not one per press.
+    private static let seekRenewDelay: Duration = .seconds(1)
+
+    /// A seek in a Jellyfin remux lands on segments cut by whichever ffmpeg
+    /// job Jellyfin happened to be running: it restarts the job at almost
+    /// every seek (six jobs for six quick back-seeks, 2026-10-08), and only
+    /// a job's first segment lines up with the playlist. The player's clock,
+    /// and the subtitles with it, then ran 0-5 s behind speech, the same
+    /// misalignment as after the background. Reopening in a new session once
+    /// seeking settles starts one job exactly at the playhead.
+    private func scheduleJellyfinRenewAfterSeek() {
+        guard isRenewableJellyfinStream else { return }
+        seekRenewTask?.cancel()
+        seekRenewTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.seekRenewDelay)
+            guard let self, !Task.isCancelled, !self.isScrubbing else { return }
+            self.renewJellyfinStream(reason: "after a seek")
+        }
+    }
+
+    /// A Jellyfin HLS remux (direct play has no segments to misplace).
+    private var isRenewableJellyfinStream: Bool {
+        LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity) != nil
+            && !usingTranscodedStream && video.streamURL.pathExtension.lowercased() == "m3u8"
+    }
+
     /// A Jellyfin remux comes back from the background (visionOS took the
-    /// decoder away, so the player reloads a segment) 0-5 s off its own
-    /// clock, subtitles with it; a new play session realigns it. See
-    /// `JellyfinLibrary.renewedStreamURL`. Every Jellyfin client reloads
+    /// decoder away, so the player reloads a segment) or from a seek 0-5 s
+    /// off its own clock, subtitles with it; a new play session realigns it.
+    /// See `JellyfinLibrary.renewedStreamURL`. Every Jellyfin client reloads
     /// the stream the same way.
-    private func renewJellyfinStreamAfterBackground() {
-        guard let itemId = LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity),
-              !usingTranscodedStream, video.streamURL.pathExtension.lowercased() == "m3u8",
+    private func renewJellyfinStream(reason: String) {
+        guard isRenewableJellyfinStream,
+              let itemId = LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity),
               let library = LibraryService.current() else { return }
+        seekRenewTask?.cancel()
         let streamURL = video.streamURL
         Task { [weak self] in
             guard let renewed = await library.renewedStreamURL(itemId: itemId, streamURL: streamURL) else { return }
             guard let self, self.video.streamURL == streamURL else { return }
-            AppLogger.videoWindow.info("Reopening the Jellyfin stream in a new play session after the background")
+            AppLogger.videoWindow.info("Reopening the Jellyfin stream in a new play session \(reason, privacy: .public) at \(self.currentTime, format: .fixed(precision: 2))s")
             self.carryPositionToNextRenderer(reason: "new Jellyfin play session")
             self.streamSwitchStart = self.currentTime
             self.video.streamURL = renewed
