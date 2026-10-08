@@ -414,8 +414,7 @@ struct VideoWindowView: View {
             PlayerOrnamentStack(
                 subtitles: bandSubtitles, controlsVisible: !windowModel.isUIHidden,
                 prompt: skipSegmentButton.map { AnyView($0) },
-                gap: bandSubtitles != nil ? PlayerOrnamentStack<EmptyView>.stereoBandGap
-                    : windowModel.showsStereoPicture ? Self.stereoControlsGap : 12,
+                gap: windowModel.showsStereoPicture ? Self.stereoControlsGap : 12,
                 filmTime: { windowModel.currentTime }
             ) { videoOrnament }
         }

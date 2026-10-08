@@ -263,8 +263,7 @@ struct FilmPlayerView: View {
             PlayerOrnamentStack(
                 subtitles: bandSubtitles, controlsVisible: chromeVisible,
                 prompt: skipButton(controlsVisible: chromeVisible).map { AnyView($0) },
-                gap: bandSubtitles != nil ? PlayerOrnamentStack<EmptyView>.stereoBandGap
-                    : stereoSource == nil ? 12 : VideoWindowView.stereoControlsGap,
+                gap: stereoSource == nil ? 12 : VideoWindowView.stereoControlsGap,
                 filmTime: { player.currentTime }
             ) {
             FilmTransport(player: player, stereoEnabled: stereoSource != nil,

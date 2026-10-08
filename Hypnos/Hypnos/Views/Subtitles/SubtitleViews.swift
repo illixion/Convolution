@@ -123,12 +123,27 @@ enum SubtitleStereoDepth {
     static func depthOffset(_ value: Double) -> Double { value * fullScale }
 }
 
+/// How far the band of subtitles hung under a stereo picture
+/// (`StereoSubtitleStyle.belowPicture`) sits below the window's edge.
+///
+/// It used to be fixed, raised to 84 and then 120 pt because the picture's
+/// near content covered it from an angle (device, 2026-10-07). That was
+/// before the stereo plane was recessed into the window (RAVESDK 7a79976),
+/// so the default is close again and the viewer picks what clears their
+/// content.
+enum SubtitleBandGap {
+    static let key = "subtitles.bandGap"
+    static let defaultPoints = 20.0
+    static let range: ClosedRange<Double> = 0 ... 160
+}
+
 /// The subtitle settings that only mean something in 3D: where they show
 /// and, drawn into the picture, their depth and HDR brightness.
 struct StereoSubtitleSettings: View {
     @AppStorage(StereoSubtitleStyle.key) private var style = StereoSubtitleStyle.inPicture
     @AppStorage(SubtitleStereoDepth.key) private var depth = 0.0
     @AppStorage(SubtitleHDRBrightness.key) private var nits = SubtitleHDRBrightness.defaultNits
+    @AppStorage(SubtitleBandGap.key) private var bandGap = SubtitleBandGap.defaultPoints
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -136,6 +151,19 @@ struct StereoSubtitleSettings: View {
                 ForEach(StereoSubtitleStyle.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
+            if style == .belowPicture {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Distance below picture: \(Int(bandGap)) pt").font(.caption)
+                    HStack {
+                        Text("Closer").font(.caption2).foregroundStyle(.secondary)
+                        Slider(value: $bandGap, in: SubtitleBandGap.range, step: 4)
+                        Text("Lower").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Button("Reset Distance") { bandGap = SubtitleBandGap.defaultPoints }
+                        .font(.caption)
+                        .disabled(bandGap == SubtitleBandGap.defaultPoints)
+                }
+            }
             if style == .inPicture {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Subtitle depth: \(depthLabel)").font(.caption)
@@ -260,14 +288,14 @@ struct PlayerOrnamentStack<Controls: View>: View {
     var subtitles: SubtitleController? = nil
     let controlsVisible: Bool
     var prompt: AnyView? = nil
-    /// Space between the window's bottom edge and whatever hangs first.
+    /// Space between the window's bottom edge and the controls. The
+    /// subtitle band, when there is one, hangs first at its own adjustable
+    /// distance instead (`SubtitleBandGap`).
     let gap: CGFloat
     var filmTime: @MainActor () -> Double = { 0 }
     @ViewBuilder let controls: Controls
 
-    /// A stereo picture reads nearer than its edge, and from an angle covered
-    /// a band at the controls' gap (device, 2026-10-07): the band hangs lower.
-    static var stereoBandGap: CGFloat { 120 }
+    @AppStorage(SubtitleBandGap.key) private var bandGap = SubtitleBandGap.defaultPoints
 
     /// Whether the ornament has anything to show at all.
     static func isVisible(subtitles: SubtitleController?, controlsVisible: Bool, hasPrompt: Bool = false) -> Bool {
@@ -287,7 +315,7 @@ struct PlayerOrnamentStack<Controls: View>: View {
             }
             if let prompt, controlsVisible { prompt.padding(.top, 12) }
         }
-        .padding(.top, gap)
+        .padding(.top, subtitles != nil ? bandGap : gap)
         .animation(.easeInOut(duration: 0.2), value: prompt == nil)
     }
 }
