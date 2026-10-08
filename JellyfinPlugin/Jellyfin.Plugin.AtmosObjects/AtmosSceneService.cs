@@ -288,6 +288,7 @@ public sealed partial class AtmosSceneService
         public bool Covers(int segment) => !Finished && segment >= FirstSegment && segment <= NextSegment + FollowSegments;
     }
 
+    /// <summary>A scene's state; <paramref name="itemId"/> is a scene id from <see cref="ResolveScene"/>.</summary>
     private ItemState? GetState(Guid itemId)
     {
         if (_items.TryGetValue(itemId, out var existing))
@@ -295,51 +296,35 @@ public sealed partial class AtmosSceneService
             return existing;
         }
 
-        var item = _libraryManager.GetItemById(itemId);
+        if (!_sceneTargets.TryGetValue(itemId, out var target))
+        {
+            return null;
+        }
+
+        var item = _libraryManager.GetItemById(target.Item);
         if (item is null || string.IsNullOrEmpty(item.Path))
         {
             return null;
         }
 
         var state = new ItemState();
-        // No session can be running for an item not yet in _items: any work
+        // No session can be running for a scene not yet in _items: any work
         // folder here was left by a server stopped mid-decode.
         DeleteStale(ItemDirectory(itemId), "work-*");
-        var audioStreams = _mediaSourceManager.GetMediaStreams(itemId).Where(s => s.Type == MediaStreamType.Audio).ToList();
-        var truehdStreams = audioStreams.Where(s => string.Equals(s.Codec, "truehd", StringComparison.OrdinalIgnoreCase)).ToList();
-        // The track in the preferred language, else the first: a German disc
-        // lists its German track first.
-        var truehd = truehdStreams.FirstOrDefault(s => IsPreferredLanguage(s.Language)) ?? truehdStreams.FirstOrDefault();
         var disc = IsBluray(item);
-        if (disc && truehd is not null)
-        {
-            // ffmpeg's bluray: probe carries no languages; the disc's playlist does.
-            truehd = ChooseDiscTrueHd(item.Path) is int index
-                ? truehdStreams.FirstOrDefault(s => s.Index == index) ?? truehd
-                : truehd;
-        }
-
-        // No TrueHD Atmos track: fall back to E-AC-3, decoded in-process by Cavern
-        // (Eac3AtmosDecoder.cs). Whether it actually carries JOC objects isn't known
-        // until the first decode attempt — see RunEac3SessionAsync's NoObjects outcome.
-        // Blu-ray carries objects only in TrueHD, so a disc has no E-AC-3 path.
-        var eac3 = truehd is null && !disc
-            ? audioStreams.FirstOrDefault(s => string.Equals(s.Codec, "eac3", StringComparison.OrdinalIgnoreCase))
-            : null;
-        var stream = truehd ?? eac3;
-        if (stream is null)
+        var candidate = Candidates(target.Item)?.FirstOrDefault(c => c.Index == target.Stream);
+        if (candidate is null)
         {
             MarkUnsupported(itemId, disc ? "No TrueHD audio track on the disc." : "No TrueHD or EAC3 audio track.");
         }
         else
         {
-            KeepCacheFor(itemId, stream.Index, truehdStreams.FirstOrDefault()?.Index ?? stream.Index);
             state.Source = new ItemSource(
                 item.Path,
-                stream.Index,
+                candidate.Index,
                 item.RunTimeTicks is long ticks ? TimeSpan.FromTicks(ticks).TotalSeconds : 0,
-                ProbeOriginMs(item.Path, stream.Index, disc),
-                truehd is not null ? AudioCodecKind.TrueHd : AudioCodecKind.Eac3,
+                ProbeOriginMs(item.Path, candidate.Index, disc),
+                candidate.Codec,
                 disc);
         }
 
@@ -1023,86 +1008,6 @@ public sealed partial class AtmosSceneService
         }
 
         File.Move(tmp, path, overwrite: true);
-    }
-
-    private static bool IsPreferredLanguage(string? language) =>
-        !string.IsNullOrEmpty(language)
-        && string.Equals(language, Config.PreferredAudioLanguage, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// The ffmpeg index of the disc's TrueHD track in the preferred language:
-    /// languages from <c>mvc3d streams</c> (the playlist's STN table), the
-    /// index from probing the stream mvc3d feeds ffmpeg, matched by PID.
-    /// Null when mvc3d isn't installed or the disc says nothing useful.
-    /// </summary>
-    private int? ChooseDiscTrueHd(string discPath)
-    {
-        if (!File.Exists(Mvc3dPath))
-        {
-            return null;
-        }
-
-        try
-        {
-            using var list = StartProcess(Mvc3dPath, ["streams", discPath], redirectInput: false);
-            var tracks = list.StandardOutput.ReadToEnd()
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(line => line.Split(' '))
-                .Where(f => f.Length == 4 && f[0] == "audio" && f[2] == "truehd")
-                .Select(f => (Pid: Convert.ToInt32(f[1], 16), Language: f[3]))
-                .ToList();
-            list.WaitForExit();
-            if (tracks.Count == 0)
-            {
-                return null;
-            }
-
-            var pid = tracks.FirstOrDefault(t => IsPreferredLanguage(t.Language), tracks[0]).Pid;
-            using var feed = DiscFeed.Start(Mvc3dPath, discPath, 0);
-            using var probe = StartProcess(_mediaEncoder.ProbePath,
-                ["-v", "error", "-i", "pipe:0", "-show_entries", "stream=index,codec_name,id", "-of", "csv=p=0"], redirectInput: true);
-            feed.Connect(probe);
-            var streams = probe.StandardOutput.ReadToEnd();
-            probe.WaitForExit();
-            // "1,truehd,0x1100": index first, id last; the AC-3 core shares the PID.
-            foreach (var fields in streams.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.Trim().Split(',')))
-            {
-                if (fields.Length >= 3 && fields[1] == "truehd" && Convert.ToInt32(fields[^1], 16) == pid)
-                {
-                    _logger.LogInformation("Disc {Path}: TrueHD track PID 0x{Pid:x4} ({Language}), stream {Index}",
-                        Path.GetFileName(discPath), pid, tracks.First(t => t.Pid == pid).Language, fields[0]);
-                    return int.Parse(fields[0], CultureInfo.InvariantCulture);
-                }
-            }
-        }
-        catch (Exception ex) when (ex is IOException or FormatException or InvalidOperationException or System.ComponentModel.Win32Exception)
-        {
-            _logger.LogWarning(ex, "Could not read the disc's audio languages; using the first TrueHD track");
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Drops an item's cached scene when it was decoded from another track
-    /// (a changed language preference, or the choice by language itself,
-    /// which older caches predate: those came from <paramref name="firstTrueHd"/>).
-    /// </summary>
-    private void KeepCacheFor(Guid itemId, int streamIndex, int firstTrueHd)
-    {
-        var dir = ItemDirectory(itemId);
-        var marker = Path.Combine(dir, "track.txt");
-        var cached = File.Exists(marker) && int.TryParse(File.ReadAllText(marker).Trim(), out var recorded)
-            ? recorded
-            : firstTrueHd;
-        if (cached != streamIndex && Directory.Exists(dir))
-        {
-            _logger.LogInformation("Atmos cache for {ItemId} was decoded from stream {Old}; now {New}, so it is dropped", itemId, cached, streamIndex);
-            Directory.Delete(dir, recursive: true);
-        }
-
-        Directory.CreateDirectory(dir);
-        File.WriteAllText(marker, streamIndex.ToString(CultureInfo.InvariantCulture));
     }
 
     /// <summary>Timestamp of the track's first packet: scene frame 0.</summary>

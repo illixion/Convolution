@@ -42,11 +42,22 @@ subtracts the origin. Measured on servo with the same pipeline: first decoded
 audio 3.7 s after a seek to one hour, then about 6.5× realtime.
 
 Blu-ray carries object audio only in TrueHD, so a disc has no E-AC-3 path.
-With several TrueHD tracks the plugin decodes the one in `PreferredAudioLanguage`
-(default `eng`), else the first. `bluray:` reports no languages, so for a disc they
-come from `mvc3d streams` (the playlist's STN table), matched to ffmpeg's index by
-PID; *Bumblebee 3D* is a German release that lists German first. The track an
-item's cache was decoded from is kept in `track.txt`; a different choice drops it.
+## Audio tracks
+
+`GET /AtmosObjects/{id}/Tracks?languages=eng,deu` lists an item's object-audio
+tracks (TrueHD first, then E-AC-3; a disc has only TrueHD) with index, codec,
+language and a display title, the default marked. Every audio request takes
+`audioStream=<index>` to name a track; each track is its own scene, decoded and
+cached separately (`AtmosTracks.cs`: the scene id is derived from the item id and
+the stream index), so switching back and forth keeps both. Without
+`audioStream`, the default is the first track in the first of `languages` (a
+client sends its device languages), then `PreferredAudioLanguage` (default
+`eng`), then the first track; codes are compared in ISO 639-2/T form (`ger` and
+`de` count as `deu`). `bluray:` reports no languages, so a disc's come from
+`mvc3d streams` (the playlist's STN table), matched to ffmpeg's index by PID;
+*Bumblebee 3D* is a German release that lists German first. A cache from before
+per-track scenes is adopted by its track's scene (`track.txt`, else the first
+TrueHD track).
 Known limits: both tools pick the feature as the longest title (mvc3d the
 longest 3D one), which agrees on ordinary discs; a feature made of several
 clips restarts its timestamps at each clip, as it does through `bluray:`.
