@@ -23,6 +23,12 @@ struct TVPhotoViewerView: View {
 
     @State private var index: Int
     @State private var currentImage: UIImage?
+    /// Index `currentImage` belongs to; keys the image's identity so a change
+    /// animates as a transition instead of swapping in place.
+    @State private var shownIndex: Int
+    /// Edge the next photo slides in from. Set when the user steps, before the
+    /// photo loads, so the outgoing one already leaves the matching way.
+    @State private var slideEdge: Edge = .trailing
     @State private var isLoading = false
     @State private var isSlideshow = false
     @State private var slideshowTask: Task<Void, Never>?
@@ -34,6 +40,7 @@ struct TVPhotoViewerView: View {
         self.startIndex = startIndex
         self.onLoadMore = onLoadMore
         _index = State(initialValue: startIndex)
+        _shownIndex = State(initialValue: startIndex)
     }
 
     private static let maxDisplayPixels: CGFloat = 3840
@@ -51,6 +58,11 @@ struct TVPhotoViewerView: View {
                     // tvOS insets the safe area for TV overscan; without this the
                     // picture is letterboxed on all four sides.
                     .ignoresSafeArea()
+                    .id(shownIndex)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: slideEdge).combined(with: .opacity),
+                        removal: .move(edge: slideEdge == .trailing ? .leading : .trailing)
+                            .combined(with: .opacity)))
             } else if isLoading {
                 ProgressView()
             }
@@ -74,8 +86,10 @@ struct TVPhotoViewerView: View {
         .onAppear { hasFocus = true }
         .onMoveCommand { direction in
             switch direction {
-            case .left: step(by: -1)
-            case .right: step(by: 1)
+            // Swipes report the finger's direction: swiping left brings the
+            // next photo in, as in the Photos app.
+            case .left: step(by: 1)
+            case .right: step(by: -1)
             default: break
             }
         }
@@ -97,6 +111,7 @@ struct TVPhotoViewerView: View {
     private func step(by delta: Int) {
         let next = index + delta
         guard next >= 0, next < images.count else { return }
+        slideEdge = delta > 0 ? .trailing : .leading
         index = next
         if index >= images.count - 3 {
             Task { await onLoadMore() }
@@ -112,7 +127,10 @@ struct TVPhotoViewerView: View {
         let loaded = try? await ImageLoader.shared.loadDisplayImage(
             from: image.fullSizeURL, maxPixelSize: Self.maxDisplayPixels)
         guard !Task.isCancelled else { return }
-        currentImage = loaded
+        withAnimation(.easeInOut(duration: 0.35)) {
+            currentImage = loaded
+            shownIndex = index
+        }
         isLoading = false
     }
 
