@@ -118,6 +118,9 @@ private struct JFItem: Decodable {
     var kind: LibraryItemKind {
         switch `Type` {
         case "Movie": return .movie
+        // Jellyfin's Home Videos library exposes individual files as Video,
+        // rather than Movie. They are still directly playable media items.
+        case "Video": return .movie
         case "Series": return .series
         case "Season": return .season
         case "Episode": return .episode
@@ -670,6 +673,7 @@ actor JellyfinLibrary: MediaServerLibrary {
         let sourceVideoCodec = source?.MediaStreams?
             .first { $0.Type == "Video" }?.Codec?.lowercased()
         let sourceBitrate = source?.Bitrate
+        let sourceContainer = source?.Container?.lowercased()
 
         if quality.caps(sourceBitrate: sourceBitrate) {
             let capped = Self.hlsStreamURL(
@@ -691,6 +695,17 @@ actor JellyfinLibrary: MediaServerLibrary {
             ])
 
         if await NativeVideoDecodeProbe.canPlayNatively(url: directURL, timeout: 5) {
+            return GenericPlaybackPlan(method: .direct, streamURL: directURL, resumeSeconds: resumeSeconds,
+                                       sourceBitrate: sourceBitrate)
+        }
+
+        // WebKit can play Jellyfin's WebM files on Apple platforms even when
+        // AVFoundation cannot. Keep the original file URL so they follow the
+        // same direct/WebKit route as Stash instead of asking Jellyfin to
+        // create an HLS transcode just to make the container playable.
+        let isWebM = sourceContainer?.split(separator: ",").contains("webm") == true
+            || ["vp8", "vp9", "av1"].contains(sourceVideoCodec ?? "")
+        if isWebM {
             return GenericPlaybackPlan(method: .direct, streamURL: directURL, resumeSeconds: resumeSeconds,
                                        sourceBitrate: sourceBitrate)
         }

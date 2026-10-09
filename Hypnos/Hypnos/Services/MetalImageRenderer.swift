@@ -212,7 +212,15 @@ final class MetalImageRenderer: Sendable {
             colorSpace: colorSpace
         )
 
-        if useLossyCompression {
+        // Explicit lossy texture compression requires newer Apple GPU
+        // families and is only supported for standard 8-bit color formats.
+        // Setting compressionType on older devices (for example the A13 in
+        // iPad 9) aborts inside Metal's descriptor validation instead of
+        // returning nil, so keep those devices on the ordinary private-texture
+        // path even when the preference is enabled.
+        if useLossyCompression,
+           pixelFormat == .bgra8Unorm,
+           device.supportsFamily(.apple7) {
             // Blit-copy from the uncompressed staging texture into a lossy-compressed
             // read-only texture. The staging texture is released after the copy completes.
             let lossyDesc = MTLTextureDescriptor.texture2DDescriptor(
