@@ -35,6 +35,8 @@ struct TVPhotoViewerView: View {
         _index = State(initialValue: startIndex)
     }
 
+    private static let maxDisplayPixels: CGFloat = 3840
+
     private var image: GalleryImage? { images[safe: index] }
 
     var body: some View {
@@ -98,7 +100,13 @@ struct TVPhotoViewerView: View {
     private func load() async {
         guard let image else { return }
         isLoading = true
-        currentImage = try? await ImageLoader.shared.loadImage(from: image.fullSizeURL)
+        // Cancelled when the user steps on (`.task(id: index)`), which also
+        // stops the download and skips the decode of a photo already left behind.
+        // 4K is the most a TV can show, so nothing above that is ever decoded.
+        let loaded = try? await ImageLoader.shared.loadDisplayImage(
+            from: image.fullSizeURL, maxPixelSize: Self.maxDisplayPixels)
+        guard !Task.isCancelled else { return }
+        currentImage = loaded
         isLoading = false
     }
 

@@ -146,7 +146,13 @@ actor ImageLoader {
     private init() {
         // Configure cache limits (costs reflect true decoded image sizes)
         cache.countLimit = 20
+        #if os(tvOS)
+        // An Apple TV app lives in a far smaller budget than a Vision Pro one
+        // (the viewer there showed a 1.5 GB lifetime peak in a jetsam log).
+        cache.totalCostLimit = 96 * 1024 * 1024
+        #else
         cache.totalCostLimit = 512 * 1024 * 1024 // 512 MB
+        #endif
     }
 
     /// Estimate the actual in-memory cost of a cached image (decoded pixels + compressed data)
@@ -258,6 +264,21 @@ actor ImageLoader {
         }
 
         return try await task.value?.image
+    }
+
+    /// Load an image for on-screen display, decoded no larger than `maxPixelSize`
+    /// on its long edge. Goes through the same `CGImageSource` downscaler as the
+    /// 2D photo viewer (`MetalImageRenderer.downsampledImage`), straight from the
+    /// encoded bytes, so a 48 MP original is never decoded at full size. The
+    /// result is deliberately not parked in the decoded-image cache: the bytes
+    /// are already on disk, and one screen-sized bitmap is cheap to rebuild.
+    /// Cancelling the caller cancels the download and skips the decode.
+    func loadDisplayImage(from url: URL, maxPixelSize: CGFloat) async throws -> UIImage? {
+        guard let data = try await loadRawData(from: url) else { return nil }
+        try Task.checkCancellation()
+        return await Task.detached(priority: .userInitiated) {
+            MetalImageRenderer.downsampledImage(from: data, maxDimension: maxPixelSize)
+        }.value
     }
 
     /// Load image data from a URL, using cache if available

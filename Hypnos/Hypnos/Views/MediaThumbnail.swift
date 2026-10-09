@@ -48,6 +48,17 @@ final class MediaThumbnailCache: @unchecked Sendable {
         // Enough for several screenfuls at a couple of sizes. Images here are
         // already downsampled, so this is a small budget in bytes.
         cache.countLimit = 512
+        // The count alone let ~1000 px tiles add up to gigabytes on a big
+        // grid; bound the decoded bytes too (NSCache evicts past either).
+        #if os(tvOS)
+        cache.totalCostLimit = 128 * 1024 * 1024
+        #else
+        cache.totalCostLimit = 384 * 1024 * 1024
+        #endif
+    }
+
+    func removeAll() {
+        cache.removeAllObjects()
     }
 
     private func key(_ url: URL, _ side: CGFloat) -> NSString {
@@ -59,7 +70,9 @@ final class MediaThumbnailCache: @unchecked Sendable {
     }
 
     func store(_ image: UIImage, for url: URL, side: CGFloat) {
-        cache.setObject(image, forKey: key(url, side))
+        let pixels = image.cgImage.map { $0.width * $0.height }
+            ?? Int(image.size.width * image.size.height * image.scale * image.scale)
+        cache.setObject(image, forKey: key(url, side), cost: pixels * 4)
     }
 }
 

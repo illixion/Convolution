@@ -1881,6 +1881,14 @@ class AppModel {
             } else if event.contains(.warning) {
                 AppLogger.appModel.info("DispatchSource: warning memory pressure — no action (OS handles page eviction)")
             }
+            #if os(tvOS)
+            // tvOS has no windows to downscale and a small budget: drop the
+            // decoded caches (disk caches stay, so they refill cheaply).
+            if event.contains(.warning) || event.contains(.critical) {
+                Task { await ImageLoader.shared.clearMemoryCache() }
+                MediaThumbnailCache.shared.removeAll()
+            }
+            #endif
         }
         source.resume()
         memoryPressureSource = source
