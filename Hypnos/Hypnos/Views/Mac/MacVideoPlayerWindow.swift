@@ -116,7 +116,7 @@ struct MacVideoPlayerWindow: View {
     /// Loads a Library video's skippable segments and follows the playhead
     /// while it has any.
     private func watchSegments(_ player: AVPlayer) async {
-        await skipper.load(itemId: LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity))
+        await skipper.load(videoIdentity: video.identity)
         guard segmentObserver == nil, !skipper.segments.isEmpty else { return }
         segmentObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600),
                                                          queue: .main) { time in

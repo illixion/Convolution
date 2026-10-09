@@ -30,6 +30,19 @@ final class MediaSegmentSkipper {
     /// How long a segment's button shows without the controls.
     static let promptSeconds = LibrarySegmentSkipPolicy.promptSeconds
 
+    /// Loads the segments for whatever a player is showing: a Library
+    /// title's intro/credits, or (sideload builds) a YouTube video's
+    /// SponsorBlock segments. Anything else has none.
+    func load(videoIdentity: String) async {
+        #if HYPNOS_YOUTUBE
+        if let id = YouTubeVideoID(videoIdentity: videoIdentity) {
+            await loadSponsorBlock(id)
+            return
+        }
+        #endif
+        await load(itemId: LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: videoIdentity))
+    }
+
     /// Loads `itemId`'s segments, or clears them for nil (not a Library title).
     func load(itemId: String?) async {
         guard itemId != loadedItemId else { return }
@@ -43,6 +56,42 @@ final class MediaSegmentSkipper {
             AppLogger.library.info("Skippable segments: \(self.segments.map { "\($0.kind.rawValue) \(Int($0.startSeconds))-\(Int($0.endSeconds))" }.joined(separator: ", "), privacy: .public)")
         }
     }
+
+    #if HYPNOS_YOUTUBE
+    /// Segments that skip by themselves, with what the notice calls them.
+    @ObservationIgnored private var autoSkipLabels: [LibraryMediaSegment: String] = [:]
+    /// Each auto-skip fires once: a viewer who scrubs back into one wants
+    /// to watch it.
+    @ObservationIgnored private var autoSkipped: Set<LibraryMediaSegment> = []
+
+    private func loadSponsorBlock(_ id: YouTubeVideoID) async {
+        let key = id.videoIdentity
+        guard key != loadedItemId else { return }
+        loadedItemId = key
+        segments = []
+        autoSkipLabels = [:]
+        autoSkipped = []
+        let loaded = await SponsorBlock.segments(for: id)
+        guard loadedItemId == key else { return }
+        segments = loaded.map(\.librarySegment).filter(LibrarySegmentSkipPolicy.eligible)
+        for segment in loaded where segment.category.mode == .auto {
+            autoSkipLabels[segment.librarySegment] = segment.category.displayName.lowercased()
+        }
+        if !loaded.isEmpty {
+            AppLogger.youtube.info("SponsorBlock: \(loaded.map { "\($0.category.rawValue) \(Int($0.start))-\(Int($0.end))" }.joined(separator: ", "), privacy: .public)")
+        }
+    }
+
+    /// The auto-skip segment `time` has just entered, marked as skipped.
+    func autoSkip(at time: Double) -> (segment: LibraryMediaSegment, label: String)? {
+        guard !autoSkipLabels.isEmpty, time.isFinite else { return nil }
+        guard let hit = autoSkipLabels.first(where: { segment, _ in
+            !autoSkipped.contains(segment) && time >= segment.startSeconds && time < segment.endSeconds - 0.3
+        }) else { return nil }
+        autoSkipped.insert(hit.key)
+        return (hit.key, hit.value)
+    }
+    #endif
 
     /// The segment `time` is in, if a skip would still save something.
     func segment(at time: Double) -> LibraryMediaSegment? {

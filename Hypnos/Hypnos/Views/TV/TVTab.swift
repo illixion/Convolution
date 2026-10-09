@@ -19,6 +19,9 @@ enum TVTab: String, CaseIterable, Identifiable {
     case videos = "Videos"
     case albums = "Albums"
     case library = "Library"
+    #if HYPNOS_YOUTUBE
+    case youtube = "YouTube"
+    #endif
     case settings = "Settings"
     /// Only while Settings → Developer → Show Debug Console is on.
     case console = "Console"
@@ -31,6 +34,9 @@ enum TVTab: String, CaseIterable, Identifiable {
         case .videos: return "video"
         case .albums: return "rectangle.stack"
         case .library: return "rectangle.stack.badge.play"
+        #if HYPNOS_YOUTUBE
+        case .youtube: return "play.rectangle"
+        #endif
         case .settings: return "gearshape"
         case .console: return "terminal"
         }

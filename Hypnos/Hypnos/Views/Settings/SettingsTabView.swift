@@ -263,6 +263,10 @@ struct SettingsTabView: View {
 
                 JellyfinServerSection()
 
+                #if HYPNOS_YOUTUBE
+                YouTubeSettingsSection()
+                #endif
+
                 Section("Photo Library") {
                     switch PhotosAuthorization.status {
                     case .authorized:

@@ -11,7 +11,13 @@ import SwiftUI
 @MainActor
 enum MainTabCatalog {
     /// Display order of every tab, before per-state filtering.
-    static let orderedTabs: [Tab] = [.pictures, .videos, .albums, .library, .remote, .filters, .windows, .console, .settings]
+    static let orderedTabs: [Tab] = {
+        var tabs: [Tab] = [.pictures, .videos, .albums, .library]
+        #if HYPNOS_YOUTUBE
+        tabs.append(.youtube)
+        #endif
+        return tabs + [.remote, .filters, .windows, .console, .settings]
+    }()
 
     /// The tabs to show for the current app state.
     static func visibleTabs(appModel: AppModel) -> [Tab] {
@@ -79,6 +85,10 @@ enum MainTabCatalog {
         // "Play Slideshow" control in context instead.
         case .albums, .library, .filters, .windows, .settings, .remote, .console:
             return nil
+        #if HYPNOS_YOUTUBE
+        case .youtube:
+            return nil
+        #endif
         }
     }
 

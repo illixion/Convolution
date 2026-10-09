@@ -106,6 +106,11 @@ enum AppLogger {
     /// Library feature: home/detail browsing, playback routing, progress sync
     static let library = DebugLogger(subsystem: subsystem, category: "Library")
 
+    #if HYPNOS_YOUTUBE
+    /// YouTube resolution, the optional backend and SponsorBlock.
+    static let youtube = DebugLogger(subsystem: subsystem, category: "YouTube")
+    #endif
+
     /// Subtitle tracks: listing, fetching, parsing
     static let subtitles = DebugLogger(subsystem: subsystem, category: "Subtitles")
 

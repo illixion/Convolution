@@ -266,6 +266,10 @@ final class VideoWindowModel {
     @ObservationIgnored private var resolvedPhotosStreamURL: URL?
     @ObservationIgnored private var photosResolveTask: Task<Void, Never>?
     @ObservationIgnored private var playbackRendererTask: Task<Void, Never>?
+    #if HYPNOS_YOUTUBE
+    /// Resolving a YouTube video again (`VideoWindowModel+YouTube`).
+    @ObservationIgnored var youTubeRefreshTask: Task<Void, Never>?
+    #endif
 
     // MARK: - Initialization (side-effect-free)
 
@@ -319,7 +323,11 @@ final class VideoWindowModel {
            DepthCacheStore.entry(videoIdentity: video.identity) != nil {
             pseudo3DDepthMode = .cached(videoIdentity: video.identity)
         }
+        #if HYPNOS_YOUTUBE
+        if !refreshYouTubeStreamIfNeeded() { resolvePlaybackRenderer() }
+        #else
         resolvePlaybackRenderer()
+        #endif
         armLoadStallWatch()
         armStartupQualityWatch()
         subtitles.load(SubtitleSource.forVideo(video))
@@ -335,7 +343,12 @@ final class VideoWindowModel {
     /// A clip loops; a Library title plays once. The window was built for
     /// gallery clips and looped everything, so an episode restarted at its
     /// end and the progress reporter told Jellyfin it was back at 0:10.
-    var loopsAtEnd: Bool { libraryItemId == nil }
+    var loopsAtEnd: Bool {
+        #if HYPNOS_YOUTUBE
+        if youTubeID != nil { return false }
+        #endif
+        return libraryItemId == nil
+    }
 
     /// The current title has reached its end and been handled.
     @ObservationIgnored private var endHandled = false
@@ -972,6 +985,9 @@ final class VideoWindowModel {
 
     func forceWebKitPlayback() {
         playbackRendererTask?.cancel()
+        #if HYPNOS_YOUTUBE
+        if dropYouTubeSurround(reason: "the native player couldn't play the surround stream") { return }
+        #endif
         playbackRenderer = .webKit
     }
 
@@ -1037,6 +1053,9 @@ final class VideoWindowModel {
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard let self, self.authenticatedStreamURL == url else { return }
+                #if HYPNOS_YOUTUBE
+                if !isPlayable, self.dropYouTubeSurround(reason: "the surround stream isn't decodable") { return }
+                #endif
                 self.playbackRenderer = isPlayable ? .nativeMetal : .webKit
                 // A fake-3D engage waiting on the transcode swap resolves here.
                 if self.pendingPseudo3DEngage != nil {
@@ -1139,7 +1158,7 @@ final class VideoWindowModel {
 
     /// The skip button the window offers now, if any.
     var offeredSegment: LibraryMediaSegment? {
-        guard libraryItemId != nil, !isScrubbing else { return nil }
+        guard !isScrubbing else { return nil }
         return segmentSkipper.offered(at: currentTime, controlsVisible: !isUIHidden)
     }
 
@@ -1203,6 +1222,9 @@ final class VideoWindowModel {
         if resumeCarriedPosition(reportedTime: currentTime, duration: duration) { return }
         self.currentTime = currentTime
         if duration > 0 { self.duration = duration }
+        #if HYPNOS_YOUTUBE
+        autoSkipYouTubeSegmentIfNeeded()
+        #endif
         self.isPaused = paused
         self.isMuted = muted
         self.bufferedEnd = buffered

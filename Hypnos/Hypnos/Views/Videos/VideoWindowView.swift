@@ -525,7 +525,7 @@ struct VideoWindowView: View {
         // the coordinator's doc comment for the exact start/progress/stopped
         // sequence this drives.
         .task(id: video.identity) {
-            await windowModel.segmentSkipper.load(itemId: windowModel.libraryItemId)
+            await windowModel.segmentSkipper.load(videoIdentity: video.identity)
         }
         .task(id: video.identity) {
             let reported = video

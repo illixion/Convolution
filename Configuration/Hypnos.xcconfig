@@ -20,4 +20,12 @@
 // the iOS ImagePresentationComponent probe (see PrivateSpatial3DiOS.swift).
 PRIVATE_API_CONDITION =
 
-SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(PRIVATE_API_CONDITION)
+// YouTube playback, for sideload builds only. Empty here, so no build
+// compiles it unless asked: other visionOS YouTube players were pulled from
+// the App Store, and until that question is settled none of this code may
+// reach a submission. Opt in with
+// `~/bin/build-and-sign --set YOUTUBE_CONDITION=HYPNOS_YOUTUBE`, or in the
+// gitignored scripts/build-signing.conf / LocalSigning.xcconfig.
+YOUTUBE_CONDITION =
+
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(PRIVATE_API_CONDITION) $(YOUTUBE_CONDITION)

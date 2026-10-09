@@ -37,6 +37,10 @@ enum KeychainStore {
         /// server-issued API key with no associated user. See
         /// `JellyfinAuth.swift`.
         case jellyfinAccessToken
+        #if HYPNOS_YOUTUBE
+        /// The optional YouTube backend's (web-yt-dlp) token.
+        case youtubeBackendToken
+        #endif
     }
 
     // MARK: - Reading

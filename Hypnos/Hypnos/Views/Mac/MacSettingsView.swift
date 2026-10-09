@@ -33,6 +33,9 @@ struct MacSettingsView: View {
             }
 
             JellyfinServerSection()
+            #if HYPNOS_YOUTUBE
+            YouTubeSettingsSection()
+            #endif
 
             Section {
                 Text("Browse and convert files placed in this app's Documents folder. Always available alongside Photos and any media server.")

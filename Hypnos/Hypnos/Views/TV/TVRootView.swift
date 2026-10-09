@@ -83,6 +83,10 @@ struct TVRootView: View {
             TVAlbumsTabView(selectedTab: $selectedTab)
         case .library:
             TVLibraryTabView()
+        #if HYPNOS_YOUTUBE
+        case .youtube:
+            YouTubeTabView()
+        #endif
         case .settings:
             TVSettingsView()
         case .console:

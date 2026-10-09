@@ -28,6 +28,9 @@ import SwiftUI
 
 enum TVSettingsPage: String, Hashable {
     case deviceSetup, librarySource, jellyfin, stash, nextcloud, cache, developer
+    #if HYPNOS_YOUTUBE
+    case youtube
+    #endif
 }
 
 /// Settings state that has to outlive the view. When the tab bar gains or
@@ -106,6 +109,10 @@ struct TVSettingsView: View {
                         value: appModel.hasStashServer ? host(appModel.stashServerURL) : "Not set")
                     row(.nextcloud, "Nextcloud", systemImage: LibrarySource.nextcloud.symbolName,
                         value: appModel.hasNextcloudServer ? host(appModel.nextcloudServerURL) : "Not set")
+                    #if HYPNOS_YOUTUBE
+                    row(.youtube, "YouTube", systemImage: "play.rectangle",
+                        value: YouTubeBackend.shared.baseURL?.host ?? "No backend")
+                    #endif
                 }
                 Section {
                     row(.cache, "Cache", systemImage: "internaldrive", value: cachePreset.label)
@@ -156,6 +163,9 @@ struct TVSettingsView: View {
         case .nextcloud: "Nextcloud"
         case .cache: "Cache"
         case .developer: "Developer"
+        #if HYPNOS_YOUTUBE
+        case .youtube: "YouTube"
+        #endif
         }
     }
 
@@ -169,6 +179,9 @@ struct TVSettingsView: View {
         case .nextcloud: NextcloudSettingsSection()
         case .cache: CacheSettingsSection()
         case .developer: TVDeveloperSection()
+        #if HYPNOS_YOUTUBE
+        case .youtube: YouTubeSettingsSection()
+        #endif
         }
     }
 }

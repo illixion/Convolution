@@ -138,6 +138,14 @@ struct IncomingURLHandler: ViewModifier {
     @MainActor
     private func route(_ url: URL) async {
         let scheme = url.scheme?.lowercased()
+        #if HYPNOS_YOUTUBE
+        // A shared or handed-off YouTube link plays through the YouTube
+        // chain, not the generic page probe (which finds a web page).
+        if scheme == "http" || scheme == "https", let id = YouTubeVideoID(url: url) {
+            await openYouTube(id)
+            return
+        }
+        #endif
         if scheme == "http" || scheme == "https" {
             switch await StreamableURLResolver.classify(url) {
             case .directVideo(let videoURL):
@@ -149,6 +157,23 @@ struct IncomingURLHandler: ViewModifier {
             await handleSharedFile(url)
         }
     }
+
+    #if HYPNOS_YOUTUBE
+    @MainActor
+    private func openYouTube(_ id: YouTubeVideoID) async {
+        do {
+            let resolution = try await YouTubeResolver.resolve(id)
+            let video = resolution.video
+            YouTubeHistory.shared.record(YouTubeVideoSummary(
+                id: id, title: video.title ?? "YouTube video", lengthSeconds: video.duration
+            ))
+            openWindow(id: "video-detail", value: VideoWindowValue(video: video, galleryVideos: [video]))
+            AppLogger.streamURL.info("Opened YouTube video via \(resolution.source.rawValue, privacy: .public)")
+        } catch {
+            AppLogger.streamURL.error("YouTube link unplayable: \(error.localizedDescription)")
+        }
+    }
+    #endif
 
     /// Open a streamable video URL in the rich pipeline (native-Metal / pseudo-3D
     /// aware). `identitySource` is the URL used to derive the stable per-video id.

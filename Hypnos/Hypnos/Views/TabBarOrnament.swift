@@ -190,6 +190,10 @@ struct TabBarOrnament: View {
         // "Play Slideshow" control in context instead.
         case .albums, .library, .filters, .windows, .settings, .remote, .console:
             return nil
+        #if HYPNOS_YOUTUBE
+        case .youtube:
+            return nil
+        #endif
         }
     }
 

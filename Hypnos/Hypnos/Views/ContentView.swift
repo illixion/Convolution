@@ -165,6 +165,10 @@ struct ContentView: View {
             AlbumsTabView()
         case .library:
             LibraryTabRootView()
+        #if HYPNOS_YOUTUBE
+        case .youtube:
+            YouTubeTabView()
+        #endif
         case .filters:
             FiltersTabView()
         case .windows:
@@ -208,6 +212,10 @@ struct ContentView: View {
             switch tab {
             case .filters, .remote, .settings, .library:
                 tabContent(tab)
+            #if HYPNOS_YOUTUBE
+            case .youtube:
+                tabContent(tab)
+            #endif
             default:
                 NavigationStack {
                     tabContent(tab)

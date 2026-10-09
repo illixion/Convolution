@@ -12,6 +12,9 @@ enum Tab: String, CaseIterable {
     case videos = "Videos"
     case albums = "Albums"
     case library = "Library"
+    #if HYPNOS_YOUTUBE
+    case youtube = "YouTube"
+    #endif
     case filters = "Filters"
     case windows = "Windows"
     case settings = "Settings"
@@ -32,6 +35,9 @@ enum Tab: String, CaseIterable {
         case .videos: return "video"
         case .albums: return "rectangle.stack"
         case .library: return "rectangle.stack.badge.play"
+        #if HYPNOS_YOUTUBE
+        case .youtube: return "play.rectangle"
+        #endif
         case .filters: return "line.3.horizontal.decrease.circle"
         case .windows: return "macwindow.on.rectangle"
         case .settings: return "gearshape"

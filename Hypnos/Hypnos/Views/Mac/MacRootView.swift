@@ -79,6 +79,10 @@ struct MacRootView: View {
             MacAlbumsView(selection: $selection)
         case .library:
             LibraryTabRootView()
+        #if HYPNOS_YOUTUBE
+        case .youtube:
+            YouTubeTabView()
+        #endif
         case .settings:
             MacSettingsView()
         }

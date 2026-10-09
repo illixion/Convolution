@@ -88,7 +88,7 @@ struct TVVideoPlayerView: View {
         }
         .task { await resolve() }
         .task {
-            await skipper.load(itemId: LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity))
+            await skipper.load(videoIdentity: video.identity)
         }
     }
 
