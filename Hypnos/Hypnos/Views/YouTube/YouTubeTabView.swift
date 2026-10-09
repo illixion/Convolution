@@ -39,6 +39,9 @@ struct YouTubeTabView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    #if os(tvOS)
+                    tvSearchField
+                    #endif
                     if let pastedID {
                         pastedLinkRow(pastedID)
                     }
@@ -48,8 +51,10 @@ struct YouTubeTabView: View {
                 .padding(.vertical, 16)
             }
             .navigationTitle("YouTube")
+            #if !os(tvOS)
             .searchable(text: $query, prompt: "Search YouTube or paste a link")
             .onSubmit(of: .search) { submit() }
+            #endif
             .onChange(of: query) { _, newValue in
                 if newValue.isEmpty { clearSearch() }
             }
@@ -106,6 +111,21 @@ struct YouTubeTabView: View {
             grid(history.videos, removable: true)
         }
     }
+
+    #if os(tvOS)
+    /// An in-page field and an explicit Search button. The system search field
+    /// `.searchable` adds on tvOS sits above a scrolling page the remote
+    /// couldn't reach, so there was nothing to focus and no way to submit.
+    private var tvSearchField: some View {
+        HStack(spacing: 24) {
+            TextField("Search YouTube or paste a link", text: $query)
+                .onSubmit { submit() }
+                .submitLabel(.search)
+            Button("Search") { submit() }
+                .disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+    }
+    #endif
 
     private func pastedLinkRow(_ id: YouTubeVideoID) -> some View {
         Button {

@@ -156,7 +156,9 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         // The transport bar's own menu: a Loop toggle, since a clip may want
         // looping where the default is off and the other way round.
         func loopItem() -> UIAction {
-            UIAction(title: "Loop", image: UIImage(systemName: "repeat"),
+            // The transport bar shows only the icon, so the state is the fill.
+            UIAction(title: "Loop",
+                     image: UIImage(systemName: coordinator.loops ? "repeat.circle.fill" : "repeat.circle"),
                      state: coordinator.loops ? .on : .off) { [weak coordinator, weak controller] _ in
                 guard let coordinator, let controller else { return }
                 coordinator.loops.toggle()
