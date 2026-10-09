@@ -143,7 +143,10 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         let asset = MediaAuthorization.shared.asset(for: url)
         let item = AVPlayerItem(asset: asset)
         item.applySpatialAudioPolicy()
-        let player = AVPlayer(playerItem: item)
+        // An AVQueuePlayer so a looping clip can run through AVPlayerLooper,
+        // which queues the next pass ahead of the end: no pause, no gap and
+        // no transport UI popping up at the loop point.
+        let player = AVQueuePlayer()
         controller.player = player
 
         // Both observers are queued/dispatched on `.main`, so `Coordinator`
@@ -153,6 +156,24 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         // `@Sendable` NotificationCenter/KVO closures at all.
         let coordinator = context.coordinator
         coordinator.loops = loops
+        // A resume point needs the item's own readiness (below), so only a
+        // from-the-start clip takes the gapless looper.
+        let useLooper = loops && (startSeconds ?? 0) <= 0
+        if useLooper {
+            let looper = AVPlayerLooper(player: player, templateItem: item)
+            coordinator.looper = looper
+            coordinator.looperObservation = looper.observe(\.status, options: [.new]) { [weak coordinator] looper, _ in
+                guard looper.status == .failed else { return }
+                DispatchQueue.main.async { coordinator?.onPlaybackFailed() }
+            }
+            coordinator.didStart = true
+            player.play()
+        } else {
+            player.insert(item, after: nil)
+            // Never park at the end: a parked player shows its controls. The
+            // end handler below rewinds it when looping is on.
+            player.actionAtItemEnd = .none
+        }
         // The transport bar's own menu: a Loop toggle, since a clip may want
         // looping where the default is off and the other way round.
         func loopItem() -> UIAction {
@@ -162,6 +183,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
                      state: coordinator.loops ? .on : .off) { [weak coordinator, weak controller] _ in
                 guard let coordinator, let controller else { return }
                 coordinator.loops.toggle()
+                if !coordinator.loops { coordinator.looper?.disableLooping() }
                 controller.transportBarCustomMenuItems = [loopItem()]
             }
         }
@@ -245,6 +267,8 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
             if coordinator.loops, let player {
                 player.seek(to: .zero) { _ in player.play() }
             } else {
+                // actionAtItemEnd is .none, so end the way the player would have.
+                player?.pause()
                 coordinator.onPlayedToEnd?()
             }
         }
@@ -267,6 +291,8 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
 
     static func dismantleUIViewController(_ uiViewController: AVPlayerViewController, coordinator: Coordinator) {
         coordinator.statusObservation?.invalidate()
+        coordinator.looperObservation?.invalidate()
+        coordinator.looper?.disableLooping()
         if let observer = coordinator.failureObserver {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -295,6 +321,8 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         /// Set once the first play (after any resume seek) has been issued.
         var didStart = false
         var loops = false
+        var looper: AVPlayerLooper?
+        var looperObservation: NSKeyValueObservation?
         var failureObserver: NSObjectProtocol?
         var endObserver: NSObjectProtocol?
         var statusObservation: NSKeyValueObservation?
