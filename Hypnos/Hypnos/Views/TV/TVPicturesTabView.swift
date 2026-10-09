@@ -26,8 +26,13 @@ struct TVPicturesTabView: View {
 
     var body: some View {
         NavigationStack {
-            content
-                .navigationTitle("Pictures")
+            // Wrapped like the Albums tab: a grid as the direct root of the
+            // stack is taken as the title's scroll view, which leaves the large
+            // title stuck over the cells as the grid scrolls.
+            VStack(spacing: 0) {
+                content
+            }
+            .navigationTitle("Pictures")
         }
         .fullScreenCover(item: presentedImageBinding) { image in
             if let index = presentedIndex {

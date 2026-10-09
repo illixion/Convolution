@@ -26,6 +26,7 @@ struct TVPhotoViewerView: View {
     @State private var isLoading = false
     @State private var isSlideshow = false
     @State private var slideshowTask: Task<Void, Never>?
+    @FocusState private var hasFocus: Bool
     @Environment(\.dismiss) private var dismiss
 
     init(images: [GalleryImage], startIndex: Int, onLoadMore: @escaping () async -> Void = {}) {
@@ -66,6 +67,11 @@ struct TVPhotoViewerView: View {
                 }
             }
         }
+        // Remote events (swipes, clickpad edges, Play/Pause) only reach a
+        // focused view, and a bare ZStack never takes focus.
+        .focusable()
+        .focused($hasFocus)
+        .onAppear { hasFocus = true }
         .onMoveCommand { direction in
             switch direction {
             case .left: step(by: -1)

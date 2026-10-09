@@ -50,6 +50,10 @@ struct TVVideoPlayerView: View {
     /// Called once when playback reaches the end (the Library autoplays the
     /// next episode from here). Nil leaves the player on its last frame.
     var onPlayedToEnd: (() -> Void)?
+    /// Whether playback starts out looping. On for the Videos tab's clips; off
+    /// for YouTube and Library titles, which play once (and, for episodes,
+    /// continue to the next). The player's Loop menu item changes it per run.
+    var loops = false
     @Environment(\.dismiss) private var dismiss
     @State private var resolvedURL: URL?
     @State private var failureMessage: String?
@@ -58,7 +62,7 @@ struct TVVideoPlayerView: View {
     var body: some View {
         Group {
             if let resolvedURL {
-                TVAVPlayerViewControllerRepresentable(url: resolvedURL, startSeconds: startSeconds,
+                TVAVPlayerViewControllerRepresentable(url: resolvedURL, startSeconds: startSeconds, loops: loops,
                                                       segments: skipper.segments,
                                                       onProgress: onProgress, onPlayedToEnd: onPlayedToEnd) {
                     failureMessage = "This video's format isn't supported on Apple TV."
@@ -126,6 +130,7 @@ struct TVVideoPlayerView: View {
 private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresentable {
     let url: URL
     var startSeconds: Double?
+    var loops = false
     /// Offered as the player's own contextual action (Skip Intro) while
     /// the playhead is in one.
     var segments: [LibraryMediaSegment] = []
@@ -147,6 +152,18 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         // touched there; that conformance is what lets it cross into these
         // `@Sendable` NotificationCenter/KVO closures at all.
         let coordinator = context.coordinator
+        coordinator.loops = loops
+        // The transport bar's own menu: a Loop toggle, since a clip may want
+        // looping where the default is off and the other way round.
+        func loopItem() -> UIAction {
+            UIAction(title: "Loop", image: UIImage(systemName: "repeat"),
+                     state: coordinator.loops ? .on : .off) { [weak coordinator, weak controller] _ in
+                guard let coordinator, let controller else { return }
+                coordinator.loops.toggle()
+                controller.transportBarCustomMenuItems = [loopItem()]
+            }
+        }
+        controller.transportBarCustomMenuItems = [loopItem()]
         coordinator.failureObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemFailedToPlayToEndTime,
             object: item,
@@ -221,8 +238,13 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
             queue: .main
-        ) { [weak coordinator] _ in
-            coordinator?.onPlayedToEnd?()
+        ) { [weak coordinator, weak player] _ in
+            guard let coordinator else { return }
+            if coordinator.loops, let player {
+                player.seek(to: .zero) { _ in player.play() }
+            } else {
+                coordinator.onPlayedToEnd?()
+            }
         }
 
         return controller
@@ -270,6 +292,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         var onPlayedToEnd: (() -> Void)?
         /// Set once the first play (after any resume seek) has been issued.
         var didStart = false
+        var loops = false
         var failureObserver: NSObjectProtocol?
         var endObserver: NSObjectProtocol?
         var statusObservation: NSKeyValueObservation?

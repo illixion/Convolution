@@ -21,11 +21,16 @@ struct TVVideosTabView: View {
 
     var body: some View {
         NavigationStack {
-            content
-                .navigationTitle("Videos")
+            // Wrapped like the Albums tab: a grid as the direct root of the
+            // stack is taken as the title's scroll view, which leaves the large
+            // title stuck over the cells as the grid scrolls.
+            VStack(spacing: 0) {
+                content
+            }
+            .navigationTitle("Videos")
         }
         .fullScreenCover(item: $presentedVideo) { video in
-            TVVideoPlayerView(video: video)
+            TVVideoPlayerView(video: video, loops: true)
         }
         .mediaQuickActions(quickActions)
         .task {
