@@ -45,6 +45,9 @@ struct TVPhotoViewerView: View {
                 Image(platformImage: currentImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
+                    // tvOS insets the safe area for TV overscan; without this the
+                    // picture is letterboxed on all four sides.
+                    .ignoresSafeArea()
             } else if isLoading {
                 ProgressView()
             }
