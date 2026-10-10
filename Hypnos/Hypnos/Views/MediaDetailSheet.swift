@@ -123,6 +123,13 @@ struct MediaDetailSheet: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
+                    #if os(tvOS)
+                    // Read-only on a TV: with no lock screen, editing would
+                    // let anyone with the remote strip tags, performers and
+                    // URLs off the server's items. Ratings stay in the
+                    // thumbnail menu.
+                    infoTab
+                    #else
                     VStack(spacing: 0) {
                         Picker("Mode", selection: $selectedTab) {
                             Label("Info", systemImage: "info.circle").tag(0)
@@ -139,6 +146,7 @@ struct MediaDetailSheet: View {
                             editTab
                         }
                     }
+                    #endif
                 }
             }
             .navigationTitle(navigationTitle)
@@ -573,7 +581,8 @@ struct MediaDetailSheet: View {
                 }
             }
 
-            // Delete section
+            // Delete section. None on a TV (`MediaDeletion.isAvailable`).
+            if MediaDeletion.isAvailable {
             Section {
                 Button(role: .destructive) {
                     showDeleteConfirmation = true
@@ -590,6 +599,7 @@ struct MediaDetailSheet: View {
                     }
                 }
                 .disabled(isDeleting)
+            }
             }
         }
     }
@@ -1057,6 +1067,7 @@ struct MediaDetailSheet: View {
     // MARK: - Delete
 
     private func performDelete(deleteFile: Bool) async {
+        guard MediaDeletion.isAvailable else { return }
         isDeleting = true
         do {
             let client = appModel.apiClient

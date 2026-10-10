@@ -17,7 +17,8 @@
    there is no second confirmation here.
  - Local (the app's Documents folder): delete the file.
  Nextcloud and share-sheet media have nothing to delete from here, so their
- menus offer no Delete at all.
+ menus offer no Delete at all. Neither does anything on tvOS: a TV has no
+ lock screen, so whoever holds the remote could otherwise delete the library.
  */
 
 import DebugTrace
@@ -33,12 +34,24 @@ enum MediaDeletion: Equatable {
     case photosLibrary(localIdentifier: String)
     case localFile(URL)
 
+    /// Nothing can be deleted from a TV: it has no lock screen, so anyone
+    /// holding the remote would be able to delete the library's media.
+    static var isAvailable: Bool {
+        #if os(tvOS)
+        false
+        #else
+        true
+        #endif
+    }
+
     static func forImage(_ image: GalleryImage) -> MediaDeletion? {
+        guard isAvailable else { return nil }
         if let id = image.stashId, !id.isEmpty { return .stash(id: id) }
         return forURL(image.fullSizeURL, isLocal: image.source == .local)
     }
 
     static func forVideo(_ video: GalleryVideo) -> MediaDeletion? {
+        guard isAvailable else { return nil }
         if let id = video.stashId, !id.isEmpty { return .stash(id: id) }
         return forURL(video.streamURL, isLocal: isInLocalLibrary(video.streamURL))
     }

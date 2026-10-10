@@ -8,11 +8,20 @@
  `PhotoDisplayView`'s machinery is reused, deliberately (see
  `Hypnos/CLAUDE.md` "tvOS"): this is a plain full-resolution image behind
  the Menu button, which `fullScreenCover` wires up for free.
+
+ `.onMoveCommand` can't tell a swipe on the touch surface from a press on
+ the clickpad's edge (or an arrow on any other remote), and the two read in
+ opposite directions: a swipe drags the photo (left brings the next one in,
+ as in Photos), a press points at where to go (right is next).
+ `TVArrowPressObserver` sees presses first, so the move command knows which
+ it was.
  */
 
 #if os(tvOS)
 
 import SwiftUI
+import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 struct TVPhotoViewerView: View {
     let images: [GalleryImage]
@@ -33,6 +42,7 @@ struct TVPhotoViewerView: View {
     @State private var isSlideshow = false
     @State private var slideshowTask: Task<Void, Never>?
     @FocusState private var hasFocus: Bool
+    @State private var arrowPresses = TVArrowPressObserver()
     @Environment(\.dismiss) private var dismiss
 
     init(images: [GalleryImage], startIndex: Int, onLoadMore: @escaping () async -> Void = {}) {
@@ -81,15 +91,17 @@ struct TVPhotoViewerView: View {
         }
         // Remote events (swipes, clickpad edges, Play/Pause) only reach a
         // focused view, and a bare ZStack never takes focus.
+        .background(TVArrowPressObserver.Host(observer: arrowPresses))
         .focusable()
         .focused($hasFocus)
         .onAppear { hasFocus = true }
         .onMoveCommand { direction in
+            // A press points where to go; a swipe drags the photo, so a left
+            // swipe brings the next one in, as in the Photos app.
+            let forward: Int = arrowPresses.justPressed() ? 1 : -1
             switch direction {
-            // Swipes report the finger's direction: swiping left brings the
-            // next photo in, as in the Photos app.
-            case .left: step(by: 1)
-            case .right: step(by: -1)
+            case .right: step(by: forward)
+            case .left: step(by: -forward)
             default: break
             }
         }
@@ -157,6 +169,69 @@ struct TVPhotoViewerView: View {
     private func stopSlideshow() {
         slideshowTask?.cancel()
         slideshowTask = nil
+    }
+}
+
+/// Notes the remote's left/right arrow presses (clickpad edges, D-pads,
+/// keyboards) without ever handling one: it fails on sight and cancels
+/// nothing, so the press still reaches the focused view as a move command.
+/// Gesture recognizers get each press before the view does, and swipes on
+/// the touch surface aren't presses, so a move command arriving just after
+/// one of these was a press.
+final class TVArrowPressObserver: UIGestureRecognizer {
+    private var lastPress: TimeInterval = -.infinity
+
+    init() {
+        super.init(target: nil, action: nil)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+        allowedTouchTypes = []
+        allowedPressTypes = [UIPress.PressType.leftArrow, .rightArrow].map { NSNumber(value: $0.rawValue) }
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent) {
+        if presses.contains(where: { $0.type == .leftArrow || $0.type == .rightArrow }) {
+            lastPress = ProcessInfo.processInfo.systemUptime
+        }
+        state = .failed
+    }
+
+    /// Whether the move command being handled came from a press.
+    func justPressed() -> Bool {
+        ProcessInfo.processInfo.systemUptime - lastPress < 0.5
+    }
+
+    /// Attaches the observer to the window while the viewer is on screen:
+    /// presses travel up from the focused view, and the window is above it.
+    struct Host: UIViewRepresentable {
+        let observer: TVArrowPressObserver
+
+        func makeUIView(context: Context) -> HostView { HostView(observer: observer) }
+        func updateUIView(_ view: HostView, context: Context) {}
+        static func dismantleUIView(_ view: HostView, coordinator: ()) { view.detach() }
+    }
+
+    final class HostView: UIView {
+        let observer: TVArrowPressObserver
+
+        init(observer: TVArrowPressObserver) {
+            self.observer = observer
+            super.init(frame: .zero)
+            isUserInteractionEnabled = false
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            detach()
+            window?.addGestureRecognizer(observer)
+        }
+
+        func detach() {
+            observer.view?.removeGestureRecognizer(observer)
+        }
     }
 }
 
