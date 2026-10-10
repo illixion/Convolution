@@ -58,8 +58,11 @@ public class PluginConfiguration : MediaBrowser.Model.Plugins.BasePluginConfigur
     /// <summary>How many segment encoders run at once.</summary>
     public int EncoderParallelism { get; set; } = 4;
 
-    /// <summary>Video segments kept per item before the least recently used are dropped.</summary>
+    /// <summary>Video segments kept per item before the least recently used are dropped. Every picture tier counts.</summary>
     public int VideoCacheMegabytes { get; set; } = 4096;
+
+    /// <summary>Offer lower picture tiers (1440p, 1080p HEVC) of a larger film's video, transcoded on request.</summary>
+    public bool PictureTiers { get; set; } = true;
 
     /// <summary>Length of a side-by-side stream segment made from spatial video (1-10 s).</summary>
     public double SpatialSegmentSeconds { get; set; } = 4;

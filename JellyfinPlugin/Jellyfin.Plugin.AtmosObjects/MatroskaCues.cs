@@ -283,6 +283,101 @@ public static class MatroskaCues
 /// </summary>
 public static class Fmp4
 {
+    /// <summary>
+    /// The init segment without empty edits (edit list entries with media
+    /// time -1). A transcoding run keeps the film's timestamps, so the muxer
+    /// opens its edit list with an empty edit as long as the film time the
+    /// run starts at: every run's init would differ by that, and a player
+    /// honouring it would show the picture that much late. The segments are
+    /// already in film time (their tfdt), so the edit is dropped.
+    /// </summary>
+    public static byte[] WithoutEmptyEdits(byte[] init)
+    {
+        foreach (var (moovType, moovStart, moovBody, moovEnd) in Boxes(init, 0, init.Length))
+        {
+            if (moovType != "moov")
+            {
+                continue;
+            }
+
+            foreach (var (trakType, trakStart, trakBody, trakEnd) in Boxes(init, moovBody, moovEnd))
+            {
+                if (trakType != "trak")
+                {
+                    continue;
+                }
+
+                foreach (var (edtsType, edtsStart, edtsBody, edtsEnd) in Boxes(init, trakBody, trakEnd))
+                {
+                    if (edtsType != "edts")
+                    {
+                        continue;
+                    }
+
+                    foreach (var (elstType, elstStart, elstBody, elstEnd) in Boxes(init, edtsBody, edtsEnd))
+                    {
+                        if (elstType != "elst" || elstBody - elstStart != 8 || elstEnd - elstBody < 8)
+                        {
+                            continue;
+                        }
+
+                        var version = init[elstBody];
+                        var entrySize = version == 1 ? 20 : 12;
+                        var count = (int)BinaryPrimitives.ReadUInt32BigEndian(init.AsSpan(elstBody + 4, 4));
+                        var first = elstBody + 8;
+                        if (first + count * entrySize > elstEnd)
+                        {
+                            return init;
+                        }
+
+                        var kept = new List<int>();
+                        for (var i = 0; i < count; i++)
+                        {
+                            var entry = first + i * entrySize;
+                            var mediaTime = version == 1
+                                ? BinaryPrimitives.ReadInt64BigEndian(init.AsSpan(entry + 8, 8))
+                                : BinaryPrimitives.ReadInt32BigEndian(init.AsSpan(entry + 4, 4));
+                            if (mediaTime != -1)
+                            {
+                                kept.Add(entry);
+                            }
+                        }
+
+                        var removed = (count - kept.Count) * entrySize;
+                        // Only 32-bit box sizes are patched; an init with a
+                        // 64-bit one is left as it came.
+                        var ancestors = new[] { moovStart, trakStart, edtsStart, elstStart };
+                        if (removed == 0 || kept.Count == 0
+                            || ancestors.Any(a => BinaryPrimitives.ReadUInt32BigEndian(init.AsSpan(a, 4)) is 0 or 1))
+                        {
+                            return init;
+                        }
+
+                        var output = new List<byte>(init.Length - removed);
+                        output.AddRange(init.AsSpan(0, first).ToArray());
+                        foreach (var entry in kept)
+                        {
+                            output.AddRange(init.AsSpan(entry, entrySize).ToArray());
+                        }
+
+                        output.AddRange(init.AsSpan(first + count * entrySize).ToArray());
+                        var result = output.ToArray();
+                        BinaryPrimitives.WriteUInt32BigEndian(result.AsSpan(elstBody + 4, 4), (uint)kept.Count);
+                        foreach (var ancestor in ancestors)
+                        {
+                            var size = BinaryPrimitives.ReadUInt32BigEndian(result.AsSpan(ancestor, 4));
+                            BinaryPrimitives.WriteUInt32BigEndian(result.AsSpan(ancestor, 4), size - (uint)removed);
+                        }
+
+                        return result;
+                    }
+                }
+            }
+        }
+
+        return init;
+    }
+
     /// <summary>The media timescale (mdhd) of the init segment's first track.</summary>
     public static uint? Timescale(byte[] init)
     {

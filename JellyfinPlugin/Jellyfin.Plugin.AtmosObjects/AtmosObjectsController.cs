@@ -28,9 +28,13 @@ namespace Jellyfin.Plugin.AtmosObjects;
 /// And the film's video, copied untouched as fragmented MP4 in film time, so
 /// the client can render it on the audio's clock:
 ///
-///   GET  /AtmosObjects/{itemId}/Video                    index: segment start times
+///   GET  /AtmosObjects/{itemId}/Video                    index: segment start times, the picture tiers on offer
 ///   GET  /AtmosObjects/{itemId}/Video/Init               init segment
 ///   GET  /AtmosObjects/{itemId}/Video/Segments/{n}       segment n (one keyframe interval)
+///
+/// Init and Segments take an optional <c>height</c> (1440 or 1080; 400 for
+/// anything else, 404 when the index doesn't offer it): the picture
+/// transcoded to that tier, cut on the same index.
 /// </summary>
 [ApiController]
 [Route("AtmosObjects")]
@@ -165,16 +169,26 @@ public class AtmosObjectsController : ControllerBase
     }
 
     [HttpGet("{itemId}/Video/Init")]
-    public async Task<ActionResult> GetVideoInit([FromRoute] Guid itemId, CancellationToken ct)
+    public async Task<ActionResult> GetVideoInit([FromRoute] Guid itemId, [FromQuery] int? height, CancellationToken ct)
     {
-        var path = await _video.EnsureInitAsync(itemId, ct).ConfigureAwait(false);
+        if (height is int h && !VideoTiers.IsTier(h))
+        {
+            return BadRequest($"height must be one of {string.Join(", ", VideoTiers.Heights)}");
+        }
+
+        var path = await _video.EnsureInitAsync(itemId, height, ct).ConfigureAwait(false);
         return path is null ? NotFound() : PhysicalFile(path, "video/mp4");
     }
 
     [HttpGet("{itemId}/Video/Segments/{segment:int}")]
-    public async Task<ActionResult> GetVideoSegment([FromRoute] Guid itemId, [FromRoute] int segment, CancellationToken ct)
+    public async Task<ActionResult> GetVideoSegment([FromRoute] Guid itemId, [FromRoute] int segment, [FromQuery] int? height, CancellationToken ct)
     {
-        var path = await _video.EnsureSegmentAsync(itemId, segment, ct).ConfigureAwait(false);
+        if (height is int h && !VideoTiers.IsTier(h))
+        {
+            return BadRequest($"height must be one of {string.Join(", ", VideoTiers.Heights)}");
+        }
+
+        var path = await _video.EnsureSegmentAsync(itemId, segment, height, ct).ConfigureAwait(false);
         return path is null ? NotFound() : PhysicalFile(path, "video/iso.segment");
     }
 }

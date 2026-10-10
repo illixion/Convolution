@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A self-checking console for the lower picture tiers' decisions (which
+    tiers a source is offered, the keyframes a run forces, the encoder's
+    arguments, which encoder ffmpeg's listing picks, the init's empty edit dropped), which live in
+    VideoTierPlanning.cs apart from the processes and Jellyfin services.
+    Run it with dotnet run on this folder; it exits non-zero if a rule fails.
+    "dotnet run args ENCODER HEIGHT FIRST LAST" (ENCODER videotoolbox or x265) prints a
+    run's tier arguments over a 1 s keyframe grid, for trying them by hand.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../Jellyfin.Plugin.AtmosObjects/VideoTierPlanning.cs" Link="VideoTierPlanning.cs" />
+    <Compile Include="../Jellyfin.Plugin.AtmosObjects/MatroskaCues.cs" Link="MatroskaCues.cs" />
+  </ItemGroup>
+
+</Project>

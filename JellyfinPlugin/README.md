@@ -126,9 +126,13 @@ Every endpoint needs normal Jellyfin authentication (an API key or a user token)
 | `GET /AtmosObjects/{itemId}/Segments/{n}/Bundle?codec=aac\|opus&bitrate=B&budget=T` | Every channel of segment `n` in one lossy bundle: `B` the average bits per second per audible channel, `T` an optional cap on the whole segment (see [Compressed bundles](#compressed-bundles)) |
 | `GET /AtmosObjects/{itemId}` | `{state, progressSeconds, durationSeconds, error}`, where `state` is `none`, `partial`, `preparing`, `ready`, `unsupported` or `failed` |
 | `POST /AtmosObjects/{itemId}/Prepare` | Decodes the whole film into the cache in the background |
-| `GET /AtmosObjects/{itemId}/Video` | The video index: segment start times and range info (see [Video](#video)) |
-| `GET /AtmosObjects/{itemId}/Video/Init` | The video's fragmented-MP4 init segment |
-| `GET /AtmosObjects/{itemId}/Video/Segments/{n}` | Video segment `n`: one keyframe interval, in film time |
+| `GET /AtmosObjects/{itemId}/Video` | The video index: segment start times, range info and the picture tiers on offer (see [Video](#video)) |
+| `GET /AtmosObjects/{itemId}/Video/Init?height=H` | The video's fragmented-MP4 init segment |
+| `GET /AtmosObjects/{itemId}/Video/Segments/{n}?height=H` | Video segment `n`: one keyframe interval, in film time |
+
+`height` is optional on both: absent, the film's own video, copied; `1440`
+or `1080`, that [picture tier](#picture-tiers), transcoded on request. Any
+other value is a 400, and a tier the index doesn't offer for the item a 404.
 
 | `GET /Spatial/{itemId}` | Whether the item is spatial video, and its side-by-side stream: `{spatial, reason, width, height, eyeWidth, eyeHeight, video3DFormat, hdr, durationSeconds, segmentSeconds, segments, bitsPerSecond, playlist}` (see [Spatial video](#spatial-video)) |
 | `GET /Spatial/{itemId}/main.m3u8` | HLS media playlist of the side-by-side stream |
@@ -277,8 +281,9 @@ display management itself).
   Apple hardware, so it is served as its HDR10 base layer (`hvc1`).
 
 The index (`index.json`) contains `segmentStarts`, `durationSeconds`,
-`codec`, `videoRange` (Jellyfin's range type), `dvProfile` and
-`dolbyVision`.
+`codec`, `videoRange` (Jellyfin's range type), `dvProfile`,
+`dolbyVision` and `pictureHeights`, the lower tiers on offer, largest first
+(empty from a plugin older than tiers).
 
 A request for a segment that isn't cached starts a run: jellyfin-ffmpeg seeks
 and copies up to two minutes of video through its HLS muxer, split at every
@@ -293,7 +298,13 @@ quirks are corrected rather than trusted to flags:
 
 Segments are the film's own bitstream, so a full cache would duplicate the
 file. Beyond `VideoCacheMegabytes` per item (default 4096) the least
-recently used segments are dropped.
+recently used segments are dropped, the picture tiers' (below) counted with
+the original's.
+
+A run's last HLS segment is cut short by the run's end (half a second into
+the interval after its last segment) and is dropped, unless it is the film's
+own last. It used to be cached as that next segment, so a client playing on
+got half a second of it and then a frozen picture until the segment after.
 
 On The Wild Robot (UHD, Dolby Vision profile 8.1), from a Mac over the tailnet:
 - The index is served in 0.26 s.
@@ -301,6 +312,52 @@ On The Wild Robot (UHD, Dolby Vision profile 8.1), from a Mac over the tailnet:
 - Segments the same run has already copied arrive in about 0.1 s.
 - Consecutive segments are continuous in decode time, and each first frame
   lands on its index time within the Cues' 1 ms rounding.
+
+### Picture tiers
+
+A UHD remux is 50–90 Mbps, and a client's AI 3D (depth from the picture)
+can't keep up with 4K. So the index also offers lower tiers of the picture,
+named by height, each fitting a 16:9 box: **1440** (2560×1440, 24 Mbps) and
+**1080** (1920×1080, 14 Mbps). A scope film (3840×1600) at 1080 is
+1920×800. A source gets the tiers whose box is smaller than it in either
+dimension: 2160p gets both, 1440p gets 1080, 1080p none.
+
+- **Same index, same film time.** A tier is cut on the original's keyframe
+  index, so segment `n` of every tier covers the same film time and a client
+  can change tier at any segment boundary, with that tier's init.
+- **Made like a copy run, with the codec swapped.** The run decodes from the
+  keyframe it lands on (`-noaccurate_seek`), scales, and encodes 10-bit HEVC
+  (`hvc1`, Main 10) with a keyframe forced at every index segment start inside
+  it (`-force_key_frames`, 8 ms ahead of the Cues' time, in film time since
+  the run keeps the film's timestamps) and none of the encoder's own, so the
+  HLS muxer's split at every keyframe still yields one index segment per
+  output segment and the same matching and `tfdt` shift apply. The init loses
+  the edit list's empty edit (the film time the run started at), so every run
+  writes the same init.
+- **Encoder:** `hevc_videotoolbox` when jellyfin-ffmpeg lists it (a Mac
+  server), else `libx265` (`veryfast`); listed once per server start. No
+  HEVC encoder, or `PictureTiers` off in the configuration, offers no tiers.
+- **Colour:** HDR10 and HLG keep their transfer and BT.2020 tags (x265 writes
+  the HDR10 SEI). Dolby Vision is not carried: profiles 7, 8 and 10 are
+  served as their base layer (`hvc1`). Profile 5 has no base layer a decoder
+  shows correctly without its RPU, so it gets no tiers. No audio.
+- **Runs are per tier.** A seek cancels runs of the same tier only, so a
+  client changing tier can still be fed from the other while it does. An
+  `Init` request with no run of that tier makes segment 0 alone, rather than
+  encoding the film's opening alongside the client's next run.
+
+Checked on the dev instance (Linux, so `libx265`) with the UHD Dolby Vision
+8.1 demo: 1080 and 1440 segments present at the original's segment times
+(within the Cues' 1 ms), one keyframe each and the original's frame counts,
+HEVC Main 10 PQ BT.2020 without the RPU; init plus consecutive segments
+decode cleanly, and the original's segments 10–11 followed by the 1080 tier's
+12–13 decode as one stream. The container's four Arm cores make 1080 at
+about 0.3× realtime (a cold mid-film segment in 11–14 s), too slow to watch;
+VideoToolbox on a Mac (checked by hand with the same arguments, Homebrew
+ffmpeg 8.1 on an M-series Mac) makes 20 s of 1080 in 11 s from 4K (software decode and scaling included).
+`dotnet run` on `JellyfinPlugin/TierPlanningCheck` checks the decisions
+(tiers offered, forced keyframes, encoder arguments and choice, the init's
+empty edit), which live in `VideoTierPlanning.cs`.
 
 ## How live decoding stays sample-exact
 
@@ -452,6 +509,7 @@ fetched in any order, or played straight through by ffmpeg and AVPlayer
 <cache>/v2/<itemId>/video/index.json      keyframe index
 <cache>/v2/<itemId>/video/init.mp4        video init segment
 <cache>/v2/<itemId>/video/<n>.m4s         video segment n (LRU-trimmed)
+<cache>/v2/<itemId>/video/<height>/init.mp4, <n>.m4s   a picture tier's (trimmed with the original's, one budget per item)
 <cache>/spatial/<itemId>/<variant>/info.json   what vergence --info said
 <cache>/spatial/<itemId>/<variant>/init.mp4    side-by-side init segment
 <cache>/spatial/<itemId>/<variant>/<n>.m4s     side-by-side segment n (LRU-trimmed across items)
