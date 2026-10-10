@@ -5,12 +5,12 @@ namespace Jellyfin.Plugin.AtmosObjects;
 
 /// <summary>
 /// The transport stream of a Blu-ray disc (an ISO or a BDMV folder), fed to
-/// ffmpeg through its stdin by mvc3d (an MIT Swift Blu-ray reader, not yet published:
-/// <c>mvc3d stream</c>).
+/// ffmpeg through its stdin by Vergence (an MIT Swift Blu-ray reader, not yet published:
+/// <c>vergence stream</c>).
 /// <para>
 /// ffmpeg's own <c>bluray:</c> input reads an ISO through libbluray at a few
 /// MB/s and cannot seek in usable time: on servo a cut at one hour into a
-/// film took 75 s to start, against about 2 s through mvc3d, which jumps to
+/// film took 75 s to start, against about 2 s through Vergence, which jumps to
 /// the clip's entry point straight from the disc's EP map. The bytes are the
 /// feature playlist's own clips, so ffmpeg sees the same streams in the same
 /// order as Jellyfin's <c>bluray:</c> probe (the indexes in MediaStreams hold)
@@ -18,7 +18,7 @@ namespace Jellyfin.Plugin.AtmosObjects;
 /// through: the origin probe and the seek arithmetic are unchanged.
 /// </para>
 /// <para>
-/// mvc3d seeks in playlist time (0 = the feature's first IN point), so the
+/// Vergence seeks in playlist time (0 = the feature's first IN point), so the
 /// caller passes the target with the origin subtracted. A feature made of
 /// several clips is fed clip after clip, and the timestamps restart with each
 /// clip, as they do through <c>bluray:</c>.
@@ -40,7 +40,7 @@ internal sealed class DiscFeed : IDisposable
     {
         if (!File.Exists(mvc3dPath))
         {
-            throw new FileNotFoundException($"mvc3d not found at {mvc3dPath}; set Mvc3dPath in the plugin configuration.");
+            throw new FileNotFoundException($"vergence not found at {mvc3dPath}; set Mvc3dPath in the plugin configuration.");
         }
 
         var info = new ProcessStartInfo(mvc3dPath)
@@ -88,7 +88,7 @@ internal sealed class DiscFeed : IDisposable
         });
     }
 
-    /// <summary>What mvc3d reported (where the stream starts, or why it failed).</summary>
+    /// <summary>What Vergence reported (where the stream starts, or why it failed).</summary>
     public async Task<string> ErrorsAsync()
     {
         Dispose();

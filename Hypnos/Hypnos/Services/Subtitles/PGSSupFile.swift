@@ -7,7 +7,7 @@
  a `.sup` file, every segment prefixed with "PG", its presentation and
  decode times (90 kHz) and its type and length. The segments are the same
  ones a Blu-ray carries in its PES packets, so the disc's decoder reads
- them (MVC3D's `SupFile`), and the cues are images like a disc's
+ them (Vergence's `SupFile`), and the cues are images like a disc's
  (`DiscSubtitles`).
 
  A caption lasts until the next caption of the track: PGS clears the
@@ -23,7 +23,7 @@
 
 import CoreGraphics
 import Foundation
-import MVC3D
+import VergenceApple
 import RAVEUI
 
 enum PGSSupFile {

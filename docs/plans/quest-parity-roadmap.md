@@ -196,7 +196,7 @@ latency and thermal/memory budgets; measure Quest 2 before claiming support.
   presentation's native compositor binding. Cover half/full SBS and OU, eye
   swap, orientation and edge sampling. Improve caption size/background/depth
   with the shared subtitle model, including correctly anchored stereo captions.
-- Port mvc3d/edge264 to Android in a measured spike. Adapt HTTP range reads,
+- Port Vergence (formerly mvc3d)/edge264 to Android in a measured spike. Adapt HTTP range reads,
   decoded eye frames, disc audio and PGS to the same playback session and film
   timeline; reuse its existing parser instead of rewriting the disc stack.
 - Add object-audio/disc download packages to the portable catalog schema and

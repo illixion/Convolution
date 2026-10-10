@@ -3,7 +3,7 @@
 
  A disc's subtitles are bitmaps muxed into the same clip as the base view,
  so they arrive as the picture decoder reads it: `MVCPictureSource` asks
- mvc3d for the playlist's PGS PIDs alongside the video and hands their
+ Vergence for the playlist's PGS PIDs alongside the video and hands their
  packets here. Every track is collected whichever is showing (they are a
  few kilobytes a minute), so switching tracks shows what has been read
  already; only the showing track's bitmaps are ever decoded, and each one
@@ -24,7 +24,7 @@
 
 import CoreGraphics
 import Foundation
-import MVC3D
+import VergenceApple
 import RAVEUI
 
 final class DiscSubtitles: @unchecked Sendable {

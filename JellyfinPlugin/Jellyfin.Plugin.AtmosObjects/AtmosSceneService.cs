@@ -110,9 +110,22 @@ public sealed partial class AtmosSceneService
         ? Path.Combine(Plugin.Instance?.DataFolderPath ?? _paths.PluginConfigurationsPath, "truehdd")
         : Config.TruehddPath;
 
-    private string Mvc3dPath => string.IsNullOrWhiteSpace(Config.Mvc3dPath)
-        ? Path.Combine(Plugin.Instance?.DataFolderPath ?? _paths.PluginConfigurationsPath, "mvc3d")
-        : Config.Mvc3dPath;
+    // The Vergence CLI, installed as "vergence"; servers set up before the
+    // rename still have it as "mvc3d".
+    private string Mvc3dPath
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(Config.Mvc3dPath))
+            {
+                return Config.Mvc3dPath;
+            }
+
+            var folder = Plugin.Instance?.DataFolderPath ?? _paths.PluginConfigurationsPath;
+            var vergence = Path.Combine(folder, "vergence");
+            return File.Exists(vergence) ? vergence : Path.Combine(folder, "mvc3d");
+        }
+    }
 
     private string ItemDirectory(Guid itemId) => Path.Combine(CacheRoot, itemId.ToString("N"));
 
@@ -412,7 +425,7 @@ public sealed partial class AtmosSceneService
         _logger.LogInformation("Atmos session for {ItemId}: segment {Segment}, seek {Seek:F1} s, to end {ToEnd}", itemId, session.FirstSegment, seekSeconds, session.ToEnd);
 
         var ffmpegArgs = new List<string> { "-v", "error", "-nostdin" };
-        // A disc is cut by mvc3d, in playlist time, which starts at the origin.
+        // A disc is cut by Vergence, in playlist time, which starts at the origin.
         using var feed = source.IsDisc ? DiscFeed.Start(Mvc3dPath, source.Path, atStreamStart ? 0 : seekSeconds - (source.OriginMs / 1000)) : null;
         if (!atStreamStart && feed is null)
         {

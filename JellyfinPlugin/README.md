@@ -31,13 +31,13 @@ an ISO at a few MB/s and can't seek in usable time: on servo a cut an hour
 into *Bumblebee 3D* took 75 s to start, and passing the raw `.iso` path the
 way a file is passed fails outright. For a disc item (`VideoType` BluRay, or
 an ISO whose `IsoType` is BluRay) the plugin instead feeds ffmpeg through its
-stdin from `mvc3d stream DISC --seek S` (`DiscFeed.cs`). mvc3d is an MIT
+stdin from `vergence stream DISC --seek S` (`DiscFeed.cs`). Vergence is an MIT
 Swift Blu-ray reader (not yet published) that jumps to the clip entry point
 before `S` straight from the disc's EP map. It writes the feature
 playlist's own clips, so ffmpeg sees the streams in the order Jellyfin's
 `bluray:` probe lists them, and with the clip's own timestamps, which `bluray:` passes
 through as well. The stream indexes in MediaStreams, the origin probe and the
-seek arithmetic are unchanged; mvc3d seeks in playlist time, so the plugin
+seek arithmetic are unchanged; Vergence seeks in playlist time, so the plugin
 subtracts the origin. Measured on servo with the same pipeline: first decoded
 audio 3.7 s after a seek to one hour, then about 6.5× realtime.
 
@@ -54,11 +54,11 @@ the stream index), so switching back and forth keeps both. Without
 client sends its device languages), then `PreferredAudioLanguage` (default
 `eng`), then the first track; codes are compared in ISO 639-2/T form (`ger` and
 `de` count as `deu`). `bluray:` reports no languages, so a disc's come from
-`mvc3d streams` (the playlist's STN table), matched to ffmpeg's index by PID;
+`vergence streams` (the playlist's STN table), matched to ffmpeg's index by PID;
 *Bumblebee 3D* is a German release that lists German first. A cache from before
 per-track scenes is adopted by its track's scene (`track.txt`, else the first
 TrueHD track).
-Known limits: both tools pick the feature as the longest title (mvc3d the
+Known limits: both tools pick the feature as the longest title (Vergence the
 longest 3D one), which agrees on ordinary discs; a feature made of several
 clips restarts its timestamps at each clip, as it does through `bluray:`.
 
@@ -67,7 +67,7 @@ clips restarts its timestamps at each clip, as it does through `bluray:`.
 | Library | Used for | Distribution | Licence |
 |---|---|---|---|
 | [truehdd](https://github.com/truehdd/truehdd) | TrueHD decode (external subprocess) | Source pinned + patched, built locally (`truehdd/build.sh`) | Apache-2.0 |
-| mvc3d | Reading Blu-ray ISOs and folders (external subprocess, disc items only) | Built from source (`swift build -c release`) | MIT |
+| Vergence | Reading Blu-ray ISOs and folders (external subprocess, disc items only) | Built from source (`swift build -c release`) | MIT |
 | [Cavern](https://github.com/VoidXH/Cavern) / `Cavern.Format` | E-AC-3 JOC decode (in-process) | Official NuGet packages, `Cavern`/`Cavern.Format` 2.1.0, referenced by the `.csproj` | Custom, free but requires crediting the creator — see below |
 
 Full licence texts and the required Cavern credit are in
@@ -94,7 +94,7 @@ credit is in the notices file; don't drop it if this plugin is redistributed.
    ```xml
    <PluginConfiguration>
      <TruehddPath>/path/to/truehdd/checkout/target/release/truehdd</TruehddPath>
-     <Mvc3dPath />                 <!-- empty: mvc3d next to the default truehdd; only Blu-ray items need it -->
+     <Mvc3dPath />                 <!-- empty: vergence (or mvc3d, from before the rename) next to the default truehdd; only Blu-ray items need it -->
      <PreferredAudioLanguage>eng</PreferredAudioLanguage>  <!-- ISO 639-2, among several object-audio tracks -->
      <CacheDirectory />            <!-- empty: <jellyfin cache>/atmos-objects -->
      <SegmentSeconds>10</SegmentSeconds>

@@ -2,7 +2,7 @@
  Hypnos - the picture of a 3D Blu-ray disc image, decoded on the device
 
  A Blu-ray's 3D is MVC (H.264 Multiview), which no Apple decoder handles.
- mvc3d (a local package, ../../mvc3d) reads the disc image in place over
+ Vergence (a local package, ../../vergence) reads the disc image in place over
  HTTP range requests (Jellyfin serves the raw ISO from
  `Videos/{id}/stream?static=true`), picks the feature playlist and decodes
  both views with edge264. Each frame is copied into pixel buffers: the left
@@ -12,7 +12,7 @@
 
  Film time is the transport stream's clock, which the Atmos plugin's audio
  scene also uses: the scene starts at the first PlayItem's IN time (its
- `startSeconds`), and mvc3d's frames are stamped in playlist time from that
+ `startSeconds`), and Vergence's frames are stamped in playlist time from that
  same IN time, so film time = playlist time + `originSeconds`. A feature
  made of several clips restarts the stream clock at each clip, which this
  mapping (and the plugin's) doesn't follow; the features seen so far are
@@ -28,7 +28,7 @@
 import CoreMedia
 import CoreVideo
 import Foundation
-import MVC3D
+import VergenceApple
 import RAVEFilm
 import DebugTrace
 

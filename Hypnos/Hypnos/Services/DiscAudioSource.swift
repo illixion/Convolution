@@ -4,7 +4,7 @@
  For a disc the Atmos plugin can't serve (no plugin, a disc without TrueHD,
  or a disc on the device itself), the film player plays the disc's AC-3:
  a plain AC-3 or E-AC-3 track, or the AC-3 core every Blu-ray TrueHD track
- carries. mvc3d reads and decodes it (`PlaylistAudioReader`, through Apple's
+ carries. Vergence reads and decodes it (`PlaylistAudioReader`, through Apple's
  decoder) into 5.1, which plays as five sources pinned at the speaker
  positions plus an LFE bed: the same stage, clock and head tracking as
  object audio.
@@ -18,7 +18,7 @@
 
 import AVFoundation
 import Foundation
-import MVC3D
+import VergenceApple
 import RAVEFilm
 
 final class DiscAudioSource: FilmAudioSource, @unchecked Sendable {

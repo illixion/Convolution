@@ -19,7 +19,7 @@ public sealed record AudioTrack(int Index, string Codec, string? Language, strin
 /// Without a chosen track, the default is the first decodable track in the
 /// first language the client lists (its device languages), then
 /// <see cref="PluginConfiguration.PreferredAudioLanguage"/>, then the first
-/// track. A disc's languages come from <c>mvc3d streams</c>, as ffmpeg's
+/// track. A disc's languages come from <c>vergence streams</c>, as ffmpeg's
 /// bluray: probe has none.
 /// </summary>
 public sealed partial class AtmosSceneService
@@ -190,8 +190,8 @@ public sealed partial class AtmosSceneService
 
     /// <summary>
     /// A disc's TrueHD languages by ffmpeg stream index: languages from
-    /// <c>mvc3d streams</c> (the playlist's STN table), indexes from probing
-    /// the stream mvc3d feeds ffmpeg, matched by PID. Empty when mvc3d isn't
+    /// <c>vergence streams</c> (the playlist's STN table), indexes from probing
+    /// the stream Vergence feeds ffmpeg, matched by PID. Empty when Vergence isn't
     /// installed or the disc says nothing useful.
     /// </summary>
     private Dictionary<int, string> DiscTrueHdLanguages(string discPath)
