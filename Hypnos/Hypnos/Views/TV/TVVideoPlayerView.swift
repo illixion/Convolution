@@ -39,6 +39,16 @@ import SwiftUI
 
 struct TVVideoPlayerView: View {
     let video: GalleryVideo
+
+    /// YouTube's saved quality; other sources play whatever they offer.
+    private var maximumResolution: CGSize {
+        #if HYPNOS_YOUTUBE
+        if YouTubeVideoID(videoIdentity: video.identity) != nil {
+            return YouTubeQuality.maximumResolution(height: YouTubeQuality.preferred.height)
+        }
+        #endif
+        return .zero
+    }
     /// Optional periodic (position, duration, paused) callback — a no-op
     /// for every existing caller (`TVVideosTabView`'s plain
     /// `TVVideoPlayerView(video:)`); the Library tab wires it to
@@ -63,6 +73,7 @@ struct TVVideoPlayerView: View {
         Group {
             if let resolvedURL {
                 TVAVPlayerViewControllerRepresentable(url: resolvedURL, startSeconds: startSeconds, loops: loops,
+                                                      maximumResolution: maximumResolution,
                                                       segments: skipper.segments,
                                                       onProgress: onProgress, onPlayedToEnd: onPlayedToEnd) {
                     failureMessage = "This video's format isn't supported on Apple TV."
@@ -131,6 +142,8 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
     let url: URL
     var startSeconds: Double?
     var loops = false
+    /// The largest picture an adaptive stream may pick (zero: no cap).
+    var maximumResolution: CGSize = .zero
     /// Offered as the player's own contextual action (Skip Intro) while
     /// the playhead is in one.
     var segments: [LibraryMediaSegment] = []
@@ -143,6 +156,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         let asset = MediaAuthorization.shared.asset(for: url)
         let item = AVPlayerItem(asset: asset)
         item.applySpatialAudioPolicy()
+        item.preferredMaximumResolution = maximumResolution
         // An AVQueuePlayer so a looping clip can run through AVPlayerLooper,
         // which queues the next pass ahead of the end: no pause, no gap and
         // no transport UI popping up at the loop point.

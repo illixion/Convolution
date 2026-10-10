@@ -145,7 +145,14 @@ struct MacVideoPlayerWindow: View {
         let authenticated = MediaAuthorization.shared.authorizedURL(source)
         if await NativeVideoDecodeProbe.canPlayNatively(url: authenticated) {
             AppLogger.videoWindow.info("[macOS] playing original: \(authenticated.loggableDescription)")
-            player = AVPlayer(playerItem: AVPlayerItem(asset: MediaAuthorization.shared.asset(for: authenticated)))
+            let item = AVPlayerItem(asset: MediaAuthorization.shared.asset(for: authenticated))
+            #if HYPNOS_YOUTUBE
+            // YouTube's saved quality; other sources play whatever they offer.
+            if YouTubeVideoID(videoIdentity: video.identity) != nil {
+                item.preferredMaximumResolution = YouTubeQuality.maximumResolution(height: YouTubeQuality.preferred.height)
+            }
+            #endif
+            player = AVPlayer(playerItem: item)
             return
         }
 

@@ -87,6 +87,7 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         coordinator.startMuted = startMuted
         coordinator.startVolume = Float(playbackModel?.volume ?? 1)
         coordinator.loops = loops
+        coordinator.maximumResolution = playbackModel?.maximumPictureResolution ?? .zero
 
         if let loopController {
             loopController.queryCurrentTime = { [weak coordinator] in
@@ -160,7 +161,21 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         var loops = true
 
         private var player: AVPlayer?
-        private var playerItem: AVPlayerItem?
+        private var playerItem: AVPlayerItem? {
+            didSet { playerItem?.preferredMaximumResolution = maximumResolution }
+        }
+        /// The largest picture an adaptive stream may pick (zero: no cap).
+        var maximumResolution: CGSize = .zero {
+            didSet {
+                guard maximumResolution != oldValue, let playerItem else { return }
+                playerItem.preferredMaximumResolution = maximumResolution
+                // What is already buffered (a minute or more) stays at the
+                // old size until a seek to the playhead drops it.
+                let lower = maximumResolution != .zero && (oldValue == .zero
+                    || maximumResolution.width < oldValue.width || maximumResolution.height < oldValue.height)
+                if lower { seek(to: currentTime) }
+            }
+        }
         private var videoOutput: AVPlayerItemVideoOutput?
         private var textureCache: CVMetalTextureCache?
         private var timeObserver: Any?

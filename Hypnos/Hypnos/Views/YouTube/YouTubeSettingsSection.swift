@@ -15,6 +15,7 @@ struct YouTubeSettingsSection: View {
     @Bindable private var backend = YouTubeBackend.shared
     @State private var tokenDraft = ""
     @AppStorage(SponsorBlock.enabledKey) private var sponsorBlockEnabled = true
+    @AppStorage(YouTubeQuality.defaultsKey) private var quality: YouTubeQuality = .auto
     @State private var categoryModes: [SponsorBlockCategory: SponsorBlockCategory.Mode] =
         Dictionary(uniqueKeysWithValues: SponsorBlockCategory.allCases.map { ($0, $0.mode) })
 
@@ -38,10 +39,30 @@ struct YouTubeSettingsSection: View {
             }
             Toggle("Surround Sound from Backend", isOn: $backend.prefersSurround)
                 .disabled(!backend.isConfigured)
+            #if os(tvOS)
+            // tvOS: checkmarked rows, never a Picker (see TVSettingsView).
+            ForEach(YouTubeQuality.allCases) { level in
+                Button {
+                    quality = level
+                } label: {
+                    HStack {
+                        Text("Picture Quality: \(level.title)")
+                        Spacer()
+                        if level == quality { Image(systemName: "checkmark") }
+                    }
+                }
+            }
+            #else
+            Picker("Picture Quality", selection: $quality) {
+                ForEach(YouTubeQuality.allCases) { level in
+                    Text(level.title).tag(level)
+                }
+            }
+            #endif
         } header: {
             Text("YouTube")
         } footer: {
-            Text("Videos play from YouTube directly on this device. A web-yt-dlp backend is optional: it adds 5.1 surround sound where YouTube has it, and plays videos the device can't, such as ones made for kids.")
+            Text("Videos play from YouTube directly on this device. A web-yt-dlp backend is optional: it adds 5.1 surround sound where YouTube has it, and plays videos the device can't, such as ones made for kids. Picture Quality caps what YouTube sends; Auto takes the best the connection allows and lowers it if 3D can't keep up.")
         }
 
         Section {

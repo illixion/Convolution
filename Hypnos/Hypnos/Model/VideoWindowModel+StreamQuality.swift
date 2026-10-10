@@ -9,6 +9,7 @@
  says so (`qualityNotice`). `original` never steps.
  */
 
+import CoreGraphics
 import DebugTrace
 import Foundation
 import RAVEMedia
@@ -182,18 +183,28 @@ extension VideoWindowModel {
         stereoLoadStrikes = 0
         stereoLoadGraceUntil = .now.addingTimeInterval(20)
 
+        #if HYPNOS_YOUTUBE
+        if stepYouTubeDownFor3D(pictureHeight: sample.sourceHeight) { return }
+        #endif
+        // A smaller picture, one step at a time (4K to 1440p, then 1080p),
+        // never below 1080p: below that 3D isn't worth the picture.
         if offersQualityChoice, qualityPreference == .auto,
-           streamLevel == nil || streamLevel == .mbps40 {
-            AppLogger.videoWindow.info("3D couldn't keep up at \(self.streamLevel?.rawValue ?? "original", privacy: .public); stepping to 1080p")
-            switchStream(to: .mbps20, reason: "3D couldn't keep up")
-            showQualityNotice("Quality lowered to \(LibraryStreamQuality.mbps20.title) so 3D plays smoothly")
+           let next = LibraryStreamQuality.smallerPicture(than: pictureHeight(sample), from: streamLevel),
+           (next.maxHeight ?? 0) >= 1080 {
+            AppLogger.videoWindow.info("3D couldn't keep up at \(self.streamLevel?.rawValue ?? "original", privacy: .public), \(sample.sourceHeight, privacy: .public) lines; stepping to \(next.rawValue, privacy: .public)")
+            switchStream(to: next, reason: "3D couldn't keep up")
+            showQualityNotice("Quality lowered to \(next.title) so 3D plays smoothly")
             return
         }
         guard stereoLoadAdvisedIdentity != video.identity else { return }
         stereoLoadAdvisedIdentity = video.identity
         let isAI3D = shouldUsePseudo3D
+        var choosesQuality = offersQualityChoice
+        #if HYPNOS_YOUTUBE
+        if youTubeID != nil { choosesQuality = true }
+        #endif
         let advice: String
-        if offersQualityChoice {
+        if choosesQuality {
             advice = "3D can't keep up with this video. Choose a lower quality for smooth playback."
         } else if isAI3D, case .realtime = pseudo3DDepthMode {
             advice = "AI 3D can't keep up with this video. Pre-Process it for smooth 3D."
@@ -201,6 +212,13 @@ extension VideoWindowModel {
             advice = "3D can't keep up with this video's resolution."
         }
         showQualityNotice(advice)
+    }
+
+    /// The picture's height: as the pump measured it, else what the level
+    /// playing allows (the original counts as 4K).
+    private func pictureHeight(_ sample: RAVEStereoPerformance) -> Int {
+        if sample.sourceHeight > 0 { return sample.sourceHeight }
+        return streamLevel?.maxHeight ?? 2160
     }
 
     // MARK: Notice
@@ -230,6 +248,22 @@ extension VideoWindowModel {
         isBuffering = false
         qualityNotice = nil
         stallMonitor = StreamStallMonitor()
+        #if HYPNOS_YOUTUBE
+        youTubeQuality = .preferred
+        youTubeAutoHeight = nil
+        #endif
+        updatePictureResolutionCap()
+    }
+
+    /// The cap the players apply: YouTube's level, else none.
+    func updatePictureResolutionCap() {
+        var cap = CGSize.zero
+        #if HYPNOS_YOUTUBE
+        if youTubeID != nil {
+            cap = YouTubeQuality.maximumResolution(height: youTubeQuality.height ?? youTubeAutoHeight)
+        }
+        #endif
+        if cap != maximumPictureResolution { maximumPictureResolution = cap }
     }
 
     func cancelStreamQualityTasks() {

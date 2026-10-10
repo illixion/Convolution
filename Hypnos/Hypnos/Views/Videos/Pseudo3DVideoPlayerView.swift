@@ -95,6 +95,7 @@ struct Pseudo3DVideoPlayerView: View {
                 engine.startMuted = startMuted
                 engine.startVolume = Float(playbackModel?.volume ?? 1)
                 engine.loops = loops
+                engine.preferredMaximumResolution = playbackModel?.maximumPictureResolution ?? .zero
                 engine.setContentOpacity(contentOpacity)
                 engine.setSquareCorners(!appModel.roundedCorners)
                 engine.setSubtitles(subtitleFrame)
@@ -134,6 +135,9 @@ struct Pseudo3DVideoPlayerView: View {
             }
         }
         .onChange(of: subtitleFrame) { _, frame in engine.setSubtitles(frame) }
+        .onChange(of: playbackModel?.maximumPictureResolution ?? .zero) { _, cap in
+            engine.preferredMaximumResolution = cap
+        }
         .onChange(of: videoURL) { _, newURL in
             engine.load(url: newURL, roomActive: isRoomActive, depthMode: depthMode,
                         startAt: playbackModel?.takeStreamSwitchStart(),

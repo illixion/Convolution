@@ -231,6 +231,14 @@ struct VideoOrnamentsView: View {
                 windowModel.setQuality(quality)
             }
         }
+        #if HYPNOS_YOUTUBE
+        if windowModel.youTubeID != nil {
+            YouTubeQualityMenu(selected: windowModel.youTubeQuality, label: windowModel.youTubeQualityLabel,
+                               onOpenChanged: { chromeMenu("Quality", opened: $0) }) { quality in
+                windowModel.setYouTubeQuality(quality)
+            }
+        }
+        #endif
     }
 
     private var flipButton: some View {

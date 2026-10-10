@@ -202,6 +202,9 @@ final class VideoWindowModel {
     /// Consecutive stereo-pump reports of frames being dropped (see
     /// `noteStereoPerformance`).
     @ObservationIgnored var stereoLoadStrikes = 0
+    /// The largest picture the player may pick from an adaptive stream;
+    /// zero leaves it to the player. Players apply it live.
+    var maximumPictureResolution: CGSize = .zero
     /// Reports before this are ignored: the picture just engaged, or the
     /// window just acted on an overload.
     @ObservationIgnored var stereoLoadGraceUntil = Date.distantPast
@@ -282,6 +285,12 @@ final class VideoWindowModel {
     @ObservationIgnored private var resolvedPhotosStreamURL: URL?
     @ObservationIgnored private var photosResolveTask: Task<Void, Never>?
     @ObservationIgnored private var playbackRendererTask: Task<Void, Never>?
+    #if HYPNOS_YOUTUBE
+    /// The YouTube quality chosen for this window (starts at the saved one).
+    var youTubeQuality: YouTubeQuality = .preferred
+    /// Under Auto, the picture height 3D load has lowered the cap to.
+    var youTubeAutoHeight: Int?
+    #endif
     #if HYPNOS_YOUTUBE
     /// Resolving a YouTube video again (`VideoWindowModel+YouTube`).
     @ObservationIgnored var youTubeRefreshTask: Task<Void, Never>?

@@ -60,6 +60,40 @@ extension VideoWindowModel {
         }
     }
 
+    // MARK: Quality
+
+    /// What the quality control reads: the choice, and under Auto where 3D
+    /// load has capped it.
+    var youTubeQualityLabel: String {
+        if youTubeQuality == .auto, let height = youTubeAutoHeight { return "Auto · \(height)p" }
+        return youTubeQuality == .p2160 ? "4K" : youTubeQuality.title
+    }
+
+    /// The viewer picked `quality`: remembered for every YouTube video, and
+    /// applied to this one at once (the player switches at its next segment).
+    func setYouTubeQuality(_ quality: YouTubeQuality) {
+        YouTubeQuality.preferred = quality
+        youTubeQuality = quality
+        youTubeAutoHeight = nil
+        dismissQualityNotice()
+        AppLogger.youtube.info("Quality set to \(quality.rawValue, privacy: .public)")
+        updatePictureResolutionCap()
+    }
+
+    /// 3D can't keep up with a YouTube picture `pictureHeight` high: under
+    /// Auto, cap it one level lower (4K to 1440p, then 1080p, no lower).
+    /// False when it didn't step, and the window gives its advice instead.
+    func stepYouTubeDownFor3D(pictureHeight: Int) -> Bool {
+        guard youTubeID != nil, youTubeQuality == .auto else { return false }
+        let current = youTubeAutoHeight ?? (pictureHeight > 0 ? pictureHeight : 2160)
+        guard let next = [1440, 1080].first(where: { $0 < current }) else { return false }
+        AppLogger.youtube.info("3D couldn't keep up at \(current, privacy: .public) lines; capping at \(next, privacy: .public)p")
+        youTubeAutoHeight = next
+        updatePictureResolutionCap()
+        showQualityNotice("Quality lowered to \(next)p so 3D plays smoothly")
+        return true
+    }
+
     /// Skips an auto-skip SponsorBlock segment the playhead just entered.
     func autoSkipYouTubeSegmentIfNeeded() {
         guard youTubeID != nil, !isScrubbing,

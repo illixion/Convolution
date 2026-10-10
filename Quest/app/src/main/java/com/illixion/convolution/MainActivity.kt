@@ -104,7 +104,7 @@ class MainActivity : ComponentActivity() {
             qualityTarget?.let { item -> AlertDialog(
                 onDismissRequest = { qualityTarget = null }, title = { Text("Playback quality") },
                 text = { Column {
-                listOf("Auto" to "auto", "Always Direct Play" to "original", "4K · 40 Mbps" to "mbps40", "1080p · 20 Mbps" to "mbps20", "1080p · 10 Mbps" to "mbps10", "720p · 4 Mbps" to "mbps4", "480p · 1.5 Mbps" to "mbps1_5").forEach { (label, quality) ->
+                listOf("Auto" to "auto", "Always Direct Play" to "original", "4K · 40 Mbps" to "mbps40", "1440p · 30 Mbps" to "mbps30", "1080p · 20 Mbps" to "mbps20", "1080p · 10 Mbps" to "mbps10", "720p · 4 Mbps" to "mbps4", "480p · 1.5 Mbps" to "mbps1_5").forEach { (label, quality) ->
                         TextButton(onClick = { qualityTarget = null; prepare(item, quality) }) { Text(label) }
                     }
                 } }, confirmButton = {}, dismissButton = { TextButton(onClick = { qualityTarget = null }) { Text("Cancel") } }
