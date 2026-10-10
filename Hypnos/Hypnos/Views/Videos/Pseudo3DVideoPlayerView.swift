@@ -89,7 +89,10 @@ struct Pseudo3DVideoPlayerView: View {
                     isFlipped: isFlipped
                 )
                 engine.onVideoSizeKnown = onVideoSizeKnown
-                engine.onPlaybackError = onPlaybackError
+                engine.onPlaybackError = { [engine, weak playbackModel] in
+                    if engine.failure == .needsSystemRenderer { playbackModel?.notePictureNeedsSystemRenderer() }
+                    onPlaybackError?()
+                }
                 engine.onDurationKnown = onDurationKnown
                 engine.onPerformance = { [weak playbackModel] in playbackModel?.noteStereoPerformance($0) }
                 engine.startMuted = startMuted

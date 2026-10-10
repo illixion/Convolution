@@ -190,6 +190,8 @@ final class VideoWindowModel {
     var isChangingQuality = false
     /// Shown under the window for a few seconds after Auto lowered quality.
     var qualityNotice: String?
+    /// The picture is Dolby Vision profile 5 (`notePictureNeedsSystemRenderer`).
+    private(set) var pictureNeedsSystemRenderer = false
     /// The player is waiting for data while it means to play.
     var isBuffering = false
     @ObservationIgnored var stallMonitor = StreamStallMonitor()
@@ -545,6 +547,7 @@ final class VideoWindowModel {
     /// Switch to a different video, resetting per-window viewing state. The
     /// WebVideoPlayerView reloads automatically because its `videoURL` changes.
     func switchToVideo(_ newVideo: GalleryVideo) {
+        pictureNeedsSystemRenderer = false
         appModel.lastViewedVideoId = newVideo.id
         // Keep the open-window registry pointed at what this window actually
         // shows, so a window group saved after prev/next captures the right video.
@@ -638,6 +641,7 @@ final class VideoWindowModel {
     /// conversion instead (`usesImmersiveStereo`).
     var liveStereoLayout: PackedStereoLayout? {
         guard PlatformCapabilities.supportsStereoVideo, shouldUse3DMode, !immersiveStereoRequested,
+              !pictureNeedsSystemRenderer,
               playbackRenderer == .nativeMetal else { return nil }
         return (video3DSettings ?? Video3DSettings.from(video: video) ?? .defaults(for: .sideBySide)).packedLayout
     }
@@ -1004,8 +1008,19 @@ final class VideoWindowModel {
     var pseudo3DAvailable: Bool {
         // The stereo pump renders a per-eye pair; there is nothing to show it
         // on without a stereoscopic display.
-        guard PlatformCapabilities.supportsStereoVideo else { return false }
+        guard PlatformCapabilities.supportsStereoVideo, !pictureNeedsSystemRenderer else { return false }
         return playbackRenderer == .nativeMetal || canUseTranscodedStream
+    }
+
+    /// The stereo pump found a Dolby Vision profile 5 picture, which only
+    /// the system's renderer shows right (it applies the RPU; the app does no
+    /// Dolby processing of its own). 3D stays off for this video; a film with
+    /// the server's object audio plays 3D from the plugin's converted tier.
+    func notePictureNeedsSystemRenderer() {
+        guard !pictureNeedsSystemRenderer else { return }
+        pictureNeedsSystemRenderer = true
+        AppLogger.videoWindow.info("Dolby Vision profile 5 picture: 3D is unavailable, playing in 2D")
+        showQualityNotice("This Dolby Vision video plays in 2D only. 3D needs a converted copy from the server.")
     }
 
     func forceWebKitPlayback() {

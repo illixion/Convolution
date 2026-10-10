@@ -7,6 +7,7 @@
  */
 
 import AVFoundation
+import AVKit
 import CoreVideo
 import DebugTrace
 import MetalKit
@@ -38,6 +39,74 @@ private struct VideoAAUniforms {
     var applyResolve: Float
 }
 
+/// What the decoded frames are, read off the first one's attachments. The
+/// stream's metadata can't say for an HLS remux, and the frames always can.
+enum NativeVideoDynamicRange {
+    case unknown, sdr, pq, hlg
+
+    var isHDR: Bool { self == .pq || self == .hlg }
+}
+
+/// The player's view: the Metal picture (SDR, or HDR while adjustments are
+/// on) and the system's own video layer (HDR and Dolby Vision as they are)
+/// over one AVPlayer, one of them showing.
+final class NativeVideoHostView: UIView {
+    let metalView: MTKView
+    let systemView = SystemVideoLayerView()
+
+    init(metalView: MTKView) {
+        self.metalView = metalView
+        super.init(frame: .zero)
+        isOpaque = false
+        for view in [metalView, systemView] as [UIView] {
+            view.frame = bounds
+            view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            addSubview(view)
+        }
+        systemView.isHidden = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    #if os(tvOS) || os(visionOS)
+    /// Stated to the window's display manager while the view is in it. On
+    /// visionOS it is how a player declares HDR video (without it the picture
+    /// dims once playback starts); tvOS switches the TV's mode with it.
+    var displayCriteria: AVDisplayCriteria? {
+        didSet { applyDisplayCriteria() }
+    }
+    private weak var criteriaWindow: UIWindow?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        applyDisplayCriteria()
+    }
+
+    private func applyDisplayCriteria() {
+        if let criteriaWindow, criteriaWindow !== window {
+            criteriaWindow.avDisplayManager.preferredDisplayCriteria = nil
+        }
+        criteriaWindow = window
+        window?.avDisplayManager.preferredDisplayCriteria = displayCriteria
+    }
+    #endif
+}
+
+final class SystemVideoLayerView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        playerLayer.videoGravity = .resizeAspect
+        isUserInteractionEnabled = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+}
+
 struct NativeMetalVideoPlayerView: UIViewRepresentable {
     let videoURL: URL
     var isRoomActive: Bool = true
@@ -58,9 +127,9 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         Coordinator()
     }
 
-    func makeUIView(context: Context) -> MTKView {
+    func makeUIView(context: Context) -> NativeVideoHostView {
         guard let renderer = MetalImageRenderer.shared else {
-            return MTKView()
+            return NativeVideoHostView(metalView: MTKView())
         }
 
         let view = MTKView(frame: .zero, device: renderer.device)
@@ -74,12 +143,13 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         view.layer.isOpaque = false
         view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
 
+        let host = NativeVideoHostView(metalView: view)
         context.coordinator.renderer = renderer
-        context.coordinator.attach(to: view)
-        return view
+        context.coordinator.attach(to: host)
+        return host
     }
 
-    func updateUIView(_ view: MTKView, context: Context) {
+    func updateUIView(_ view: NativeVideoHostView, context: Context) {
         let coordinator = context.coordinator
         coordinator.visualAdjustments = visualAdjustments
         coordinator.onVideoSizeKnown = onVideoSizeKnown
@@ -133,7 +203,7 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         coordinator.setRoomActive(isRoomActive)
     }
 
-    static func dismantleUIView(_ view: MTKView, coordinator: Coordinator) {
+    static func dismantleUIView(_ view: NativeVideoHostView, coordinator: Coordinator) {
         coordinator.cleanup()
     }
 
@@ -150,9 +220,24 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         }
 
         weak var mtkView: MTKView?
+        weak var host: NativeVideoHostView?
         var renderer: MetalImageRenderer?
         var loadedURL: URL?
-        var visualAdjustments = VisualAdjustments()
+        var visualAdjustments = VisualAdjustments() {
+            didSet { updatePresentation() }
+        }
+        /// Read off the first decoded frame of each load.
+        private var dynamicRange = NativeVideoDynamicRange.unknown
+        /// Dolby Vision profile 5: its frames are IPT-PQ-c2, which only the
+        /// system's renderer maps (with the RPU), so it never shows through
+        /// Metal. The app does no Dolby processing of its own.
+        private var needsSystemRenderer = false
+        private var usesSystemLayer = false
+        /// The first HDR frame, for display criteria when the stream has no
+        /// asset track to describe it (HLS).
+        private var firstHDRFrameFormat: CMVideoFormatDescription?
+        private var presentationSizeObservation: NSKeyValueObservation?
+        private var criteriaTask: Task<Void, Never>?
         var onVideoSizeKnown: ((CGSize) -> Void)?
         var onPlaybackUpdate: ((PlaybackState) -> Void)?
         var onPlaybackError: (() -> Void)?
@@ -208,8 +293,9 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             player?.currentTime().seconds ?? 0
         }
 
-        func attach(to view: MTKView) {
-            mtkView = view
+        func attach(to host: NativeVideoHostView) {
+            self.host = host
+            mtkView = host.metalView
             if let device = renderer?.device {
                 CVMetalTextureCacheCreate(nil, nil, device, nil, &textureCache)
             }
@@ -219,6 +305,10 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             cleanupPlayer()
             loadedURL = url
             guard let renderer else { return }
+            dynamicRange = .unknown
+            needsSystemRenderer = false
+            firstHDRFrameFormat = nil
+            configureMetalView(for: .sdr)
 
             let asset = MediaAuthorization.shared.asset(for: url)
             let item = AVPlayerItem(asset: asset)
@@ -237,6 +327,20 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             self.player = player
             self.playerItem = item
             self.videoOutput = output
+            usesSystemLayer = false
+            showSystemLayer(false)
+
+            // The Metal path learns the size from the frames it pulls; while
+            // the system layer shows, nothing is pulled.
+            presentationSizeObservation = item.observe(\.presentationSize, options: [.new]) { [weak self] observed, _ in
+                let size = observed.presentationSize
+                Task { @MainActor [weak self] in
+                    guard let self, self.usesSystemLayer, size.width > 0, size.height > 0,
+                          self.lastReportedSize != size else { return }
+                    self.lastReportedSize = size
+                    self.onVideoSizeKnown?(size)
+                }
+            }
 
             endObserver = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime,
@@ -388,6 +492,7 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
 
         func cleanup() {
             cleanupPlayer()
+            host = nil
             intermediate = nil
             textureCache = nil
             renderer = nil
@@ -409,6 +514,14 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             }
             statusObservation?.invalidate()
             statusObservation = nil
+            presentationSizeObservation?.invalidate()
+            presentationSizeObservation = nil
+            criteriaTask?.cancel()
+            criteriaTask = nil
+            host?.systemView.playerLayer.player = nil
+            #if os(tvOS) || os(visionOS)
+            host?.displayCriteria = nil
+            #endif
             timeControlObservation?.invalidate()
             timeControlObservation = nil
             player?.pause()
@@ -476,6 +589,10 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
                 return
             }
             reportSizeIfNeeded(pixelBuffer)
+            if dynamicRange == .unknown {
+                noteDynamicRange(of: pixelBuffer)
+                if usesSystemLayer { return }
+            }
 
             let sharpen = Float(visualAdjustments.clampedSharpenAmount)
             let useRCAS = sharpen > 0.001
@@ -499,7 +616,7 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
                     pass1Desc.colorAttachments[0].storeAction = .store
 
                     if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass1Desc) {
-                        encoder.setRenderPipelineState(renderer.rcasPipelineState)
+                        encoder.setRenderPipelineState(view.colorPixelFormat == .rgba16Float ? renderer.rcasPipelineState16 : renderer.rcasPipelineState)
                         encoder.setFragmentTexture(sourceTexture, index: 0)
                         var uniforms = VideoRCASUniforms(brightness: 0, contrast: 1, saturation: 1, sharpen: sharpen)
                         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<VideoRCASUniforms>.size, index: 0)
@@ -515,7 +632,7 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             }
 
             let didSupersample = pass2InputTexture.width > drawableW || pass2InputTexture.height > drawableH
-            encoder.setRenderPipelineState(renderer.pipelineState)
+            encoder.setRenderPipelineState(view.colorPixelFormat == .rgba16Float ? renderer.pipelineState16 : renderer.pipelineState)
             encoder.setFragmentTexture(pass2InputTexture, index: 0)
             var uniforms = VideoAAUniforms(
                 brightness: Float(visualAdjustments.brightness),
@@ -535,12 +652,13 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             let width = CVPixelBufferGetWidth(pixelBuffer)
             let height = CVPixelBufferGetHeight(pixelBuffer)
             var cvTexture: CVMetalTexture?
+            let isHalf = CVPixelBufferGetPixelFormatType(pixelBuffer) == kCVPixelFormatType_64RGBAHalf
             let status = CVMetalTextureCacheCreateTextureFromImage(
                 nil,
                 cache,
                 pixelBuffer,
                 nil,
-                .bgra8Unorm,
+                isHalf ? .rgba16Float : .bgra8Unorm,
                 width,
                 height,
                 0,
@@ -552,6 +670,131 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
                 return nil
             }
             return texture
+        }
+
+        // MARK: HDR
+
+        private var adjustmentsAreNeutral: Bool {
+            visualAdjustments.brightness == 0 && visualAdjustments.contrast == 1
+                && visualAdjustments.saturation == 1 && visualAdjustments.clampedSharpenAmount <= 0.001
+        }
+
+        /// The first frame says what the picture is. AVFoundation hands PQ
+        /// and HLG frames over still encoded (PQ code values in BGRA), which
+        /// an SDR drawable showed washed out and dim.
+        private func noteDynamicRange(of pixelBuffer: CVPixelBuffer) {
+            let transfer = CVBufferCopyAttachment(pixelBuffer, kCVImageBufferTransferFunctionKey, nil) as? String
+            if transfer == (kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ as String) {
+                dynamicRange = .pq
+            } else if transfer == (kCVImageBufferTransferFunction_ITU_R_2100_HLG as String) {
+                dynamicRange = .hlg
+            } else {
+                dynamicRange = .sdr
+            }
+            // Profile 5 carries an RPU and no colour primaries (its IPT-PQ-c2
+            // picture has none to state); 8.1 states BT.2020.
+            let hasRPU = CVBufferCopyAttachment(pixelBuffer, "DolbyVisionRPUData" as CFString, nil) != nil
+            let hasPrimaries = CVBufferCopyAttachment(pixelBuffer, kCVImageBufferColorPrimariesKey, nil) != nil
+            needsSystemRenderer = hasRPU && !hasPrimaries
+            if dynamicRange.isHDR {
+                var format: CMVideoFormatDescription?
+                CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: pixelBuffer, formatDescriptionOut: &format)
+                firstHDRFrameFormat = format
+                AppLogger.videoWindow.info(
+                    "Native player: \(self.dynamicRange == .pq ? "PQ" : "HLG", privacy: .public) picture\(self.needsSystemRenderer ? " (Dolby Vision profile 5)" : "", privacy: .public)"
+                )
+            }
+            updatePresentation()
+            if dynamicRange.isHDR { applyDisplayCriteria() }
+        }
+
+        /// HDR plays through the system's video layer, which shows it (and
+        /// Dolby Vision, RPU and all) as the OS does everywhere else. Metal
+        /// takes over only while adjustments or sharpening are on, then in
+        /// HDR itself (half-float frames into an EDR layer tagged PQ or HLG).
+        /// Profile 5 never leaves the system layer.
+        private func updatePresentation() {
+            guard host != nil, player != nil, dynamicRange != .unknown else { return }
+            let system = dynamicRange.isHDR && (needsSystemRenderer || adjustmentsAreNeutral)
+            if !system { configureMetalView(for: dynamicRange) }
+            guard system != usesSystemLayer else { return }
+            usesSystemLayer = system
+            showSystemLayer(system)
+            if system {
+                // Nothing pulls frames while the system layer shows; an
+                // attached output would still convert every one.
+                if let videoOutput { playerItem?.remove(videoOutput) }
+                videoOutput = nil
+            } else {
+                useOutput(pixelFormat: dynamicRange.isHDR ? kCVPixelFormatType_64RGBAHalf : kCVPixelFormatType_32BGRA)
+            }
+        }
+
+        private func showSystemLayer(_ show: Bool) {
+            guard let host else { return }
+            host.systemView.playerLayer.player = show ? player : nil
+            host.systemView.isHidden = !show
+            host.metalView.isHidden = show
+            host.metalView.isPaused = show
+        }
+
+        /// The drawable and the layer's colour space for the picture Metal
+        /// draws: plain BGRA for SDR, half float in an EDR layer for HDR.
+        private func configureMetalView(for range: NativeVideoDynamicRange) {
+            guard let view = mtkView, let layer = view.layer as? CAMetalLayer else { return }
+            let format: MTLPixelFormat = range.isHDR ? .rgba16Float : .bgra8Unorm
+            if view.colorPixelFormat != format {
+                view.colorPixelFormat = format
+                intermediate = nil
+            }
+            switch range {
+            case .pq: layer.colorspace = CGColorSpace(name: CGColorSpace.itur_2100_PQ)
+            case .hlg: layer.colorspace = CGColorSpace(name: CGColorSpace.itur_2100_HLG)
+            case .sdr, .unknown: layer.colorspace = nil
+            }
+            // tvOS has no EDR switch; the TV's own mode (display criteria)
+            // carries HDR there.
+            #if !os(tvOS)
+            layer.wantsExtendedDynamicRangeContent = range.isHDR
+            #endif
+        }
+
+        /// Swaps the frame output for one in another pixel format.
+        private func useOutput(pixelFormat: OSType) {
+            guard let playerItem else { return }
+            if let videoOutput { playerItem.remove(videoOutput) }
+            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: pixelFormat,
+                kCVPixelBufferMetalCompatibilityKey as String: true
+            ])
+            playerItem.add(output)
+            videoOutput = output
+        }
+
+        private func applyDisplayCriteria() {
+            #if os(tvOS) || os(visionOS)
+            criteriaTask?.cancel()
+            let item = playerItem
+            let fallback = firstHDRFrameFormat
+            criteriaTask = Task { @MainActor [weak self] in
+                // The asset's own track says Dolby Vision (dvh1) where a
+                // decoded frame can't; an HLS stream has none, so the frame.
+                var format = fallback
+                var rate: Float = 0
+                if let playerTrack = item?.tracks.first(where: { $0.assetTrack?.mediaType == .video }) {
+                    rate = playerTrack.currentVideoFrameRate
+                    if let track = playerTrack.assetTrack {
+                        if let described = try? await track.load(.formatDescriptions).first { format = described }
+                        if rate <= 0, let nominal = try? await track.load(.nominalFrameRate) { rate = nominal }
+                    }
+                }
+                guard !Task.isCancelled, let self, self.playerItem === item, let format else { return }
+                let measured = Double(rate > 0 ? rate : 24)
+                let standard: [Double] = [24000.0 / 1001, 24, 25, 30000.0 / 1001, 30, 50, 60000.0 / 1001, 60]
+                let snapped = standard.min { abs($0 - measured) < abs($1 - measured) } ?? measured
+                self.host?.displayCriteria = AVDisplayCriteria(refreshRate: Float(snapped), formatDescription: format)
+            }
+            #endif
         }
 
         private func reportSizeIfNeeded(_ pixelBuffer: CVPixelBuffer) {

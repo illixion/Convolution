@@ -75,6 +75,9 @@ struct FilmPlayerView: View {
     /// and that is said; at the lowest (or with none, or a fixed choice) the
     /// viewer is told once per film what would help.
     @State private var pictureNotice: String?
+    /// The converted tier a Dolby Vision profile 5 film's 3D switched to,
+    /// undone when 3D ends.
+    @State private var stereoTierForDolbyVision: Int?
     @State private var pictureNoticeTask: Task<Void, Never>?
     @State private var stereoLoadStrikes = 0
     @State private var stereoLoadAdvisedItem: String?
@@ -360,10 +363,12 @@ struct FilmPlayerView: View {
                         packedStereo: stereoLayout,
                         squareCorners: !appModel.roundedCorners,
                         subtitles: stereoSubtitles,
-                        onUnavailable: {
+                        onUnavailable: { failure in
                             guard stereoSource === source else { return }
                             stopStereo()
-                            stereoFailure = "The 3D renderer is unavailable. Playback continues in 2D."
+                            stereoFailure = failure == .needsSystemRenderer
+                                ? Self.dolbyVisionOriginalIn3D
+                                : "The 3D renderer is unavailable. Playback continues in 2D."
                         },
                         onToggleChrome: { toggleChrome() },
                         onPerformance: { noteStereoPerformance($0) }
@@ -526,12 +531,36 @@ struct FilmPlayerView: View {
         }
     }
 
+    static let dolbyVisionOriginalIn3D = "This film's Dolby Vision picture plays in 3D only as the server's converted copy. Playback continues in 2D."
+
     private func startStereo() {
         guard stereoSource == nil else { return }
         // A 3D film already has both eyes; only a flat one needs depth.
         let layout = session.stereoFormat?.packedLayout(eyesReversed: false)
         guard layout != nil || CoreMLDepthProvider.hasAvailableModel(role: .realtime) else {
             showsDepthSetup = true
+            return
+        }
+        // Dolby Vision profile 5 shows right only through the system's own
+        // renderer, which the 3D picture isn't. The plugin's lower tiers are
+        // that picture converted to HDR10 on the server, so 3D plays one,
+        // and leaving 3D goes back to the original.
+        if player.video.index?.needsSystemRenderer == true, player.video.pictureHeight == nil {
+            guard let tier = FilmPictureQuality.stepDown(from: nil, offering: player.video.offeredPictureHeights) else {
+                stereoFailure = player.video.isOffline
+                    ? "This download has only the film's Dolby Vision picture, which can't play in 3D. Playback continues in 2D."
+                    : "This film's Dolby Vision picture needs converting on the server for 3D, and the server can't. Playback continues in 2D."
+                return
+            }
+            stereoTierForDolbyVision = tier
+            Task {
+                guard await player.video.setPictureHeight(tier) else {
+                    stereoTierForDolbyVision = nil
+                    stereoFailure = "The converted picture for 3D couldn't be loaded. Playback continues in 2D."
+                    return
+                }
+                startStereo()
+            }
             return
         }
         stereoLayout = layout
@@ -554,6 +583,12 @@ struct FilmPlayerView: View {
     private func stopStereo(keepingPosition: Bool = true) {
         guard let source = stereoSource else { return }
         let position = player.currentTime
+        if stereoTierForDolbyVision != nil, keepingPosition, player.video.pictureHeight == stereoTierForDolbyVision {
+            // Back to the original Dolby Vision picture, which the flat
+            // (system) renderer shows as it is.
+            Task { _ = await player.video.setPictureHeight(nil) }
+        }
+        stereoTierForDolbyVision = nil
         stereoSource = nil
         stereoLayout = nil
         mountedDepthModelName = nil

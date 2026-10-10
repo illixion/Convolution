@@ -692,7 +692,7 @@ actor JellyfinLibrary: MediaServerLibrary {
             .appending(queryItems: [
                 .init(name: "static", value: "true"),
                 .init(name: "MediaSourceId", value: mediaSourceId),
-                .init(name: "api_key", value: authHeaderToken),
+                .init(name: "ApiKey", value: authHeaderToken),
             ])
 
         if await NativeVideoDecodeProbe.canPlayNatively(url: directURL, timeout: 5) {
@@ -865,13 +865,22 @@ actor JellyfinLibrary: MediaServerLibrary {
     ///   answers 400 "The mediaSourceId field is required.", which AVPlayer
     ///   surfaces only as "resource unavailable".
     /// - `DeviceId` and `PlaySessionId` key the server's transcode job, which
-    ///   `api_key` query auth otherwise leaves unset.
+    ///   `ApiKey` query auth otherwise leaves unset.
     ///
     /// A capped `quality` encodes H.264 at its bitrate and picture size, but
     /// still lists the source's codec so a file already within the cap is
     /// copied rather than encoded (the caller skips caps above the source's
     /// bitrate, so that is rare). Verified on the dev instance: an H.264 MKV
     /// at the 1.5 Mbps level came back as 852x480 H.264 in fMP4 segments.
+    /// The HEVC ranges Apple's players show as they are, Dolby Vision
+    /// included. Without the list Jellyfin strips Dolby Vision from a copied
+    /// stream (profile 8.1 arrived as plain HDR10, measured on 10.11 and
+    /// 12.2), and a profile 5 film has no HDR10 underneath to fall back to.
+    /// The enhancement-layer types (profile 7) are left out on purpose: no
+    /// Apple decoder reads the second layer, so Jellyfin serves the HDR10
+    /// base. The system renderer applies the RPU; the app never does.
+    static let hevcRangeTypes = "SDR,HDR10,HDR10Plus,HLG,DOVI,DOVIWithHDR10,DOVIWithHDR10Plus,DOVIWithHLG,DOVIWithSDR"
+
     static func hlsStreamURL(baseURL: URL, itemId: String, mediaSourceId: String,
                              sourceVideoCodec: String?, playSessionId: String,
                              token: String, quality: LibraryStreamQuality = .original) -> URL {
@@ -882,7 +891,7 @@ actor JellyfinLibrary: MediaServerLibrary {
         let maxBitrate = quality.maxBitrate ?? 120_000_000
         let audioBitrate = quality.audioBitrate
         var query: [URLQueryItem] = [
-            .init(name: "api_key", value: token),
+            .init(name: "ApiKey", value: token),
             .init(name: "MediaSourceId", value: mediaSourceId),
             .init(name: "DeviceId", value: JellyfinClientIdentity.deviceId),
             .init(name: "PlaySessionId", value: playSessionId),
@@ -898,6 +907,9 @@ actor JellyfinLibrary: MediaServerLibrary {
         if let width = quality.maxWidth, let height = quality.maxHeight {
             query.append(.init(name: "MaxWidth", value: String(width)))
             query.append(.init(name: "MaxHeight", value: String(height)))
+        }
+        if sourceCodec == "hevc" {
+            query.append(.init(name: "hevc-rangetype", value: hevcRangeTypes))
         }
         return baseURL.appending(path: "Videos/\(itemId)/main.m3u8").appending(queryItems: query)
     }
@@ -1144,6 +1156,7 @@ actor JellyfinLibrary: MediaServerLibrary {
             .init(name: "MaxStreamingBitrate", value: String(maxBitrate)),
             .init(name: "VideoBitrate", value: String(maxBitrate - audioBitrate)),
             .init(name: "AudioBitrate", value: String(audioBitrate)),
+            .init(name: "hevc-rangetype", value: hevcRangeTypes),
         ])
     }
 

@@ -630,10 +630,26 @@ final class LibraryDownloads {
 
     /// The plugin's video, init then every segment, appended to `file`.
     /// Ranges are written as it goes, so a retry continues from the last one.
+    ///
+    /// A Dolby Vision profile 5 film is kept as the plugin's converted 1080p
+    /// HDR10 tier instead of its original: only the system's renderer shows
+    /// profile 5 right, so the original couldn't play in 3D, and with no
+    /// server to convert it offline, the download carries the copy that does
+    /// both. Its index is stored saying HDR10, so playback treats it as such.
     private func fetchFilmVideo(itemId: String, package: FilmPackage, into file: URL, library: JellyfinLibrary) async throws {
         let root = "AtmosObjects/\(itemId)"
-        let indexData = try await library.data(path: "\(root)/Video")
+        var indexData = try await library.data(path: "\(root)/Video")
         let index = try JSONDecoder().decode(FilmVideoIndex.self, from: indexData)
+        let tier = index.needsSystemRenderer ? FilmPictureQuality.stepDown(from: nil, offering: index.pictureHeights) : nil
+        let query = tier.map { [URLQueryItem(name: "height", value: String($0))] } ?? []
+        if tier != nil, var described = try JSONSerialization.jsonObject(with: indexData) as? [String: Any] {
+            described["videoRange"] = "HDR10"
+            described["dvProfile"] = NSNull()
+            described["dolbyVision"] = false
+            described["pictureHeights"] = [Int]()
+            indexData = try JSONSerialization.data(withJSONObject: described)
+            AppLogger.library.info("Downloading the converted \(FilmPictureQuality.name(of: tier), privacy: .public) HDR10 picture of a Dolby Vision profile 5 film")
+        }
         try FileManager.default.createDirectory(at: package.directory, withIntermediateDirectories: true)
         try indexData.write(to: package.videoIndexURL)
 
@@ -664,7 +680,7 @@ final class LibraryDownloads {
             try Task.checkCancellation()
             for ahead in piece..<min(total, piece + 4) where pending[ahead] == nil {
                 let requestPath = path(ahead)
-                pending[ahead] = Task { try await library.data(path: requestPath, timeout: 120) }
+                pending[ahead] = Task { try await library.data(path: requestPath, query: query, timeout: 120) }
             }
             let data = try await pending.removeValue(forKey: piece)!.value
             try handle.write(contentsOf: data)

@@ -172,7 +172,7 @@ final class FilmSession {
         !server.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    /// Jellyfin's `X-Emby-Token` header accepts a signed-in session's access
+    /// Jellyfin's `Authorization` header token accepts a signed-in session's access
     /// token exactly the same way it accepts a plain API key, so a signed-in
     /// user needs no separate token here — prefer that session (it's what
     /// makes watch-progress reporting work at all, see
@@ -225,7 +225,7 @@ final class FilmSession {
         if isBlurayDisc {
             let url = serverURL.appending(path: "Videos/\(item.id)/stream").appending(queryItems: [.init(name: "static", value: "true")])
             do {
-                disc = try await MVCPictureSource.open(url: url, headers: ["X-Emby-Token": token])
+                disc = try await MVCPictureSource.open(url: url, headers: ["Authorization": JellyfinClientIdentity.authorizationHeader(token: token)])
             } catch {
                 self.error = "The disc couldn't be read: \(error.localizedDescription)"
                 AppLogger.filmPlayer.error("Disc open failed: \(error.localizedDescription)")
