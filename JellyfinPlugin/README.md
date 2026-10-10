@@ -78,6 +78,20 @@ credit is in the notices file; don't drop it if this plugin is redistributed.
 
 ## Install
 
+> **Keep Jellyfin and this plugin up to date, by hand.** Jellyfin has no
+> auto-update for the server on macOS or Windows (the installers don't
+> update themselves, and a Docker image only changes when it is pulled
+> again), and a plugin installed by copying its files, like this one, never
+> updates either. Each plugin build targets one Jellyfin version: this one
+> is for **Jellyfin 12.2**, and it won't load on 10.x. After upgrading
+> Jellyfin, rebuild and copy the plugin again (steps below), set
+> `targetAbi` in the plugin folder's `meta.json` to the new version, and do a
+> full restart. Newer plugin features need a matching build: the converted
+> picture Convolution plays Dolby Vision profile 5 in 3D with (Picture tiers,
+> below) is new in this one. Before a major Jellyfin upgrade, stop the server
+> and back up its `config`, `data` and `plugins` folders: the database is
+> migrated on the first start and can't be taken back to the old version.
+
 1. Build the plugin: `dotnet build Jellyfin.Plugin.AtmosObjects -c Release`.
    This targets .NET 10 and Jellyfin 12.2 (12.x dropped the legacy
    `X-Emby-Token` header and `api_key` query: clients send
