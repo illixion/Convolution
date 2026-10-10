@@ -8,6 +8,8 @@
 #   scripts/dev-jellyfin.sh reset   wipe its state and re-seed/reinstall from scratch
 #   scripts/dev-jellyfin.sh down    stop it
 #   scripts/dev-jellyfin.sh rm      stop it and delete everything it stored
+#   scripts/dev-jellyfin.sh native up|reset|down|rm
+#                                   the same instance run natively on the Mac (below)
 #
 # Serves http://127.0.0.1:8097 (loopback only). Needs docker (colima), the
 # .NET SDK (to build the plugin) and ffmpeg. Seeds a Movies library with three
@@ -32,11 +34,35 @@
 # whole dev instance disposable via `rm` the same way dev-stash.sh is,
 # rather than leaving a native Jellyfin install and a native truehdd build
 # behind on the Mac itself.
+#
+# `native` runs Jellyfin's macOS build instead, on port 8098 with its own
+# state, for what a container can't do: encode with VideoToolbox (the
+# plugin's picture tiers) and convert MV-HEVC (`Spatial/`, through the
+# `vergence` CLI, built from ../vergence). It uses the macOS truehdd as is,
+# Homebrew's ffmpeg, and adds the spatial recording at
+# $HYPNOS_DEV_JELLYFIN_SPATIAL (default ~/Downloads/IMG_0664.MOV) to Movies
+# when that file exists. Both instances can run at once.
 set -euo pipefail
+
+native=0
+if [[ "${1:-}" == native ]]; then
+    native=1
+    shift
+fi
 
 name=hypnos-dev-jellyfin
 port=8097
 root="${HYPNOS_DEV_JELLYFIN_DIR:-$HOME/.local/share/hypnos-dev-jellyfin}"
+# Where the libraries' folders are, as the server sees them.
+media=/media
+if (( native )); then
+    port=8098
+    root="${HYPNOS_DEV_JELLYFIN_NATIVE_DIR:-$HOME/.local/share/hypnos-dev-jellyfin-native}"
+    media="$root/data"
+fi
+native_version=10.11.11
+native_sha256=27c0bcbeac7a698cf0fd034e347f124f69083bc4463816099b52bebead614a47
+spatial="${HYPNOS_DEV_JELLYFIN_SPATIAL:-$HOME/Downloads/IMG_0664.MOV}"
 base="http://127.0.0.1:$port"
 apikey_file="$root/config/dev-api-key.txt"
 demo="${HYPNOS_DEV_JELLYFIN_DEMO:-$HOME/Downloads/DolbyElement4K_VisionAtmos.mkv}"
@@ -363,7 +389,15 @@ seed_media() {
     # :ro, and docker can't create a new mountpoint inside a read-only bind
     # mount (confirmed: "read-only file system" from runc) — so touch an
     # empty placeholder here first.
-    touch "$root/data/movies/DolbyElement4K_VisionAtmos.mkv"
+    if (( native )); then
+        ln -sf "$demo" "$root/data/movies/DolbyElement4K_VisionAtmos.mkv"
+        if [[ -f "$spatial" ]]; then
+            mkdir -p "$root/data/movies/Spatial Sample"
+            ln -sf "$spatial" "$root/data/movies/Spatial Sample/Spatial Sample.mov"
+        fi
+    else
+        touch "$root/data/movies/DolbyElement4K_VisionAtmos.mkv"
+    fi
 
     # Video + EAC3 only (streams 0 and 2 of the demo): forces the plugin onto
     # the EAC3/Cavern path, since GetState prefers TrueHD when both are present.
@@ -459,11 +493,17 @@ META
 }
 
 install_plugin_config() {
+    local truehdd=/truehdd/truehdd vergence=""
+    if (( native )); then
+        truehdd="$repo_root/JellyfinPlugin/truehdd/checkout/target/release/truehdd"
+        vergence="$root/vergence-build/release/vergence"
+    fi
     mkdir -p "$root/config/plugins/configurations"
-    cat > "$root/config/plugins/configurations/Jellyfin.Plugin.AtmosObjects.xml" <<'XML'
+    cat > "$root/config/plugins/configurations/Jellyfin.Plugin.AtmosObjects.xml" <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <PluginConfiguration>
-  <TruehddPath>/truehdd/truehdd</TruehddPath>
+  <TruehddPath>$truehdd</TruehddPath>
+  <Mvc3dPath>$vergence</Mvc3dPath>
   <CacheDirectory />
   <SegmentSeconds>10</SegmentSeconds>
   <EncoderParallelism>4</EncoderParallelism>
@@ -485,6 +525,97 @@ start_container() {
             "$image" >/dev/null
     fi
     wait_for_server
+}
+
+# The macOS build of Jellyfin, fetched once and checked against the hash
+# pinned here (the repo publishes none beside the tarball). Apple silicon only,
+# like the truehdd build. Its `jellyfin` apphost is unsigned and gets
+# SIGKILLed at launch; signing it in place fails (codesign treats the folder's
+# .dlls as subcomponents), so it is signed ad hoc outside the folder and
+# copied back.
+install_native_server() {
+    local dir="$root/server"
+    [[ -x "$dir/jellyfin/jellyfin" ]] && return
+    local tarball="jellyfin_${native_version}-arm64.tar.xz"
+    local url="https://repo.jellyfin.org/files/server/macos/stable/v${native_version}/arm64/$tarball"
+    mkdir -p "$dir"
+    echo "dev-jellyfin: downloading Jellyfin $native_version for macOS (first run only)..."
+    curl -fsSL -o "$dir/$tarball" "$url"
+    if [[ "$(shasum -a 256 "$dir/$tarball" | awk '{print $1}')" != "$native_sha256" ]]; then
+        echo "dev-jellyfin: $tarball doesn't match its pinned hash" >&2
+        rm -f "$dir/$tarball"
+        exit 1
+    fi
+    tar -xJf "$dir/$tarball" -C "$dir"
+    rm -f "$dir/$tarball"
+    cp "$dir/jellyfin/jellyfin" "$dir/jellyfin-apphost"
+    codesign -s - -f "$dir/jellyfin-apphost" >/dev/null 2>&1
+    mv "$dir/jellyfin-apphost" "$dir/jellyfin/jellyfin"
+}
+
+# The `vergence` CLI the plugin runs for `Spatial/`, built from the checkout's
+# committed HEAD (not its working tree, which another agent may be halfway
+# through editing) into the instance's own folder.
+build_vergence() {
+    local checkout="$repo_root/../vergence"
+    if [[ ! -d "$checkout/.git" ]]; then
+        echo "dev-jellyfin: no vergence checkout at $checkout; Spatial/ will answer 404" >&2
+        return
+    fi
+    local src="$root/vergence-src"
+    rm -rf "$src"
+    mkdir -p "$src"
+    git -C "$checkout" archive HEAD | tar -x -C "$src"
+    mkdir -p "$root/log"
+    if ! swift build -c release --package-path "$src" --scratch-path "$root/vergence-build" --product vergence \
+        > "$root/log/vergence-build.log" 2>&1; then
+        tail -30 "$root/log/vergence-build.log" >&2
+        exit 1
+    fi
+}
+
+# Starts the native server in the background, loopback only: network.xml is
+# written before its first start so it never listens on another interface.
+# Same layout as the container's /config, so plugins and the API key sit
+# where the other functions expect them.
+start_native() {
+    mkdir -p "$root"/{config/config,cache,log}
+    if [[ -f "$root/server.pid" ]] && kill -0 "$(cat "$root/server.pid")" 2>/dev/null; then
+        wait_for_server
+        return
+    fi
+    cat > "$root/config/config/network.xml" <<XML
+<?xml version="1.0" encoding="utf-8"?>
+<NetworkConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <InternalHttpPort>$port</InternalHttpPort>
+  <LocalNetworkAddresses><string>127.0.0.1</string></LocalNetworkAddresses>
+  <EnableIPv6>false</EnableIPv6>
+  <EnableRemoteAccess>false</EnableRemoteAccess>
+  <AutoDiscovery>false</AutoDiscovery>
+  <EnableUPnP>false</EnableUPnP>
+</NetworkConfiguration>
+XML
+    local server="$root/server/jellyfin"
+    nohup "$server/jellyfin" --datadir "$root/config" --configdir "$root/config/config" \
+        --cachedir "$root/cache" --logdir "$root/log" --webdir "$server/jellyfin-web" \
+        --ffmpeg "$(command -v ffmpeg)" > "$root/log/server.out" 2>&1 &
+    echo $! > "$root/server.pid"
+    wait_for_server
+}
+
+# Stops the server this script started, by the PID it recorded.
+stop_native() {
+    [[ -f "$root/server.pid" ]] || return 0
+    local pid
+    pid=$(cat "$root/server.pid")
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid"
+        for _ in $(seq 1 20); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.5
+        done
+    fi
+    rm -f "$root/server.pid"
 }
 
 # Completes the first-run wizard, creates the dev user + a Movies library
@@ -538,10 +669,10 @@ setup_and_scan() {
         # the only metadata source Jellyfin ever consults for these items.
         api -X POST "$base/Library/VirtualFolders?name=Movies&collectionType=movies&refreshLibrary=true" \
             -H "X-Emby-Token: $token" -H 'Content-Type: application/json' \
-            -d '{"LibraryOptions":{"PathInfos":[{"Path":"/media/movies"}],"EnablePhotos":false,"EnableRealtimeMonitor":false,"EnableInternetProviders":false}}' >/dev/null
+            -d '{"LibraryOptions":{"PathInfos":[{"Path":"'"$media"'/movies"}],"EnablePhotos":false,"EnableRealtimeMonitor":false,"EnableInternetProviders":false}}' >/dev/null
         api -X POST "$base/Library/VirtualFolders?name=TV%20Shows&collectionType=tvshows&refreshLibrary=true" \
             -H "X-Emby-Token: $token" -H 'Content-Type: application/json' \
-            -d '{"LibraryOptions":{"PathInfos":[{"Path":"/media/tvshows"}],"EnablePhotos":false,"EnableRealtimeMonitor":false,"EnableInternetProviders":false}}' >/dev/null
+            -d '{"LibraryOptions":{"PathInfos":[{"Path":"'"$media"'/tvshows"}],"EnablePhotos":false,"EnableRealtimeMonitor":false,"EnableInternetProviders":false}}' >/dev/null
 
         api -X POST "$base/Auth/Keys?App=hypnos-dev" -H "X-Emby-Token: $token" >/dev/null
         local key
@@ -689,6 +820,36 @@ report_partial_progress() {
     api -X POST "$base/Sessions/Playing/Stopped" -H "X-Emby-Token: $token" -H 'Content-Type: application/json' \
         -d "{\"ItemId\":\"$itemId\",\"PlaySessionId\":\"$sessionId\",\"PositionTicks\":$ticks}" >/dev/null
 }
+
+if (( native )); then
+    case "${1:-up}" in
+        up|reset)
+            if [[ "${1:-up}" == reset ]]; then
+                stop_native
+                rm -rf "${root:?}"/config "${root:?}"/cache
+            fi
+            install_native_server
+            build_plugin
+            build_vergence
+            seed_media
+            install_plugin_config
+            start_native
+            setup_and_scan
+            ;;
+        down)
+            stop_native
+            ;;
+        rm)
+            stop_native
+            rm -rf "${root:?}"
+            ;;
+        *)
+            echo "usage: $0 native up|reset|down|rm" >&2
+            exit 2
+            ;;
+    esac
+    exit 0
+fi
 
 case "${1:-up}" in
     up)

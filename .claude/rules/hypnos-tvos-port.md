@@ -348,6 +348,19 @@ library, and mints an API key written to `config/dev-api-key.txt` under
 chmod 600, never printed. `reset` wipes config/cache and redoes all of
 that; `down`/`rm` stop it or delete everything.
 
+`scripts/dev-jellyfin.sh native up|reset|down|rm` runs the same instance on
+Jellyfin's macOS build instead, at `http://127.0.0.1:8098` under
+`$HYPNOS_DEV_JELLYFIN_NATIVE_DIR` (default
+`~/.local/share/hypnos-dev-jellyfin-native`), for the two things the Linux
+container can't do: VideoToolbox picture tiers and MV-HEVC `Spatial/`
+streaming. It downloads the pinned 10.11.11 arm64 tarball once, signs its
+apphost ad hoc (unsigned, it is SIGKILLed at launch), writes a loopback-only
+`network.xml` before the first start, uses Homebrew ffmpeg and the macOS
+truehdd, builds `vergence` from `../vergence`'s committed HEAD into its own
+folder, and adds `$HYPNOS_DEV_JELLYFIN_SPATIAL` (default
+`~/Downloads/IMG_0664.MOV`, a Vision Pro recording; Jellyfin titles it from
+its own metadata) to Movies. Both instances can run at once.
+
 Seeds a Movies library from `$HYPNOS_DEV_JELLYFIN_DEMO` (default
 `~/Downloads/DolbyElement4K_VisionAtmos.mkv`, the public Dolby Atmos demo —
 TrueHD + EAC3/JOC tracks over the same UHD HEVC video) with three items, one

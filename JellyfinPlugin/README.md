@@ -353,8 +353,10 @@ HEVC Main 10 PQ BT.2020 without the RPU; init plus consecutive segments
 decode cleanly, and the original's segments 10–11 followed by the 1080 tier's
 12–13 decode as one stream. The container's four Arm cores make 1080 at
 about 0.3× realtime (a cold mid-film segment in 11–14 s), too slow to watch;
-VideoToolbox on a Mac (checked by hand with the same arguments, Homebrew
-ffmpeg 8.1 on an M-series Mac) makes 20 s of 1080 in 11 s from 4K (software decode and scaling included).
+VideoToolbox on a Mac (the native dev instance, `scripts/dev-jellyfin.sh
+native up`, Homebrew ffmpeg 8.1 on an M-series Mac) serves ten cold 1 s 1080
+segments of the 4K demo in 7 s, the first in 2.6 s and the rest in 0.2–1 s
+each (software decode and scaling included). An M1 server will be slower.
 `dotnet run` on `JellyfinPlugin/TierPlanningCheck` checks the decisions
 (tiers offered, forced keyframes, encoder arguments and choice, the init's
 empty edit), which live in `VideoTierPlanning.cs`.
