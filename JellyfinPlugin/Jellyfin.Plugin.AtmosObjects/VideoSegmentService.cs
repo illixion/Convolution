@@ -59,6 +59,8 @@ public sealed class VideoSegmentService
     /// <summary>How far ahead of a run's progress a request still waits for it instead of starting another.</summary>
     private const int FollowSegments = 8;
     private static readonly TimeSpan SegmentWait = TimeSpan.FromSeconds(45);
+    /// <summary>How far a produced segment may present from its indexed start (see <see cref="NearestSegment"/>).</summary>
+    private const double MatchToleranceSeconds = 0.010;
 
     private readonly ILibraryManager _libraryManager;
     private readonly IMediaSourceManager _mediaSourceManager;
@@ -432,7 +434,16 @@ public sealed class VideoSegmentService
 
     private static double NextStart(List<double> starts, int segment) => segment + 1 < starts.Count ? starts[segment + 1] : double.MaxValue;
 
-    /// <summary>The segment starting within 2 ms of <paramref name="seconds"/> (Cues are ms-rounded).</summary>
+    /// <summary>
+    /// The segment whose indexed start is nearest <paramref name="seconds"/>,
+    /// if it is within <see cref="MatchToleranceSeconds"/> and well inside
+    /// the gap to its neighbours. The Cues are not exact: Baby Driver's
+    /// segment 1893 is indexed at 1664.872 s and presents at 1664.870 s, after
+    /// a one-frame segment. A fixed 2 ms window rejected it, so the segment
+    /// was never written and the client asked for it forever while the
+    /// audio played on. Keyframes are at least a frame apart, so a match
+    /// within 40% of the gap can't be the neighbour.
+    /// </summary>
     private static int? NearestSegment(List<double> starts, double seconds)
     {
         var i = starts.BinarySearch(seconds);
@@ -441,15 +452,25 @@ public sealed class VideoSegmentService
             i = ~i;
         }
 
+        int? best = null;
         foreach (var candidate in new[] { i - 1, i })
         {
-            if (candidate >= 0 && candidate < starts.Count && Math.Abs(starts[candidate] - seconds) < 0.002)
+            if (candidate >= 0 && candidate < starts.Count
+                && (best is not { } b || Math.Abs(starts[candidate] - seconds) < Math.Abs(starts[b] - seconds)))
             {
-                return candidate;
+                best = candidate;
             }
         }
 
-        return null;
+        if (best is not { } n)
+        {
+            return null;
+        }
+
+        var gap = Math.Min(n > 0 ? starts[n] - starts[n - 1] : double.MaxValue,
+            n + 1 < starts.Count ? starts[n + 1] - starts[n] : double.MaxValue);
+        var tolerance = Math.Min(MatchToleranceSeconds, gap * 0.4);
+        return Math.Abs(starts[n] - seconds) <= tolerance ? n : null;
     }
 
     /// <summary>Drops the least recently used segments beyond the per-item budget.</summary>
