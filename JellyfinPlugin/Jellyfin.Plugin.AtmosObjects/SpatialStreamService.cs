@@ -11,28 +11,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.AtmosObjects;
 
-/// <summary>What <c>vergence sbs --info</c> says about an item, plus where it was read from.</summary>
-public sealed class SpatialInfo
-{
-    public bool Spatial { get; set; }
-    public int Width { get; set; }
-    public int Height { get; set; }
-    public int EyeWidth { get; set; }
-    public int EyeHeight { get; set; }
-    public bool HalfWidth { get; set; }
-    public double DurationSeconds { get; set; }
-    public double FrameRate { get; set; }
-    public double SegmentSeconds { get; set; }
-    public int Segments { get; set; }
-    public long BitsPerSecond { get; set; }
-    public bool Hdr { get; set; }
-    /// <summary>Why the item can't be streamed side by side, when it can't.</summary>
-    public string? Reason { get; set; }
-    /// <summary>The source file's size and modification time when this was read; a change invalidates the cache.</summary>
-    public long SourceBytes { get; set; }
-    public long SourceTicks { get; set; }
-}
-
 /// <summary>
 /// Streams a spatial video (MV-HEVC, as a Vision Pro or iPhone records it) as
 /// side-by-side HEVC over HLS, for players that can't decode its second view
@@ -78,6 +56,8 @@ public sealed partial class SpatialStreamService
     private readonly IApplicationPaths _paths;
     private readonly ILogger<SpatialStreamService> _logger;
     private readonly ConcurrentDictionary<string, ItemState> _items = new();
+    /// <summary>Every run on the server that hasn't finished, guarded by <see cref="_runsGate"/> (taken after an item's gate, never before).</summary>
+    private readonly List<Run> _activeRuns = [];
     private readonly object _runsGate = new();
     private readonly object _trimGate = new();
 
@@ -147,21 +127,7 @@ public sealed partial class SpatialStreamService
             return null;
         }
 
-        var text = new StringBuilder();
-        text.Append("#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-INDEPENDENT-SEGMENTS\n");
-        text.Append(CultureInfo.InvariantCulture, $"#EXT-X-TARGETDURATION:{(int)Math.Ceiling(info.SegmentSeconds)}\n");
-        text.Append("#EXT-X-MEDIA-SEQUENCE:0\n");
-        text.Append(CultureInfo.InvariantCulture, $"#EXT-X-MAP:URI=\"init.mp4{query}\"\n");
-        for (var n = 0; n < info.Segments; n++)
-        {
-            var duration = n == info.Segments - 1
-                ? Math.Max(0.001, info.DurationSeconds - (n * info.SegmentSeconds))
-                : info.SegmentSeconds;
-            text.Append(CultureInfo.InvariantCulture, $"#EXTINF:{duration:0.00000},\nSegments/{n}.m4s{query}\n");
-        }
-
-        text.Append("#EXT-X-ENDLIST\n");
-        return text.ToString();
+        return SpatialPlaylist.Build(info, query);
     }
 
     /// <summary>Path of the init segment, waiting for a run to write it (or starting one at the beginning).</summary>
@@ -268,11 +234,12 @@ public sealed partial class SpatialStreamService
         public volatile bool Finished;
         public readonly CancellationTokenSource Cancellation = new();
 
-        public bool Covers(int segment, int follow) => !Finished && segment >= FirstSegment && segment <= LastSegment
-            && segment <= NextSegment + follow;
+        public SpatialRunProgress Progress => new(Finished, FirstSegment, LastSegment, NextSegment);
+
+        public bool Covers(int segment, int follow) => Progress.Covers(segment, follow);
     }
 
-    private static int FollowSegments(SpatialInfo info) => Math.Max(2, (int)Math.Ceiling(FollowSeconds / info.SegmentSeconds));
+    private static int FollowSegments(SpatialInfo info) => SpatialRunPlanner.FollowSegments(info.SegmentSeconds, FollowSeconds);
 
     private static string SegmentPath(ItemState state, int segment) => Path.Combine(state.Directory, $"{segment}.m4s");
 
@@ -318,7 +285,7 @@ public sealed partial class SpatialStreamService
             try
             {
                 var cached = JsonSerializer.Deserialize<SpatialInfo>(await File.ReadAllTextAsync(infoPath, ct).ConfigureAwait(false), AtmosSceneService.JsonOptions);
-                if (cached is not null && cached.SourceBytes == file.Length && cached.SourceTicks == file.LastWriteTimeUtc.Ticks)
+                if (SpatialInfoCache.IsCurrent(cached, file.Length, file.LastWriteTimeUtc.Ticks))
                 {
                     return cached;
                 }
@@ -335,11 +302,11 @@ public sealed partial class SpatialStreamService
             }
         }
 
-        var info = await ProbeAsync(state, ct).ConfigureAwait(false);
+        var (info, answered) = await ProbeAsync(state, ct).ConfigureAwait(false);
         info.SourceBytes = file.Length;
         info.SourceTicks = file.LastWriteTimeUtc.Ticks;
-        // Not cached when vergence couldn't run at all, so installing it later works without a restart.
-        if (info.Spatial || info.Reason is null)
+        // Not cached when vergence couldn't run or failed, so installing or updating it later works without a restart.
+        if (SpatialInfoCache.ShouldStore(info, answered))
         {
             System.IO.Directory.CreateDirectory(state.Directory);
             var tmp = infoPath + ".tmp";
@@ -350,25 +317,26 @@ public sealed partial class SpatialStreamService
         return info;
     }
 
-    private async Task<SpatialInfo> ProbeAsync(ItemState state, CancellationToken ct)
+    /// <summary>The item's info, and whether vergence read the file and answered.</summary>
+    private async Task<(SpatialInfo Info, bool Answered)> ProbeAsync(ItemState state, CancellationToken ct)
     {
         // Only HEVC in a QuickTime-family container can be MV-HEVC spatial
         // video; anything else is answered without starting a process.
         if (!Containers.Contains(Path.GetExtension(state.MediaPath).ToLowerInvariant()))
         {
-            return new SpatialInfo { Reason = "not a QuickTime or MP4 file" };
+            return (new SpatialInfo { Reason = "not a QuickTime or MP4 file" }, false);
         }
 
         var video = _mediaSourceManager.GetMediaStreams(state.ItemId).FirstOrDefault(s => s.Type == MediaStreamType.Video);
         if (video?.Codec is { } codec && !string.Equals(codec, "hevc", StringComparison.OrdinalIgnoreCase))
         {
-            return new SpatialInfo { Reason = "not HEVC" };
+            return (new SpatialInfo { Reason = "not HEVC" }, false);
         }
 
         var vergence = AtmosSceneService.VergencePath(_paths);
         if (!File.Exists(vergence))
         {
-            return new SpatialInfo { Spatial = false, Reason = $"vergence not found at {vergence}; set Mvc3dPath in the plugin configuration" };
+            return (new SpatialInfo { Spatial = false, Reason = $"vergence not found at {vergence}; set Mvc3dPath in the plugin configuration" }, false);
         }
 
         var args = new List<string> { "sbs", state.MediaPath, "--info" };
@@ -386,8 +354,8 @@ public sealed partial class SpatialStreamService
         {
             var problem = (await stderr.ConfigureAwait(false)).Trim();
             _logger.LogWarning("vergence --info failed for {ItemId}: {Problem}", state.ItemId, problem);
-            // Answered for the item, not for the server: a file vergence can't read stays unreadable.
-            return new SpatialInfo { Spatial = false, Reason = problem.Length > 0 ? problem : $"vergence exited {process.ExitCode}" };
+            // Reported for the item, but not stored: an updated vergence gets another look.
+            return (new SpatialInfo { Spatial = false, Reason = problem.Length > 0 ? problem : $"vergence exited {process.ExitCode}" }, false);
         }
 
         var info = JsonSerializer.Deserialize<SpatialInfo>(output, AtmosSceneService.JsonOptions) ?? new SpatialInfo();
@@ -401,7 +369,7 @@ public sealed partial class SpatialStreamService
                 state.ItemId, info.Width, info.Height, info.Segments, info.SegmentSeconds);
         }
 
-        return info;
+        return (info, true);
     }
 
     private static IEnumerable<string> PictureArguments()
@@ -429,19 +397,11 @@ public sealed partial class SpatialStreamService
     {
         var info = state.Info!;
         // Up to RunSeconds, stopping before a segment that is already cached.
-        var last = Math.Min(info.Segments - 1, segment + Math.Max(1, (int)Math.Ceiling(RunSeconds / info.SegmentSeconds)) - 1);
-        for (var n = segment + 1; n <= last; n++)
-        {
-            if (File.Exists(SegmentPath(state, n)))
-            {
-                last = n - 1;
-                break;
-            }
-        }
+        var last = SpatialRunPlanner.LastSegment(segment, info.Segments, info.SegmentSeconds, RunSeconds, n => File.Exists(SegmentPath(state, n)));
 
         // A seek elsewhere (or far ahead) makes runs for the old position pointless.
         var follow = FollowSegments(info);
-        foreach (var old in state.Runs.Where(r => !r.Covers(segment, follow)))
+        foreach (var old in SpatialRunPlanner.Superseded(state.Runs, r => r.Progress, segment, follow))
         {
             old.Cancellation.Cancel();
         }
@@ -467,6 +427,11 @@ public sealed partial class SpatialStreamService
             finally
             {
                 run.Finished = true;
+                lock (_runsGate)
+                {
+                    _activeRuns.Remove(run);
+                }
+
                 TrimCache();
             }
         });
@@ -476,20 +441,21 @@ public sealed partial class SpatialStreamService
     /// Converting is a hardware decode and encode of two views at once, so
     /// only <see cref="PluginConfiguration.SpatialRuns"/> run on the server at
     /// a time: beyond that, the runs whose viewers asked least recently stop.
+    /// Runs already stopping don't count, or a seek (which stops its item's
+    /// old run first) would also stop another viewer's.
     /// </summary>
     private void LimitRuns(Run started)
     {
         lock (_runsGate)
         {
-            var active = _items.Values
-                .SelectMany(item => { lock (item.Gate) { return item.Runs.Where(r => !r.Finished && r != started).ToList(); } })
-                .OrderBy(r => r.Item.LastRequest)
-                .ToList();
-            foreach (var run in active.Take(Math.Max(0, active.Count + 1 - Math.Max(1, Config.SpatialRuns))))
+            var active = _activeRuns.Where(r => !r.Finished && !r.Cancellation.IsCancellationRequested);
+            foreach (var run in SpatialRunPlanner.OverLimit(active, r => r.Item.LastRequest, Config.SpatialRuns))
             {
                 _logger.LogInformation("Stopping the spatial run for {ItemId} to make room", run.Item.ItemId);
                 run.Cancellation.Cancel();
             }
+
+            _activeRuns.Add(started);
         }
     }
 
@@ -567,27 +533,18 @@ public sealed partial class SpatialStreamService
                 return;
             }
 
-            var budget = Math.Max(512, Config.SpatialCacheMegabytes) * 1024L * 1024L;
+            var budget = SpatialCacheTrimmer.BudgetBytes(Config.SpatialCacheMegabytes);
             var files = new DirectoryInfo(Root).EnumerateFiles("*.m4s", SearchOption.AllDirectories)
-                .Where(f => !f.Name.StartsWith('.'))
-                .OrderByDescending(f => f.LastAccessTimeUtc > f.LastWriteTimeUtc ? f.LastAccessTimeUtc : f.LastWriteTimeUtc)
-                .ToList();
-            var grace = DateTime.UtcNow - TrimGrace;
-            long total = 0;
-            var dropped = 0;
-            foreach (var file in files)
+                .Select(f => new SpatialCacheFile(f.FullName, f.Length, f.LastAccessTimeUtc, f.LastWriteTimeUtc));
+            var drop = SpatialCacheTrimmer.ToDelete(files, budget, DateTime.UtcNow, TrimGrace);
+            foreach (var file in drop)
             {
-                total += file.Length;
-                if (total > budget && file.LastAccessTimeUtc < grace && file.LastWriteTimeUtc < grace)
-                {
-                    TryDelete(file.FullName);
-                    dropped++;
-                }
+                TryDelete(file.Path);
             }
 
-            if (dropped > 0)
+            if (drop.Count > 0)
             {
-                _logger.LogInformation("Spatial cache: dropped {Count} segments over {Megabytes} MB", dropped, budget / (1024 * 1024));
+                _logger.LogInformation("Spatial cache: dropped {Count} segments over {Megabytes} MB", drop.Count, budget / (1024 * 1024));
             }
         }
     }

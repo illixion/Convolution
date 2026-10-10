@@ -404,7 +404,8 @@ converted ahead of time, and the whole video is never stored:
 
 - **`GET /Spatial/{itemId}`** asks `vergence sbs --info` once per item (only
   for HEVC in MOV/MP4; anything else is answered at once) and keeps the
-  answer in `info.json`, until the file changes. Convolution's Quest app asks
+  answer in `info.json`, until the file changes (not when vergence is missing
+  or fails, so installing or updating it needs no restart). Convolution's Quest app asks
   for every HEVC MOV/MP4 it plays, and plays `playlist` instead of the file
   when `spatial` is true, as `video3DFormat` (`FullSideBySide`).
 - **Segments are on a fixed grid** (`SpatialSegmentSeconds`, default 4 s, from
@@ -426,6 +427,10 @@ converted ahead of time, and the whole video is never stored:
   segment, so the default keeps about 15 minutes.
 - **`SpatialHalfWidth`, `SpatialMaxEye` and `SpatialQuality`** (low, standard,
   high, max) set the picture. The segments of each setting are kept apart.
+
+`dotnet run` on `JellyfinPlugin/SpatialStreamCheck` checks these rules (the
+playlist, run ranges, what a seek or the run limit stops, cache trimming and
+when `info.json` holds), which live in `SpatialStreamPlanning.cs`.
 
 Decoding MV-HEVC needs Apple's frameworks: this works on a Jellyfin server
 running on a Mac (`Mvc3dPath` names `vergence`), and elsewhere every item
