@@ -186,11 +186,10 @@ extension VideoWindowModel {
         #if HYPNOS_YOUTUBE
         if stepYouTubeDownFor3D(pictureHeight: sample.sourceHeight) { return }
         #endif
-        // A smaller picture, one step at a time (4K to 1440p, then 1080p),
-        // never below 1080p: below that 3D isn't worth the picture.
-        if offersQualityChoice, qualityPreference == .auto,
-           let next = LibraryStreamQuality.smallerPicture(than: pictureHeight(sample), from: streamLevel),
-           (next.maxHeight ?? 0) >= 1080 {
+        // Straight to 1080p, never below: on a Vision Pro 1440p still
+        // dropped frames in 3D, and below 1080p 3D isn't worth the picture.
+        if offersQualityChoice, qualityPreference == .auto, pictureHeight(sample) > 1080,
+           let next = LibraryStreamQuality.smallerPicture(than: 1081, from: streamLevel) {
             AppLogger.videoWindow.info("3D couldn't keep up at \(self.streamLevel?.rawValue ?? "original", privacy: .public), \(sample.sourceHeight, privacy: .public) lines; stepping to \(next.rawValue, privacy: .public)")
             switchStream(to: next, reason: "3D couldn't keep up")
             showQualityNotice("Quality lowered to \(next.title) so 3D plays smoothly")

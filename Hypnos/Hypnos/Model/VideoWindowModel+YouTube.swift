@@ -81,12 +81,13 @@ extension VideoWindowModel {
     }
 
     /// 3D can't keep up with a YouTube picture `pictureHeight` high: under
-    /// Auto, cap it one level lower (4K to 1440p, then 1080p, no lower).
+    /// Auto, cap it at 1080p (1440p still dropped frames on a Vision Pro).
     /// False when it didn't step, and the window gives its advice instead.
     func stepYouTubeDownFor3D(pictureHeight: Int) -> Bool {
         guard youTubeID != nil, youTubeQuality == .auto else { return false }
         let current = youTubeAutoHeight ?? (pictureHeight > 0 ? pictureHeight : 2160)
-        guard let next = [1440, 1080].first(where: { $0 < current }) else { return false }
+        guard current > 1080 else { return false }
+        let next = 1080
         AppLogger.youtube.info("3D couldn't keep up at \(current, privacy: .public) lines; capping at \(next, privacy: .public)p")
         youTubeAutoHeight = next
         updatePictureResolutionCap()

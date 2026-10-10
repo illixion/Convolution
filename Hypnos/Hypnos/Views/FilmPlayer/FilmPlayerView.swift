@@ -206,8 +206,8 @@ struct FilmPlayerView: View {
 
     #if os(visionOS)
     /// About 6 s of a 3D picture showing under three quarters of its frames
-    /// (three overloaded reports in a row). Under Auto the picture steps one
-    /// tier down (the conversion's cost follows the picture's size), then
+    /// (three overloaded reports in a row). Under Auto the picture steps to
+    /// 1080p (the conversion's cost follows the picture's size), then
     /// 20 s pass before the next reports count; otherwise the viewer is told
     /// once per film.
     private func noteStereoPerformance(_ sample: RAVEStereoPerformance) {
@@ -790,6 +790,9 @@ struct FilmTransport: View {
         }
         if player.audioEncoding != nil {
             ObjectAudioQualityMenu(player: player, onOpenChanged: menuChanged)
+        }
+        if !player.video.offeredPictureHeights.isEmpty {
+            FilmPictureQualityMenu(player: player.video, onOpenChanged: menuChanged)
         }
         if !session.subtitles.tracks.isEmpty {
             SubtitleMenu(controller: session.subtitles, onOpenChanged: menuChanged)

@@ -12,10 +12,8 @@ struct FilmPictureQualityPicker: View {
 
     private var choices: [FilmPictureQuality] { FilmPictureQuality.choices(offering: player.offeredPictureHeights) }
 
-    /// What the picker shows as chosen: Auto where it isn't offered is the original.
     private var selected: FilmPictureQuality {
-        let quality = FilmPictureQuality(rawValue: stored) ?? .auto
-        return choices.contains(quality) ? quality : .original
+        FilmPictureQuality.selected(stored: stored, offering: player.offeredPictureHeights)
     }
 
     var body: some View {
@@ -40,5 +38,45 @@ struct FilmPictureQualityPicker: View {
             return "Auto plays the original and lowers it for this film if 3D can't keep up. Now \(now)\(changing)."
         }
         return "Lower tiers are made by the server as they play and use less of the connection. Now \(now)\(changing)."
+    }
+}
+
+/// The same choice in the transport, beside Audio Quality, so a tier is one
+/// tap away mid-film; shown only for a film with tiers on offer.
+struct FilmPictureQualityMenu: View {
+    let player: FilmVideoPlayer
+    var onOpenChanged: (Bool) -> Void = { _ in }
+    @AppStorage(FilmPictureQuality.defaultsKey) private var stored = FilmPictureQuality.auto.rawValue
+
+    private var selected: FilmPictureQuality {
+        FilmPictureQuality.selected(stored: stored, offering: player.offeredPictureHeights)
+    }
+
+    var body: some View {
+        PlayerChoiceMenu(title: "Picture Quality", systemImage: "gauge.with.dots.needle.67percent",
+                         help: "Picture: \(FilmPictureQuality.name(of: player.pictureHeight))",
+                         onOpenChanged: onOpenChanged) { close in
+            ForEach(FilmPictureQuality.choices(offering: player.offeredPictureHeights), id: \.self) { quality in
+                Button {
+                    close()
+                    stored = quality.rawValue
+                    AppLogger.filmPlayer.info("Picture quality → \(quality.rawValue, privacy: .public)")
+                    Task { await player.setPictureHeight(quality.height) }
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(quality.title)
+                            if quality == .auto, selected == .auto {
+                                Text("Now \(FilmPictureQuality.name(of: player.pictureHeight))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    } icon: {
+                        Image(systemName: "checkmark").opacity(quality == selected ? 1 : 0)
+                    }
+                }
+            }
+        }
+        .accessibilityIdentifier("player.pictureQuality")
     }
 }

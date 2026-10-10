@@ -7,9 +7,10 @@
  (RAVEFilm's `FilmVideoIndex.pictureHeights`), so the player can change tier
  at the playhead without moving it.
 
- Auto plays the original and, on visionOS, steps down one tier at a time
- when the 3D picture can't keep up (`FilmPlayerView.noteStereoPerformance`),
- for that film only. Original and the tiers are fixed and never step. A
+ Auto plays the original and, on visionOS, steps straight to 1080p when
+ the 3D picture can't keep up (`FilmPlayerView.noteStereoPerformance`), for
+ that film only: on a Vision Pro 1440p still dropped frames in 3D (Baby
+ Driver, 2026-10-10), so a stop there only delayed the step that works. Original and the tiers are fixed and never step. A
  download plays its original whatever this says.
  */
 
@@ -62,10 +63,19 @@ enum FilmPictureQuality: String, CaseIterable, Sendable {
         return automatic + [.original] + heights.compactMap(FilmPictureQuality.init(height:))
     }
 
-    /// The tier Auto steps to from `current` (nil: the original): the next
-    /// smaller one offered, or nil at the bottom.
+    /// The tier Auto steps to for 3D from `current` (nil: the original):
+    /// 1080p when offered, else the smallest tier below `current`; nil at
+    /// the bottom.
     static func stepDown(from current: Int?, offering heights: [Int]) -> Int? {
-        heights.sorted(by: >).first { tier in current.map { tier < $0 } ?? true }
+        let lower = heights.filter { tier in current.map { tier < $0 } ?? true }
+        return lower.contains(1080) ? 1080 : lower.min()
+    }
+
+    /// What a menu shows as chosen from the stored raw value: Auto where it
+    /// isn't offered is the original.
+    static func selected(stored: String, offering heights: [Int]) -> FilmPictureQuality {
+        let quality = FilmPictureQuality(rawValue: stored) ?? .auto
+        return choices(offering: heights).contains(quality) ? quality : .original
     }
 
     static func name(of height: Int?) -> String {
