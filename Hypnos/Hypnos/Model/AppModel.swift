@@ -1434,13 +1434,15 @@ class AppModel {
     // MARK: - Initialization
 
     init() {
-        // RAVEMedia's depth cache has no notion of this app's cache budget, so
+        // Vergence's depth cache has no notion of this app's cache budget, so
         // it never evicts until told how much disk it may hold. Wired before
         // anything can enqueue a conversion; without it the depth cache grows
         // without bound rather than taking its CacheBudget share.
-        RAVEMediaPolicy.depthCacheCap = { currentSize in
+        VergencePolicy.depthCacheCap = { currentSize in
             CacheBudget.cap(for: .depth, currentSize: currentSize)
         }
+        // Conversions log too, with no player open: send them to DebugTrace.
+        RAVEMediaLog.routeVergenceLogs()
 
         Task.detached(priority: .utility) {
             DepthConversionManager.cleanupOrphanedDownloads()
