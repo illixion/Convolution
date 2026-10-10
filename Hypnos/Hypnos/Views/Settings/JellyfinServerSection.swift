@@ -28,6 +28,7 @@ struct JellyfinServerSection: View {
     var body: some View {
         Section {
             TextField("Server (https://host/jellyfin)", text: $session.server)
+                .textFieldTapTarget()
                 .textContentType(.URL)
                 #if !os(macOS)
                 .keyboardType(.URL)
@@ -52,11 +53,13 @@ struct JellyfinServerSection: View {
                 #endif
             } else {
                 TextField("Username", text: $username)
+                    .textFieldTapTarget()
                     .autocorrectionDisabled()
                     #if !os(macOS)
                     .textInputAutocapitalization(.never)
                     #endif
                 SecureField("Password", text: $password)
+                    .textFieldTapTarget()
                 Button("Sign In") {
                     Task { await signIn() }
                 }
@@ -71,6 +74,7 @@ struct JellyfinServerSection: View {
 
                 platformDisclosureGroup("Use an API key instead") {
                     SecureField("API key", text: $session.apiKey)
+                        .textFieldTapTarget()
                     Text("Browsing works with just a key. Watch-progress sync (resume points, played/unplayed) needs a signed-in user, so it won't update reliably in this mode.")
                         .font(.caption)
                         .foregroundStyle(.secondary)

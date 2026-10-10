@@ -73,6 +73,7 @@ struct NextcloudSettingsSection: View {
         @Bindable var appModel = appModel
 
         TextField("Server URL", text: $appModel.nextcloudServerURL)
+            .textFieldTapTarget()
             .textFieldStyle(.plain)
             .textContentType(.URL)
             .autocorrectionDisabled()

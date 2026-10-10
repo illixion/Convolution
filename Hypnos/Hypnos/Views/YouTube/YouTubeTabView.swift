@@ -119,6 +119,7 @@ struct YouTubeTabView: View {
     private var tvSearchField: some View {
         HStack(spacing: 24) {
             TextField("Search YouTube or paste a link", text: $query)
+                .textFieldTapTarget()
                 .onSubmit { submit() }
                 .submitLabel(.search)
             Button("Search") { submit() }

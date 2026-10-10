@@ -405,9 +405,13 @@ struct MediaDetailSheet: View {
         List {
             Section("Details") {
                 TextField("Title", text: $editTitle)
+                    .textFieldTapTarget()
                 TextField("Code", text: $editCode)
+                    .textFieldTapTarget()
                 TextField("Date (YYYY-MM-DD)", text: $editDate)
+                    .textFieldTapTarget()
                 TextField(creatorLabel, text: $editCreator)
+                    .textFieldTapTarget()
 
                 VStack(alignment: .leading) {
                     Text("Details")
@@ -422,6 +426,7 @@ struct MediaDetailSheet: View {
                     // Hypnos/CLAUDE.md "tvOS") — a single-line fallback keeps
                     // the module compiling.
                     TextField("Details", text: $editDetails)
+                        .textFieldTapTarget()
                     #endif
                 }
             }
@@ -448,6 +453,7 @@ struct MediaDetailSheet: View {
                 }
                 HStack {
                     TextField("Search studios...", text: $studioSearchText)
+                        .textFieldTapTarget()
                         #if !os(macOS)
                         .textInputAutocapitalization(.never)
                         #endif
@@ -487,6 +493,7 @@ struct MediaDetailSheet: View {
                 }
                 HStack {
                     TextField("Search performers...", text: $performerSearchText)
+                        .textFieldTapTarget()
                         #if !os(macOS)
                         .textInputAutocapitalization(.never)
                         #endif
@@ -528,6 +535,7 @@ struct MediaDetailSheet: View {
                 }
                 HStack {
                     TextField("Search tags...", text: $tagSearchText)
+                        .textFieldTapTarget()
                         #if !os(macOS)
                         .textInputAutocapitalization(.never)
                         #endif
@@ -552,6 +560,7 @@ struct MediaDetailSheet: View {
                 ForEach(editUrls.indices, id: \.self) { index in
                     HStack {
                         TextField("URL", text: $editUrls[index])
+                            .textFieldTapTarget()
                             #if !os(macOS)
                             .textInputAutocapitalization(.never)
                             #endif

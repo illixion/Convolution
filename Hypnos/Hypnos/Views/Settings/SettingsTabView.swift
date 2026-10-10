@@ -305,6 +305,7 @@ struct SettingsTabView: View {
 
                 Section {
                     TextField("Server URL", text: $appModel.stashServerURL)
+                        .textFieldTapTarget()
                         .textFieldStyle(.plain)
                         .textContentType(.URL)
                         .autocorrectionDisabled()
@@ -319,6 +320,7 @@ struct SettingsTabView: View {
                         }
 
                     SecureField("API Key (optional)", text: $appModel.stashAPIKey)
+                        .textFieldTapTarget()
                         .textFieldStyle(.plain)
                         .autocorrectionDisabled()
                         #if !os(macOS)

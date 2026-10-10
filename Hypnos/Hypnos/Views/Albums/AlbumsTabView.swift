@@ -118,6 +118,7 @@ struct AlbumsTabView: View {
             // searched by looking inside it, not by name.
             if !isLocalLibrary && appModel.mediaContainers.count > 8 {
                 TextField("Search", text: $query)
+                    .textFieldTapTarget()
                     .roundedTextFieldStyle()
                     .autocorrectionDisabled()
                     .frame(maxWidth: 280)

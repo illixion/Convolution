@@ -284,10 +284,12 @@ struct FiltersTabView: View {
         Section("Search") {
             if isVideoFilter {
                 TextField("Search titles...", text: $appModel.currentVideoFilter.searchTerm)
+                    .textFieldTapTarget()
                     .textFieldStyle(.plain)
                     .autocorrectionDisabled()
             } else {
                 TextField("Search titles...", text: $appModel.currentFilter.searchTerm)
+                    .textFieldTapTarget()
                     .textFieldStyle(.plain)
                     .autocorrectionDisabled()
             }
@@ -372,6 +374,7 @@ struct PhotosFilterSections: View {
     var body: some View {
         Section {
             TextField("Search file names...", text: $criteria.searchTerm)
+                .textFieldTapTarget()
                 .textFieldStyle(.plain)
                 .autocorrectionDisabled()
         } header: {
@@ -723,6 +726,7 @@ struct GalleryFilterView: View {
 
             // Search field
             TextField("Search galleries...", text: $searchText)
+                .textFieldTapTarget()
                 .textFieldStyle(.plain)
                 .autocorrectionDisabled()
                 .onChange(of: searchText) { _, newValue in
@@ -817,6 +821,7 @@ struct TagFilterView: View {
 
             // Search field
             TextField("Search tags...", text: $searchText)
+                .textFieldTapTarget()
                 .textFieldStyle(.plain)
                 .autocorrectionDisabled()
                 .onChange(of: searchText) { _, newValue in
@@ -911,6 +916,7 @@ struct StudioFilterView: View {
 
             // Search field
             TextField("Search studios...", text: $searchText)
+                .textFieldTapTarget()
                 .textFieldStyle(.plain)
                 .autocorrectionDisabled()
                 .onChange(of: searchText) { _, newValue in
@@ -1005,6 +1011,7 @@ struct PerformerFilterView: View {
 
             // Search field
             TextField("Search performers...", text: $searchText)
+                .textFieldTapTarget()
                 .textFieldStyle(.plain)
                 .autocorrectionDisabled()
                 .onChange(of: searchText) { _, newValue in
@@ -1140,18 +1147,22 @@ struct OCountFilterView: View {
                     HStack {
                         if isVideoFilter {
                             TextField("Min", value: $appModel.currentVideoFilter.oCountRange.min, format: .number)
+                                .textFieldTapTarget()
                                 .roundedTextFieldStyle()
                                 .frame(width: 80)
                             Text("to")
                             TextField("Max", value: $appModel.currentVideoFilter.oCountRange.max, format: .number)
+                                .textFieldTapTarget()
                                 .roundedTextFieldStyle()
                                 .frame(width: 80)
                         } else {
                             TextField("Min", value: $appModel.currentFilter.oCountRange.min, format: .number)
+                                .textFieldTapTarget()
                                 .roundedTextFieldStyle()
                                 .frame(width: 80)
                             Text("to")
                             TextField("Max", value: $appModel.currentFilter.oCountRange.max, format: .number)
+                                .textFieldTapTarget()
                                 .roundedTextFieldStyle()
                                 .frame(width: 80)
                         }
@@ -1159,10 +1170,12 @@ struct OCountFilterView: View {
                 } else if oCountModifier.requiresValue {
                     if isVideoFilter {
                         TextField("Value", value: $appModel.currentVideoFilter.oCountValue, format: .number)
+                            .textFieldTapTarget()
                             .roundedTextFieldStyle()
                             .frame(width: 100)
                     } else {
                         TextField("Value", value: $appModel.currentFilter.oCountValue, format: .number)
+                            .textFieldTapTarget()
                             .roundedTextFieldStyle()
                             .frame(width: 100)
                     }

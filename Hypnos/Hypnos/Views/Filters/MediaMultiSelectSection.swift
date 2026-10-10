@@ -115,6 +115,7 @@ struct MediaMultiSelectSection: View {
             } else {
                 if options.count > Self.searchThreshold {
                     TextField("Filter this list...", text: $query)
+                        .textFieldTapTarget()
                         .textFieldStyle(.plain)
                         .autocorrectionDisabled()
                 }

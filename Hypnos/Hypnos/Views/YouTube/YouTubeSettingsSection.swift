@@ -19,6 +19,7 @@ struct YouTubeSettingsSection: View {
     var body: some View {
         Section {
             TextField("Backend (https://host/yt)", text: $backend.endpoint)
+                .textFieldTapTarget()
                 .textContentType(.URL)
                 #if !os(macOS)
                 .keyboardType(.URL)
@@ -26,6 +27,7 @@ struct YouTubeSettingsSection: View {
                 #endif
                 .autocorrectionDisabled()
             SecureField(backend.hasToken ? "Token (saved)" : "Token", text: $tokenDraft)
+                .textFieldTapTarget()
                 .onSubmit(saveToken)
             if !tokenDraft.isEmpty {
                 Button("Save Token", action: saveToken)

@@ -246,6 +246,7 @@ struct RemoteTabView: View {
     private var editingSection: some View {
         Section {
             TextField("Name", text: $editingConfig.name)
+                .textFieldTapTarget()
 
             HStack(spacing: 8) {
                 Image(systemName: statusSymbol)
@@ -462,6 +463,7 @@ struct RemoteTabView: View {
     private var webPageSection: some View {
         Section {
             TextField("Page URL", text: $editingConfig.webPageURL)
+                .textFieldTapTarget()
                 .textContentType(.URL)
                 .autocorrectionDisabled()
                 #if !os(macOS)
@@ -540,6 +542,7 @@ struct RemoteTabView: View {
     private var slideshowSections: some View {
         Section {
             TextField("RoboFrame API Endpoint", text: $editingConfig.apiEndpoint)
+                .textFieldTapTarget()
                 .textContentType(.URL)
                 .autocorrectionDisabled()
                 #if !os(macOS)
@@ -547,6 +550,7 @@ struct RemoteTabView: View {
                 #endif
 
             TextField("WebSocket Device ID", text: $editingConfig.wsDeviceId)
+                .textFieldTapTarget()
                 .autocorrectionDisabled()
                 #if !os(macOS)
                 .textInputAutocapitalization(.never)
@@ -557,6 +561,7 @@ struct RemoteTabView: View {
                 .foregroundColor(.secondary)
 
             SecureField("Access Token", text: $editingConfig.accessToken)
+                .textFieldTapTarget()
                 .autocorrectionDisabled()
                 #if !os(macOS)
                 .textInputAutocapitalization(.never)
@@ -652,6 +657,7 @@ struct RemoteTabView: View {
                             }
                         )
                     )
+                    .textFieldTapTarget()
                     .font(.body.monospaced())
                     .autocorrectionDisabled()
                     #if !os(macOS)
@@ -665,6 +671,7 @@ struct RemoteTabView: View {
 
             HStack {
                 TextField("Tags (space-separated)", text: $newModTagPreset)
+                    .textFieldTapTarget()
                     .autocorrectionDisabled()
                     #if !os(macOS)
                     .textInputAutocapitalization(.never)
