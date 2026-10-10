@@ -44,6 +44,7 @@ struct ObjectAudioQualityMenu: View {
 
     var body: some View {
         PlayerChoiceMenu(title: "Audio Quality", systemImage: "waveform.badge.magnifyingglass",
+                         badge: badge,
                          help: "Object audio: \(player.audioQuality.isEmpty ? selected.title : player.audioQuality)",
                          onOpenChanged: onOpenChanged) { close in
             ForEach(ObjectAudioQuality.allCases, id: \.self) { quality in
@@ -66,6 +67,14 @@ struct ObjectAudioQualityMenu: View {
             }
         }
         .accessibilityIdentifier("player.audioQuality")
+    }
+
+    /// The encoding playing, for the bar's badge ("Lossless", "64k").
+    private var badge: String {
+        switch player.audioEncoding {
+        case .aac(let bitrate)?, .opus(let bitrate)?: "\(bitrate / 1000)k"
+        default: "Lossless"
+        }
     }
 
     /// Under Auto, where it is now ("Now AAC 64 kbps").

@@ -7,13 +7,16 @@ struct StreamQualityMenu: View {
     let selected: LibraryStreamQuality
     /// What is in force, e.g. "Auto · 720p".
     let label: String
+    /// The same, short, for the bar's badge ("720p").
+    let badge: String
     var isChanging = false
     var onOpenChanged: (Bool) -> Void = { _ in }
     let onSelect: (LibraryStreamQuality) -> Void
 
     var body: some View {
-        PlayerChoiceMenu(title: "Quality: \(label)", systemImage: "gauge.with.dots.needle.67percent",
-                         help: isChanging ? "Changing quality…" : "Streaming quality",
+        PlayerChoiceMenu(title: "Quality", systemImage: "gauge.with.dots.needle.67percent",
+                         badge: isChanging ? "…" : badge,
+                         help: isChanging ? "Changing quality…" : "Streaming quality: \(label)",
                          onOpenChanged: onOpenChanged) { close in
             ForEach(LibraryStreamQuality.allCases, id: \.self) { quality in
                 Button {

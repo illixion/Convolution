@@ -11,9 +11,14 @@ import SwiftUI
 /// popover doesn't report itself through `onOpenChanged`: More, open
 /// underneath it, already holds the chrome, and a reported "menu" would take
 /// the stereo picture's input away (see `VideoWindowModel.pictureTakesInputWithChrome`).
+///
+/// With a `badge`, the bar shows the value in force ("1080p", "AI 3D") in
+/// place of the icon, so it reads without opening the menu.
 struct PlayerChoiceMenu<Items: View>: View {
     let title: String
     let systemImage: String
+    var badge: String?
+    var badgeIsActive = false
     var help: String?
     var onOpenChanged: (Bool) -> Void = { _ in }
     /// The rows; each calls the passed closure to close the popover first.
@@ -29,7 +34,7 @@ struct PlayerChoiceMenu<Items: View>: View {
         #else
         if inMenu {
             Button { showsPopover.toggle() } label: {
-                Label(title, systemImage: systemImage)
+                Label(badge.map { "\(title): \($0)" } ?? title, systemImage: systemImage)
             }
             .popover(isPresented: $showsPopover, arrowEdge: .trailing) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -53,9 +58,34 @@ struct PlayerChoiceMenu<Items: View>: View {
                 // Silent inside the bar's More menu (tvOS), which reports for it.
                 .ravePlayerMenuReporting(onOpenChanged)
         } label: {
-            Label(title, systemImage: systemImage).ravePlayerAccessoryLabel()
+            if let badge {
+                PlayerBadge(text: badge, isActive: badgeIsActive)
+                    .accessibilityLabel("\(title): \(badge)")
+            } else {
+                Label(title, systemImage: systemImage).ravePlayerAccessoryLabel()
+            }
         }
         .help(help ?? title)
+    }
+}
+
+/// A control-bar button that reads as its value ("1080p", "AI 3D") rather
+/// than as an icon. `isActive` fills it, for a mode that is on (3D).
+struct PlayerBadge: View {
+    let text: String
+    var isActive = false
+
+    var body: some View {
+        Text(text)
+            .font(.callout.weight(.semibold))
+            .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(isActive ? AnyShapeStyle(.tint.opacity(0.4)) : AnyShapeStyle(.quaternary), in: Capsule())
+            .overlay(Capsule().strokeBorder(.secondary.opacity(0.6), lineWidth: 1))
+            .ravePlayerControlLabel()
     }
 }
 

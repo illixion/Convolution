@@ -226,6 +226,7 @@ struct VideoOrnamentsView: View {
     private var qualityMenu: some View {
         if windowModel.offersQualityChoice {
             StreamQualityMenu(selected: windowModel.qualityPreference, label: windowModel.qualityLabel,
+                              badge: windowModel.qualityBadge,
                               isChanging: windowModel.isChangingQuality,
                               onOpenChanged: { chromeMenu("Quality", opened: $0) }) { quality in
                 windowModel.setQuality(quality)
@@ -234,6 +235,7 @@ struct VideoOrnamentsView: View {
         #if HYPNOS_YOUTUBE
         if windowModel.youTubeID != nil {
             YouTubeQualityMenu(selected: windowModel.youTubeQuality, label: windowModel.youTubeQualityLabel,
+                               badge: windowModel.youTubeQualityBadge,
                                onOpenChanged: { chromeMenu("Quality", opened: $0) }) { quality in
                 windowModel.setYouTubeQuality(quality)
             }
@@ -550,16 +552,10 @@ struct VideoOrnamentsView: View {
             // Silent inside the bar's More menu, which reports for it.
             .ravePlayerMenuReporting { chromeMenu("View Mode", opened: $0) }
         } label: {
-            // Icon-only, .title3 — matches PhotoOrnamentView's 3D menu button
-            // (which shows `view.3d` in the flat state). The active-mode
-            // background is the only highlight.
-            ViewModeGlyph(mode: currentViewMode.title, systemImage: currentViewMode.systemImage)
-                .padding(6)
-                .background(
-                    (windowModel.shouldUse3DMode || windowModel.shouldUsePseudo3D)
-                        ? .white.opacity(0.3) : .clear,
-                    in: .rect(cornerRadius: 8)
-                )
+            // A badge naming the mode in force ("2D", "AI 3D"), filled
+            // while a 3D mode is on.
+            ViewModeGlyph(mode: currentViewMode.badge, systemImage: currentViewMode.systemImage,
+                          isActive: windowModel.shouldUse3DMode || windowModel.shouldUsePseudo3D)
         }
         // Match the other borderless ornament buttons: the default Menu style
         // renders a raised glass capsule that reads as "always highlighted"
@@ -584,6 +580,9 @@ struct VideoOrnamentsView: View {
             case .pseudo3D: "AI 3D"
             }
         }
+
+        /// The bar's badge: the title, short enough for the bar.
+        var badge: String { self == .immersive ? "Immersive" : title }
 
         var systemImage: String {
             switch self {
@@ -811,18 +810,15 @@ private struct MoreOptionsControl<Items: View>: View {
 private struct ViewModeGlyph: View {
     let mode: String
     let systemImage: String
+    var isActive = false
     @Environment(\.ravePlayerControlsInMenu) private var inMenu
 
     var body: some View {
         if inMenu {
             Label("View Mode: \(mode)", systemImage: systemImage)
         } else {
-            HStack(spacing: 6) {
-                Image(systemName: systemImage).font(.title3)
-                Text(mode).font(.callout.weight(.medium)).lineLimit(1).fixedSize()
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("View Mode: \(mode)")
+            PlayerBadge(text: mode, isActive: isActive)
+                .accessibilityLabel("View Mode: \(mode)")
         }
     }
 }

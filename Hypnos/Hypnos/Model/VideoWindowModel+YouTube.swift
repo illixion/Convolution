@@ -69,6 +69,12 @@ extension VideoWindowModel {
         return youTubeQuality == .p2160 ? "4K" : youTubeQuality.title
     }
 
+    /// The same, short, for the bar's badge ("1080p" while Auto caps it).
+    var youTubeQualityBadge: String {
+        if youTubeQuality == .auto, let height = youTubeAutoHeight { return "\(height)p" }
+        return youTubeQuality == .p2160 ? "4K" : youTubeQuality.title
+    }
+
     /// The viewer picked `quality`: remembered for every YouTube video, and
     /// applied to this one at once (the player switches at its next segment).
     func setYouTubeQuality(_ quality: YouTubeQuality) {

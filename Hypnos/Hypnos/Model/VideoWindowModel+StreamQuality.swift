@@ -35,6 +35,14 @@ extension VideoWindowModel {
         return qualityPreference.shortTitle
     }
 
+    /// What is in force, short, for the bar's badge: the level playing
+    /// ("720p"; "1080p" for either 1080p cap), or the choice when that is
+    /// the original.
+    var qualityBadge: String {
+        let shown = streamLevel ?? qualityPreference
+        return shown.maxHeight == 1080 ? "1080p" : shown.shortTitle
+    }
+
     /// The viewer picked `quality`: remember it for every title, and swap
     /// this one's stream if it changes what plays.
     func setQuality(_ quality: LibraryStreamQuality) {

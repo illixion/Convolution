@@ -13,12 +13,14 @@ struct YouTubeQualityMenu: View {
     let selected: YouTubeQuality
     /// What is in force, e.g. "Auto · 1440p".
     let label: String
+    /// The same, short, for the bar's badge ("1440p").
+    let badge: String
     var onOpenChanged: (Bool) -> Void = { _ in }
     let onSelect: (YouTubeQuality) -> Void
 
     var body: some View {
-        PlayerChoiceMenu(title: "Quality: \(label)", systemImage: "gauge.with.dots.needle.67percent",
-                         help: "Picture quality", onOpenChanged: onOpenChanged) { close in
+        PlayerChoiceMenu(title: "Quality", systemImage: "gauge.with.dots.needle.67percent", badge: badge,
+                         help: "Picture quality: \(label)", onOpenChanged: onOpenChanged) { close in
             ForEach(YouTubeQuality.allCases) { quality in
                 Button {
                     close()

@@ -54,6 +54,7 @@ struct FilmPictureQualityMenu: View {
 
     var body: some View {
         PlayerChoiceMenu(title: "Picture Quality", systemImage: "gauge.with.dots.needle.67percent",
+                         badge: player.isChangingPictureTier ? "…" : badge,
                          help: "Picture: \(FilmPictureQuality.name(of: player.pictureHeight))",
                          onOpenChanged: onOpenChanged) { close in
             ForEach(FilmPictureQuality.choices(offering: player.offeredPictureHeights), id: \.self) { quality in
@@ -78,5 +79,12 @@ struct FilmPictureQualityMenu: View {
             }
         }
         .accessibilityIdentifier("player.pictureQuality")
+    }
+
+    /// The tier playing. The index doesn't give the original's size, but a
+    /// film offering 1440p is taller than that, i.e. a 4K film.
+    private var badge: String {
+        if let height = player.pictureHeight { return "\(height)p" }
+        return player.offeredPictureHeights.contains(1440) ? "4K" : "Original"
     }
 }

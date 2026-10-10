@@ -773,17 +773,30 @@ struct FilmTransport: View {
 
     /// A 3D film plays its own two eyes; a 2D one gets AI 3D.
     private var isStereoFilm: Bool { session.stereoFormat != nil }
-    private var stereoTitle: String {
-        stereoEnabled ? "Play as 2D" : (isStereoFilm ? "Play in 3D" : "AI 3D")
+    private var stereoMode: String { isStereoFilm ? "3D" : "AI 3D" }
+
+    /// 2D or 3D, the bar's badge naming the one in force, as in the video
+    /// window; picking the other switches.
+    private func viewModeMenu(toggle: @escaping () -> Void) -> some View {
+        PlayerChoiceMenu(title: "View Mode", systemImage: isStereoFilm ? "view.3d" : "wand.and.sparkles",
+                         badge: stereoEnabled ? stereoMode : "2D", badgeIsActive: stereoEnabled,
+                         onOpenChanged: menuChanged) { close in
+            ForEach([false, true], id: \.self) { stereo in
+                Button {
+                    close()
+                    if stereo != stereoEnabled { toggle() }
+                } label: {
+                    Label(stereo ? stereoMode : "2D", systemImage: "checkmark")
+                        .labelStyle(CheckmarkLabelStyle(isChecked: stereo == stereoEnabled))
+                }
+            }
+        }
+        .accessibilityIdentifier("player.viewMode")
     }
 
     @ViewBuilder private var playbackItems: some View {
         if let onToggle3D {
-            Button(action: onToggle3D) {
-                Label(stereoTitle, systemImage: stereoEnabled ? "rectangle" : (isStereoFilm ? "view.3d" : "wand.and.sparkles"))
-                    .ravePlayerAccessoryLabel()
-            }
-            .help(stereoTitle)
+            viewModeMenu(toggle: onToggle3D)
         }
         if player.audioTracks.count > 1 {
             FilmAudioTrackMenu(player: player, onOpenChanged: menuChanged)
@@ -1043,6 +1056,20 @@ struct FilmTelemetry: View {
             .font(.caption.monospaced())
             .foregroundColor(.secondary)
             .selectableText()
+        }
+    }
+}
+
+/// A menu row whose checkmark shows only on the chosen one, keeping the
+/// titles aligned.
+private struct CheckmarkLabelStyle: LabelStyle {
+    let isChecked: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        Label {
+            configuration.title
+        } icon: {
+            configuration.icon.opacity(isChecked ? 1 : 0)
         }
     }
 }
