@@ -866,8 +866,51 @@ struct FilmAdjustmentsView: View {
                 #endif
             }
         }
+        Section("Room") { FilmRoomPicker() }
         Section("Sound") { FilmTuning() }
         Section("Telemetry") { FilmTelemetry(player: session.player) }
+    }
+}
+
+/// The room the film plays in on a RealityKit stage: the system's acoustics
+/// (on visionOS, the room the wearer is in, which a window can't change) or
+/// one of `FilmRoomReverb`'s. The Reverb slider sets how much of either.
+struct FilmRoomPicker: View {
+    @Bindable private var session = FilmSession.shared
+
+    private enum Choice: Hashable {
+        case system
+        case preset(RAVEReverbPreset)
+    }
+
+    var body: some View {
+        let player = session.player
+        let choice = Binding<Choice> {
+            player.roomSource == .system ? .system : .preset(player.reverbPreset)
+        } set: { choice in
+            switch choice {
+            case .system:
+                player.roomSource = .system
+            case .preset(let preset):
+                player.roomSource = .virtual
+                player.reverbPreset = preset
+            }
+            session.saveSound()
+        }
+        Picker("Room", selection: choice) {
+            #if os(visionOS)
+            Text("Your Room").tag(Choice.system)
+            #else
+            Text("System").tag(Choice.system)
+            #endif
+            ForEach(RAVEReverbPreset.allCases) { preset in
+                Text(preset == .none ? "Open Air" : preset.title).tag(Choice.preset(preset))
+            }
+        }
+        #if os(visionOS)
+        Text("Your Room is how visionOS hears the room you're in. The others replace it with a room of the film's own; Open Air has none.")
+            .font(.caption)
+        #endif
     }
 }
 

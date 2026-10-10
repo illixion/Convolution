@@ -112,8 +112,9 @@ final class FilmSession {
     // MARK: Sound settings
 
     /// The player's sound tuning as saved between launches. Not every
-    /// platform uses every field: the reverb preset and head tracking are
-    /// the tvOS PHASE stage's; RealityKit's stage reads only the level.
+    /// platform uses every field: PHASE (tvOS) ignores `roomSource`, and
+    /// RealityKit's stage reads the preset only while `roomSource` is
+    /// `.virtual`.
     private struct SoundSettings: Codable {
         var masterGainDB: Float
         var lfeGainDB: Float
@@ -124,6 +125,8 @@ final class FilmSession {
         var roomHeight: Float
         var avOffsetMs: Double
         var headTracking: Bool
+        /// Optional: settings saved before it existed decode as `.system`.
+        var roomSource: FilmRoomSource?
     }
 
     private static let soundKey = "filmPlayer.sound"
@@ -133,7 +136,7 @@ final class FilmSession {
             masterGainDB: player.masterGainDB, lfeGainDB: player.lfeGainDB, reverbDB: player.reverbDB,
             reverbPreset: player.reverbPreset, roomHalfWidth: player.roomHalfWidth,
             roomHalfDepth: player.roomHalfDepth, roomHeight: player.roomHeight,
-            avOffsetMs: player.avOffsetMs, headTracking: headTracking
+            avOffsetMs: player.avOffsetMs, headTracking: headTracking, roomSource: player.roomSource
         )
         if let data = try? JSONEncoder().encode(settings) {
             UserDefaults.standard.set(data, forKey: Self.soundKey)
@@ -154,6 +157,7 @@ final class FilmSession {
         player.lfeGainDB = settings.lfeGainDB
         player.reverbDB = settings.reverbDB
         player.reverbPreset = settings.reverbPreset
+        player.roomSource = settings.roomSource ?? .system
         player.roomHalfWidth = settings.roomHalfWidth
         player.roomHalfDepth = settings.roomHalfDepth
         player.roomHeight = settings.roomHeight
