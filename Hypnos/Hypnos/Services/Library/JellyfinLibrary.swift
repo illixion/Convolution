@@ -706,8 +706,15 @@ actor JellyfinLibrary: MediaServerLibrary {
         let isWebM = sourceContainer?.split(separator: ",").contains("webm") == true
             || ["vp8", "vp9", "av1"].contains(sourceVideoCodec ?? "")
         if isWebM {
+            // The full-quality HLS transcode stays in reserve, as Stash's
+            // does: AI 3D needs frames from AVFoundation, which can't read
+            // WebM, and the video window swaps onto it when 3D is picked.
+            let reserve = Self.hlsStreamURL(
+                baseURL: baseURL, itemId: itemId, mediaSourceId: mediaSourceId,
+                sourceVideoCodec: sourceVideoCodec, playSessionId: playSessionId,
+                token: authHeaderToken)
             return GenericPlaybackPlan(method: .direct, streamURL: directURL, resumeSeconds: resumeSeconds,
-                                       sourceBitrate: sourceBitrate)
+                                       sourceBitrate: sourceBitrate, transcodeURL: reserve)
         }
 
         let transcodeURL = Self.hlsStreamURL(

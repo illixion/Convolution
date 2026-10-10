@@ -457,7 +457,11 @@ struct VideoWindowView: View {
                 windowModel.requestPseudo3D()
             })
         }
-        .alert("Convert to 3D", isPresented: $windowModel.showPseudo3DModePrompt) {
+        // Both hold the chrome up while open (`hasOpenPopover`).
+        .onChange(of: windowModel.showPseudo3DModePrompt || windowModel.showDepthModelSetup) { _, open in
+            if !open { windowModel.startAutoHideTimer() }
+        }
+        .alert("AI 3D", isPresented: $windowModel.showPseudo3DModePrompt) {
             Button("Real-Time") {
                 windowModel.engageRealtimePseudo3D()
             }
@@ -466,7 +470,7 @@ struct VideoWindowView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Real-time starts instantly and plays at 30fps. Pre-process analyzes the whole video in the background first (about as long as the video), then plays at up to 60fps with steadier depth — you'll be notified when it's ready.")
+            Text("AI 3D estimates depth from this 2D video. Real-time starts instantly and plays at 30fps. Pre-process analyzes the whole video in the background first (about as long as the video), then plays at up to 60fps with steadier depth — you'll be notified when it's ready.")
         }
         .onChange(of: DepthConversionManager.shared.lastCompleted) { _, completed in
             guard let completed, completed.videoIdentity == video.identity else { return }
@@ -526,6 +530,7 @@ struct VideoWindowView: View {
         // sequence this drives.
         .task(id: video.identity) {
             await windowModel.segmentSkipper.load(videoIdentity: video.identity)
+            windowModel.refreshOfferedSegment()
         }
         .task(id: video.identity) {
             let reported = video

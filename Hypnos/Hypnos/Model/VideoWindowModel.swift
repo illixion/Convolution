@@ -123,7 +123,9 @@ final class VideoWindowModel {
 
     // MARK: - Playback State (driven by the WebVideoPlayerView JS bridge)
 
-    var currentTime: Double = 0
+    var currentTime: Double = 0 {
+        didSet { refreshOfferedSegment() }
+    }
     var duration: Double = 0
     var isPaused: Bool = true
     /// Seeded from AppModel.videoAutoplayMuted in init (autoplay defaults to
@@ -136,7 +138,9 @@ final class VideoWindowModel {
     var bufferedEnd: Double = 0
     /// True while the user is dragging the scrubber — suppresses incoming
     /// timeupdate writes so the thumb doesn't fight the drag.
-    var isScrubbing: Bool = false
+    var isScrubbing: Bool = false {
+        didSet { refreshOfferedSegment() }
+    }
 
     // MARK: - Load Status
 
@@ -195,6 +199,14 @@ final class VideoWindowModel {
     @ObservationIgnored var startupQualityTask: Task<Void, Never>?
     /// The current title's own bitrate, once asked.
     @ObservationIgnored var sourceBitrate: (itemId: String, bitrate: Int?)?
+    /// Consecutive stereo-pump reports of frames being dropped (see
+    /// `noteStereoPerformance`).
+    @ObservationIgnored var stereoLoadStrikes = 0
+    /// Reports before this are ignored: the picture just engaged, or the
+    /// window just acted on an overload.
+    @ObservationIgnored var stereoLoadGraceUntil = Date.distantPast
+    /// The video the "can't keep up" advice was last shown for, once each.
+    @ObservationIgnored var stereoLoadAdvisedIdentity: String?
 
     // MARK: - Share
 
@@ -203,7 +215,9 @@ final class VideoWindowModel {
 
     // MARK: - UI Visibility
 
-    var isUIHidden: Bool = false
+    var isUIHidden: Bool = false {
+        didSet { refreshOfferedSegment() }
+    }
     var isWindowControlsHidden: Bool = false
     /// Whether this window is in the user's current room (drives auto-resume).
     var isInActiveRoom: Bool = true
@@ -232,6 +246,7 @@ final class VideoWindowModel {
     /// the video should stay fully visible while editing.
     var isChromeModalOpen: Bool {
         showMediaInfo || showShareSheet || showVideo3DSettingsSheet || openOrnamentMenuCount > 0
+            || showPseudo3DModePrompt || showDepthModelSetup
     }
 
     /// The ornament "menus" that are popovers: the control bar's More, and
@@ -255,6 +270,7 @@ final class VideoWindowModel {
     /// Whether any chrome is open that should pin the ornament/control bar.
     var hasOpenPopover: Bool {
         showMediaInfo || showAdjustments || showShareSheet || isScrubbing || openOrnamentMenuCount > 0
+            || showPseudo3DModePrompt || showDepthModelSetup
     }
 
     @ObservationIgnored private var didStart = false
@@ -895,7 +911,7 @@ final class VideoWindowModel {
             // The transcode isn't AVFoundation-playable either (a server that
             // only offers the non-seekable /stream.mp4 lands here). Say so
             // rather than leaving a menu item that silently does nothing.
-            depthConversionFailureMessage = "This video can't be converted to 3D: its server transcode isn't playable by AVFoundation. HLS transcoding must be available on the Stash server."
+            depthConversionFailureMessage = "AI 3D isn't available for this video: the server's transcode of it can't be decoded here. HLS transcoding must be available on the server."
             return
         }
         pseudo3DDepthMode = pending.depthMode
@@ -1074,7 +1090,7 @@ final class VideoWindowModel {
         }
     }
 
-    /// Settings → "Real-Time 3D for All Videos": engage fake-3D as soon as
+    /// Settings → "AI 3D for All Videos": engage fake-3D as soon as
     /// the native renderer is confirmed (runs on open and on every video
     /// switch), unless this window already has a mode — restored fake-3D or
     /// genuine stereoscopic. Prefers this video's pre-processed cache (strict
@@ -1156,10 +1172,15 @@ final class VideoWindowModel {
         startAutoHideTimer()
     }
 
-    /// The skip button the window offers now, if any.
-    var offeredSegment: LibraryMediaSegment? {
-        guard !isScrubbing else { return nil }
-        return segmentSkipper.offered(at: currentTime, controlsVisible: !isUIHidden)
+    /// The skip button the window offers now, if any. Stored, and written
+    /// only when it changes: the window's body reads it, and as a computed
+    /// read of `currentTime` it re-ran that body, and re-created every
+    /// ornament menu with it, on each of the player's 30 reports a second.
+    private(set) var offeredSegment: LibraryMediaSegment?
+
+    func refreshOfferedSegment() {
+        let offered = isScrubbing ? nil : segmentSkipper.offered(at: currentTime, controlsVisible: !isUIHidden)
+        if offered != offeredSegment { offeredSegment = offered }
     }
 
     /// Jumps past `segment`. Credits that run to the end land just short
@@ -1399,6 +1420,14 @@ final class VideoWindowModel {
             self.stallMonitor.restartGrace(at: .now)
             self.video.streamURL = renewed
         }
+    }
+
+    /// Closes the More popover and forgets every open menu: a choice was
+    /// made in one, and its result should show with nothing in front of it.
+    func closeOrnamentMenus(reason: String) {
+        menuDismissals += 1
+        clearLostMenus(reason: reason)
+        startAutoHideTimer()
     }
 
     func clearLostMenus(reason: String) {

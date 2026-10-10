@@ -337,8 +337,8 @@ struct VideoQuickLookView: View {
     private var sideMenu: some View {
         VStack(spacing: 0) {
             menuButton(
-                title: pseudo3DEnabled ? "Viewing in 3D" : "Convert to 3D",
-                systemImage: "cube",
+                title: pseudo3DEnabled ? "Viewing in AI 3D" : "AI 3D",
+                systemImage: "wand.and.sparkles",
                 tinted: pseudo3DEnabled,
                 disabled: !pseudo3DEnabled && !canConvertTo3D
             ) {

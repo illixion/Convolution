@@ -5,7 +5,7 @@
  All per-window state is read from VideoWindowModel so multiple video windows are
  independent. Styled to match PhotoOrnamentView.
 
- Bar layout: [Gallery] | [< N/M >] | [ViewMode v] [Subtitles v] [Quality v] [A-B] |
+ Bar layout: [Gallery] | [< N/M >] | [ViewMode: icon + 2D/3D/AI 3D v] [Subtitles v] [Quality v] [A-B] |
  [Info] [Share] | [... More v] | [Title]
  Playback and feature actions share RAVEUI's player controls in one ornament
  in both 2D and fake-3D. The immersive scene owns its own transport.
@@ -501,7 +501,11 @@ struct VideoOrnamentsView: View {
             if PlatformCapabilities.supportsStereoVideo {
                 Divider()
 
-                modeButton("Convert to 3D (Beta)", mode: .pseudo3D) {
+                // Named apart from "3D": this is depth estimated from a 2D
+                // picture, not a 3D movie's own two eyes.
+                modeButton(ViewMode.pseudo3D.title, subtitle: windowModel.pseudo3DAvailable
+                           ? "Adds depth to a 2D video" : "Not available for this video",
+                           mode: .pseudo3D) {
                     windowModel.requestPseudo3D()
                 }
                 .disabled(!windowModel.pseudo3DAvailable)
@@ -541,7 +545,7 @@ struct VideoOrnamentsView: View {
             // Icon-only, .title3 — matches PhotoOrnamentView's 3D menu button
             // (which shows `view.3d` in the flat state). The active-mode
             // background is the only highlight.
-            OrnamentGlyph(title: "View Mode", systemImage: viewModeIcon)
+            ViewModeGlyph(mode: currentViewMode.title, systemImage: currentViewMode.systemImage)
                 .padding(6)
                 .background(
                     (windowModel.shouldUse3DMode || windowModel.shouldUsePseudo3D)
@@ -562,6 +566,25 @@ struct VideoOrnamentsView: View {
     /// (shouldUsePseudo3D already excludes shouldUse3DMode).
     private enum ViewMode {
         case flat, stereoscopic, immersive, pseudo3D
+
+        /// The menu item's name, also shown beside the bar's icon.
+        var title: String {
+            switch self {
+            case .flat: "2D"
+            case .stereoscopic: "3D"
+            case .immersive: "Immersive 3D"
+            case .pseudo3D: "AI 3D"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .flat: "rectangle"
+            case .stereoscopic: "view.3d"
+            case .immersive: "inset.filled.pano"
+            case .pseudo3D: "wand.and.sparkles"
+            }
+        }
     }
 
     private var currentViewMode: ViewMode {
@@ -573,13 +596,22 @@ struct VideoOrnamentsView: View {
 
     /// Radio-style mode item: checkmark on the active mode only; selecting
     /// the already-active mode does nothing.
-    private func modeButton(_ title: String, mode: ViewMode, action: @escaping () -> Void) -> some View {
+    /// Picking a mode also closes the bar's More popover, so the change is
+    /// seen with nothing in front of it: a stereo picture engaged under an
+    /// open popover would start dimmed and flat, and its follow-up prompt
+    /// (Real-Time or Pre-Process) would open over the popover.
+    private func modeButton(_ title: String, subtitle: String? = nil, mode: ViewMode,
+                            action: @escaping () -> Void) -> some View {
         Button {
             guard currentViewMode != mode else { return }
+            windowModel.closeOrnamentMenus(reason: "view mode chosen")
             action()
         } label: {
+            // A menu item reads its first Text as the title, the second as
+            // the subtitle under it.
             HStack {
                 Text(title)
+                if let subtitle { Text(subtitle) }
                 if currentViewMode == mode {
                     Image(systemName: "checkmark")
                 }
@@ -636,16 +668,6 @@ struct VideoOrnamentsView: View {
             }
         }
     }
-
-    /// SF Symbol for the ViewMode button, mirroring PhotoOrnamentView's
-    /// mapping: immersive/stereoscopic → `inset.filled.pano`, windowed fake-3D
-    /// → `spatial.capture.fill`, flat → `view.3d` (the "switch to 3D"
-    /// affordance, same as pictures in 2D).
-    private var viewModeIcon: String {
-        if windowModel.shouldUse3DMode { return "inset.filled.pano" }
-        if windowModel.shouldUsePseudo3D { return "spatial.capture.fill" }
-        return "view.3d"
-    }
 }
 
 /// Ornament-row depth-conversion status (spinner + live label). Kept in its own
@@ -691,8 +713,8 @@ private struct ConversionMenuStatus: View {
         if let phase = conversions.phase(for: videoIdentity) {
             switch phase {
             case .downloading: return "Downloading…"
-            case .converting: return "Converting to 3D…"
-            case .refining: return "Refining 3D…"
+            case .converting: return "Preparing AI 3D…"
+            case .refining: return "Refining AI 3D…"
             }
         }
         if conversions.isProcessing(videoIdentity: videoIdentity) {
@@ -776,6 +798,27 @@ private struct MoreOptionsControl<Items: View>: View {
 
 /// A feature button's icon: the glyph on the bar, title and glyph inside the
 /// compact bar's "More" popover.
+/// The View Mode button: the mode's icon and name on the bar, so what the
+/// picture is doing reads at a glance; a labelled row in the More popover.
+private struct ViewModeGlyph: View {
+    let mode: String
+    let systemImage: String
+    @Environment(\.ravePlayerControlsInMenu) private var inMenu
+
+    var body: some View {
+        if inMenu {
+            Label("View Mode: \(mode)", systemImage: systemImage)
+        } else {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage).font(.title3)
+                Text(mode).font(.callout.weight(.medium)).lineLimit(1).fixedSize()
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("View Mode: \(mode)")
+        }
+    }
+}
+
 private struct OrnamentGlyph: View {
     let title: String
     let systemImage: String

@@ -170,12 +170,12 @@ struct SettingsTabView: View {
                             "Pre-Process 3D Depth Model",
                             selection: $appModel.preprocessDepthModelName
                         )
-                        Toggle("Real-Time 3D for All Videos", isOn: $appModel.defaultRealtimePseudo3D)
+                        Toggle("AI 3D for All Videos", isOn: $appModel.defaultRealtimePseudo3D)
                         Toggle("Stable Depth", isOn: $appModel.stableDepth)
                         Text("Real-Time 3D holds the room's depth steady when someone walks up to the camera, eases close-ups into the nearest depth instead of clipping them, and keeps depth edges on the picture's edges. Turn off to compare with the previous behavior.")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text("Convert to 3D uses these models: Real-Time for instant playback (fast model recommended), Pre-Process for background conversion (a larger model can be used). Manage installed models under Developer. With Real-Time 3D for All Videos on, compatible videos open already converted — using this video's pre-processed conversion when available, otherwise real-time.")
+                        Text("AI 3D uses these models: Real-Time for instant playback (fast model recommended), Pre-Process for background conversion (a larger model can be used). Manage installed models under Developer. With AI 3D for All Videos on, compatible videos open already converted — using this video's pre-processed conversion when available, otherwise real-time.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -349,7 +349,7 @@ struct SettingsTabView: View {
                     }
 
                     Toggle("Server-Side Transcoding", isOn: $appModel.enableStashTranscoding)
-                    Text("Keep the Stash server's HLS transcode in reserve. Scenes always play their original file first (WebM decodes on-device in WebKit); the transcode is used only if that file can't be played, or when a feature needs AVFoundation — Convert to 3D, immersive 3D, depth pre-processing. Turn off to never transcode, which leaves those unavailable for WebM. Applies to newly loaded scenes.")
+                    Text("Keep the Stash server's HLS transcode in reserve. Scenes always play their original file first (WebM decodes on-device in WebKit); the transcode is used only if that file can't be played, or when a feature needs AVFoundation — AI 3D, live and immersive 3D, depth pre-processing. Turn off to never transcode, which leaves those unavailable for WebM. Applies to newly loaded scenes.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } header: {

@@ -40,6 +40,7 @@ enum LibraryPlaybackCoordinator {
             identity: identityPrefix + item.id,
             thumbnailURL: thumbnail,
             streamURL: plan.streamURL,
+            transcodeStreamURL: plan.transcodeURL,
             title: item.title,
             duration: item.runtimeSeconds,
             // A 3D film opens in live 3D, like a Stash video tagged SBS.

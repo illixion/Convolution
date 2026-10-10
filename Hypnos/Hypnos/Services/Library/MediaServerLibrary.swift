@@ -45,6 +45,9 @@ struct GenericPlaybackPlan: Sendable {
     var quality: LibraryStreamQuality? = nil
     /// The file's own bitrate, when the server knows it.
     var sourceBitrate: Int? = nil
+    /// A natively decodable transcode of a stream only WebKit can play (a
+    /// WebM original), kept in reserve for what needs AVFoundation: AI 3D.
+    var transcodeURL: URL? = nil
 }
 
 /// start/progress/stop calls a player makes as it plays an item, so the

@@ -11,6 +11,7 @@
 
 import DebugTrace
 import Foundation
+import RAVEMedia
 
 extension VideoWindowModel {
     /// The title is a server stream whose quality can change: a Library
@@ -119,7 +120,7 @@ extension VideoWindowModel {
 
     /// Replaces the stream with one at `level` (nil: the original), at the
     /// playhead.
-    private func switchStream(to level: LibraryStreamQuality?, reason: String) {
+    func switchStream(to level: LibraryStreamQuality?, reason: String) {
         guard let itemId = libraryItemId, let library = LibraryService.current() else { return }
         isChangingQuality = true
         qualitySwitchTask?.cancel()
@@ -136,6 +137,10 @@ extension VideoWindowModel {
                 self.stallMonitor.noteStepped(at: .now)
                 // Direct play and HLS can resolve to different renderers.
                 let needsRenderer = plan.streamURL.pathExtension != self.video.streamURL.pathExtension
+                    || self.usingTranscodedStream
+                // The reserve transcode belongs to the stream it backs up.
+                self.usingTranscodedStream = false
+                self.video.transcodeStreamURL = plan.transcodeURL
                 self.video.streamURL = plan.streamURL
                 if needsRenderer { self.resolvePlaybackRenderer() }
                 self.armStartupQualityWatchIfNoPicture()
@@ -149,6 +154,53 @@ extension VideoWindowModel {
     /// A switch made before the first frame gets its own startup window.
     private func armStartupQualityWatchIfNoPicture() {
         if !hasPresentedVideo { armStartupQualityWatch() }
+    }
+
+    // MARK: 3D load
+
+    /// A stereo picture (AI 3D or live 3D) just appeared: its first seconds
+    /// include model loading and the first decode, so they don't count.
+    func stereoPictureStarted() {
+        stereoLoadStrikes = 0
+        stereoLoadGraceUntil = .now.addingTimeInterval(5)
+    }
+
+    /// The stereo pump's report every couple of seconds. Three overloaded
+    /// reports in a row (about 6 s of visible stutter) are acted on: under
+    /// Auto, a stream above 1080p steps to 1080p, since the conversion's
+    /// cost follows the picture's size; otherwise the viewer is told once
+    /// what would help.
+    func noteStereoPerformance(_ sample: RAVEStereoPerformance) {
+        guard showsStereoPicture, !isPaused, !isScrubbing, !isChangingQuality,
+              Date.now >= stereoLoadGraceUntil, sample.isOverloaded else {
+            stereoLoadStrikes = 0
+            return
+        }
+        stereoLoadStrikes += 1
+        AppLogger.videoWindow.info("Stereo picture dropping frames: \(Int(sample.deliveredFraction * 100), privacy: .public)% of \(sample.sourceFramesPerSecond, format: .fixed(precision: 1), privacy: .public) fps shown (\(self.stereoLoadStrikes, privacy: .public)/3)")
+        guard stereoLoadStrikes >= 3 else { return }
+        stereoLoadStrikes = 0
+        stereoLoadGraceUntil = .now.addingTimeInterval(20)
+
+        if offersQualityChoice, qualityPreference == .auto,
+           streamLevel == nil || streamLevel == .mbps40 {
+            AppLogger.videoWindow.info("3D couldn't keep up at \(self.streamLevel?.rawValue ?? "original", privacy: .public); stepping to 1080p")
+            switchStream(to: .mbps20, reason: "3D couldn't keep up")
+            showQualityNotice("Quality lowered to \(LibraryStreamQuality.mbps20.title) so 3D plays smoothly")
+            return
+        }
+        guard stereoLoadAdvisedIdentity != video.identity else { return }
+        stereoLoadAdvisedIdentity = video.identity
+        let isAI3D = shouldUsePseudo3D
+        let advice: String
+        if offersQualityChoice {
+            advice = "3D can't keep up with this video. Choose a lower quality for smooth playback."
+        } else if isAI3D, case .realtime = pseudo3DDepthMode {
+            advice = "AI 3D can't keep up with this video. Pre-Process it for smooth 3D."
+        } else {
+            advice = "3D can't keep up with this video's resolution."
+        }
+        showQualityNotice(advice)
     }
 
     // MARK: Notice

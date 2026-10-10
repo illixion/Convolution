@@ -13,14 +13,25 @@ struct VideoControlBar<Accessories: View>: View {
         self.accessories = accessories()
     }
 
+    /// The bar's state as it was when a menu opened. While any ornament menu
+    /// is open the bar reads nothing that moves: the player reports the
+    /// playhead up to 30 times a second, every report re-rendered this bar
+    /// and the accessories in it, and an open visionOS menu redrew (and
+    /// dropped taps) with each one. The film player does the same.
+    @State private var frozenState: RAVEPlayerControlState?
+
+    private var liveState: RAVEPlayerControlState {
+        RAVEPlayerControlState(
+            currentTime: windowModel.currentTime, duration: windowModel.duration,
+            bufferedUntil: windowModel.bufferedEnd, isPlaying: !windowModel.isPaused,
+            isMuted: windowModel.isMuted, volume: windowModel.volume,
+            markers: [windowModel.loopController.pointA, windowModel.loopController.pointB].compactMap { $0 }
+        )
+    }
+
     var body: some View {
         RAVEPlayerControls(
-            state: RAVEPlayerControlState(
-                currentTime: windowModel.currentTime, duration: windowModel.duration,
-                bufferedUntil: windowModel.bufferedEnd, isPlaying: !windowModel.isPaused,
-                isMuted: windowModel.isMuted, volume: windowModel.volume,
-                markers: [windowModel.loopController.pointA, windowModel.loopController.pointB].compactMap { $0 }
-            ),
+            state: frozenState ?? liveState,
             togglePlayback: { windowModel.togglePlayPause() },
             seek: { windowModel.endScrub(at: $0) },
             toggleMute: { windowModel.toggleMute() },
@@ -37,6 +48,9 @@ struct VideoControlBar<Accessories: View>: View {
             menuDismissal: windowModel.menuDismissals
         ) {
             accessories
+        }
+        .onChange(of: windowModel.openOrnamentMenuCount > 0) { _, open in
+            frozenState = open ? liveState : nil
         }
     }
 

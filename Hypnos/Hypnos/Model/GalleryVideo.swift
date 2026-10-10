@@ -51,7 +51,7 @@ struct GalleryVideo: Identifiable, Equatable, Hashable, Codable {
     /// 2. a feature needs AVFoundation — fake-3D, MV-HEVC, depth pre-process —
     ///    since those decode via AVFoundation and WebM isn't readable by it
     ///    (still true on visionOS 27: VP8 and VP9 both fail the probe).
-    let transcodeStreamURL: URL?
+    var transcodeStreamURL: URL?
     /// Short auto-generated Stash scene preview clip (`/scene/{id}/preview`,
     /// typically 640×360 h264). Drives the gallery long-press quick look.
     /// `nil` for sources with no server-side preview (e.g. local files).
@@ -180,6 +180,17 @@ struct GalleryVideo: Identifiable, Equatable, Hashable, Codable {
     /// error for a raw WebM. Auth (apikey / ApiKey header) is layered by callers.
     var transcodedDownloadURL: URL {
         let source = transcodeStreamURL ?? streamURL
+        // Jellyfin's HLS transcode (`main.m3u8`) has a progressive sibling
+        // that takes the same parameters. It runs as its own job, so it
+        // gets its own play session rather than sharing the one playing.
+        if source.path.hasSuffix("/main.m3u8"),
+           var components = URLComponents(url: source, resolvingAgainstBaseURL: false) {
+            components.path = String(components.path.dropLast("/main.m3u8".count)) + "/stream.mp4"
+            components.queryItems = (components.queryItems ?? [])
+                .filter { $0.name != "PlaySessionId" && $0.name != "SegmentContainer" }
+                + [URLQueryItem(name: "PlaySessionId", value: UUID().uuidString)]
+            return components.url ?? source
+        }
         let hlsSuffix = "/stream.m3u8"
         guard source.path.hasSuffix(hlsSuffix),
               var components = URLComponents(url: source, resolvingAgainstBaseURL: false)

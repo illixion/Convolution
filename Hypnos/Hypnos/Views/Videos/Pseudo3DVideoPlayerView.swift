@@ -91,6 +91,7 @@ struct Pseudo3DVideoPlayerView: View {
                 engine.onVideoSizeKnown = onVideoSizeKnown
                 engine.onPlaybackError = onPlaybackError
                 engine.onDurationKnown = onDurationKnown
+                engine.onPerformance = { [weak playbackModel] in playbackModel?.noteStereoPerformance($0) }
                 engine.startMuted = startMuted
                 engine.startVolume = Float(playbackModel?.volume ?? 1)
                 engine.loops = loops
@@ -161,6 +162,7 @@ struct Pseudo3DVideoPlayerView: View {
             }
         }
         .onAppear {
+            playbackModel?.stereoPictureStarted()
             engine.startMuted = startMuted
             engine.startVolume = Float(playbackModel?.volume ?? 1)
             engine.loops = loops

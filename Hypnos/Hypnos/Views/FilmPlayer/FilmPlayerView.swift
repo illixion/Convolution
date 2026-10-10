@@ -70,6 +70,13 @@ struct FilmPlayerView: View {
     @State private var chromeHolds = 0
     @State private var chromeHideTask: Task<Void, Never>?
     @State private var stereoFailure: String?
+    /// Said once per film when the 3D picture keeps dropping frames: the
+    /// film player streams the original picture and has no lower quality to
+    /// step to, so the viewer is told rather than the stream changed.
+    @State private var pictureNotice: String?
+    @State private var pictureNoticeTask: Task<Void, Never>?
+    @State private var stereoLoadStrikes = 0
+    @State private var stereoLoadAdvisedItem: String?
     /// The subtitles the stereo picture draws, from `StereoSubtitleFeeder`.
     @State private var stereoSubtitles: RAVEStereoSubtitleFrame?
     @AppStorage(StereoSubtitleStyle.key) private var stereoSubtitleStyle = StereoSubtitleStyle.inPicture
@@ -193,12 +200,49 @@ struct FilmPlayerView: View {
         }
     }
 
-    /// What hangs beside the controls: the audio notice and the skip button.
+    #if os(visionOS)
+    /// About 6 s of a 3D picture showing under three quarters of its frames.
+    private func noteStereoPerformance(_ sample: RAVEStereoPerformance) {
+        guard player.isPlaying, !chromeOpen, sample.isOverloaded else {
+            stereoLoadStrikes = 0
+            return
+        }
+        stereoLoadStrikes += 1
+        guard stereoLoadStrikes >= 3 else { return }
+        stereoLoadStrikes = 0
+        let item = session.loadedItem?.id ?? ""
+        guard stereoLoadAdvisedItem != item else { return }
+        stereoLoadAdvisedItem = item
+        AppLogger.filmPlayer.info("3D picture dropping frames: \(Int(sample.deliveredFraction * 100), privacy: .public)% of \(sample.sourceFramesPerSecond, format: .fixed(precision: 1), privacy: .public) fps shown")
+        pictureNotice = stereoLayout == nil
+            ? "AI 3D can't keep up with this film's picture. 2D plays smoothly."
+            : "3D can't keep up with this film's picture. 2D plays smoothly."
+        pictureNoticeTask?.cancel()
+        pictureNoticeTask = Task {
+            try? await Task.sleep(for: .seconds(10))
+            if !Task.isCancelled { pictureNotice = nil }
+        }
+    }
+    #endif
+
+    private var hasPictureNotice: Bool {
+        #if os(visionOS)
+        pictureNotice != nil
+        #else
+        false
+        #endif
+    }
+
+    /// What hangs beside the controls: the audio and picture notices and the
+    /// skip button.
     private func prompt(controlsVisible: Bool) -> AnyView? {
         let skip = skipButton(controlsVisible: controlsVisible)
-        guard audioNotice != nil || skip != nil else { return nil }
+        guard audioNotice != nil || hasPictureNotice || skip != nil else { return nil }
         return AnyView(HStack(spacing: 12) {
             audioNotice.map { StreamQualityNotice(text: $0, systemImage: "waveform") }
+            #if os(visionOS)
+            pictureNotice.map { StreamQualityNotice(text: $0, systemImage: "gauge.with.dots.needle.33percent") }
+            #endif
             skip
         })
     }
@@ -291,7 +335,8 @@ struct FilmPlayerView: View {
                             stopStereo()
                             stereoFailure = "The 3D renderer is unavailable. Playback continues in 2D."
                         },
-                        onToggleChrome: { toggleChrome() }
+                        onToggleChrome: { toggleChrome() },
+                        onPerformance: { noteStereoPerformance($0) }
                     )
                     .background {
                         if stereoSubtitleStyle == .inPicture {
@@ -691,13 +736,19 @@ struct FilmTransport: View {
         }
     }
 
+    /// A 3D film plays its own two eyes; a 2D one gets AI 3D.
+    private var isStereoFilm: Bool { session.stereoFormat != nil }
+    private var stereoTitle: String {
+        stereoEnabled ? "Play as 2D" : (isStereoFilm ? "Play in 3D" : "AI 3D")
+    }
+
     @ViewBuilder private var playbackItems: some View {
         if let onToggle3D {
             Button(action: onToggle3D) {
-                Label(stereoEnabled ? "Play as 2D" : "Convert to 3D", systemImage: stereoEnabled ? "rectangle" : "view.3d")
+                Label(stereoTitle, systemImage: stereoEnabled ? "rectangle" : (isStereoFilm ? "view.3d" : "wand.and.sparkles"))
                     .ravePlayerAccessoryLabel()
             }
-            .help(stereoEnabled ? "Play as 2D" : "Convert to 3D")
+            .help(stereoTitle)
         }
         if player.audioTracks.count > 1 {
             FilmAudioTrackMenu(player: player, onOpenChanged: menuChanged)
