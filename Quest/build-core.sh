@@ -2,9 +2,11 @@
 set -euo pipefail
 quest_dir="$(cd "$(dirname "$0")" && pwd)"
 sdk_repo="${RAVE_SDK_PATH:-$quest_dir/../../RAVESDK}"
-: "${SWIFT_ANDROID_BIN:?Set SWIFT_ANDROID_BIN to the matching open-source swift executable}"
-: "${SWIFT_ANDROID_BUNDLE:?Set SWIFT_ANDROID_BUNDLE to the installed Android artifactbundle directory}"
-: "${ANDROID_NDK_HOME:?Set ANDROID_NDK_HOME (NDK r27 or newer)}"
+# Defaults are where the swift.org .pkg (installed for this user) and
+# `swift sdk install` put them.
+: "${SWIFT_ANDROID_BIN:=$HOME/Library/Developer/Toolchains/swift-6.3.3-RELEASE.xctoolchain/usr/bin/swift}"
+: "${SWIFT_ANDROID_BUNDLE:=$HOME/Library/org.swift.swiftpm/swift-sdks/swift-6.3.3-RELEASE_android.artifactbundle}"
+: "${ANDROID_NDK_HOME:=$HOME/Library/Android/sdk/ndk/27.0.12077973}"
 triple=aarch64-unknown-linux-android29
 scratch="$quest_dir/build/swift"
 # SwiftPM 6.3.3 can choose an arbitrary architecture from the multi-triple SDK.

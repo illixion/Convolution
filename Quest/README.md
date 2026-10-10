@@ -72,9 +72,10 @@ require Meta VR OS SDK 207. JSDK stubs are compile-only and never packaged.
 Python 3 packages the native runtime dependency closure.
 
 ```sh
-export SWIFT_ANDROID_BIN=/path/to/swift-6.3.3/usr/bin/swift
-export SWIFT_ANDROID_BUNDLE=/path/to/swift-6.3.3-RELEASE_android.artifactbundle
-export ANDROID_NDK_HOME="$HOME/Library/Android/sdk/ndk/27.0.12077973"
+# Only needed when they aren't in the default places (build-core.sh's header):
+# export SWIFT_ANDROID_BIN=/path/to/swift-6.3.3/usr/bin/swift
+# export SWIFT_ANDROID_BUNDLE=/path/to/swift-6.3.3-RELEASE_android.artifactbundle
+# export ANDROID_NDK_HOME=/path/to/ndk/27.0.12077973
 export ANDROID_HOME="$HOME/Library/Android/sdk"
 export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
 ./Quest/build-core.sh
