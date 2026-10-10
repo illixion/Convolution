@@ -240,7 +240,8 @@ final class FilmSession {
             // the disc): the disc's own 5.1, read from the same image.
             await player.load(picture: disc, audio: try? disc.audioSource(itemID: item.id))
         } else {
-            await player.load(client, picture: disc)
+            // A fixed lower tier opens there when the plugin offers it.
+            await player.load(client, picture: disc, pictureHeight: FilmPictureQuality.preferred.height)
         }
         guard player.video.isLoaded else {
             error = player.video.status

@@ -70,13 +70,17 @@ struct FilmPlayerView: View {
     @State private var chromeHolds = 0
     @State private var chromeHideTask: Task<Void, Never>?
     @State private var stereoFailure: String?
-    /// Said once per film when the 3D picture keeps dropping frames: the
-    /// film player streams the original picture and has no lower quality to
-    /// step to, so the viewer is told rather than the stream changed.
+    /// When the 3D picture keeps dropping frames: under Auto the picture
+    /// steps to the next lower tier the plugin offers (for this film only),
+    /// and that is said; at the lowest (or with none, or a fixed choice) the
+    /// viewer is told once per film what would help.
     @State private var pictureNotice: String?
     @State private var pictureNoticeTask: Task<Void, Never>?
     @State private var stereoLoadStrikes = 0
     @State private var stereoLoadAdvisedItem: String?
+    /// Reports before this don't count: the first seconds of 3D (model
+    /// loading, the first decode) and of a new tier (its flush and refill).
+    @State private var stereoLoadGraceUntil = Date.distantPast
     /// The subtitles the stereo picture draws, from `StereoSubtitleFeeder`.
     @State private var stereoSubtitles: RAVEStereoSubtitleFrame?
     @AppStorage(StereoSubtitleStyle.key) private var stereoSubtitleStyle = StereoSubtitleStyle.inPicture
@@ -201,22 +205,48 @@ struct FilmPlayerView: View {
     }
 
     #if os(visionOS)
-    /// About 6 s of a 3D picture showing under three quarters of its frames.
+    /// About 6 s of a 3D picture showing under three quarters of its frames
+    /// (three overloaded reports in a row). Under Auto the picture steps one
+    /// tier down (the conversion's cost follows the picture's size), then
+    /// 20 s pass before the next reports count; otherwise the viewer is told
+    /// once per film.
     private func noteStereoPerformance(_ sample: RAVEStereoPerformance) {
-        guard player.isPlaying, !chromeOpen, sample.isOverloaded else {
+        guard player.isPlaying, !chromeOpen, !player.video.isChangingPictureTier,
+              Date.now >= stereoLoadGraceUntil, sample.isOverloaded else {
             stereoLoadStrikes = 0
             return
         }
         stereoLoadStrikes += 1
+        AppLogger.filmPlayer.info("3D picture dropping frames: \(Int(sample.deliveredFraction * 100), privacy: .public)% of \(sample.sourceFramesPerSecond, format: .fixed(precision: 1), privacy: .public) fps shown (\(self.stereoLoadStrikes, privacy: .public)/3)")
         guard stereoLoadStrikes >= 3 else { return }
         stereoLoadStrikes = 0
+        stereoLoadGraceUntil = .now.addingTimeInterval(20)
+
+        let current = player.video.pictureHeight
+        if FilmPictureQuality.preferred == .auto,
+           let lower = FilmPictureQuality.stepDown(from: current, offering: player.video.offeredPictureHeights) {
+            let tier = FilmPictureQuality.name(of: lower)
+            AppLogger.filmPlayer.info("3D couldn't keep up at \(FilmPictureQuality.name(of: current), privacy: .public); stepping to \(tier, privacy: .public)")
+            showPictureNotice("Picture lowered to \(tier) so 3D plays smoothly")
+            Task {
+                if await !player.video.setPictureHeight(lower) {
+                    AppLogger.filmPlayer.error("Couldn't step the picture to \(tier, privacy: .public)")
+                }
+                // The new tier's flush and refill don't count either.
+                stereoLoadGraceUntil = .now.addingTimeInterval(20)
+            }
+            return
+        }
         let item = session.loadedItem?.id ?? ""
         guard stereoLoadAdvisedItem != item else { return }
         stereoLoadAdvisedItem = item
-        AppLogger.filmPlayer.info("3D picture dropping frames: \(Int(sample.deliveredFraction * 100), privacy: .public)% of \(sample.sourceFramesPerSecond, format: .fixed(precision: 1), privacy: .public) fps shown")
-        pictureNotice = stereoLayout == nil
+        showPictureNotice(stereoLayout == nil
             ? "AI 3D can't keep up with this film's picture. 2D plays smoothly."
-            : "3D can't keep up with this film's picture. 2D plays smoothly."
+            : "3D can't keep up with this film's picture. 2D plays smoothly.")
+    }
+
+    private func showPictureNotice(_ text: String) {
+        pictureNotice = text
         pictureNoticeTask?.cancel()
         pictureNoticeTask = Task {
             try? await Task.sleep(for: .seconds(10))
@@ -512,6 +542,8 @@ struct FilmPlayerView: View {
         mountedDepthModelName = appModel.realtimeDepthModelName
         stereoSource = source
         session.stereoEnabled = true
+        stereoLoadStrikes = 0
+        stereoLoadGraceUntil = .now.addingTimeInterval(5)
         // Re-prime from the keyframe containing the current position. The film
         // transport keeps its play/pause intent and re-anchors Atmos with it.
         player.seek(to: player.currentTime)
@@ -611,6 +643,9 @@ struct TVFilmSoundSettings: View {
                 }
                 if session.subtitles.selected != nil {
                     Section("Subtitles") { SubtitleDelayControl(controller: session.subtitles) }
+                }
+                if !player.video.offeredPictureHeights.isEmpty {
+                    Section("Picture") { FilmPictureQualityPicker(player: player.video) }
                 }
                 Section("Objects") { FilmObjectMapPanel(player: player) }
             }
@@ -865,6 +900,9 @@ struct FilmAdjustmentsView: View {
                 if session.stereoEnabled { StereoSubtitleSettings(subtitles: session.subtitles) }
                 #endif
             }
+        }
+        if !session.player.video.offeredPictureHeights.isEmpty {
+            Section("Picture") { FilmPictureQualityPicker(player: session.player.video) }
         }
         Section("Room") { FilmRoomPicker() }
         Section("Sound") { FilmTuning() }
