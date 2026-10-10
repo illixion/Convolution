@@ -58,7 +58,7 @@ struct FilmPlayerView: View {
     @State private var stereoSource: SampleBufferFrameSource?
     /// Set while a 3D film plays as real 3D (eyes cropped from the frame);
     /// nil while a flat film plays as fake-3D.
-    @State private var stereoLayout: RAVEPackedStereoLayout?
+    @State private var stereoLayout: PackedStereoLayout?
     @State private var mountedDepthModelName: String?
     @State private var showsDepthSetup = false
     @State private var chromeOpen = false

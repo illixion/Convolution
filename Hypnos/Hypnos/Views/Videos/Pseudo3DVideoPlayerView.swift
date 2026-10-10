@@ -41,7 +41,7 @@ struct Pseudo3DVideoPlayerView: View {
     var startPaused: Bool = false
     /// A stereo video that already holds both eyes: played live as real 3D,
     /// each eye cropped out, with no depth model. Nil warps a mono video.
-    var packedStereo: RAVEPackedStereoLayout? = nil
+    var packedStereo: PackedStereoLayout? = nil
     var isFlipped: Bool = false
     var loopController: VideoLoopController? = nil
     var playbackModel: VideoWindowModel? = nil
@@ -291,7 +291,7 @@ struct Pseudo3DVideoPlayerView: View {
     var depthMode: Pseudo3DDepthMode = .realtime
     var startAtSeconds: Double? = nil
     var startPaused: Bool = false
-    var packedStereo: RAVEPackedStereoLayout? = nil
+    var packedStereo: PackedStereoLayout? = nil
     var isFlipped: Bool = false
     var loopController: VideoLoopController? = nil
     var playbackModel: VideoWindowModel? = nil

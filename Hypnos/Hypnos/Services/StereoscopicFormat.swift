@@ -60,8 +60,8 @@ enum StereoscopicFormat: String, CaseIterable, Codable {
     }
 
     /// The layout the stereo pump crops eyes out of.
-    func packedLayout(eyesReversed: Bool) -> RAVEPackedStereoLayout {
-        RAVEPackedStereoLayout(
+    func packedLayout(eyesReversed: Bool) -> PackedStereoLayout {
+        PackedStereoLayout(
             arrangement: isHorizontalSplit ? .sideBySide : .overUnder,
             isHalfResolution: isHalfResolution,
             eyesReversed: eyesReversed

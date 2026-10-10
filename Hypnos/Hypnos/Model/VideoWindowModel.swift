@@ -627,7 +627,7 @@ final class VideoWindowModel {
     /// no download or conversion. Needs the AVFoundation renderer (the pump
     /// pulls decoded frames); a WebKit-only source goes to the immersive
     /// conversion instead (`usesImmersiveStereo`).
-    var liveStereoLayout: RAVEPackedStereoLayout? {
+    var liveStereoLayout: PackedStereoLayout? {
         guard PlatformCapabilities.supportsStereoVideo, shouldUse3DMode, !immersiveStereoRequested,
               playbackRenderer == .nativeMetal else { return nil }
         return (video3DSettings ?? Video3DSettings.from(video: video) ?? .defaults(for: .sideBySide)).packedLayout

@@ -43,7 +43,7 @@ struct Video3DSettings: Codable, Equatable, Hashable {
     }
 
     /// How this video packs its eyes, for live playback in the stereo pump.
-    var packedLayout: RAVEPackedStereoLayout {
+    var packedLayout: PackedStereoLayout {
         format.packedLayout(eyesReversed: eyesReversed)
     }
 

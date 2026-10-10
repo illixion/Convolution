@@ -113,7 +113,7 @@ struct VideoWindowView: View {
 
     /// A new stereo player per video, attempt and mode: the engine takes its
     /// packed layout when it loads.
-    private func stereoPlayerID(live layout: RAVEPackedStereoLayout?) -> String {
+    private func stereoPlayerID(live layout: PackedStereoLayout?) -> String {
         let mode = layout.map { "live3d_\($0.arrangement.rawValue)_\($0.isHalfResolution)_\($0.eyesReversed)" } ?? "pseudo3d"
         return "\(video.id)_\(mode)_\(windowModel.playbackAttempt)"
     }

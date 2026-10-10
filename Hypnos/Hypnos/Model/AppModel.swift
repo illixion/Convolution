@@ -1003,7 +1003,7 @@ class AppModel {
     }
 
     /// Studio depth refinement for real-time 3D (RAVEMedia's
-    /// `RAVEDepthRefinement`): the room holds its depth when someone walks up
+    /// `DepthRefinement`): the room holds its depth when someone walks up
     /// to the camera, close-ups ease into the near end instead of clipping,
     /// and depth edges follow the picture. Read by the realtime depth source
     /// when a 3D picture starts, so players reload their pipeline on change.
@@ -1011,7 +1011,7 @@ class AppModel {
     var stableDepth: Bool {
         didSet {
             if stableDepth != oldValue {
-                UserDefaults.standard.set(stableDepth, forKey: RAVEDepthRefinement.enabledDefaultsKey)
+                UserDefaults.standard.set(stableDepth, forKey: DepthRefinement.enabledDefaultsKey)
             }
         }
     }
@@ -1590,7 +1590,7 @@ class AppModel {
         let loadedRealtimeDepthModelName = UserDefaults.standard.string(forKey: "realtimeDepthModelName") ?? legacyDepthModelName
         let loadedPreprocessDepthModelName = UserDefaults.standard.string(forKey: "preprocessDepthModelName") ?? legacyDepthModelName
         let loadedDefaultRealtimePseudo3D = loadBool("defaultRealtimePseudo3D", default: false)
-        let loadedStableDepth = loadBool(RAVEDepthRefinement.enabledDefaultsKey, default: true)
+        let loadedStableDepth = loadBool(DepthRefinement.enabledDefaultsKey, default: true)
         let loadedVideoAutoplayMuted = loadBool("videoAutoplayMuted", default: true)
 
         // Load default image viewing mode (default: 2D / mono)
