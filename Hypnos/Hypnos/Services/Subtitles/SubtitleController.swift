@@ -9,8 +9,9 @@
 
  A track comes from a `SubtitleSource`, so the controller doesn't know which
  server it talks to. Jellyfin converts every text stream it has (sidecar
- SRT/ASS, embedded tracks) to WebVTT; image subtitles are listed but can't
- be selected, except a disc's own (PGS), which the film player reads from
+ SRT/ASS, embedded tracks) to WebVTT, and serves an embedded PGS stream as
+ a `.sup` file (`PGSSupFile`); other image subtitles (VobSub, DVB) are
+ listed but can't be selected. A disc's own PGS the film player reads from
  the disc itself (`SubtitleSource.disc`, `DiscSubtitles`).
 
  Which track starts is `SubtitlePreference`: the language last picked, or
@@ -242,7 +243,11 @@ final class SubtitleController {
         fetchTask = Task { [weak self] in
             do {
                 let data = try await source.data(track)
-                let cues = try await Task.detached(priority: .userInitiated) { try RAVESubtitleTrack(data: data) }.value
+                let isBitmap = track.isBitmap
+                let trackID = track.id
+                let cues = try await Task.detached(priority: .userInitiated) {
+                    isBitmap ? try PGSSupFile.track(from: data, trackID: trackID) : try RAVESubtitleTrack(data: data)
+                }.value
                 guard let self, !Task.isCancelled, self.selected == track else { return }
                 self.parsed[track.id] = cues
                 self.cues = cues

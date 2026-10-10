@@ -742,25 +742,36 @@ actor JellyfinLibrary: MediaServerLibrary {
         let sourceId = source?.Id ?? itemId
         return (source?.MediaStreams ?? []).compactMap { stream in
             guard stream.Type == "Subtitle", let index = stream.Index else { return nil }
+            let isText = stream.IsTextSubtitleStream ?? false
             return LibrarySubtitleTrack(
                 id: index, sourceId: sourceId, language: stream.Language, name: stream.Title,
                 isDefault: stream.IsDefault ?? false, isForced: stream.IsForced ?? false,
                 isHearingImpaired: stream.IsHearingImpaired ?? false,
-                isText: stream.IsTextSubtitleStream ?? false)
+                isText: isText,
+                // Blu-ray image subtitles, drawn from the raw stream (`PGSSupFile`).
+                isBitmap: !isText && Self.isPGS(stream.Codec))
         }
     }
 
+    private static func isPGS(_ codec: String?) -> Bool {
+        ["pgssub", "hdmv_pgs_subtitle", "pgs"].contains(codec?.lowercased() ?? "")
+    }
+
     /// `Subtitles/{index}/Stream.vtt` converts any text stream, external or
-    /// embedded, to WebVTT. An embedded stream is extracted from the whole
-    /// file on first request, so this can take a while on a large film.
+    /// embedded, to WebVTT; a PGS stream comes as itself (`Stream.pgssub`, a
+    /// `.sup` file: Jellyfin can't convert images to text). An embedded
+    /// stream is extracted from the whole file on first request, every
+    /// subtitle stream at once, which took 4.5 minutes for a 60 GB film, so
+    /// the request waits that long for the first byte.
     func subtitleData(itemId: String, track: LibrarySubtitleTrack) async throws -> Data {
         if let record = LibraryOfflineStore.shared.record(for: itemId) {
             return try await LocalSubtitles.data(for: track, video: LibraryOfflineStore.mediaURL(record))
         }
-        let path = "Videos/\(itemId)/\(track.sourceId)/Subtitles/\(track.id)/Stream.vtt"
+        let format = track.isBitmap ? "pgssub" : "vtt"
+        let path = "Videos/\(itemId)/\(track.sourceId)/Subtitles/\(track.id)/Stream.\(format)"
         var request = URLRequest(url: baseURL.appending(path: path))
         request.setValue(JellyfinClientIdentity.authorizationHeader(token: authHeaderToken), forHTTPHeaderField: "Authorization")
-        request.timeoutInterval = 120
+        request.timeoutInterval = 600
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard status == 200 else { throw JellyfinLibraryError.http(path: path, status: status) }

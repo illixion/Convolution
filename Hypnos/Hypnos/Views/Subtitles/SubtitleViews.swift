@@ -2,7 +2,7 @@
  Hypnos - the subtitle menu and overlay every player shows
 
  `SubtitleMenu` is a player-controls accessory: Off, then each track, with
- image tracks listed but disabled. `SubtitleOverlay` draws the selected
+ image tracks other than PGS listed but disabled. `SubtitleOverlay` draws the selected
  track on the player's clock through RAVEUI, applying the timing offset.
  A stereo picture draws them into the picture instead (`StereoSubtitleFeeder`).
  */
@@ -24,13 +24,22 @@ struct SubtitleMenu: View {
             Button { close(); controller.select(nil) } label: { item("Off", isSelected: controller.selected == nil) }
             ForEach(controller.tracks) { track in
                 Button { close(); controller.select(track) } label: {
-                    item(track.isPlayable ? track.title : "\(track.title) (Image, unsupported)",
-                         isSelected: controller.selected == track)
+                    item(title(of: track), isSelected: controller.selected == track)
                 }
                 .disabled(!track.isPlayable)
             }
         }
         .accessibilityIdentifier("player.subtitles")
+    }
+
+    /// The chosen track says when it is still on its way (an embedded
+    /// track's first extraction on the server can take minutes) or failed.
+    private func title(of track: LibrarySubtitleTrack) -> String {
+        guard track.isPlayable else { return "\(track.title) (Image, unsupported)" }
+        guard controller.selected == track else { return track.title }
+        if controller.error != nil { return "\(track.title) (Failed)" }
+        if controller.isFetching { return "\(track.title) (Loading…)" }
+        return track.title
     }
 
     private var statusText: String {
