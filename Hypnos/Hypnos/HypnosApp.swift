@@ -297,6 +297,16 @@ struct HypnosApp: App {
         .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
 
+        // Debug: the film's picture through Apple's renderers, beside the
+        // film player (the `filmCompare` debug command).
+        Window("Picture Compare", id: PictureCompare.windowID) {
+            PictureCompareView()
+        }
+        .windowStyle(.plain)
+        .defaultSize(width: 1280, height: 580)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
+
         Window("Sound and Picture", id: FilmAdjustmentsView.windowID) {
             FilmAdjustmentsView()
         }

@@ -91,6 +91,9 @@ struct FilmPlayerView: View {
 
     var body: some View {
         content
+            #if os(visionOS)
+            .modifier(PictureCompareOpener())
+            #endif
             .onAppear {
                 session.activePlayerView = viewID
                 session.isPlayerOpen = true

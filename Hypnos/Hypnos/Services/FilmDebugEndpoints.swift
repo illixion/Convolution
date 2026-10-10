@@ -32,6 +32,36 @@ enum FilmDebugEndpoints {
                 _ = await FilmSession.shared.switchToDiscAudio()
                 return reply()
             },
+            .command("filmCompare", "Opens a window beside the film player showing the same film through one of "
+                     + "Apple's renderers (Jellyfin's HLS remux with Dolby Vision kept, muted, following the film's "
+                     + "clock), for comparing how visionOS presents HDR. renderer: playerLayer (AVPlayerLayer with the "
+                     + "film's display criteria), playerViewController (AVKit, controls hidden), or close.",
+                     parameters: [.string("renderer", "playerLayer, playerViewController or close", required: true,
+                                          choices: ["playerLayer", "playerViewController", "close"])]) { args in
+                let name = args.string("renderer") ?? "close"
+                #if os(visionOS)
+                guard let renderer = PictureCompare.Renderer(rawValue: name) else {
+                    PictureCompare.shared.close()
+                    return CompareReply(status: "Closed", driftSeconds: nil, filmLayerRange: layerRange())
+                }
+                let status = await PictureCompare.shared.open(renderer)
+                return CompareReply(status: status, driftSeconds: PictureCompare.shared.drift, filmLayerRange: layerRange())
+                #else
+                return CompareReply(status: "visionOS only (\(name))", driftSeconds: nil, filmLayerRange: layerRange())
+                #endif
+            },
+            .command("filmLayerRange", "Sets the film player's own picture layer's preferredDynamicRange (default "
+                     + "high), to compare against a stock layer.",
+                     parameters: [.string("range", "high, constrainedHigh or standard", required: true,
+                                          choices: ["high", "constrainedHigh", "standard"])]) { args in
+                let layer = FilmSession.shared.player.video.displayLayer
+                switch args.string("range") ?? "high" {
+                case "standard": layer.preferredDynamicRange = .standard
+                case "constrainedHigh": layer.preferredDynamicRange = .constrainedHigh
+                default: layer.preferredDynamicRange = .high
+                }
+                return CompareReply(status: "Set", driftSeconds: nil, filmLayerRange: layerRange())
+            },
         ])
     }
 
@@ -68,6 +98,21 @@ enum FilmDebugEndpoints {
         var audioTracks: Int
         var picture: Picture
         var disc: MVCPictureSource.Diagnostics?
+    }
+
+    struct CompareReply: Encodable {
+        var status: String
+        var driftSeconds: Double?
+        var filmLayerRange: String
+    }
+
+    private static func layerRange() -> String {
+        switch FilmSession.shared.player.video.displayLayer.preferredDynamicRange {
+        case .high: "high"
+        case .constrainedHigh: "constrainedHigh"
+        case .standard: "standard"
+        default: "other"
+        }
     }
 
     private static func reply() -> Reply {
