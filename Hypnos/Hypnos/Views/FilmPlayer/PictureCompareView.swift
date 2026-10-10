@@ -13,8 +13,11 @@
  - `playerViewController`: AVKit's `AVPlayerViewController` with its controls
    hidden, which states its own criteria (what Infuse uses for Dolby Vision).
 
- `filmLayerRange` sets the film player's own layer's `preferredDynamicRange`,
- the one setting it has that a stock layer doesn't.
+ - `videoPlayerComponent`: RealityKit's video component on the AVPlayer.
+
+ Result (device, 2026-10-10, Dolby Vision profile 5): the two layers looked
+ alike and darker and flatter than Infuse; AVKit and the video component
+ matched Infuse. The film player now draws through the video component.
  */
 
 #if os(visionOS)
@@ -31,7 +34,7 @@ final class PictureCompare {
     static let windowID = "picture-compare"
 
     enum Renderer: String, CaseIterable {
-        case playerLayer, playerViewController, videoPlayerComponent, filmRenderer, filmComponent
+        case playerLayer, playerViewController, videoPlayerComponent
     }
 
     private(set) var renderer: Renderer?
@@ -74,10 +77,6 @@ final class PictureCompare {
         return lines
     }
 
-    static func describeFilmLayer() -> String {
-        describe(FilmSession.shared.player.video.displayLayer)
-    }
-
     private static func describe(_ layer: CALayer) -> String {
         var parts = ["\(type(of: layer))"]
         let keys = ["preferredDynamicRange", "wantsExtendedDynamicRangeContent", "toneMapMode", "contentsHeadroom",
@@ -93,29 +92,6 @@ final class PictureCompare {
 
     func open(_ renderer: Renderer) async -> String {
         guard let item = FilmSession.shared.loadedItem else { return "No film is loaded" }
-        if renderer == .filmComponent {
-            followTask?.cancel()
-            player?.pause()
-            player = nil
-            loadedItemID = nil
-            startFilmComponent()
-            self.renderer = renderer
-            openRequest += 1
-            status = "Showing filmComponent"
-            return status
-        }
-        stopFilmComponent()
-        if renderer == .filmRenderer {
-            // The film player's own renderer: nothing to stream or follow.
-            followTask?.cancel()
-            player?.pause()
-            player = nil
-            loadedItemID = nil
-            self.renderer = renderer
-            openRequest += 1
-            status = "Showing filmRenderer"
-            return status
-        }
         if player == nil || loadedItemID != item.id {
             guard let library = LibraryService.current() else { return "No Jellyfin server" }
             do {
@@ -137,7 +113,6 @@ final class PictureCompare {
     }
 
     func close() {
-        stopFilmComponent()
         followTask?.cancel()
         followTask = nil
         player?.pause()
@@ -170,81 +145,6 @@ final class PictureCompare {
         }
     }
 
-    // MARK: The film's own samples through RealityKit
-
-    /// A renderer of its own, fed every sample the film player enqueues (its
-    /// stereo tap) and clocked by a synchronizer that mirrors the film's
-    /// timebase: both run on the host clock, so the mirror only has to follow
-    /// rate changes, seeks and re-anchors.
-    let componentRenderer = AVSampleBufferVideoRenderer()
-    private let synchronizer = AVSampleBufferRenderSynchronizer()
-    private var mirrorTask: Task<Void, Never>?
-    private var synchronizerAttached = false
-
-    private func startFilmComponent() {
-        let video = FilmSession.shared.player.video
-        if !synchronizerAttached {
-            synchronizer.addRenderer(componentRenderer)
-            synchronizer.delaysRateChangeUntilHasSufficientMediaData = false
-            synchronizerAttached = true
-        }
-        _ = video
-        mirrorTask?.cancel()
-        mirrorTask = Task { [weak self] in
-            while !Task.isCancelled {
-                self?.mirrorClock()
-                try? await Task.sleep(for: .milliseconds(20))
-            }
-        }
-    }
-
-    /// Called once RealityKit's component holds the renderer: a renderer
-    /// with no video target throws on its first enqueue.
-    func componentDidAttach() {
-        guard renderer == .filmComponent, mirrorTask != nil else { return }
-        let video = FilmSession.shared.player.video
-        nonisolated(unsafe) let renderer = componentRenderer
-        video.onSampleBuffer = { buffer in renderer.enqueue(buffer) }
-        video.onFlush = { renderer.flush() }
-        // Samples from the playhead on: a seek in place refills both.
-        video.seek(to: video.currentTime)
-    }
-
-    private func stopFilmComponent() {
-        guard mirrorTask != nil else { return }
-        mirrorTask?.cancel()
-        mirrorTask = nil
-        let video = FilmSession.shared.player.video
-        video.onSampleBuffer = nil
-        video.onFlush = nil
-        componentRenderer.flush(removingDisplayedImage: true, completionHandler: nil)
-        synchronizer.setRate(0, time: .zero)
-    }
-
-    private(set) var mirrorCorrections = 0
-
-    private func mirrorClock() {
-        let film = FilmSession.shared.player.video.timebase
-        let host = CMClockGetHostTimeClock()
-        let now = CMClockGetTime(host)
-        let filmTime = CMSyncConvertTime(now, from: host, to: film)
-        let rate = CMTimebaseGetRate(film)
-        let ours = CMSyncConvertTime(now, from: host, to: synchronizer.timebase)
-        if rate != Float64(synchronizer.rate) || abs((filmTime - ours).seconds) > 0.001 {
-            synchronizer.setRate(Float(rate), time: filmTime, atHostTime: now)
-            mirrorCorrections += 1
-        }
-    }
-
-    var componentStatus: String {
-        let status = switch componentRenderer.status {
-        case .rendering: "rendering"
-        case .failed: "failed \(componentRenderer.error.map { "\(($0 as NSError).code)" } ?? "?")"
-        default: "unknown"
-        }
-        return "\(status), corrections \(mirrorCorrections), skew \(String(format: "%.1f", (CMTimebaseGetTime(synchronizer.timebase) - CMTimebaseGetTime(FilmSession.shared.player.video.timebase)).seconds * 1000)) ms"
-    }
-
     var drift: Double? {
         guard let player else { return nil }
         let value = player.currentTime().seconds - FilmSession.shared.player.currentTime
@@ -257,11 +157,7 @@ struct PictureCompareView: View {
 
     var body: some View {
         Group {
-            if compare.renderer == .filmComponent {
-                CompareRealityView(source: .renderer(compare.componentRenderer))
-            } else if compare.renderer == .filmRenderer {
-                CompareRealityView(source: .renderer(FilmSession.shared.player.video.displayLayer.sampleBufferRenderer))
-            } else if let player = compare.player, let renderer = compare.renderer {
+            if let player = compare.player, let renderer = compare.renderer {
                 switch renderer {
                 case .playerLayer:
                     CompareLayerView(player: player, criteria: FilmSession.shared.player.video.displayCriteria)
@@ -269,8 +165,6 @@ struct PictureCompareView: View {
                     CompareControllerView(player: player)
                 case .videoPlayerComponent:
                     CompareRealityView(source: .player(player))
-                case .filmRenderer, .filmComponent:
-                    EmptyView()
                 }
             } else {
                 Text(compare.status).foregroundStyle(.secondary)
@@ -355,12 +249,6 @@ private struct CompareRealityView: View {
                 component.desiredViewingMode = .mono
                 entity.components.set(component)
                 content.add(entity)
-                if case .renderer = source {
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(300))
-                        PictureCompare.shared.componentDidAttach()
-                    }
-                }
             } update: { content in
                 guard let entity = content.entities.first(where: { $0.name == "compare" }) else { return }
                 // The component's screen is 1 m tall at the video's aspect;

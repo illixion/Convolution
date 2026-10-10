@@ -12,6 +12,9 @@ import AVFoundation
 import DebugTrace
 import Foundation
 import RAVEFilm
+#if os(visionOS)
+import RAVEMedia
+#endif
 
 @MainActor
 enum FilmDebugEndpoints {
@@ -35,43 +38,59 @@ enum FilmDebugEndpoints {
             .command("filmCompare", "Opens a window beside the film player showing the same film through one of "
                      + "Apple's renderers (Jellyfin's HLS remux with Dolby Vision kept, muted, following the film's "
                      + "clock), for comparing how visionOS presents HDR. renderer: playerLayer (AVPlayerLayer with the "
-                     + "film's display criteria), playerViewController (AVKit, controls hidden), videoPlayerComponent (RealityKit's video component), filmRenderer (the film player's own renderer handed to RealityKit's video component), filmComponent (the film's samples into a second renderer on RealityKit's video component, clocked by a synchronizer mirroring the film clock; uses the stereo tap, so keep 3D off), or close.",
+                     + "film's display criteria), playerViewController (AVKit, controls hidden), videoPlayerComponent (RealityKit's video component), or close. (The film player itself now draws through the video component on visionOS.)",
                      parameters: [.string("renderer", "playerLayer, playerViewController or close", required: true,
-                                          choices: ["playerLayer", "playerViewController", "videoPlayerComponent", "filmRenderer", "filmComponent", "close"])]) { args in
+                                          choices: ["playerLayer", "playerViewController", "videoPlayerComponent", "close"])]) { args in
                 let name = args.string("renderer") ?? "close"
                 #if os(visionOS)
                 guard let renderer = PictureCompare.Renderer(rawValue: name) else {
                     PictureCompare.shared.close()
-                    return CompareReply(status: "Closed", driftSeconds: nil, filmLayerRange: layerRange())
+                    return CompareReply(status: "Closed", driftSeconds: nil)
                 }
-                var status = await PictureCompare.shared.open(renderer)
-                if renderer == .filmComponent { status += ": " + PictureCompare.shared.componentStatus }
-                return CompareReply(status: status, driftSeconds: PictureCompare.shared.drift, filmLayerRange: layerRange())
+                let status = await PictureCompare.shared.open(renderer)
+                return CompareReply(status: status, driftSeconds: PictureCompare.shared.drift)
                 #else
-                return CompareReply(status: "visionOS only (\(name))", driftSeconds: nil, filmLayerRange: layerRange())
+                return CompareReply(status: "visionOS only (\(name))", driftSeconds: nil)
+                #endif
+            },
+            .command("stereoStrength", "Scales the AI 3D (depth warp) strength of every 3D picture, live: 1 is the "
+                     + "shipped strength (0.8 % of the picture width per eye at the far end). For finding by eye how "
+                     + "much separation reads right. Not saved.",
+                     parameters: [.number("scale", "multiplier on the shipped strength", required: true, range: 0 ... 2)]) { args in
+                #if os(visionOS)
+                Pseudo3DStereoEngine.strengthScale = Float(args.double("scale") ?? 1)
+                return ["scale": Double(Pseudo3DStereoEngine.strengthScale),
+                        "perEyePercentOfWidth": Double(Pseudo3DStereoEngine.strengthScale) * 0.8]
+                #else
+                return ["scale": 1.0, "perEyePercentOfWidth": 0.8]
+                #endif
+            },
+            .query("stereoDepth", "How AI 3D's realtime depth is spread over the picture (0 far … 1 near, after the "
+                   + "depth budget): the last frame, the shot playing and the last 40 shots (split at cuts), each with the "
+                   + "strength multiplier the shot-adaptive policy would choose (measured only, not applied). Also the "
+                   + "plane width, strength and convergence in force, and the stereoStrength debug multiplier.") { _ in
+                #if os(visionOS)
+                let configured = Pseudo3DStereoEngine.lastConfigured
+                return StereoDepthReply(
+                    metrics: StereoDepthMetrics.snapshot,
+                    planeWidthMeters: configured?.planeWidthMeters,
+                    depthStrength: configured?.depthStrength,
+                    convergence: configured?.convergence,
+                    debugStrengthScale: Pseudo3DStereoEngine.strengthScale,
+                    targetMeanShift: StereoStrengthPolicy.targetMeanShift
+                )
+                #else
+                return ["stereoDepth": "visionOS only"]
                 #endif
             },
             .query("filmCompareLayers", "The comparison window's view and layer tree (filmCompare), with each "
                    + "layer's dynamic-range settings and the window's display criteria, to find what AVKit's player "
-                   + "sets that a plain layer doesn't. Also the film player's own layer for reference.") { _ in
+                   + "sets that a plain layer doesn't.") { _ in
                 #if os(visionOS)
-                return ["compare": PictureCompare.shared.layerTree(),
-                        "film": [PictureCompare.describeFilmLayer()]]
+                return ["compare": PictureCompare.shared.layerTree()]
                 #else
                 return ["compare": ["visionOS only"]]
                 #endif
-            },
-            .command("filmLayerRange", "Sets the film player's own picture layer's preferredDynamicRange (default "
-                     + "high), to compare against a stock layer.",
-                     parameters: [.string("range", "high, constrainedHigh or standard", required: true,
-                                          choices: ["high", "constrainedHigh", "standard"])]) { args in
-                let layer = FilmSession.shared.player.video.displayLayer
-                switch args.string("range") ?? "high" {
-                case "standard": layer.preferredDynamicRange = .standard
-                case "constrainedHigh": layer.preferredDynamicRange = .constrainedHigh
-                default: layer.preferredDynamicRange = .high
-                }
-                return CompareReply(status: "Set", driftSeconds: nil, filmLayerRange: layerRange())
             },
         ])
     }
@@ -111,25 +130,26 @@ enum FilmDebugEndpoints {
         var disc: MVCPictureSource.Diagnostics?
     }
 
+    #if os(visionOS)
+    struct StereoDepthReply: Encodable {
+        var metrics: StereoDepthMetrics.Snapshot
+        var planeWidthMeters: Float?
+        var depthStrength: Float?
+        var convergence: Float?
+        var debugStrengthScale: Float
+        var targetMeanShift: Float
+    }
+    #endif
+
     struct CompareReply: Encodable {
         var status: String
         var driftSeconds: Double?
-        var filmLayerRange: String
-    }
-
-    private static func layerRange() -> String {
-        switch FilmSession.shared.player.video.displayLayer.preferredDynamicRange {
-        case .high: "high"
-        case .constrainedHigh: "constrainedHigh"
-        case .standard: "standard"
-        default: "other"
-        }
     }
 
     private static func reply() -> Reply {
         let player = FilmSession.shared.player
         let video = player.video
-        let renderer = video.displayLayer.sampleBufferRenderer
+        let renderer = video.renderer
         let rendererStatus = switch renderer.status {
         case .rendering: "rendering"
         case .failed: "failed: \(renderer.error.map { "\(($0 as NSError).domain) \(($0 as NSError).code)" } ?? "?")"
