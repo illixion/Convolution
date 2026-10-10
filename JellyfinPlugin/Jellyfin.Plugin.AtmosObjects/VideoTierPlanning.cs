@@ -11,6 +11,21 @@ public enum TierEncoder
     X265
 }
 
+/// <summary>
+/// How a tier applies a Dolby Vision profile 5 picture's RPU before scaling,
+/// making HDR10 of it. The app never does this itself: Dolby processing stays
+/// on the server, and on the device only the system's own renderer reads the
+/// RPU. Both are jellyfin-ffmpeg's own filters (the ones Jellyfin tone-maps
+/// with); stock ffmpeg has neither.
+/// </summary>
+public enum TierReshape
+{
+    /// <summary>tonemap_videotoolbox on VideoToolbox-decoded frames (a Mac server). 3× realtime at 1080 on an M1.</summary>
+    VideoToolbox,
+    /// <summary>tonemapx on the CPU, anywhere else. 1.25× realtime at 1080 on an M1.</summary>
+    Software
+}
+
 /// <summary>The transfer function a tier keeps from its source.</summary>
 public enum TierTransfer
 {
@@ -57,16 +72,23 @@ public static class VideoTiers
     public static int BitsPerSecond(int height) => height >= 1440 ? 24_000_000 : 14_000_000;
 
     /// <summary>
-    /// The transfer a transcode keeps, or null when the picture can't be
-    /// transcoded faithfully: Dolby Vision without an HDR10, HLG or SDR base
-    /// (profile 5's IPT-PQ-C2 decodes to the wrong colours without its RPU).
+    /// Dolby Vision with no HDR10, HLG or SDR base (profile 5): its IPT-PQ-C2
+    /// picture decodes to purple and green without its RPU.
     /// </summary>
-    public static TierTransfer? Transfer(string videoRange, int? dvProfile)
+    public static bool NeedsReshape(string videoRange, int? dvProfile) =>
+        dvProfile == 5 || string.Equals(videoRange ?? string.Empty, "DOVI", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The transfer a transcode keeps, or null when the picture can't be
+    /// transcoded faithfully: profile 5 without a way to apply its RPU
+    /// (<paramref name="canReshape"/>). With one it becomes HDR10.
+    /// </summary>
+    public static TierTransfer? Transfer(string videoRange, int? dvProfile, bool canReshape = false)
     {
         var range = videoRange ?? string.Empty;
-        if (dvProfile == 5 || string.Equals(range, "DOVI", StringComparison.OrdinalIgnoreCase))
+        if (NeedsReshape(range, dvProfile))
         {
-            return null;
+            return canReshape ? TierTransfer.Pq : null;
         }
 
         if (range.Contains("HLG", StringComparison.OrdinalIgnoreCase))
@@ -89,9 +111,9 @@ public static class VideoTiers
     /// smaller than the picture in either dimension. A 3840×2160 source
     /// gets [1440, 1080], 2560×1440 gets [1080], 1920×1080 none.
     /// </summary>
-    public static List<int> Offered(int? width, int? height, string videoRange, int? dvProfile)
+    public static List<int> Offered(int? width, int? height, string videoRange, int? dvProfile, bool canReshape = false)
     {
-        if (width is not int w || height is not int h || w <= 0 || h <= 0 || Transfer(videoRange, dvProfile) is null)
+        if (width is not int w || height is not int h || w <= 0 || h <= 0 || Transfer(videoRange, dvProfile, canReshape) is null)
         {
             return [];
         }
@@ -130,15 +152,26 @@ public static class VideoTiers
     /// the HLS muxer: scale into the tier's box, 10-bit HEVC (hvc1) at the
     /// tier's bitrate, keyframes only where forced, the source's colour tags.
     /// Dolby Vision is not carried (no RPU, no dvcC): the result is the
-    /// base layer's HDR10, HLG or SDR. No audio.
+    /// base layer's HDR10, HLG or SDR, or with <paramref name="reshape"/>
+    /// profile 5's picture with its RPU applied, as HDR10. No audio.
     /// </summary>
-    public static List<string> EncodeArguments(TierEncoder encoder, int height, TierTransfer transfer, IReadOnlyList<double> keyframes)
+    public static List<string> EncodeArguments(TierEncoder encoder, int height, TierTransfer transfer, IReadOnlyList<double> keyframes,
+        TierReshape? reshape = null)
     {
         var bitrate = BitsPerSecond(height);
         var pixelFormat = encoder == TierEncoder.VideoToolbox ? "p010le" : "yuv420p10le";
+        // tonemap=none: the RPU maps the picture to PQ BT.2020 at its own
+        // brightness, with nothing compressed toward a display's peak.
+        const string toHdr10 = "p=bt2020:t=smpte2084:m=bt2020:tonemap=none:apply_dovi=1";
+        var reshapeFilter = reshape switch
+        {
+            TierReshape.VideoToolbox => $"tonemap_videotoolbox=format=p010:{toHdr10},hwdownload,format=p010le,",
+            TierReshape.Software => $"tonemapx={toHdr10}:format=yuv420p10le,",
+            _ => string.Empty
+        };
         var args = new List<string>
         {
-            "-vf", $"scale=w={BoxWidth(height)}:h={height}:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=bicubic,format={pixelFormat}",
+            "-vf", $"{reshapeFilter}scale=w={BoxWidth(height)}:h={height}:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=bicubic,format={pixelFormat}",
             // Every source frame once, at its own time: a frame dropped or
             // duplicated to a constant rate would move the keyframes.
             "-fps_mode", "passthrough",
@@ -176,6 +209,33 @@ public static class VideoTiers
         });
         args.AddRange(["-tag:v", "hvc1", "-an", "-sn", "-dn"]);
         return args;
+    }
+
+    /// <summary>
+    /// Input arguments a reshape needs before <c>-i</c>: tonemap_videotoolbox
+    /// takes VideoToolbox frames, decoded on the GPU (with the RPU parsed).
+    /// </summary>
+    public static List<string> InputArguments(TierReshape? reshape) => reshape == TierReshape.VideoToolbox
+        ? ["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"]
+        : [];
+
+    /// <summary>
+    /// How this server can apply a profile 5 RPU, from <c>ffmpeg -hide_banner
+    /// -filters</c>'s listing: VideoToolbox's filter when the tier encodes with
+    /// VideoToolbox (both mean a Mac), else tonemapx; null with neither
+    /// (stock ffmpeg), when profile 5 gets no tiers.
+    /// </summary>
+    public static TierReshape? PickReshape(string filtersListing, TierEncoder? encoder)
+    {
+        static bool Lists(string listing, string name) => listing.Split('\n')
+            .Any(line => line.Split(' ', StringSplitOptions.RemoveEmptyEntries) is { Length: >= 2 } parts && parts[1] == name);
+
+        if (encoder == TierEncoder.VideoToolbox && Lists(filtersListing, "tonemap_videotoolbox"))
+        {
+            return TierReshape.VideoToolbox;
+        }
+
+        return Lists(filtersListing, "tonemapx") ? TierReshape.Software : null;
     }
 
     /// <summary>

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyVersion>0.1.0.0</AssemblyVersion>
@@ -21,8 +21,8 @@
 
   <ItemGroup>
     <!-- Supplied by the server at runtime; never copied into the plugin folder. -->
-    <PackageReference Include="Jellyfin.Controller" Version="10.11.5" ExcludeAssets="runtime" />
-    <PackageReference Include="Jellyfin.Model" Version="10.11.5" ExcludeAssets="runtime" />
+    <PackageReference Include="Jellyfin.Controller" Version="12.2.0" ExcludeAssets="runtime" />
+    <PackageReference Include="Jellyfin.Model" Version="12.2.0" ExcludeAssets="runtime" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <!--
       Decodes E-AC-3's JOC objects in-process (see Eac3AtmosDecoder.cs). Official

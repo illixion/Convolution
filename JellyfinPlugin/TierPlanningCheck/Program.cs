@@ -21,7 +21,8 @@ Check(Show(VideoTiers.Offered(2560, 1440, "SDR", null)) == "[1080]", "1440p gets
 Check(Show(VideoTiers.Offered(1920, 1080, "HDR10", null)) == "[]", "1080p gets none");
 Check(Show(VideoTiers.Offered(1920, 800, "SDR", null)) == "[]", "a scope 1080p film gets none");
 Check(Show(VideoTiers.Offered(2048, 858, "SDR", null)) == "[1080]", "a 2K DCP-width film is wider than 1920: 1080");
-Check(Show(VideoTiers.Offered(3840, 2160, "DOVI", 5)) == "[]", "Dolby Vision profile 5 (no HDR10 base) gets none");
+Check(Show(VideoTiers.Offered(3840, 2160, "DOVI", 5)) == "[]", "Dolby Vision profile 5 (no HDR10 base) gets none without a reshape");
+Check(Show(VideoTiers.Offered(3840, 1740, "DOVI", 5, canReshape: true)) == "[1440,1080]", "profile 5 gets both when its RPU can be applied");
 Check(Show(VideoTiers.Offered(3840, 2160, "DOVIWithEL", 7)) == "[1440,1080]", "profile 7 keeps its HDR10 base: both");
 Check(Show(VideoTiers.Offered(null, 2160, "HDR10", null)) == "[]" && Show(VideoTiers.Offered(3840, 0, "HDR10", null)) == "[]",
     "unknown dimensions get none");
@@ -31,7 +32,10 @@ Check(VideoTiers.Transfer("HDR10", null) == TierTransfer.Pq && VideoTiers.Transf
       && VideoTiers.Transfer("DOVIWithHDR10", 8) == TierTransfer.Pq, "HDR10, HDR10+ and DV 8.1 keep PQ");
 Check(VideoTiers.Transfer("HLG", null) == TierTransfer.Hlg && VideoTiers.Transfer("DOVIWithHLG", 8) == TierTransfer.Hlg, "HLG keeps HLG");
 Check(VideoTiers.Transfer("SDR", null) == TierTransfer.Sdr && VideoTiers.Transfer("DOVIWithSDR", 8) == TierTransfer.Sdr, "SDR stays SDR");
-Check(VideoTiers.Transfer("DOVI", 5) is null && VideoTiers.Transfer("HDR10", 5) is null, "profile 5 can't be transcoded");
+Check(VideoTiers.Transfer("DOVI", 5) is null && VideoTiers.Transfer("HDR10", 5) is null, "profile 5 can't be transcoded without a reshape");
+Check(VideoTiers.Transfer("DOVI", 5, canReshape: true) == TierTransfer.Pq, "profile 5 becomes HDR10 with one");
+Check(VideoTiers.NeedsReshape("DOVI", null) && VideoTiers.NeedsReshape("DOVIWithHDR10", 5) && !VideoTiers.NeedsReshape("DOVIWithHDR10", 8)
+      && !VideoTiers.NeedsReshape("DOVIWithEL", 7), "only profile 5 (no base) needs its RPU applied");
 
 // 3. Height validation and boxes.
 Check(VideoTiers.IsTier(1440) && VideoTiers.IsTier(1080) && !VideoTiers.IsTier(720) && !VideoTiers.IsTier(2160), "only 1440 and 1080 are tiers");
@@ -67,6 +71,22 @@ Check(After(vt, "-c:v") == "hevc_videotoolbox" && After(vt, "-profile:v") == "ma
 Check(After(vt, "-color_trc") == "arib-std-b67" && After(vt, "-b:v") == "24000000", "HLG tags, 24 Mbps");
 var sdr = VideoTiers.EncodeArguments(TierEncoder.X265, 1080, TierTransfer.Sdr, forced);
 Check(!sdr.Contains("-color_trc") && !After(sdr, "-x265-params").Contains("hdr10"), "SDR: no HDR tags");
+
+// 5b. Profile 5's RPU is applied before scaling, by the filter the server has.
+var p5vt = VideoTiers.EncodeArguments(TierEncoder.VideoToolbox, 1080, TierTransfer.Pq, forced, TierReshape.VideoToolbox);
+Check(After(p5vt, "-vf").StartsWith("tonemap_videotoolbox=format=p010:p=bt2020:t=smpte2084:m=bt2020:tonemap=none:apply_dovi=1,hwdownload,format=p010le,scale=", StringComparison.Ordinal)
+      && After(p5vt, "-color_trc") == "smpte2084", "VideoToolbox reshape: RPU applied on the GPU, downloaded, then scaled, tagged HDR10");
+Check(string.Join(" ", VideoTiers.InputArguments(TierReshape.VideoToolbox)) == "-hwaccel videotoolbox -hwaccel_output_format videotoolbox_vld"
+      && VideoTiers.InputArguments(TierReshape.Software).Count == 0 && VideoTiers.InputArguments(null).Count == 0, "only the VideoToolbox reshape decodes on the GPU");
+var p5sw = VideoTiers.EncodeArguments(TierEncoder.X265, 1080, TierTransfer.Pq, forced, TierReshape.Software);
+Check(After(p5sw, "-vf").StartsWith("tonemapx=p=bt2020:t=smpte2084:m=bt2020:tonemap=none:apply_dovi=1:format=yuv420p10le,scale=", StringComparison.Ordinal),
+    "software reshape: tonemapx to PQ BT.2020 before scaling");
+Check(!After(x265, "-vf").Contains("tonemap"), "no reshape: no tonemap filter");
+const string jfFilters = " .S tonemap           V->V       Conversion to/from different dynamic ranges.\n .S tonemapx          V->V       SIMD optimized HDR to SDR tonemapping\n .. tonemap_videotoolbox V->V       Perform HDR to SDR conversion with Metal.\n";
+const string stockFilters = " .S tonemap           V->V       Conversion to/from different dynamic ranges.\n";
+Check(VideoTiers.PickReshape(jfFilters, TierEncoder.VideoToolbox) == TierReshape.VideoToolbox, "jellyfin-ffmpeg on a Mac: VideoToolbox");
+Check(VideoTiers.PickReshape(jfFilters, TierEncoder.X265) == TierReshape.Software, "jellyfin-ffmpeg elsewhere: tonemapx");
+Check(VideoTiers.PickReshape(stockFilters, TierEncoder.VideoToolbox) is null, "stock ffmpeg: none (tonemap alone can't apply an RPU)");
 
 // 6. The encoder from ffmpeg's listing.
 const string mac = " V....D libx265              libx265 H.265 / HEVC (codec hevc)\n V....D hevc_videotoolbox    VideoToolbox H.265 Encoder (codec hevc)\n";

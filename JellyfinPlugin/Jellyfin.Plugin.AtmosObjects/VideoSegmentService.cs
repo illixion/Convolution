@@ -323,12 +323,23 @@ public sealed class VideoSegmentService
     /// <summary>The lower tiers this picture gets: none without an encoder, or with tiers turned off.</summary>
     private List<int> OfferedHeights(MediaStream? stream, VideoIndex index) =>
         Config.PictureTiers && Encoder() is not null
-            ? VideoTiers.Offered(stream?.Width, stream?.Height, index.VideoRange, index.DvProfile)
+            ? VideoTiers.Offered(stream?.Width, stream?.Height, index.VideoRange, index.DvProfile, Reshape() is not null)
             : [];
 
     private readonly object _encoderGate = new();
     private TierEncoder? _encoder;
+    private TierReshape? _reshape;
     private bool _encoderProbed;
+
+    /// <summary>How this server applies a profile 5 RPU for a tier, asked once with the encoder.</summary>
+    private TierReshape? Reshape()
+    {
+        Encoder();
+        lock (_encoderGate)
+        {
+            return _reshape;
+        }
+    }
 
     /// <summary>The HEVC encoder jellyfin-ffmpeg has, asked once.</summary>
     private TierEncoder? Encoder()
@@ -348,13 +359,20 @@ public sealed class VideoSegmentService
                 var listing = ffmpeg.StandardOutput.ReadToEnd();
                 ffmpeg.WaitForExit(10_000);
                 _encoder = VideoTiers.PickEncoder(listing);
+
+                using var filters = StartProcess(_mediaEncoder.EncoderPath, ["-hide_banner", "-filters"]);
+                var filtersStderr = filters.StandardError.ReadToEndAsync();
+                var filtersListing = filters.StandardOutput.ReadToEnd();
+                filters.WaitForExit(10_000);
+                _reshape = VideoTiers.PickReshape(filtersListing, _encoder);
             }
             catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
             {
                 _logger.LogWarning(ex, "Could not list ffmpeg's encoders; lower picture tiers are off");
             }
 
-            _logger.LogInformation("Picture tiers encode with {Encoder}", _encoder?.ToString() ?? "nothing (no HEVC encoder)");
+            _logger.LogInformation("Picture tiers encode with {Encoder}; Dolby Vision profile 5 converts with {Reshape}",
+                _encoder?.ToString() ?? "nothing (no HEVC encoder)", _reshape?.ToString() ?? "nothing (no tiers for it)");
             return _encoder;
         }
     }
@@ -424,6 +442,10 @@ public sealed class VideoSegmentService
         // dropped as cut short, below).
         var duration = run.Height is null || run.FirstSegment == 0 ? end - seek : end - starts[run.FirstSegment - 1];
         var args = new List<string> { "-v", "error", "-nostdin", "-y" };
+        var reshape = run.Height is not null && VideoTiers.NeedsReshape(index.VideoRange, index.DvProfile)
+            ? Reshape() ?? throw new InvalidOperationException("ffmpeg can't apply a Dolby Vision profile 5 RPU.")
+            : (TierReshape?)null;
+        args.AddRange(VideoTiers.InputArguments(reshape));
         if (seek > 0)
         {
             args.AddRange(["-ss", Seconds(seek)]);
@@ -444,10 +466,10 @@ public sealed class VideoSegmentService
             // Only the codec differs from a copy: the same muxing follows.
             // The tier's arguments tag it hvc1 and carry no Dolby Vision.
             var encoder = Encoder() ?? throw new InvalidOperationException("ffmpeg has no HEVC encoder.");
-            var transfer = VideoTiers.Transfer(index.VideoRange, index.DvProfile)
+            var transfer = VideoTiers.Transfer(index.VideoRange, index.DvProfile, reshape is not null)
                 ?? throw new InvalidOperationException($"A {index.VideoRange} picture can't be transcoded.");
             args.AddRange(VideoTiers.EncodeArguments(encoder, height, transfer,
-                VideoTiers.ForcedKeyframes(starts, run.FirstSegment, run.LastSegment)));
+                VideoTiers.ForcedKeyframes(starts, run.FirstSegment, run.LastSegment), reshape));
             args.AddRange(["-copyts", "-avoid_negative_ts", "disabled"]);
         }
         else

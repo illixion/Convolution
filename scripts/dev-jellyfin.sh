@@ -39,7 +39,8 @@
 # state, for what a container can't do: encode with VideoToolbox (the
 # plugin's picture tiers) and convert MV-HEVC (`Spatial/`, through the
 # `vergence` CLI, built from ../vergence). It uses the macOS truehdd as is,
-# Homebrew's ffmpeg, and adds the spatial recording at
+# Jellyfin's own portable ffmpeg (jellyfin-ffmpeg, which has the Dolby Vision
+# filters the plugin converts profile 5 with; Homebrew's has none), and adds the spatial recording at
 # $HYPNOS_DEV_JELLYFIN_SPATIAL (default ~/Downloads/IMG_0664.MOV) to Movies
 # when that file exists. Both instances can run at once.
 set -euo pipefail
@@ -60,17 +61,19 @@ if (( native )); then
     root="${HYPNOS_DEV_JELLYFIN_NATIVE_DIR:-$HOME/.local/share/hypnos-dev-jellyfin-native}"
     media="$root/data"
 fi
-native_version=10.11.11
-native_sha256=27c0bcbeac7a698cf0fd034e347f124f69083bc4463816099b52bebead614a47
+native_version=12.2
+native_sha256=f56a76b84471ac615ddf597f66d7445a9b1e90f3a8f76dedbe8fc30fbad732ca
+ffmpeg_version=8.1.3-1
+ffmpeg_sha256=22445d7299742749ad2eeb9ce87963d50def0357e45b3e6c7b69987c8365dbf6
 spatial="${HYPNOS_DEV_JELLYFIN_SPATIAL:-$HOME/Downloads/IMG_0664.MOV}"
 base="http://127.0.0.1:$port"
 apikey_file="$root/config/dev-api-key.txt"
 demo="${HYPNOS_DEV_JELLYFIN_DEMO:-$HOME/Downloads/DolbyElement4K_VisionAtmos.mkv}"
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-image="jellyfin/jellyfin:10.11.11"
+image="jellyfin/jellyfin:12.2"
 devuser=dev
 devpass=dev12345
-auth_hdr='X-Emby-Authorization: MediaBrowser Client="hypnos-dev-jellyfin", Device="script", DeviceId="hypnos-dev-jellyfin", Version="10.11.11"'
+auth_hdr='Authorization: MediaBrowser Client="hypnos-dev-jellyfin", Device="script", DeviceId="hypnos-dev-jellyfin", Version="12.2"'
 
 # A bold system font for the generated poster/fanart/logo art (see gen_art
 # below) — this Homebrew ffmpeg has no drawtext/libfreetype, so art is
@@ -106,7 +109,7 @@ wait_for_server() {
 # instance's plugin folder. Named/versioned per JellyfinPlugin/README.md.
 build_plugin() {
     dotnet build "$repo_root/JellyfinPlugin/Jellyfin.Plugin.AtmosObjects" -c Release >/dev/null
-    local out="$repo_root/JellyfinPlugin/Jellyfin.Plugin.AtmosObjects/bin/Release/net9.0"
+    local out="$repo_root/JellyfinPlugin/Jellyfin.Plugin.AtmosObjects/bin/Release/net10.0"
     local dest="$root/config/plugins/AtmosObjects_0.1.0.0"
     rm -rf "$dest"
     mkdir -p "$dest"
@@ -535,7 +538,8 @@ start_container() {
 # copied back.
 install_native_server() {
     local dir="$root/server"
-    [[ -x "$dir/jellyfin/jellyfin" ]] && return
+    [[ -x "$dir/jellyfin/jellyfin" ]] && [[ "$(cat "$dir/version" 2>/dev/null)" == "$native_version" ]] && return
+    rm -rf "$dir/jellyfin"
     local tarball="jellyfin_${native_version}-arm64.tar.xz"
     local url="https://repo.jellyfin.org/files/server/macos/stable/v${native_version}/arm64/$tarball"
     mkdir -p "$dir"
@@ -551,6 +555,28 @@ install_native_server() {
     cp "$dir/jellyfin/jellyfin" "$dir/jellyfin-apphost"
     codesign -s - -f "$dir/jellyfin-apphost" >/dev/null 2>&1
     mv "$dir/jellyfin-apphost" "$dir/jellyfin/jellyfin"
+    printf '%s' "$native_version" > "$dir/version"
+}
+
+# jellyfin-ffmpeg's portable macOS build (the server tarball ships none),
+# fetched once and checked against its pinned hash like the server.
+install_native_ffmpeg() {
+    local dir="$root/server/ffmpeg"
+    [[ -x "$dir/ffmpeg" ]] && [[ "$(cat "$dir/version" 2>/dev/null)" == "$ffmpeg_version" ]] && return
+    local tarball="jellyfin-ffmpeg_${ffmpeg_version}_portable_macarm64-gpl.tar.xz"
+    local url="https://repo.jellyfin.org/files/ffmpeg/macos/8.x/${ffmpeg_version}/arm64/$tarball"
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    echo "dev-jellyfin: downloading jellyfin-ffmpeg $ffmpeg_version for macOS..."
+    curl -fsSL -o "$dir/$tarball" "$url"
+    if [[ "$(shasum -a 256 "$dir/$tarball" | awk '{print $1}')" != "$ffmpeg_sha256" ]]; then
+        echo "dev-jellyfin: $tarball doesn't match its pinned hash" >&2
+        rm -rf "$dir"
+        exit 1
+    fi
+    tar -xJf "$dir/$tarball" -C "$dir"
+    rm -f "$dir/$tarball"
+    printf '%s' "$ffmpeg_version" > "$dir/version"
 }
 
 # The `vergence` CLI the plugin runs for `Spatial/`, built from the checkout's
@@ -598,7 +624,7 @@ XML
     local server="$root/server/jellyfin"
     nohup "$server/jellyfin" --datadir "$root/config" --configdir "$root/config/config" \
         --cachedir "$root/cache" --logdir "$root/log" --webdir "$server/jellyfin-web" \
-        --ffmpeg "$(command -v ffmpeg)" > "$root/log/server.out" 2>&1 &
+        --ffmpeg "$root/server/ffmpeg/ffmpeg" > "$root/log/server.out" 2>&1 &
     echo $! > "$root/server.pid"
     wait_for_server
 }
@@ -668,15 +694,15 @@ setup_and_scan() {
         # instance fully offline and deterministic: with it off, local NFO is
         # the only metadata source Jellyfin ever consults for these items.
         api -X POST "$base/Library/VirtualFolders?name=Movies&collectionType=movies&refreshLibrary=true" \
-            -H "X-Emby-Token: $token" -H 'Content-Type: application/json' \
+            -H "Authorization: MediaBrowser Token=\"$token\"" -H 'Content-Type: application/json' \
             -d '{"LibraryOptions":{"PathInfos":[{"Path":"'"$media"'/movies"}],"EnablePhotos":false,"EnableRealtimeMonitor":false,"EnableInternetProviders":false}}' >/dev/null
         api -X POST "$base/Library/VirtualFolders?name=TV%20Shows&collectionType=tvshows&refreshLibrary=true" \
-            -H "X-Emby-Token: $token" -H 'Content-Type: application/json' \
+            -H "Authorization: MediaBrowser Token=\"$token\"" -H 'Content-Type: application/json' \
             -d '{"LibraryOptions":{"PathInfos":[{"Path":"'"$media"'/tvshows"}],"EnablePhotos":false,"EnableRealtimeMonitor":false,"EnableInternetProviders":false}}' >/dev/null
 
-        api -X POST "$base/Auth/Keys?App=hypnos-dev" -H "X-Emby-Token: $token" >/dev/null
+        api -X POST "$base/Auth/Keys?App=hypnos-dev" -H "Authorization: MediaBrowser Token=\"$token\"" >/dev/null
         local key
-        key=$(api "$base/Auth/Keys" -H "X-Emby-Token: $token" | python3 -c 'import json,sys; print(json.loads(sys.stdin.buffer.read().decode("utf-8-sig"))["Items"][0]["AccessToken"])')
+        key=$(api "$base/Auth/Keys" -H "Authorization: MediaBrowser Token=\"$token\"" | python3 -c 'import json,sys; print(json.loads(sys.stdin.buffer.read().decode("utf-8-sig"))["Items"][0]["AccessToken"])')
         mkdir -p "$root/config"
         printf '%s' "$key" > "$apikey_file"
         chmod 600 "$apikey_file"
@@ -685,14 +711,14 @@ setup_and_scan() {
     else
         local key
         key=$(cat "$apikey_file")
-        api -X POST "$base/Library/Refresh" -H "X-Emby-Token: $key" >/dev/null
+        api -X POST "$base/Library/Refresh" -H "Authorization: MediaBrowser Token=\"$key\"" >/dev/null
     fi
 
     local key
     key=$(cat "$apikey_file")
     for _ in $(seq 1 60); do
         local running
-        running=$(api "$base/ScheduledTasks" -H "X-Emby-Token: $key" \
+        running=$(api "$base/ScheduledTasks" -H "Authorization: MediaBrowser Token=\"$key\"" \
             | python3 -c 'import json,sys; print(any(t["State"]=="Running" for t in json.loads(sys.stdin.buffer.read().decode("utf-8-sig"))))')
         [[ "$running" == "False" ]] && break
         sleep 3
@@ -706,9 +732,9 @@ setup_and_scan() {
     # directly: with the default 300 in force, reporting a 35%-through stop
     # left PlaybackPositionTicks at 0 and Played=true; after lowering this to
     # 3s, the same call left a real PlayedPercentage/resume point.
-    api "$base/System/Configuration" -H "X-Emby-Token: $key" \
+    api "$base/System/Configuration" -H "Authorization: MediaBrowser Token=\"$key\"" \
         | python3 -c 'import json,sys; d=json.load(sys.stdin); d["MinResumeDurationSeconds"]=3; print(json.dumps(d))' \
-        | api -X POST "$base/System/Configuration" -H "X-Emby-Token: $key" -H 'Content-Type: application/json' --data-binary @- >/dev/null
+        | api -X POST "$base/System/Configuration" -H "Authorization: MediaBrowser Token=\"$key\"" -H 'Content-Type: application/json' --data-binary @- >/dev/null
 
     seed_collection_and_watch_state "$key"
     echo "dev-jellyfin: http://127.0.0.1:$port"
@@ -723,7 +749,7 @@ setup_and_scan() {
 # first-time setup.
 find_item_id() {
     # $1: base URL, $2: API key, $3: IncludeItemTypes, $4: exact name to match
-    api "$1/Items" -H "X-Emby-Token: $2" \
+    api "$1/Items" -H "Authorization: MediaBrowser Token=\"$2\"" \
         --data-urlencode "IncludeItemTypes=$3" --data-urlencode "Recursive=true" \
         --data-urlencode "SearchTerm=$4" -G \
         | python3 -c "
@@ -738,7 +764,7 @@ for i in items:
 seed_collection_and_watch_state() {
     local key="$1"
     local userId
-    userId=$(api "$base/Users" -H "X-Emby-Token: $key" \
+    userId=$(api "$base/Users" -H "Authorization: MediaBrowser Token=\"$key\"" \
         | python3 -c 'import json,sys; u=json.loads(sys.stdin.buffer.read().decode("utf-8-sig")); print(u[0]["Id"] if u else "")')
     [[ -z "$userId" ]] && { echo "dev-jellyfin: no user found, skipping watch-state seed" >&2; return; }
 
@@ -748,18 +774,18 @@ seed_collection_and_watch_state() {
 
     if [[ -n "$crimson" && -n "$quiet" ]]; then
         local existing
-        existing=$(api "$base/Items" -H "X-Emby-Token: $key" \
+        existing=$(api "$base/Items" -H "Authorization: MediaBrowser Token=\"$key\"" \
             --data-urlencode "IncludeItemTypes=BoxSet" --data-urlencode "Recursive=true" -G \
             | python3 -c 'import json,sys; print(",".join(i["Name"] for i in json.loads(sys.stdin.buffer.read().decode("utf-8-sig")).get("Items", [])))')
         if [[ "$existing" != *"Station Saga"* ]]; then
-            api -X POST "$base/Collections" -H "X-Emby-Token: $key" -G \
+            api -X POST "$base/Collections" -H "Authorization: MediaBrowser Token=\"$key\"" -G \
                 --data-urlencode "Name=Station Saga" --data-urlencode "Ids=$crimson,$quiet" >/dev/null
         fi
     fi
 
     # Fully played: The Quiet Ledger.
     if [[ -n "$quiet" ]]; then
-        api -X POST "$base/Users/$userId/PlayedItems/$quiet" -H "X-Emby-Token: $key" >/dev/null
+        api -X POST "$base/Users/$userId/PlayedItems/$quiet" -H "Authorization: MediaBrowser Token=\"$key\"" >/dev/null
     fi
 
     # Partially watched (~35%): Crimson Tide Station, via the real playback
@@ -773,10 +799,10 @@ seed_collection_and_watch_state() {
     local seriesId seasonId ep
     seriesId=$(find_item_id "$base" "$key" Series "Nebula Drift")
     if [[ -n "$seriesId" ]]; then
-        seasonId=$(api "$base/Shows/$seriesId/Seasons" -H "X-Emby-Token: $key" --data-urlencode "userId=$userId" -G \
+        seasonId=$(api "$base/Shows/$seriesId/Seasons" -H "Authorization: MediaBrowser Token=\"$key\"" --data-urlencode "userId=$userId" -G \
             | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(next((s["Id"] for s in d["Items"] if s.get("IndexNumber")==1), ""))')
         if [[ -n "$seasonId" ]]; then
-            ep=$(api "$base/Shows/$seriesId/Episodes" -H "X-Emby-Token: $key" \
+            ep=$(api "$base/Shows/$seriesId/Episodes" -H "Authorization: MediaBrowser Token=\"$key\"" \
                 --data-urlencode "userId=$userId" --data-urlencode "seasonId=$seasonId" -G \
                 | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(next((e["Id"] for e in d["Items"] if e.get("IndexNumber")==1), ""))')
             [[ -n "$ep" ]] && report_partial_progress "$key" "$userId" "$ep" 0.5
@@ -786,7 +812,7 @@ seed_collection_and_watch_state() {
 
 # /Sessions/Playing* silently no-ops against a plain admin-issued API key —
 # confirmed directly: PlayCount/PlaybackPositionTicks never moved when these
-# calls were sent with the `X-Emby-Token: <api key>` header instead of a real
+# calls were sent with an API key as the header's token instead of a real
 # signed-in session's access token. Jellyfin's session manager looks up an
 # actual session object for the caller, and a bare API key doesn't have one
 # the way `/Users/AuthenticateByName` does. So this authenticates as the dev
@@ -807,17 +833,17 @@ session_token() {
 report_partial_progress() {
     local key="$1" userId="$2" itemId="$3" fraction="$4"
     local runtimeTicks ticks sessionId token
-    runtimeTicks=$(api "$base/Users/$userId/Items/$itemId" -H "X-Emby-Token: $key" \
+    runtimeTicks=$(api "$base/Users/$userId/Items/$itemId" -H "Authorization: MediaBrowser Token=\"$key\"" \
         | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("RunTimeTicks") or 0)')
     [[ "$runtimeTicks" -le 0 ]] && return
     ticks=$(python3 -c "print(int($runtimeTicks * $fraction))")
     sessionId=$(python3 -c 'import uuid; print(uuid.uuid4())')
     token=$(session_token)
-    api -X POST "$base/Sessions/Playing" -H "X-Emby-Token: $token" -H 'Content-Type: application/json' \
+    api -X POST "$base/Sessions/Playing" -H "Authorization: MediaBrowser Token=\"$token\"" -H 'Content-Type: application/json' \
         -d "{\"ItemId\":\"$itemId\",\"PlaySessionId\":\"$sessionId\",\"PositionTicks\":0,\"IsPaused\":false,\"CanSeek\":true}" >/dev/null
-    api -X POST "$base/Sessions/Playing/Progress" -H "X-Emby-Token: $token" -H 'Content-Type: application/json' \
+    api -X POST "$base/Sessions/Playing/Progress" -H "Authorization: MediaBrowser Token=\"$token\"" -H 'Content-Type: application/json' \
         -d "{\"ItemId\":\"$itemId\",\"PlaySessionId\":\"$sessionId\",\"PositionTicks\":$ticks,\"IsPaused\":false,\"CanSeek\":true}" >/dev/null
-    api -X POST "$base/Sessions/Playing/Stopped" -H "X-Emby-Token: $token" -H 'Content-Type: application/json' \
+    api -X POST "$base/Sessions/Playing/Stopped" -H "Authorization: MediaBrowser Token=\"$token\"" -H 'Content-Type: application/json' \
         -d "{\"ItemId\":\"$itemId\",\"PlaySessionId\":\"$sessionId\",\"PositionTicks\":$ticks}" >/dev/null
 }
 
@@ -829,6 +855,7 @@ if (( native )); then
                 rm -rf "${root:?}"/config "${root:?}"/cache
             fi
             install_native_server
+            install_native_ffmpeg
             build_plugin
             build_vergence
             seed_media

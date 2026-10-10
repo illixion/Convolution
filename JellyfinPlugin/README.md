@@ -79,12 +79,15 @@ credit is in the notices file; don't drop it if this plugin is redistributed.
 ## Install
 
 1. Build the plugin: `dotnet build Jellyfin.Plugin.AtmosObjects -c Release`.
-   This targets .NET 9 and Jellyfin 10.11. `Cavern`/`Cavern.Format` restore
+   This targets .NET 10 and Jellyfin 12.2 (12.x dropped the legacy
+   `X-Emby-Token` header and `api_key` query: clients send
+   `Authorization: MediaBrowser Token="…"` or `ApiKey=`, which 10.11 also
+   accepts). `Cavern`/`Cavern.Format` restore
    from NuGet automatically; nothing extra to build for the EAC3 path.
 2. Build truehdd (only needed for the TrueHD path — EAC3 items decode without
    it): `truehdd/build.sh`. It clones upstream at a pinned commit, applies
    `truehdd/*.patch` and runs `cargo build --release`.
-3. Copy `bin/Release/net9.0/Jellyfin.Plugin.AtmosObjects.dll` into
+3. Copy `bin/Release/net10.0/Jellyfin.Plugin.AtmosObjects.dll` into
    `<jellyfin data>/plugins/AtmosObjects_0.1.0.0/` (this now also carries the
    `Cavern.dll`/`Cavern.Format.dll` NuGet assemblies — `dotnet build` copies
    them into the same output folder, no separate step), and point the plugin
@@ -340,7 +343,16 @@ dimension: 2160p gets both, 1440p gets 1080, 1080p none.
 - **Colour:** HDR10 and HLG keep their transfer and BT.2020 tags (x265 writes
   the HDR10 SEI). Dolby Vision is not carried: profiles 7, 8 and 10 are
   served as their base layer (`hvc1`). Profile 5 has no base layer a decoder
-  shows correctly without its RPU, so it gets no tiers. No audio.
+  shows correctly without its RPU, so its tiers apply the RPU first and come
+  out HDR10 (PQ, BT.2020): `tonemap_videotoolbox` on VideoToolbox-decoded
+  frames when the server encodes with VideoToolbox, else `tonemapx` on the
+  CPU, both with `apply_dovi=1:tonemap=none` (jellyfin-ffmpeg's own filters;
+  stock ffmpeg has neither, and then profile 5 gets no tiers). On an M1 that
+  is 3× realtime at 1080 (VideoToolbox) or 1.25× (`tonemapx`). This is how
+  Convolution plays profile 5 in 3D: the app never applies an RPU itself
+  (only the system's own renderer reads it), so its 3D picture comes from a
+  converted tier. Jellyfin's own transcoder can't do this: it maps Dolby
+  Vision to SDR only, and its VideoToolbox path skips profile 5. No audio.
 - **Runs are per tier.** A seek cancels runs of the same tier only, so a
   client changing tier can still be fed from the other while it does. An
   `Init` request with no run of that tier makes segment 0 alone, rather than
@@ -354,7 +366,7 @@ decode cleanly, and the original's segments 10–11 followed by the 1080 tier's
 12–13 decode as one stream. The container's four Arm cores make 1080 at
 about 0.3× realtime (a cold mid-film segment in 11–14 s), too slow to watch;
 VideoToolbox on a Mac (the native dev instance, `scripts/dev-jellyfin.sh
-native up`, Homebrew ffmpeg 8.1 on an M-series Mac) serves ten cold 1 s 1080
+native up`, then Homebrew ffmpeg 8.1, now jellyfin-ffmpeg, on an M-series Mac) serves ten cold 1 s 1080
 segments of the 4K demo in 7 s, the first in 2.6 s and the rest in 0.2–1 s
 each (software decode and scaling included). An M1 Mac mini running Jellyfin's
 own ffmpeg does about the same: 16 cold 1080 segments of a 4K HDR10 film in

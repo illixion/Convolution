@@ -340,7 +340,7 @@ uses. A simple, valid set; no per-layer parallax art was made.
 
 **Never point the plugin, tests or agents at a real Jellyfin server**, same
 rule as Stash (see main CLAUDE.md). `scripts/dev-jellyfin.sh up` runs a
-disposable Jellyfin 10.11.11 in Docker at `http://127.0.0.1:8097` (loopback
+disposable Jellyfin 12.2 in Docker at `http://127.0.0.1:8097` (loopback
 only), builds `JellyfinPlugin/Jellyfin.Plugin.AtmosObjects` and installs it,
 completes the first-run wizard (user `dev`/`dev12345`), creates a Movies
 library, and mints an API key written to `config/dev-api-key.txt` under
@@ -353,9 +353,12 @@ Jellyfin's macOS build instead, at `http://127.0.0.1:8098` under
 `$HYPNOS_DEV_JELLYFIN_NATIVE_DIR` (default
 `~/.local/share/hypnos-dev-jellyfin-native`), for the two things the Linux
 container can't do: VideoToolbox picture tiers and MV-HEVC `Spatial/`
-streaming. It downloads the pinned 10.11.11 arm64 tarball once, signs its
+streaming. It downloads the pinned 12.2 arm64 tarball once, signs its
 apphost ad hoc (unsigned, it is SIGKILLed at launch), writes a loopback-only
-`network.xml` before the first start, uses Homebrew ffmpeg and the macOS
+`network.xml` before the first start, uses jellyfin-ffmpeg's pinned portable
+macOS build (the tarball ships none; Homebrew's ffmpeg lacks the
+`tonemap_videotoolbox`/`tonemapx` filters the plugin converts Dolby Vision
+profile 5 with) and the macOS
 truehdd, builds `vergence` from `../vergence`'s committed HEAD into its own
 folder, and adds `$HYPNOS_DEV_JELLYFIN_SPATIAL` (default
 `~/Downloads/IMG_0664.MOV`, a Vision Pro recording; Jellyfin titles it from
