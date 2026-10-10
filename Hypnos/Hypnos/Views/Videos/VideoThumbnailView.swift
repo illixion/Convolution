@@ -6,6 +6,7 @@
 
 import DebugTrace
 import SwiftUI
+import VergenceApple
 
 struct VideoThumbnailView: View {
     /// Max thumbnail dimension for the grid. 16:9 → ~384×216 — crisp at the

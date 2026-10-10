@@ -6,6 +6,7 @@
 
 import DebugTrace
 import Foundation
+import VergenceApple
 
 /// Video source that fetches from Stash GraphQL API
 final class GraphQLVideoSource: VideoSource, @unchecked Sendable {

@@ -10,6 +10,7 @@
 
 import Foundation
 import RAVEUI
+import VergenceApple
 
 /// What kind of thing a `LibraryItem` is. Mirrors Jellyfin's `BaseItemKind`
 /// loosely, but only the cases the Library feature actually renders — v1 is

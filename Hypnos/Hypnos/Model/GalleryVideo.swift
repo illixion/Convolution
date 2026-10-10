@@ -5,6 +5,7 @@
  */
 
 import Foundation
+import VergenceApple
 
 /// One Stash caption file: its language ("en"; "00" when untagged) and
 /// original format ("srt", "vtt").

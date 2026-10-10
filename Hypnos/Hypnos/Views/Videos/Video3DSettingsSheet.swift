@@ -5,6 +5,7 @@
  */
 
 import SwiftUI
+import VergenceApple
 
 struct Video3DSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss

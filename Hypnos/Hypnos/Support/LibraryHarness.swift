@@ -22,6 +22,7 @@ import AVFoundation
 import Foundation
 import RAVEFilm
 import RAVEUI
+import VergenceApple
 
 enum LibraryHarness {
     private static let launchFlag = "-LibraryHarness"

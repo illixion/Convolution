@@ -10,6 +10,7 @@ import AVFoundation
 import AVKit
 import DebugTrace
 import SwiftUI
+import VergenceApple
 
 #if os(visionOS)
 

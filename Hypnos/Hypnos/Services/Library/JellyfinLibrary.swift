@@ -14,6 +14,7 @@ import DebugTrace
 import Foundation
 import RAVEUI
 import os
+import VergenceApple
 
 enum JellyfinLibraryError: Error, LocalizedError {
     case notConfigured
