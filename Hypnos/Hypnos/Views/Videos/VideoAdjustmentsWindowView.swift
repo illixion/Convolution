@@ -51,7 +51,11 @@ struct VideoAdjustmentsWindowView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             SubtitleDelayControl(controller: target.subtitles)
                             #if os(visionOS)
-                            if target.showsStereoPicture { StereoSubtitleSettings(subtitles: target.subtitles) }
+                            if target.showsStereoPicture {
+                                StereoSubtitleSettings(subtitles: target.subtitles)
+                            } else if !target.usesImmersiveStereo {
+                                FlatSubtitleSettings()
+                            }
                             #endif
                         }
                         .padding([.horizontal, .bottom], 20)

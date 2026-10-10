@@ -108,6 +108,34 @@ enum StereoSubtitleStyle: String, CaseIterable, Identifiable {
     }
 }
 
+/// Where a flat picture shows its subtitles: over it (`inPicture`) or on the
+/// band hung under the window, as a stereo picture can. Its own setting, as
+/// a film watched in 2D and in 3D may want them in different places.
+enum FlatSubtitleStyle {
+    static let key = "subtitles.flatStyle"
+}
+
+/// The flat picture's subtitle placement: over the picture or below it.
+struct FlatSubtitleSettings: View {
+    @AppStorage(FlatSubtitleStyle.key) private var style = StereoSubtitleStyle.inPicture
+    @AppStorage(SubtitleBandGap.key) private var bandGap = SubtitleBandGap.defaultPoints
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Picker("Subtitles", selection: $style) {
+                ForEach(StereoSubtitleStyle.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            if style == .belowPicture {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Distance below picture: \(Int(bandGap)) pt").font(.caption)
+                    Slider(value: $bandGap, in: SubtitleBandGap.range, step: 4)
+                }
+            }
+        }
+    }
+}
+
 /// Where the HDR luminance of subtitles drawn into a stereo picture is kept.
 enum SubtitleHDRBrightness {
     static let key = "subtitles.hdrWhiteNits"

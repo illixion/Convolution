@@ -87,6 +87,7 @@ struct FilmPlayerView: View {
     /// The subtitles the stereo picture draws, from `StereoSubtitleFeeder`.
     @State private var stereoSubtitles: RAVEStereoSubtitleFrame?
     @AppStorage(StereoSubtitleStyle.key) private var stereoSubtitleStyle = StereoSubtitleStyle.inPicture
+    @AppStorage(FlatSubtitleStyle.key) private var flatSubtitleStyle = StereoSubtitleStyle.inPicture
     #endif
 
     var body: some View {
@@ -344,20 +345,19 @@ struct FilmPlayerView: View {
         #if os(visionOS)
         ZStack(alignment: .bottom) {
             Group {
-                FilmVideoView(player: player.video)
-                    .opacity(stereoSource == nil ? 1 : 0)
+                // RealityKit's video plane (HDR as AVKit shows it). Hidden,
+                // not removed, under the stereo picture so it stays fed; dimmed
+                // under an open menu, which the plane would otherwise cover.
+                // A tap on it toggles the chrome.
+                FilmVideoView(player: player.video, squareCorners: !appModel.roundedCorners,
+                              opacity: stereoSource != nil ? 0 : (chromeOpen ? 0.12 : 1),
+                              takesInput: stereoSource == nil && (!chromeOpen || (morePopoverOpen && chromeHolds == 1)),
+                              onTap: { toggleChrome() })
                     // The audio stage contributes no window depth. It remains
                     // mounted when only the picture changes to stereo.
                     .background {
                         FilmStageView(player: player, listenerDistance: session.listenerDistance)
                             .frame(depth: 0)
-                    }
-                    .overlay {
-                        // Gaze-and-pinch on the flat picture toggles the
-                        // chrome; the stereo picture has its own tap target.
-                        if stereoSource == nil {
-                            Color.clear.contentShape(.rect).onTapGesture { toggleChrome() }
-                        }
                     }
                 if let source = stereoSource {
                     RAVEExternalStereoVideoView(
@@ -383,7 +383,7 @@ struct FilmPlayerView: View {
                         }
                     }
                 }
-                if stereoSource == nil {
+                if stereoSource == nil, flatSubtitleStyle == .inPicture {
                     subtitleOverlay
                 }
             }
@@ -469,7 +469,8 @@ struct FilmPlayerView: View {
     #if os(visionOS)
     /// The subtitles to hang under a stereo picture, if set to show there.
     private var bandSubtitles: SubtitleController? {
-        stereoSource != nil && session.subtitles.selected != nil && stereoSubtitleStyle == .belowPicture
+        session.subtitles.selected != nil
+            && (stereoSource != nil ? stereoSubtitleStyle : flatSubtitleStyle) == .belowPicture
             ? session.subtitles : nil
     }
 
@@ -951,7 +952,7 @@ struct FilmAdjustmentsView: View {
             Section("Subtitles") {
                 SubtitleDelayControl(controller: session.subtitles)
                 #if os(visionOS)
-                if session.stereoEnabled { StereoSubtitleSettings(subtitles: session.subtitles) }
+                if session.stereoEnabled { StereoSubtitleSettings(subtitles: session.subtitles) } else { FlatSubtitleSettings() }
                 #endif
             }
         }

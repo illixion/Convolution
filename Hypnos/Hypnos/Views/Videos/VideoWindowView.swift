@@ -69,13 +69,18 @@ struct VideoWindowView: View {
 
     #if os(visionOS)
     @AppStorage(StereoSubtitleStyle.key) private var stereoSubtitleStyle = StereoSubtitleStyle.inPicture
+    @AppStorage(FlatSubtitleStyle.key) private var flatSubtitleStyle = StereoSubtitleStyle.inPicture
 
     /// The subtitles to hang under a stereo picture, if it has them on and
     /// they are set to show there rather than in the picture.
     private var bandSubtitles: SubtitleController? {
-        windowModel.showsStereoPicture && windowModel.subtitles.selected != nil && !appModel.allWindowsHidden
-            && stereoSubtitleStyle == .belowPicture ? windowModel.subtitles : nil
+        windowModel.subtitles.selected != nil && !appModel.allWindowsHidden && !windowModel.usesImmersiveStereo
+            && (windowModel.showsStereoPicture ? stereoSubtitleStyle : flatSubtitleStyle) == .belowPicture
+            ? windowModel.subtitles : nil
     }
+
+    /// The flat picture's subtitles hang under the window instead of over it.
+    private var flatSubtitlesBelow: Bool { flatSubtitleStyle == .belowPicture }
 
     /// The subtitles the stereo player draws into its picture, if set to.
     private var inPictureSubtitles: SubtitleController? {
@@ -83,6 +88,7 @@ struct VideoWindowView: View {
     }
     #else
     private var inPictureSubtitles: SubtitleController? { nil }
+    private var flatSubtitlesBelow: Bool { false }
     #endif
 
 
@@ -295,7 +301,8 @@ struct VideoWindowView: View {
                     // draws its own in the immersive space.
                     // A stereo picture has them drawn into it instead (see
                     // StereoSubtitleFeeder).
-                    if !appModel.allWindowsHidden, !windowModel.usesImmersiveStereo, !windowModel.showsStereoPicture {
+                    if !appModel.allWindowsHidden, !windowModel.usesImmersiveStereo, !windowModel.showsStereoPicture,
+                       !flatSubtitlesBelow {
                         SubtitleOverlay(controller: windowModel.subtitles,
                                         pictureAspect: windowModel.videoAspectRatio) { windowModel.currentTime }
                     }
