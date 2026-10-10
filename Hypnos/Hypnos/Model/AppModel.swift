@@ -223,6 +223,42 @@ class AppModel {
 
     private(set) var apiClient: StashAPIClient
 
+    /// HTTP status of the last Stash answer that refused the credentials, or
+    /// nil once a request has succeeded or the server settings changed. Fed by
+    /// the client itself, so every Stash call (grids, albums, filter search,
+    /// ratings, the app-start load) reaches it without each catching a 401.
+    private(set) var stashAuthRejectedStatus: Int?
+
+    /// User-facing explanation when Stash is the library in force and refused
+    /// the key, else nil. Screens that would otherwise say "no images" show
+    /// this instead, because an empty grid and a rejected key look identical.
+    var stashAuthProblem: String? {
+        guard stashAuthRejectedStatus != nil, effectiveLibrarySource == .stash else { return nil }
+        return stashAPIKey.isEmpty
+            ? "The Stash server requires an API key. Add one in Settings."
+            : "The Stash server rejected the API key. Check or regenerate it in Settings (Stash → Security → API Key)."
+    }
+
+    /// Backstop for the client's own event: a failure caught by a loader marks
+    /// the auth state even if the handler had not been registered yet (the
+    /// very first load at app start can beat it).
+    private func noteStashFailure(_ error: Error) {
+        guard error.isStashAuthenticationFailure, stashAuthRejectedStatus == nil else { return }
+        stashAuthRejectedStatus = 401
+    }
+
+    private func handleStashAuthEvent(_ event: StashAPIClient.AuthEvent) {
+        switch event {
+        case .rejected(let status):
+            if stashAuthRejectedStatus != status {
+                AppLogger.appModel.error("Stash rejected the credentials (HTTP \(status, privacy: .public))")
+                stashAuthRejectedStatus = status
+            }
+        case .accepted:
+            if stashAuthRejectedStatus != nil { stashAuthRejectedStatus = nil }
+        }
+    }
+
     // MARK: - Image Source (stored, always Stash server)
 
     private(set) var imageSource: any ImageSource
@@ -1736,6 +1772,14 @@ class AppModel {
         Task { await entitlementProvider.refresh() }
 
         // Now all stored properties are initialized, we can use self
+        // `self` is a mutable capture inside `init`, so it goes through a
+        // local that closures can hold weakly.
+        let model = self
+        Task {
+            await client.setAuthHandler { [weak model] event in
+                Task { @MainActor in model?.handleStashAuthEvent(event) }
+            }
+        }
         AppLogger.appModel.info("Init - Has API Key: \(!self.stashAPIKey.isEmpty, privacy: .public)")
         AppLogger.appModel.info("Init - Page Size: 30")
 
@@ -2744,6 +2788,8 @@ class AppModel {
 
     func updateAPIClient() {
         updateStashMediaCredential()
+        // New credentials: the old verdict says nothing about them.
+        stashAuthRejectedStatus = nil
         if !stashServerURL.isEmpty, let url = URL(string: stashServerURL) {
             // Update with Stash server config
             let config = StashServerConfig(
@@ -3117,6 +3163,7 @@ class AppModel {
                 AppLogger.appModel.debug("Gallery page load cancelled")
             } else {
                 AppLogger.appModel.error("Failed to load gallery page: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+                noteStashFailure(error)
                 if page == 0 {
                     galleryImages = []
                 }
@@ -3211,6 +3258,7 @@ class AppModel {
             AppLogger.appModel.debug("Loaded \(galleriesCount, privacy: .public) galleries for autocomplete")
         } catch {
             AppLogger.appModel.error("Failed to search galleries: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+            noteStashFailure(error)
         }
     }
 
@@ -3259,6 +3307,7 @@ class AppModel {
                 }
         } catch {
             AppLogger.appModel.error("Failed to search tags: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+            noteStashFailure(error)
         }
     }
 
@@ -3305,6 +3354,7 @@ class AppModel {
                 }
         } catch {
             AppLogger.appModel.error("Failed to search studios: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+            noteStashFailure(error)
         }
     }
 
@@ -3351,6 +3401,7 @@ class AppModel {
                 }
         } catch {
             AppLogger.appModel.error("Failed to search performers: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+            noteStashFailure(error)
         }
     }
 
@@ -3362,6 +3413,7 @@ class AppModel {
             availableGroups = result.groups.map(MediaContainer.init(group:))
         } catch {
             AppLogger.appModel.error("Failed to load groups: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+            noteStashFailure(error)
             availableGroups = []
         }
     }
@@ -3395,6 +3447,7 @@ class AppModel {
                 mediaContainers = result.groups.map(MediaContainer.init(group:))
             } catch {
                 AppLogger.appModel.error("Failed to load groups: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+                noteStashFailure(error)
                 mediaContainers = []
             }
 
@@ -3409,6 +3462,7 @@ class AppModel {
                     .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
             } catch {
                 AppLogger.appModel.error("Failed to load galleries: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+                noteStashFailure(error)
                 mediaContainers = []
             }
 
@@ -3622,6 +3676,7 @@ class AppModel {
                 AppLogger.appModel.debug("Video page load cancelled")
             } else {
                 AppLogger.appModel.error("Failed to load video page: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+                noteStashFailure(error)
                 if videoPage == 0 {
                     galleryVideos = []
                 }

@@ -90,6 +90,10 @@ struct VideoGalleryView: View {
                         photosStatus = PhotosAuthorization.status
                     }
                 }
+            } else if appModel.galleryVideos.isEmpty, let problem = appModel.stashAuthProblem {
+                StashAuthFailureView(message: problem) {
+                    Task { await appModel.loadInitialVideos() }
+                }
             } else if appModel.galleryVideos.isEmpty {
                 MediaLibraryMessageView(
                     icon: "video.slash",

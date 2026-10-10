@@ -63,6 +63,14 @@ struct TVVideosTabView: View {
                     await appModel.requestPhotosAccessAndReload()
                 }
             }
+        } else if appModel.galleryVideos.isEmpty, let problem = appModel.stashAuthProblem {
+            ContentUnavailableView {
+                Label("Can't Sign In to Stash", systemImage: "key.slash")
+            } description: {
+                Text(problem)
+            } actions: {
+                Button("Try Again") { Task { await appModel.loadInitialVideos() } }
+            }
         } else if appModel.galleryVideos.isEmpty {
             ContentUnavailableView(
                 "No Videos",

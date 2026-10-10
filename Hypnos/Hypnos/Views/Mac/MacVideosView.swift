@@ -47,6 +47,14 @@ struct MacVideosView: View {
         if appModel.galleryVideos.isEmpty && appModel.isLoadingVideos {
             ProgressView("Loading videos…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if appModel.galleryVideos.isEmpty, let problem = appModel.stashAuthProblem {
+            ContentUnavailableView {
+                Label("Can't Sign In to Stash", systemImage: "key.slash")
+            } description: {
+                Text(problem)
+            } actions: {
+                Button("Try Again") { Task { await appModel.loadInitialVideos() } }
+            }
         } else if appModel.galleryVideos.isEmpty {
             ContentUnavailableView(
                 "No Videos",

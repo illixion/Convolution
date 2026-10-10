@@ -83,6 +83,32 @@ extension MediaLibraryMessageView where SecondaryActions == EmptyView {
     }
 }
 
+/// Shown in place of "no images/videos" when Stash refused the API key
+/// (`AppModel.stashAuthProblem`): an empty grid and a rejected key look
+/// identical otherwise. Retry reloads with whatever is saved now.
+struct StashAuthFailureView: View {
+    @Environment(AppModel.self) private var appModel
+    #if os(visionOS) || os(iOS)
+    @Environment(MainWindowModel.self) private var windowModel
+    #endif
+    let message: String
+    let retry: () -> Void
+
+    var body: some View {
+        MediaLibraryMessageView(
+            icon: "key.slash",
+            title: "Can't Sign In to Stash",
+            message: message,
+            actionTitle: "Try Again",
+            action: retry
+        ) {
+            #if os(visionOS) || os(iOS)
+            Button("Open Settings") { windowModel.selectedTab = .settings }
+            #endif
+        }
+    }
+}
+
 /// Explains the photo library's current state for one media kind.
 struct PhotoLibraryStateView: View {
     enum MediaKind {

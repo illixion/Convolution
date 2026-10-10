@@ -104,6 +104,10 @@ struct GalleryGridView: View {
                         .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if appModel.galleryImages.isEmpty, let problem = appModel.stashAuthProblem {
+                StashAuthFailureView(message: problem) {
+                    Task { await appModel.loadInitialGallery() }
+                }
             } else if appModel.galleryImages.isEmpty {
                 MediaLibraryMessageView(
                     icon: "photo.on.rectangle.angled",

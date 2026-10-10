@@ -39,8 +39,17 @@ struct GraphQLErrorLocation: Decodable {
 
 /// Stash API Client for GraphQL queries
 actor StashAPIClient {
+    /// What the server's answer says about the credentials, reported to
+    /// `authHandler` so one place (`AppModel`) can tell every screen, instead
+    /// of each caller re-deriving "401" from whatever it happened to catch.
+    enum AuthEvent: Sendable {
+        case rejected(statusCode: Int)
+        case accepted
+    }
+
     private var config: StashServerConfig
     private let session: URLSession
+    private var authHandler: (@Sendable (AuthEvent) -> Void)?
 
     init(config: StashServerConfig = .default) {
         self.config = config
@@ -49,6 +58,10 @@ actor StashAPIClient {
 
     func updateConfig(_ newConfig: StashServerConfig) {
         self.config = newConfig
+    }
+
+    func setAuthHandler(_ handler: (@Sendable (AuthEvent) -> Void)?) {
+        authHandler = handler
     }
 
     var graphQLEndpoint: URL {
@@ -110,8 +123,17 @@ actor StashAPIClient {
                 if let responseString = String(data: data, encoding: .utf8) {
                     AppLogger.stashAPI.debug("Response body: \(responseString, privacy: .private)")
                 }
+                // 401 is a missing or wrong key; 403 is a proxy or Stash
+                // refusing the one that was sent. Both are fixed in Settings,
+                // not by retrying, so they get their own error and event.
+                if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                    authHandler?(.rejected(statusCode: httpResponse.statusCode))
+                    throw StashAPIError.unauthorized(statusCode: httpResponse.statusCode,
+                                                     hadAPIKey: !(config.apiKey ?? "").isEmpty)
+                }
                 throw StashAPIError.httpError(statusCode: httpResponse.statusCode)
             }
+            authHandler?(.accepted)
 
             if let responseString = String(data: data, encoding: .utf8) {
                 AppLogger.stashAPI.debug("Response: \(responseString.prefix(500), privacy: .private)...")
@@ -1509,6 +1531,8 @@ actor StashAPIClient {
 enum StashAPIError: Error, LocalizedError {
     case invalidResponse
     case httpError(statusCode: Int)
+    /// 401/403: the server refused the credentials (or lack of them).
+    case unauthorized(statusCode: Int, hadAPIKey: Bool)
     case graphQLErrors([GraphQLError])
     case noData
     case invalidURL(String)
@@ -1519,6 +1543,10 @@ enum StashAPIError: Error, LocalizedError {
             return "Invalid response from server"
         case .httpError(let statusCode):
             return "HTTP error: \(statusCode)"
+        case .unauthorized(let statusCode, let hadAPIKey):
+            return hadAPIKey
+                ? "Stash rejected the API key (HTTP \(statusCode)). Check the key in Settings."
+                : "Stash requires an API key (HTTP \(statusCode)). Add one in Settings."
         case .graphQLErrors(let errors):
             return "GraphQL errors: \(errors.map { $0.message }.joined(separator: ", "))"
         case .noData:
@@ -1526,5 +1554,20 @@ enum StashAPIError: Error, LocalizedError {
         case .invalidURL(let url):
             return "Invalid URL: \(url)"
         }
+    }
+}
+
+extension Error {
+    /// Whether this is a Stash 401/403, however deep a source wrapped it.
+    var isStashAuthenticationFailure: Bool {
+        if let error = self as? StashAPIError, case .unauthorized = error { return true }
+        if let error = self as? ImageSourceError {
+            switch error {
+            case .mediaAuthenticationFailed: return true
+            case .networkError(let underlying): return underlying.isStashAuthenticationFailure
+            default: return false
+            }
+        }
+        return false
     }
 }

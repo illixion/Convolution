@@ -90,6 +90,14 @@ struct TVPicturesTabView: View {
                     await appModel.requestPhotosAccessAndReload()
                 }
             }
+        } else if appModel.galleryImages.isEmpty, let problem = appModel.stashAuthProblem {
+            ContentUnavailableView {
+                Label("Can't Sign In to Stash", systemImage: "key.slash")
+            } description: {
+                Text(problem)
+            } actions: {
+                Button("Try Again") { Task { await appModel.loadInitialGallery() } }
+            }
         } else if appModel.galleryImages.isEmpty {
             ContentUnavailableView(
                 "No Pictures",
