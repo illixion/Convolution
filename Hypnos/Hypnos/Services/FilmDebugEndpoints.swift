@@ -35,19 +35,30 @@ enum FilmDebugEndpoints {
             .command("filmCompare", "Opens a window beside the film player showing the same film through one of "
                      + "Apple's renderers (Jellyfin's HLS remux with Dolby Vision kept, muted, following the film's "
                      + "clock), for comparing how visionOS presents HDR. renderer: playerLayer (AVPlayerLayer with the "
-                     + "film's display criteria), playerViewController (AVKit, controls hidden), or close.",
+                     + "film's display criteria), playerViewController (AVKit, controls hidden), videoPlayerComponent (RealityKit's video component), filmRenderer (the film player's own renderer handed to RealityKit's video component), filmComponent (the film's samples into a second renderer on RealityKit's video component, clocked by a synchronizer mirroring the film clock; uses the stereo tap, so keep 3D off), or close.",
                      parameters: [.string("renderer", "playerLayer, playerViewController or close", required: true,
-                                          choices: ["playerLayer", "playerViewController", "close"])]) { args in
+                                          choices: ["playerLayer", "playerViewController", "videoPlayerComponent", "filmRenderer", "filmComponent", "close"])]) { args in
                 let name = args.string("renderer") ?? "close"
                 #if os(visionOS)
                 guard let renderer = PictureCompare.Renderer(rawValue: name) else {
                     PictureCompare.shared.close()
                     return CompareReply(status: "Closed", driftSeconds: nil, filmLayerRange: layerRange())
                 }
-                let status = await PictureCompare.shared.open(renderer)
+                var status = await PictureCompare.shared.open(renderer)
+                if renderer == .filmComponent { status += ": " + PictureCompare.shared.componentStatus }
                 return CompareReply(status: status, driftSeconds: PictureCompare.shared.drift, filmLayerRange: layerRange())
                 #else
                 return CompareReply(status: "visionOS only (\(name))", driftSeconds: nil, filmLayerRange: layerRange())
+                #endif
+            },
+            .query("filmCompareLayers", "The comparison window's view and layer tree (filmCompare), with each "
+                   + "layer's dynamic-range settings and the window's display criteria, to find what AVKit's player "
+                   + "sets that a plain layer doesn't. Also the film player's own layer for reference.") { _ in
+                #if os(visionOS)
+                return ["compare": PictureCompare.shared.layerTree(),
+                        "film": [PictureCompare.describeFilmLayer()]]
+                #else
+                return ["compare": ["visionOS only"]]
                 #endif
             },
             .command("filmLayerRange", "Sets the film player's own picture layer's preferredDynamicRange (default "
