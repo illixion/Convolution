@@ -60,6 +60,24 @@ public class PluginConfiguration : MediaBrowser.Model.Plugins.BasePluginConfigur
 
     /// <summary>Video segments kept per item before the least recently used are dropped.</summary>
     public int VideoCacheMegabytes { get; set; } = 4096;
+
+    /// <summary>Length of a side-by-side stream segment made from spatial video (1-10 s).</summary>
+    public double SpatialSegmentSeconds { get; set; } = 4;
+
+    /// <summary>Squeeze each eye to half width, so the side-by-side picture is one eye's size.</summary>
+    public bool SpatialHalfWidth { get; set; }
+
+    /// <summary>Cap each eye's longer side in pixels (0 keeps the recording's: 2200 for a Vision Pro).</summary>
+    public int SpatialMaxEye { get; set; }
+
+    /// <summary>low, standard, high or max: the bits per pixel the side-by-side picture gets.</summary>
+    public string SpatialQuality { get; set; } = "standard";
+
+    /// <summary>Side-by-side segments kept for all items together before the least recently served are dropped.</summary>
+    public int SpatialCacheMegabytes { get; set; } = 4096;
+
+    /// <summary>How many spatial videos convert at once on the server.</summary>
+    public int SpatialRuns { get; set; } = 2;
 }
 
 public class PluginServiceRegistrator : IPluginServiceRegistrator
@@ -68,5 +86,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     {
         serviceCollection.AddSingleton<AtmosSceneService>();
         serviceCollection.AddSingleton<VideoSegmentService>();
+        serviceCollection.AddSingleton<SpatialStreamService>();
     }
 }

@@ -130,6 +130,10 @@ Every endpoint needs normal Jellyfin authentication (an API key or a user token)
 | `GET /AtmosObjects/{itemId}/Video/Init` | The video's fragmented-MP4 init segment |
 | `GET /AtmosObjects/{itemId}/Video/Segments/{n}` | Video segment `n`: one keyframe interval, in film time |
 
+| `GET /Spatial/{itemId}` | Whether the item is spatial video, and its side-by-side stream: `{spatial, reason, width, height, eyeWidth, eyeHeight, video3DFormat, hdr, durationSeconds, segmentSeconds, segments, bitsPerSecond, playlist}` (see [Spatial video](#spatial-video)) |
+| `GET /Spatial/{itemId}/main.m3u8` | HLS media playlist of the side-by-side stream |
+| `GET /Spatial/{itemId}/init.mp4`, `/Segments/{n}.m4s` | Its init segment and segment `n`, converted on request |
+
 A segment request waits until that segment has been decoded, up to 45 s. It
 starts a decode at that segment unless one is already running just before
 it.
@@ -389,6 +393,51 @@ disposed at all (safe here — nothing else holds an unmanaged handle through
 it; the underlying reader is disposed separately). Confirmed against
 `NoAtmosTest.mkv`, the dev instance's plain-EAC3 seeded item.
 
+## Spatial video
+
+A Vision Pro or iPhone recording is MV-HEVC: two views in one HEVC stream,
+of which a Quest or an Android phone decodes only the first. The plugin
+streams such an item side by side instead (full resolution per eye, BT.709,
+the stereo AAC copied), converting while it plays with Vergence's
+`vergence sbs --segments` (the same CLI the disc path uses). Nothing is
+converted ahead of time, and the whole video is never stored:
+
+- **`GET /Spatial/{itemId}`** asks `vergence sbs --info` once per item (only
+  for HEVC in MOV/MP4; anything else is answered at once) and keeps the
+  answer in `info.json`, until the file changes. Convolution's Quest app asks
+  for every HEVC MOV/MP4 it plays, and plays `playlist` instead of the file
+  when `spatial` is true, as `video3DFormat` (`FullSideBySide`).
+- **Segments are on a fixed grid** (`SpatialSegmentSeconds`, default 4 s, from
+  the start), not the recording's own keyframes, so a segment's number says
+  where it is. Each starts with a keyframe and carries the video's own times,
+  so any one can be made alone and segments made by different runs play as
+  one stream.
+- **A request for a segment that isn't cached starts a run**: `vergence`
+  converts two minutes from that segment, and each segment is served the
+  moment it is written. A run stops before a segment that is already cached,
+  so rewatching converts only what is missing. A request well past a run's
+  progress (a seek) cancels it and starts another there; a run nobody has
+  asked anything of for two minutes stops.
+- **At most `SpatialRuns` (default 2) convert at once** on the server; beyond
+  that, the run whose viewer asked least recently stops.
+- **The cache is shared and capped**: `SpatialCacheMegabytes` (default 4096)
+  for all items together, the least recently served segments dropped first.
+  A Vision Pro recording at the default quality is about 35 Mbps, 16 MB a
+  segment, so the default keeps about 15 minutes.
+- **`SpatialHalfWidth`, `SpatialMaxEye` and `SpatialQuality`** (low, standard,
+  high, max) set the picture. The segments of each setting are kept apart.
+
+Decoding MV-HEVC needs Apple's frameworks: this works on a Jellyfin server
+running on a Mac (`Mvc3dPath` names `vergence`), and elsewhere every item
+answers `spatial: false` with the reason. Converting 4400×2200 runs at about
+40 fps on an M5 MacBook Pro, so a 30 fps recording streams with a little to
+spare; set `SpatialMaxEye` (1920 gives 3840×1920) on a slower Mac.
+
+Tested on Jellyfin 10.11.11 on macOS with a Vision Pro recording: the stream
+fetched in any order, or played straight through by ffmpeg and AVPlayer
+(seeks included), holds every frame once at its own time (within 2 ticks of
+1/96000 s) and every audio packet, joined across runs.
+
 ## Cache and sessions
 
 ```
@@ -398,6 +447,9 @@ it; the underlying reader is disposed separately). Confirmed against
 <cache>/v2/<itemId>/video/index.json      keyframe index
 <cache>/v2/<itemId>/video/init.mp4        video init segment
 <cache>/v2/<itemId>/video/<n>.m4s         video segment n (LRU-trimmed)
+<cache>/spatial/<itemId>/<variant>/info.json   what vergence --info said
+<cache>/spatial/<itemId>/<variant>/init.mp4    side-by-side init segment
+<cache>/spatial/<itemId>/<variant>/<n>.m4s     side-by-side segment n (LRU-trimmed across items)
 ```
 
 - A segment counts as cached once its last group's FLAC exists. Each file is

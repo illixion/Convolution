@@ -112,19 +112,18 @@ public sealed partial class AtmosSceneService
 
     // The Vergence CLI, installed as "vergence"; servers set up before the
     // rename still have it as "mvc3d".
-    private string Mvc3dPath
-    {
-        get
-        {
-            if (!string.IsNullOrWhiteSpace(Config.Mvc3dPath))
-            {
-                return Config.Mvc3dPath;
-            }
+    private string Mvc3dPath => VergencePath(_paths);
 
-            var folder = Plugin.Instance?.DataFolderPath ?? _paths.PluginConfigurationsPath;
-            var vergence = Path.Combine(folder, "vergence");
-            return File.Exists(vergence) ? vergence : Path.Combine(folder, "mvc3d");
+    internal static string VergencePath(IApplicationPaths paths)
+    {
+        if (!string.IsNullOrWhiteSpace(Config.Mvc3dPath))
+        {
+            return Config.Mvc3dPath;
         }
+
+        var folder = Plugin.Instance?.DataFolderPath ?? paths.PluginConfigurationsPath;
+        var vergence = Path.Combine(folder, "vergence");
+        return File.Exists(vergence) ? vergence : Path.Combine(folder, "mvc3d");
     }
 
     private string ItemDirectory(Guid itemId) => Path.Combine(CacheRoot, itemId.ToString("N"));
