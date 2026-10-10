@@ -22,6 +22,7 @@
 import Photos
 import SwiftUI
 
+import RAVEUI
 struct WelcomeSourcesPage: View {
     @Environment(AppModel.self) private var appModel
 

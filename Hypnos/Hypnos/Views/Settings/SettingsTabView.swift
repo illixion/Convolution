@@ -8,6 +8,7 @@ import DebugTrace
 import Photos
 import RAVEMedia
 import SwiftUI
+import RAVEUI
 import UniformTypeIdentifiers
 
 /// Outcome of a "Apply & Test Connection" check, carrying whether it should

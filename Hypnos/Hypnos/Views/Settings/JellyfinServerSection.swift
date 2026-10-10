@@ -19,6 +19,8 @@
 
 import SwiftUI
 
+
+import RAVEUI
 struct JellyfinServerSection: View {
     @Bindable private var session = FilmSession.shared
     @Bindable private var auth = JellyfinAuth.shared

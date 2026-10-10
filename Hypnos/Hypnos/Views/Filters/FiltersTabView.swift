@@ -20,6 +20,7 @@
 import Photos
 import SwiftUI
 
+import RAVEUI
 struct FiltersTabView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(MainWindowModel.self) private var windowModel

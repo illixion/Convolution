@@ -19,6 +19,7 @@
 import NextcloudMedia
 import SwiftUI
 
+import RAVEUI
 struct NextcloudSettingsSection: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.openURL) private var openURL

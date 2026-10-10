@@ -17,6 +17,7 @@
 import DebugTrace
 import SwiftUI
 
+import RAVEUI
 struct YouTubeTabView: View {
     @State private var history = YouTubeHistory.shared
     @State private var query = ""

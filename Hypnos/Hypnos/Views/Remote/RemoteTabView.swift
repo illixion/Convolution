@@ -20,6 +20,8 @@
 
 import SwiftUI
 
+
+import RAVEUI
 struct RemoteTabView: View {
     @Environment(AppModel.self) private var appModel
 
