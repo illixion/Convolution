@@ -65,6 +65,64 @@ enum FilmDebugEndpoints {
                 return ["scale": 1.0, "perEyePercentOfWidth": 0.8]
                 #endif
             },
+            .command("stereoEdges", "AI 3D's outline handling, live, for comparing by eye. snap: snap the realtime "
+                     + "depth's soft outlines to the picture. fill: fill the strip a near subject uncovers with the "
+                     + "background beside it instead of stretching the outline across it. gaps: squeeze the empty depth between a near "
+                     + "subject and a far background out of each shot. All on by default; "
+                     + "omitted ones keep their state. Not saved.",
+                     parameters: [.boolean("snap", "snap soft depth outlines to the picture"),
+                                  .boolean("fill", "fill uncovered strips with background"),
+                                  .boolean("gaps", "squeeze empty depth between subject and background"),
+                                  .number("gapFloor", "share of an empty range's depth kept (0…1)", range: 0 ... 1),
+                                  .number("gapEmpty", "density (of an even spread) at or below which a range is empty", range: 0 ... 2),
+                                  .number("gapFull", "density at or above which a range is occupied", range: 0 ... 4)]) { args in
+                #if os(visionOS)
+                if let snap = args.bool("snap") { DepthRefinement.snapsEdges = snap }
+                if let fill = args.bool("fill") { DepthRefinement.fillsUncoveredEdges = fill }
+                if let gaps = args.bool("gaps") { DepthRefinement.compressesGaps = gaps }
+                if let v = args.double("gapFloor") { DepthGapCompressor.tuning.floorSlope = Float(v) }
+                if let v = args.double("gapEmpty") { DepthGapCompressor.tuning.emptyDensity = Float(v) }
+                if let v = args.double("gapFull") { DepthGapCompressor.tuning.fullDensity = Float(v) }
+                let t = DepthGapCompressor.tuning
+                return ["snap": DepthRefinement.snapsEdges ? 1 : 0, "fill": DepthRefinement.fillsUncoveredEdges ? 1 : 0,
+                        "gaps": DepthRefinement.compressesGaps ? 1 : 0, "gapFloor": Double(t.floorSlope),
+                        "gapEmpty": Double(t.emptyDensity), "gapFull": Double(t.fullDensity)] as [String: Double]
+                #else
+                return ["snap": 0.0, "fill": 0.0, "gaps": 0.0]
+                #endif
+            },
+            .raw("stereoEyes", kind: .query,
+                 "One AI 3D frame as a PNG, captured from the next frame the stereo pump draws: view left or right "
+                 + "(each eye exactly as warped), source (the decoded frame), depth (the depth map it warped with, near "
+                 + "white), anaglyph (left red, right cyan) or difference (the eyes' difference, contrast ×4). crop: "
+                 + "\"x,y,w,h\" as fractions of the frame from the top left, to zoom in. fresh=false reuses the last "
+                 + "capture, so several views show the same frame. Works paused too (the last frame is drawn again "
+                 + "with the depth on screen); recompute=true computes a paused frame's depth afresh instead, as the "
+                 + "first frame of a shot, so a changed stereoEdges setting shows on it.",
+                 parameters: [.string("view", "which image", required: true,
+                                      choices: ["left", "right", "source", "depth", "anaglyph", "difference"]),
+                              .string("crop", "x,y,w,h as fractions, e.g. 0.3,0.2,0.4,0.4"),
+                              .boolean("fresh", "capture a new frame (default true)", default: true),
+                              .boolean("recompute", "paused: compute the depth afresh (default false)")]) { args in
+                #if os(visionOS)
+                let view = StereoEyeImages.View(rawValue: args.string("view") ?? "") ?? .left
+                let frame: StereoEyeCapture.Frame
+                if args.bool("fresh") == false, let last = StereoEyeCapture.latest {
+                    frame = last
+                } else {
+                    frame = try await StereoEyeImages.capture(recomputingDepth: args.bool("recompute") == true)
+                }
+                let crop = args.string("crop").flatMap { text -> CGRect? in
+                    let parts = text.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+                    guard parts.count == 4 else { return nil }
+                    return CGRect(x: parts[0], y: parts[1], width: parts[2], height: parts[3])
+                }
+                let png = try StereoEyeImages.png(view, of: frame, crop: crop)
+                return .binary(png, contentType: "image/png", filename: "stereo-\(view.rawValue).png")
+                #else
+                throw CocoaError(.featureUnsupported)
+                #endif
+            },
             .query("stereoDepth", "How AI 3D's realtime depth is spread over the picture (0 far … 1 near, after the "
                    + "depth budget): the last frame, the shot playing and the last 40 shots (split at cuts), each with the "
                    + "strength multiplier the shot-adaptive policy would choose (measured only, not applied). Also the "
