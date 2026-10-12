@@ -233,6 +233,12 @@ private struct AtmosSceneProbe: Decodable {
     let sampleRate: Int
 }
 
+/// The plugin's video index (`AtmosObjects/{id}/Video`), decoded only to
+/// see that there is one.
+private struct AtmosVideoIndexProbe: Decodable {
+    let segmentStarts: [Double]
+}
+
 /// `MediaServerLibrary` backed by a Jellyfin server. Holds no UI state of
 /// its own — `server`/auth live in `FilmSession`/`JellyfinAuth`, which the
 /// app constructs this from.
@@ -600,6 +606,24 @@ actor JellyfinLibrary: MediaServerLibrary {
         }
     }
 
+    /// Whether the film player can play a file (not a disc): the plugin has
+    /// its object audio and can serve its picture as segments too. The
+    /// plugin cuts the picture at an MKV's Cues, so an MP4 with object audio
+    /// (The Matrix Resurrections' WEB-DL) has sound and no picture; opened
+    /// in the film player it failed to load (HTTP 404) and the previous
+    /// film's last frame stayed up with the controls disabled (headset,
+    /// 2026-10-12). It plays in the video window instead.
+    private func filmPlayerServes(itemId: String) async -> Bool {
+        guard await hasAtmosObjects(itemId: itemId) else { return false }
+        do {
+            let index: AtmosVideoIndexProbe = try await get("AtmosObjects/\(itemId)/Video")
+            return !index.segmentStarts.isEmpty
+        } catch {
+            AppLogger.library.info("Object audio but no picture segments for this item; playing it in the video window")
+            return false
+        }
+    }
+
     func playbackRoute(for item: LibraryItem, quality: LibraryStreamQuality) async throws -> PlaybackRoute {
         // A download plays from the device, online or not.
         if let record = LibraryOfflineStore.shared.record(for: item.id) {
@@ -618,7 +642,7 @@ actor JellyfinLibrary: MediaServerLibrary {
         if item.isBlurayDisc {
             return .atmosFilmPlayer
         }
-        if await hasAtmosObjects(itemId: item.id) {
+        if await filmPlayerServes(itemId: item.id) {
             return .atmosFilmPlayer
         }
         return .genericPlayer(try await streamPlan(itemId: item.id, quality: quality,
@@ -1100,7 +1124,7 @@ actor JellyfinLibrary: MediaServerLibrary {
                                        expectedBytes: source?.Size, fileExtension: "iso",
                                        subtitleTracks: [], objectAudio: await hasAtmosObjects(itemId: item.id))
         }
-        if await hasAtmosObjects(itemId: item.id) {
+        if await filmPlayerServes(itemId: item.id) {
             return LibraryDownloadPlan(playback: .film, mediaRequest: nil, isRemux: false,
                                        expectedBytes: source?.Size, fileExtension: "mp4",
                                        subtitleTracks: textTracks, objectAudio: true)

@@ -111,10 +111,23 @@ final class LibraryPlayback {
 
     private func start(_ item: LibraryItem, fromStart: Bool, library: JellyfinLibrary) async throws {
         let resume = fromStart ? nil : item.userData.resumeSeconds
-        switch try await library.playbackRoute(for: item) {
+        var route = try await library.playbackRoute(for: item)
+        if case .atmosFilmPlayer = route,
+           !(await FilmSession.shared.load(itemId: item.id, name: item.title, productionYear: item.year,
+                                            isBlurayDisc: item.isBlurayDisc)) {
+            // The film player couldn't open it. Opening its window anyway
+            // showed the previous film's last frame with the controls
+            // disabled (headset, 2026-10-12). A file plays in the video
+            // window instead; a disc has nowhere else to go, so its error
+            // shows under Play.
+            guard !item.isBlurayDisc, LibraryOfflineStore.shared.record(for: item.id) == nil else {
+                throw LibraryPlaybackFailure(message: FilmSession.shared.error ?? "The film couldn't be opened.")
+            }
+            route = .genericPlayer(try await library.streamPlan(itemId: item.id, quality: .preferred,
+                                                                resumeSeconds: item.userData.resumeSeconds))
+        }
+        switch route {
         case .atmosFilmPlayer:
-            _ = await FilmSession.shared.load(itemId: item.id, name: item.title, productionYear: item.year,
-                                              isBlurayDisc: item.isBlurayDisc)
             if let resume { FilmSession.shared.player.seek(to: resume) }
             FilmSession.shared.player.play()
             #if os(tvOS)
@@ -135,6 +148,12 @@ final class LibraryPlayback {
             #endif
         }
     }
+}
+
+/// A playback that couldn't start, with what to show under Play.
+struct LibraryPlaybackFailure: LocalizedError {
+    var message: String
+    var errorDescription: String? { message }
 }
 
 extension View {
