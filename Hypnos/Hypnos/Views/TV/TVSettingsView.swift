@@ -24,6 +24,7 @@
 #if os(tvOS)
 
 import RAVEDeviceSetup
+import RAVEUI
 import SwiftUI
 
 enum TVSettingsPage: String, Hashable {
@@ -96,6 +97,8 @@ struct TVSettingsView: View {
     var body: some View {
         NavigationStack(path: $state.path) {
             Form {
+                // tvOS pins the bar's large title over a scrolled list; this scrolls with it.
+                RAVEScreenHeading("Settings")
                 Section {
                     row(.deviceSetup, "Set Up from Another Device", systemImage: "qrcode", value: "")
                 }
@@ -119,14 +122,17 @@ struct TVSettingsView: View {
                     row(.developer, "Developer", systemImage: "hammer", value: "")
                 }
             }
-            .navigationTitle("Settings")
+            .raveScreenTitle("Settings")
             .navigationDestination(for: Page.self) { page in
                 if page == .deviceSetup {
                     // A QR code and instructions, not a list.
                     TVDeviceSetupView()
                 } else {
-                    Form { content(for: page) }
-                        .navigationTitle(title(for: page))
+                    Form {
+                        RAVEScreenHeading(title(for: page))
+                        content(for: page)
+                    }
+                    .raveScreenTitle(title(for: page))
                 }
             }
             // The preset isn't observable; pick up a change made on the

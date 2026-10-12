@@ -18,6 +18,7 @@
 
 #if os(tvOS)
 
+import RAVEUI
 import SwiftUI
 
 struct TVAlbumsTabView: View {
@@ -42,7 +43,9 @@ struct TVAlbumsTabView: View {
 
                 content
             }
-            .navigationTitle("Albums")
+            // No title on tvOS, like Pictures and Videos: the tab bar names the tab, and
+            // tvOS pins a large title over the grid as it scrolls.
+            .raveScreenTitle("Albums")
         }
         .task(id: isVideo) {
             guard appModel.effectiveLibrarySource != .local else { return }
