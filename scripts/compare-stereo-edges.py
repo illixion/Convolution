@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Capture an exact paused-frame A/B through the existing DebugTrace client.
 
-Usage: python3 scripts/compare-stereo-edges.py --out build/edge-comparison/nope-rail
+Usage: python3 scripts/compare-stereo-edges.py --out build/edge-comparison/movie-a-rail
 Requires a foreground AI 3D player paused on the desired frame. Does not seek,
 change the model or recompute depth. Restores all renderer switches afterward.
 The manifest rejects differing source/depth images, timestamps or disparity.

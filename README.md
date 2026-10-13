@@ -281,7 +281,7 @@ Pause an AI 3D movie on a troublesome frame with the app's DebugTrace server
 running, then run:
 
 ```sh
-python3 scripts/compare-stereo-edges.py --out build/edge-comparison/nope-rail
+python3 scripts/compare-stereo-edges.py --out build/edge-comparison/movie-a-rail
 ```
 
 This saves both eyes, source, depth and anaglyph for the original renderer, the
@@ -292,7 +292,7 @@ or completion. It uses the sibling DebugTrace client for authentication.
 
 For direct headset A/Bs, the `stereoEdges` debug command accepts `separated` and
 `holes`; both default to false. The experimental renderer is not yet the default.
-Its Nope headset check showed noisy railing outlines. The original renderer's
+Its Movie A headset check showed noisy railing outlines. The original renderer's
 background edge-fill heuristic also defaults to off after it damaged jacket
 outlines; use `fill=true` only for comparison.
 
@@ -314,7 +314,7 @@ After relaunch/import, select it under Real-Time 3D Depth Model. Presets `tv`,
 each near the default model's pixel count. Compare the same variant/precision
 and scene; actual inference time and film quality need device measurements.
 For a cheaper widescreen input, use `--width 560 --height 252` instead of an
-aspect preset. On the Nope test, its depth stage measured about 25–34 ms versus
+aspect preset. On the Movie A test, its depth stage measured about 25–34 ms versus
 40–53 ms for 686×308, with some remaining outline artifacts. A similar pixel
 count does not guarantee the same Core ML performance. If a custom shape proves
 better than the stock model on real films, publish the validated package once

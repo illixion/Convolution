@@ -610,7 +610,7 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// Whether the film player can play a file (not a disc): the plugin has
     /// its object audio and can serve its picture as segments too. The
     /// plugin cuts the picture at an MKV's Cues, so an MP4 with object audio
-    /// (The Matrix Resurrections' WEB-DL) has sound and no picture; opened
+    /// (a WEB-DL release) has sound and no picture; opened
     /// in the film player it failed to load (HTTP 404) and the previous
     /// film's last frame stayed up with the controls disabled (headset,
     /// 2026-10-12). It plays in the video window instead.
