@@ -7,8 +7,9 @@
  (RAVEFilm's `FilmVideoIndex.pictureHeights`), so the player can change tier
  at the playhead without moving it.
 
- Auto plays the original and, on visionOS, steps straight to 1080p when
- the 3D picture can't keep up (`FilmPlayerView.noteStereoPerformance`), for
+ Auto plays the original in 2D and, on visionOS, requests 1080p before AI 3D
+ starts when the plugin offers it. It can still step down when another 3D
+ picture can't keep up (`FilmPlayerView.noteStereoPerformance`), for
  that film only: on a Vision Pro 1440p still dropped frames in 3D (Baby
  Driver, 2026-10-10), so a stop there only delayed the step that works. Original and the tiers are fixed and never step. A
  download plays its original whatever this says.

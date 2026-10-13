@@ -48,6 +48,7 @@ extension VideoWindowModel {
     func setQuality(_ quality: LibraryStreamQuality) {
         guard quality != qualityPreference || isChangingQuality else { return }
         qualityPreference = quality
+        ai3DAutoCappedLibrary = false
         LibraryStreamQuality.preferred = quality
         dismissQualityNotice()
         let target: LibraryStreamQuality? = quality.maxBitrate == nil ? nil : quality
@@ -129,17 +130,21 @@ extension VideoWindowModel {
 
     /// Replaces the stream with one at `level` (nil: the original), at the
     /// playhead.
-    func switchStream(to level: LibraryStreamQuality?, reason: String) {
+    func switchStream(to level: LibraryStreamQuality?, reason: String, forAI3D: Bool = false) {
         guard let itemId = libraryItemId, let library = LibraryService.current() else { return }
         isChangingQuality = true
         qualitySwitchTask?.cancel()
         qualitySwitchTask = Task { [weak self] in
             defer { self?.isChangingQuality = false }
             do {
-                let plan = try await library.streamPlan(itemId: itemId, quality: level ?? .original)
+                let plan = try await library.streamPlan(
+                    itemId: itemId, quality: level ?? .original, forAI3D: forAI3D)
                 guard !Task.isCancelled, let self, self.libraryItemId == itemId else { return }
                 self.sourceBitrate = (itemId, plan.sourceBitrate)
-                guard plan.streamURL != self.video.streamURL else { return }
+                guard plan.streamURL != self.video.streamURL else {
+                    self.resumePendingPseudo3DEngage()
+                    return
+                }
                 AppLogger.videoWindow.info("Switching to \(plan.quality?.rawValue ?? "original", privacy: .public) quality (\(reason, privacy: .public)) at \(self.currentTime, format: .fixed(precision: 2))s")
                 self.carryPositionToNextRenderer(reason: "quality change")
                 self.streamSwitchStart = self.currentTime
@@ -151,10 +156,15 @@ extension VideoWindowModel {
                 self.usingTranscodedStream = false
                 self.video.transcodeStreamURL = plan.transcodeURL
                 self.video.streamURL = plan.streamURL
-                if needsRenderer { self.resolvePlaybackRenderer() }
+                if needsRenderer {
+                    self.resolvePlaybackRenderer()
+                } else {
+                    self.resumePendingPseudo3DEngage()
+                }
                 self.armStartupQualityWatchIfNoPicture()
             } catch {
                 AppLogger.videoWindow.error("Quality change failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+                self?.resumePendingPseudo3DEngage()
                 self?.showQualityNotice("Couldn't change quality")
             }
         }

@@ -116,6 +116,9 @@ final class VideoWindowModel {
     /// original proved undecodable or because a feature needed AVFoundation.
     /// Reset on every video switch so each video starts on its original.
     var usingTranscodedStream: Bool = false
+    /// The Stash 1080p endpoint is used only while AI 3D is active.
+    var ai3DUsesStashTier = false
+    var ai3DAutoCappedLibrary = false
     /// Native video pixel aspect (width/height), reported once the first frame's
     /// size is known. Used to aspect-fit the native Metal player so it never
     /// stretches when the window can't match the video's aspect (tall videos).
@@ -468,6 +471,8 @@ final class VideoWindowModel {
         carryPositionToNextRenderer(reason: "retry")
         playbackAttempt += 1
         usingTranscodedStream = false
+        ai3DUsesStashTier = false
+        ai3DAutoCappedLibrary = false
         pseudo3DEnabled = false
         resolvePlaybackRenderer()
         armLoadStallWatch()
@@ -579,6 +584,8 @@ final class VideoWindowModel {
         // Every video starts on its own original file, whatever the previous
         // one ended up playing.
         usingTranscodedStream = false
+        ai3DUsesStashTier = false
+        ai3DAutoCappedLibrary = false
         resolvedPhotosStreamURL = nil
         isFlipped = false
         currentAdjustments = VisualAdjustments()
@@ -891,6 +898,34 @@ final class VideoWindowModel {
     /// first. The intent is parked in `pendingPseudo3DEngage` and replayed by
     /// `resolvePlaybackRenderer` once the new renderer is known.
     func enablePseudo3D() {
+        // Auto quality starts at the server's 1080p tier before the stereo
+        // renderer mounts. A fixed quality remains an explicit override.
+        if offersQualityChoice, qualityPreference == .auto,
+           (streamLevel == nil || (streamLevel?.maxHeight ?? 0) > 1080),
+           !ai3DAutoCappedLibrary,
+           pendingPseudo3DEngage == nil {
+            pendingPseudo3DEngage = PendingPseudo3DEngage(
+                depthMode: pseudo3DDepthMode,
+                startPaused: pseudo3DEngagePaused,
+                resumeAt: pseudo3DEngageResumeTime ?? (currentTime > 0 ? currentTime : nil)
+            )
+            ai3DAutoCappedLibrary = true
+            switchStream(to: .mbps20, reason: "AI 3D starts at 1080p", forAI3D: true)
+            return
+        }
+        if video.ai3DStreamURL != nil,
+           (video.sourceHeight.map { $0 > 1080 } ?? true),
+           !ai3DUsesStashTier {
+            pendingPseudo3DEngage = PendingPseudo3DEngage(
+                depthMode: pseudo3DDepthMode,
+                startPaused: pseudo3DEngagePaused,
+                resumeAt: pseudo3DEngageResumeTime ?? (currentTime > 0 ? currentTime : nil)
+            )
+            ai3DUsesStashTier = true
+            AppLogger.videoWindow.info("AI 3D starts on Stash's 1080p HLS tier")
+            resolvePlaybackRenderer()
+            return
+        }
         // Only swap once the renderer is actually known to be WebKit — swapping
         // while still `.resolving` could abandon an original that AVFoundation
         // was about to accept.
@@ -917,8 +952,13 @@ final class VideoWindowModel {
     @ObservationIgnored private var pendingPseudo3DEngage: PendingPseudo3DEngage?
 
     /// Replay (or abandon) a fake-3D engage that was waiting on the transcode.
-    private func resumePendingPseudo3DEngage() {
+    func resumePendingPseudo3DEngage() {
         guard let pending = pendingPseudo3DEngage else { return }
+        if playbackRenderer == .resolving { return }
+        if playbackRenderer == .webKit, canUseTranscodedStream {
+            switchToTranscodedStream(reason: "AI 3D requires the AVFoundation renderer")
+            return
+        }
         pendingPseudo3DEngage = nil
         guard playbackRenderer == .nativeMetal else {
             // The transcode isn't AVFoundation-playable either (a server that
@@ -936,7 +976,16 @@ final class VideoWindowModel {
     }
 
     func disablePseudo3D() {
+        pendingPseudo3DEngage = nil
         pseudo3DEnabled = false
+        if ai3DUsesStashTier {
+            ai3DUsesStashTier = false
+            resolvePlaybackRenderer()
+        }
+        if ai3DAutoCappedLibrary, offersQualityChoice, qualityPreference == .auto {
+            ai3DAutoCappedLibrary = false
+            if streamLevel != nil { switchStream(to: nil, reason: "leaving AI 3D") }
+        }
     }
 
     /// Resolve the best 3D settings for the current video and engage 3D, or
@@ -986,6 +1035,7 @@ final class VideoWindowModel {
         if PhotosAssetURL.isPhotosAsset(video.streamURL) {
             return resolvedPhotosStreamURL ?? video.streamURL
         }
+        if ai3DUsesStashTier, let tier = video.ai3DStreamURL { return tier }
         guard usingTranscodedStream, let transcode = video.transcodeStreamURL else {
             return video.streamURL
         }
@@ -1100,6 +1150,21 @@ final class VideoWindowModel {
                 // A fake-3D engage waiting on the transcode swap resolves here.
                 if self.pendingPseudo3DEngage != nil {
                     self.resumePendingPseudo3DEngage()
+                    return
+                }
+                // A restored AI 3D window must prepare its 1080p server
+                // picture too; it did not pass through the menu's engage path.
+                if self.pseudo3DEnabled, self.offersQualityChoice,
+                   self.qualityPreference == .auto,
+                   !self.ai3DAutoCappedLibrary,
+                   (self.streamLevel == nil || (self.streamLevel?.maxHeight ?? 0) > 1080) {
+                    self.enablePseudo3D()
+                    return
+                }
+                if self.pseudo3DEnabled, self.video.ai3DStreamURL != nil,
+                   !self.ai3DUsesStashTier,
+                   (self.video.sourceHeight.map { $0 > 1080 } ?? true) {
+                    self.enablePseudo3D()
                     return
                 }
                 // A restored window that was in fake-3D over a WebKit-decoded

@@ -79,6 +79,9 @@ struct FilmPlayerView: View {
     /// The converted tier a Dolby Vision profile 5 film's 3D switched to,
     /// undone when 3D ends.
     @State private var stereoTierForDolbyVision: Int?
+    @State private var stereoTierForAutoAI3D: Int?
+    @State private var autoAI3DTierAttempted = false
+    @State private var stereoTierRequestID = UUID()
     @State private var pictureNoticeTask: Task<Void, Never>?
     @State private var stereoLoadStrikes = 0
     @State private var stereoLoadAdvisedItem: String?
@@ -556,6 +559,30 @@ struct FilmPlayerView: View {
             showsDepthSetup = true
             return
         }
+        // Under Auto, fetch the plugin's 1080p picture before starting AI 3D.
+        // The flat film returns to its original picture when 3D ends.
+        if layout == nil, FilmPictureQuality.preferred == .auto,
+           !autoAI3DTierAttempted, player.video.pictureHeight == nil,
+           player.video.offeredPictureHeights.contains(1080) {
+            autoAI3DTierAttempted = true
+            let requestID = UUID()
+            stereoTierRequestID = requestID
+            let itemID = session.loadedItem?.id
+            Task {
+                let changed = await player.video.setPictureHeight(1080)
+                guard stereoTierRequestID == requestID, session.loadedItem?.id == itemID else {
+                    if changed, session.loadedItem?.id == itemID {
+                        _ = await player.video.setPictureHeight(nil)
+                    }
+                    return
+                }
+                if changed {
+                    stereoTierForAutoAI3D = 1080
+                }
+                startStereo()
+            }
+            return
+        }
         // Dolby Vision profile 5 shows right only through the system's own
         // renderer, which the 3D picture isn't. The plugin's lower tiers are
         // that picture converted to HDR10 on the server, so 3D plays one,
@@ -596,15 +623,27 @@ struct FilmPlayerView: View {
     /// `keepingPosition` false only when something else positions the
     /// picture next: a different film loading, or 3D restarting at once.
     private func stopStereo(keepingPosition: Bool = true) {
-        guard let source = stereoSource else { return }
+        stereoTierRequestID = UUID()
+        guard let source = stereoSource else {
+            autoAI3DTierAttempted = false
+            return
+        }
         source.close()
         let position = player.currentTime
         if stereoTierForDolbyVision != nil, keepingPosition, player.video.pictureHeight == stereoTierForDolbyVision {
             // Back to the original Dolby Vision picture, which the flat
             // (system) renderer shows as it is.
             Task { _ = await player.video.setPictureHeight(nil) }
+        } else if stereoTierForAutoAI3D != nil, keepingPosition,
+                  FilmPictureQuality.preferred == .auto,
+                  player.video.pictureHeight == stereoTierForAutoAI3D {
+            Task { _ = await player.video.setPictureHeight(nil) }
         }
         stereoTierForDolbyVision = nil
+        if keepingPosition || player.video.pictureHeight != stereoTierForAutoAI3D {
+            stereoTierForAutoAI3D = nil
+        }
+        autoAI3DTierAttempted = false
         stereoSource = nil
         stereoLayout = nil
         mountedDepthModelName = nil

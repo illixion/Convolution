@@ -53,6 +53,8 @@ struct GalleryVideo: Identifiable, Equatable, Hashable, Codable {
     ///    since those decode via AVFoundation and WebM isn't readable by it
     ///    (still true on visionOS 27: VP8 and VP9 both fail the probe).
     var transcodeStreamURL: URL?
+    /// Resolution-limited HLS endpoint explicitly advertised by Stash for AI 3D.
+    var ai3DStreamURL: URL?
     /// Short auto-generated Stash scene preview clip (`/scene/{id}/preview`,
     /// typically 640×360 h264). Drives the gallery long-press quick look.
     /// `nil` for sources with no server-side preview (e.g. local files).
@@ -88,6 +90,7 @@ struct GalleryVideo: Identifiable, Equatable, Hashable, Codable {
         thumbnailURL: URL,
         streamURL: URL,
         transcodeStreamURL: URL? = nil,
+        ai3DStreamURL: URL? = nil,
         previewURL: URL? = nil,
         title: String? = nil,
         duration: TimeInterval? = nil,
@@ -107,6 +110,7 @@ struct GalleryVideo: Identifiable, Equatable, Hashable, Codable {
         self.thumbnailURL = thumbnailURL
         self.streamURL = streamURL
         self.transcodeStreamURL = transcodeStreamURL
+        self.ai3DStreamURL = ai3DStreamURL
         self.previewURL = previewURL
         self.title = title
         self.duration = duration
@@ -151,6 +155,7 @@ struct GalleryVideo: Identifiable, Equatable, Hashable, Codable {
         self.thumbnailURL = try c.decode(URL.self, forKey: .thumbnailURL)
         self.streamURL = try c.decode(URL.self, forKey: .streamURL)
         self.transcodeStreamURL = try c.decodeIfPresent(URL.self, forKey: .transcodeStreamURL)
+        self.ai3DStreamURL = try c.decodeIfPresent(URL.self, forKey: .ai3DStreamURL)
         self.previewURL = try c.decodeIfPresent(URL.self, forKey: .previewURL)
         self.title = try c.decodeIfPresent(String.self, forKey: .title)
         self.duration = try c.decodeIfPresent(TimeInterval.self, forKey: .duration)
@@ -250,6 +255,7 @@ extension GalleryVideo {
                 : thumbnailURL,
             streamURL: resolved,
             transcodeStreamURL: transcodeStreamURL,
+            ai3DStreamURL: ai3DStreamURL,
             previewURL: previewURL,
             title: title,
             duration: duration,

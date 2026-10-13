@@ -96,6 +96,13 @@ final class GraphQLVideoSource: VideoSource, @unchecked Sendable {
         let transcodeStreamURL = allowTranscoding
             ? Self.transcodeStreamURL(directStreamURL: directStreamURL, streamEndpoints: scene.sceneStreams)
             : nil
+        let ai3DStreamURL = allowTranscoding ? scene.sceneStreams?
+            .compactMap { URL(string: $0.url) }
+            .first(where: {
+                $0.path.hasSuffix("/stream.m3u8")
+                    && URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?
+                        .contains(where: { $0.name == "resolution" && $0.value == "FULL_HD" }) == true
+            }) : nil
 
         // Prefer the server-reported preview path; otherwise derive it as a
         // sibling of the screenshot (`/scene/{id}/screenshot` → `/preview`),
@@ -125,6 +132,7 @@ final class GraphQLVideoSource: VideoSource, @unchecked Sendable {
             thumbnailURL: thumbnailURL,
             streamURL: directStreamURL,
             transcodeStreamURL: transcodeStreamURL,
+            ai3DStreamURL: ai3DStreamURL,
             previewURL: previewURL,
             title: scene.title,
             duration: duration,

@@ -197,6 +197,7 @@ private struct JFPlaybackInfo: Decodable {
         struct Stream: Decodable {
             let `Type`: String?
             let Codec: String?
+            let Height: Int?
             let Index: Int?
             let Language: String?
             let Title: String?
@@ -665,7 +666,8 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// own bitrate plays the original. Also how a playing window changes
     /// quality: the same item, a new plan.
     func streamPlan(itemId: String, quality: LibraryStreamQuality,
-                    resumeSeconds: Double? = nil) async throws -> GenericPlaybackPlan {
+                    resumeSeconds: Double? = nil,
+                    forAI3D: Bool = false) async throws -> GenericPlaybackPlan {
         // Header-authenticated, so a token the server no longer accepts
         // fails here, under the Play button, rather than as a player window
         // that never shows a frame (every stream URL below authenticates by
@@ -695,12 +697,19 @@ actor JellyfinLibrary: MediaServerLibrary {
                 await self.stopEncoding(playSessionId: previous)
             }
         }
-        let sourceVideoCodec = source?.MediaStreams?
-            .first { $0.Type == "Video" }?.Codec?.lowercased()
+        let sourceVideo = source?.MediaStreams?.first { $0.Type == "Video" }
+        let sourceVideoCodec = sourceVideo?.Codec?.lowercased()
         let sourceBitrate = source?.Bitrate
         let sourceContainer = source?.Container?.lowercased()
 
-        if quality.caps(sourceBitrate: sourceBitrate) {
+        // A low-bitrate UHD file still needs scaling for AI 3D. The normal
+        // quality planner would direct-play it because it considers bitrate
+        // alone; force the 1080p HLS tier when its dimensions exceed the cap.
+        let needsAI3DScale = forAI3D && quality == .mbps20
+            && ((sourceVideo?.Height.map { $0 > 1080 } ?? true)
+                || sourceContainer?.split(separator: ",").contains("webm") == true
+                || ["vp8", "vp9", "av1"].contains(sourceVideoCodec ?? ""))
+        if quality.caps(sourceBitrate: sourceBitrate) || needsAI3DScale {
             let capped = Self.hlsStreamURL(
                 baseURL: baseURL, itemId: itemId, mediaSourceId: mediaSourceId,
                 sourceVideoCodec: sourceVideoCodec, playSessionId: playSessionId,
