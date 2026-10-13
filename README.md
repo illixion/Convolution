@@ -108,23 +108,24 @@ xcodebuild -quiet -project Hypnos/Hypnos.xcodeproj -scheme Hypnos \
 
 ## Dependencies
 
-Convolution links three shared sibling packages and one package of its own:
+Convolution links four sibling packages and one package of its own:
 
 | Package | Products used |
 |---|---|
 | [`RAVESDK`](https://github.com/illixion/RAVESDK) | `RAVENet`, `RAVEUI`, `RAVEConsole`, `RAVEMedia`, `RAVESlideshow`, `RAVEFilm`, `RAVEDeviceSetup` |
 | [`RAVEEngine`](https://github.com/illixion/RAVEEngine) | `RAVEDiagnostics` |
 | [`DebugTrace`](https://github.com/illixion/DebugTrace) | `DebugTrace`, `DebugTraceServer` |
+| [`vergence`](https://github.com/illixion/vergence) | `VergenceApple` (the stereo 3D pipeline; RAVESDK's `RAVEMedia` builds on it too) |
 | `Packages/NextcloudMedia` (in this repo) | `NextcloudMedia` |
 
-The three sibling packages are referenced as **local** Swift packages by relative
-path — `../../RAVESDK`, `../../RAVEEngine` and `../../DebugTrace`, resolved against
+The four sibling packages are referenced as **local** Swift packages by relative
+path — `../../RAVESDK`, `../../RAVEEngine`, `../../DebugTrace` and `../../vergence`, resolved against
 the directory holding `Hypnos.xcodeproj` — not as versioned remote dependencies. So
 a clone does not fetch them: check them out as **siblings** of this repo, which is
 what step 1 below does.
 
 The requirement is only that this repo's parent directory also contains
-directories named exactly `RAVESDK`, `RAVEEngine` and `DebugTrace`; this repo's own
+directories named exactly `RAVESDK`, `RAVEEngine`, `DebugTrace` and `vergence`; this repo's own
 directory name does not matter. Get it wrong and Xcode fails at package resolution,
 before compiling anything.
 
@@ -154,12 +155,13 @@ No prebuilt download yet; build from source below. An Apple TV build signed with
 
 ### From source (every platform)
 
-1. Clone this repository and the three packages into the same parent directory:
+1. Clone this repository and the four packages into the same parent directory:
    ```bash
    git clone https://github.com/illixion/Convolution.git
    git clone https://github.com/illixion/RAVESDK.git
    git clone https://github.com/illixion/RAVEEngine.git
    git clone https://github.com/illixion/DebugTrace.git
+   git clone https://github.com/illixion/vergence.git
    ```
    giving you:
    ```
@@ -167,6 +169,7 @@ No prebuilt download yet; build from source below. An Apple TV build signed with
    ├── RAVESDK/
    ├── RAVEEngine/
    ├── DebugTrace/
+   ├── vergence/
    └── Convolution/
    ```
 
