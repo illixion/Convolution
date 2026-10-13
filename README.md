@@ -296,7 +296,12 @@ Its Nope headset check showed noisy railing outlines. The original renderer's
 background edge-fill heuristic also defaults to off after it damaged jacket
 outlines; use `fill=true` only for comparison.
 
-Aspect-matched models can be generated and installed separately:
+For normal use, download one of Apple's pre-made models in the app. The custom
+aspect-matched packages below are a **developer experiment**, not a setup step
+for viewers. Apple's hosted variants differ in precision, not input shape; the
+560×252 package used in the headset check is not in the current download list.
+We have measured it against 686×308, but have not yet compared it against the
+stock model with the final edge settings. Generate one locally for that A/B:
 
 ```sh
 uv run scripts/convert-depth-model.py --variant small --aspect-preset cinema22 \
@@ -311,7 +316,10 @@ and scene; actual inference time and film quality need device measurements.
 For a cheaper widescreen input, use `--width 560 --height 252` instead of an
 aspect preset. On the Nope test, its depth stage measured about 25–34 ms versus
 40–53 ms for 686×308, with some remaining outline artifacts. A similar pixel
-count does not guarantee the same Core ML performance.
+count does not guarantee the same Core ML performance. If a custom shape proves
+better than the stock model on real films, publish the validated package once
+and add it to the in-app download catalog; viewers should not need Python or a
+Mac/PC to generate it.
 
 ## License
 
