@@ -189,7 +189,7 @@ extension VideoWindowModel {
     /// Auto, a stream above 1080p steps to 1080p, since the conversion's
     /// cost follows the picture's size; otherwise the viewer is told once
     /// what would help.
-    func noteStereoPerformance(_ sample: RAVEStereoPerformance) {
+    func noteStereoPerformance(_ sample: StereoPerformance) {
         guard showsStereoPicture, !isPaused, !isScrubbing, !isChangingQuality,
               Date.now >= stereoLoadGraceUntil, sample.isOverloaded else {
             stereoLoadStrikes = 0
@@ -233,7 +233,7 @@ extension VideoWindowModel {
 
     /// The picture's height: as the pump measured it, else what the level
     /// playing allows (the original counts as 4K).
-    private func pictureHeight(_ sample: RAVEStereoPerformance) -> Int {
+    private func pictureHeight(_ sample: StereoPerformance) -> Int {
         if sample.sourceHeight > 0 { return sample.sourceHeight }
         return streamLevel?.maxHeight ?? 2160
     }

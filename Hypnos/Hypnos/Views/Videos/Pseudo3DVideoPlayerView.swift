@@ -68,7 +68,7 @@ struct Pseudo3DVideoPlayerView: View {
 
     @Environment(AppModel.self) private var appModel
     @State private var engine = Pseudo3DStereoEngine()
-    @State private var subtitleFrame: RAVEStereoSubtitleFrame?
+    @State private var subtitleFrame: StereoSubtitleFrame?
 
     /// Distance (points) the video plane is pulled back toward the window
     /// glass. `.frame(depth: 0, alignment: .front)` pins the slab to the front

@@ -7,7 +7,7 @@
 
  The pseudo-3D eye warp, the depth-displaced mesh and every depth kernel used
  to live below this file's tonal shaders. They are now RAVEMedia's
- `RAVEStereoShaders.metal`, compiled into that package's own default library —
+ `StereoShaders.metal`, compiled into that package's own default library —
  so `device.makeDefaultLibrary()` here finds the image shaders and nothing
  else, which is the point. `stereoQuadVertex` over there is this file's
  `imageVertexShader` carried over verbatim.

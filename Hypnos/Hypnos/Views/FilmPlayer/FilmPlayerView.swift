@@ -89,7 +89,7 @@ struct FilmPlayerView: View {
     /// loading, the first decode) and of a new tier (its flush and refill).
     @State private var stereoLoadGraceUntil = Date.distantPast
     /// The subtitles the stereo picture draws, from `StereoSubtitleFeeder`.
-    @State private var stereoSubtitles: RAVEStereoSubtitleFrame?
+    @State private var stereoSubtitles: StereoSubtitleFrame?
     @AppStorage(StereoSubtitleStyle.key) private var stereoSubtitleStyle = StereoSubtitleStyle.inPicture
     @AppStorage(FlatSubtitleStyle.key) private var flatSubtitleStyle = StereoSubtitleStyle.inPicture
     #endif
@@ -238,7 +238,7 @@ struct FilmPlayerView: View {
     /// 1080p (the conversion's cost follows the picture's size), then
     /// 20 s pass before the next reports count; otherwise the viewer is told
     /// once per film.
-    private func noteStereoPerformance(_ sample: RAVEStereoPerformance) {
+    private func noteStereoPerformance(_ sample: StereoPerformance) {
         guard player.isPlaying, !chromeOpen, !player.video.isChangingPictureTier,
               Date.now >= stereoLoadGraceUntil, sample.isOverloaded else {
             stereoLoadStrikes = 0

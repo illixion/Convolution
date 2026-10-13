@@ -139,7 +139,7 @@ struct FlatSubtitleSettings: View {
 /// Where the HDR luminance of subtitles drawn into a stereo picture is kept.
 enum SubtitleHDRBrightness {
     static let key = "subtitles.hdrWhiteNits"
-    static let defaultNits = RAVEStereoSubtitleFrame.defaultHDRWhiteNits
+    static let defaultNits = StereoSubtitleFrame.defaultHDRWhiteNits
     static let range: ClosedRange<Double> = 80 ... 1000
 }
 
@@ -259,7 +259,7 @@ struct StereoSubtitleSettings: View {
 struct StereoSubtitleFeeder: View {
     let controller: SubtitleController
     let filmTime: @MainActor () -> Double
-    @Binding var frame: RAVEStereoSubtitleFrame?
+    @Binding var frame: StereoSubtitleFrame?
 
     @AppStorage(SubtitleHDRBrightness.key) private var hdrWhiteNits = SubtitleHDRBrightness.defaultNits
     @AppStorage(SubtitleStereoDepth.key) private var textDepth = 0.0
@@ -289,7 +289,7 @@ struct StereoSubtitleFeeder: View {
             return
         }
         version += 1
-        frame = RAVEStereoSubtitleFrame(version: version, hdrWhiteNits: hdrWhiteNits,
+        frame = StereoSubtitleFrame(version: version, hdrWhiteNits: hdrWhiteNits,
                                         depthOffset: SubtitleStereoDepth.depthOffset(depth)) { eyeSize in
             Self.render(cues, eyeSize: eyeSize)
         }
@@ -299,15 +299,15 @@ struct StereoSubtitleFeeder: View {
     /// twentieth of the picture's height, one image per edge. A bitmap cue
     /// (a disc's PGS) goes where the disc put it, at its own size.
     @MainActor
-    static func render(_ cues: [RAVESubtitleCue], eyeSize: CGSize) -> [RAVEStereoSubtitle] {
-        let bitmaps = cues.compactMap { cue -> RAVEStereoSubtitle? in
+    static func render(_ cues: [RAVESubtitleCue], eyeSize: CGSize) -> [StereoSubtitle] {
+        let bitmaps = cues.compactMap { cue -> StereoSubtitle? in
             guard let image = cue.image, let cgImage = image.makeImage() else { return nil }
-            return RAVEStereoSubtitle(image: cgImage, placement: cue.placement == .top ? .top : .bottom,
+            return StereoSubtitle(image: cgImage, placement: cue.placement == .top ? .top : .bottom,
                                       referenceEyeHeight: eyeSize.height, frame: image.frame)
         }
         let text = cues.filter { $0.image == nil }
         let fontSize = max(eyeSize.height * 0.05, 14)
-        let groups: [(RAVEStereoSubtitle.Placement, [RAVESubtitleCue])] = [
+        let groups: [(StereoSubtitle.Placement, [RAVESubtitleCue])] = [
             (.top, text.filter { $0.placement == .top }),
             (.bottom, text.filter { $0.placement == .bottom })
         ]
@@ -318,7 +318,7 @@ struct StereoSubtitleFeeder: View {
             // A point per eye pixel: the image is drawn 1:1 into the eye.
             renderer.scale = 1
             guard let image = renderer.cgImage else { return nil }
-            return RAVEStereoSubtitle(image: image, placement: placement, referenceEyeHeight: eyeSize.height)
+            return StereoSubtitle(image: image, placement: placement, referenceEyeHeight: eyeSize.height)
         }
     }
 }

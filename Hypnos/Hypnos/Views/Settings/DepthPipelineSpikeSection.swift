@@ -1,7 +1,7 @@
 /*
  Hypnos - Depth Pipeline Spike (Settings → Developer)
 
- Runs `DepthPipelineSpike` against a video from Documents/Videos and shows
+ Runs `DepthPipelineBenchmark` against a video from Documents/Videos and shows
  its lines on device, with a Copy button to get them off the headset. The
  numbers it produces — per-model inference time, the cost of the offline
  refinement chain if run live, and how far ahead `AVPlayerItemVideoOutput`
@@ -100,7 +100,7 @@ struct DepthPipelineSpikeSection: View {
         isRunning = true
         lines = ["Starting…"]
         Task {
-            await DepthPipelineSpike.run(videoURL: selected) { line in
+            await DepthPipelineBenchmark.run(videoURL: selected) { line in
                 Task { @MainActor in
                     if lines == ["Starting…"] { lines = [] }
                     lines.append(line)
