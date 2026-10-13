@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.10,<3.13"
 # dependencies = [
-#     "torch>=2.3",
-#     "transformers>=4.45",
-#     "coremltools>=8.0",
-#     "numpy",
+#     "torch==2.7.0",
+#     "transformers==4.51.3",
+#     "coremltools==9.0",
+#     "numpy==1.26.4",
 #     "pillow",
 # ]
 # ///
@@ -17,7 +17,8 @@ result unchanged.
 Run with uv (resolves the dependencies above automatically):
     uv run scripts/convert-depth-model.py --variant base
 or in a plain venv:
-    python3 -m venv .venv && .venv/bin/pip install torch transformers coremltools numpy pillow
+    python3.12 -m venv .venv
+    .venv/bin/pip install torch==2.7.0 transformers==4.51.3 coremltools==9.0 numpy==1.26.4 pillow
     .venv/bin/python scripts/convert-depth-model.py --variant base
 
 Get the result onto the device either way:
@@ -43,6 +44,15 @@ roughly quadratic inference cost — try 686x392 for mostly-16:9 libraries or
 630x476 / 770x574 for more detail. Very large inputs (>~900px) can degrade
 global depth coherence (the model was trained at 518) — validate on real
 content before committing to one.
+
+Aspect-matched A/B inputs at approximately the default's pixel count:
+    --aspect-preset tv        # 602x336 (~16:9)
+    --aspect-preset cinema22  # 686x308 (~2.2:1)
+    --aspect-preset cinema239 # 700x294 (~2.39:1)
+Use the same variant and precision for comparisons. Similar pixel count is
+not a promise of similar ANE time; measure on device. No preset is automatic.
+The converter dependencies are pinned: newer NumPy scalar conversion and
+Python 3.14 tracing broke this export path in the widescreen-model check.
 
 Target I/O (mirrors apple/coreml-depth-anything-v2-small):
   input  "image": color RGB image, W x H
@@ -180,8 +190,10 @@ def validate(mlmodel, wrapper, test_image, width, height):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--variant", choices=list(VARIANTS), default="base")
-    parser.add_argument("--width", type=int, default=518, help="input width, multiple of 14 (default 518)")
-    parser.add_argument("--height", type=int, default=392, help="input height, multiple of 14 (default 392)")
+    parser.add_argument("--width", type=int, help="input width, multiple of 14 (default 518)")
+    parser.add_argument("--height", type=int, help="input height, multiple of 14 (default 392)")
+    parser.add_argument("--aspect-preset", choices=["tv", "cinema22", "cinema239"],
+                        help="aspect-matched input at roughly the default pixel count; conflicts with width/height")
     parser.add_argument("--precision", choices=["auto", "fp16", "mixed", "mixed+", "fp32"], default="auto",
                         help="auto walks the ladder and keeps the first rung that validates")
     parser.add_argument("--test-image", help="photo to validate against (default: synthetic scene)")
@@ -189,7 +201,16 @@ def main():
     parser.add_argument("--out", help="output .mlpackage path (default: auto-named)")
     args = parser.parse_args()
 
-    if args.width % 14 or args.height % 14:
+    if args.aspect_preset:
+        if args.width is not None or args.height is not None:
+            parser.error("--aspect-preset cannot be combined with --width/--height")
+        args.width, args.height = {"tv": (602, 336), "cinema22": (686, 308),
+                                   "cinema239": (700, 294)}[args.aspect_preset]
+    else:
+        args.width = 518 if args.width is None else args.width
+        args.height = 392 if args.height is None else args.height
+
+    if args.width <= 0 or args.height <= 0 or args.width % 14 or args.height % 14:
         parser.error(f"width/height must be multiples of 14 (got {args.width}x{args.height})")
 
     ckpt = VARIANTS[args.variant]

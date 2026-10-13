@@ -24,21 +24,18 @@ if [[ -z "$MODEL_SRC" || ! -e "$MODEL_SRC" ]]; then
     exit 1
 fi
 
-BUNDLE_ID="${BUNDLE_ID:-com.illixion.hypnos}"
-DEVICE_NAME="${DEVICE_NAME:-AVP}"
+REQUESTED_DEVICE_NAME="${DEVICE_NAME:-}"
 [[ -f "$CONF_FILE" ]] && source "$CONF_FILE"
+DEVICE_NAME="${REQUESTED_DEVICE_NAME:-${DEVICE_NAME:-AVP}}"
+BUNDLE_ID="${BUNDLE_ID:-${BUILD_BUNDLE_ID:-com.illixion.hypnos}}"
 
-DEVICE_ID=$(xcrun devicectl list devices 2>/dev/null | grep "$DEVICE_NAME" | awk '{print $3}' | head -1)
-if [[ -z "$DEVICE_ID" ]]; then
-    echo "ERROR: device '$DEVICE_NAME' not found. Available:" >&2
-    xcrun devicectl list devices 2>/dev/null | grep -E "available|connected" >&2
-    exit 1
-fi
+# devicectl accepts a device name or identifier directly. Its human-readable
+# table changes between Xcode versions (and names can contain spaces).
 
 BASENAME="$(basename "$MODEL_SRC")"
-echo "==> Pushing $BASENAME to $DEVICE_NAME ($DEVICE_ID) Documents/ ..."
+echo "==> Pushing $BASENAME to $DEVICE_NAME Documents/ ..."
 xcrun devicectl device copy to \
-    --device "$DEVICE_ID" \
+    --device "$DEVICE_NAME" \
     --domain-type appDataContainer \
     --domain-identifier "$BUNDLE_ID" \
     --source "$(cd "$(dirname "$MODEL_SRC")" && pwd)/$BASENAME" \

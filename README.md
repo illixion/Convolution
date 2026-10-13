@@ -271,6 +271,48 @@ The app follows a SwiftUI architecture:
 
 Platform notes live in [`CLAUDE.md`](CLAUDE.md) and `.claude/rules/`.
 
+## AI 3D edge comparison (development builds)
+
+The [2026-10-13 edge investigation](docs/investigations/ai-3d-edge-artifacts-2026-10-13.md)
+records the tested scenes, failed approaches, row-stride and lifecycle causes,
+and what remains unverified.
+
+Pause an AI 3D movie on a troublesome frame with the app's DebugTrace server
+running, then run:
+
+```sh
+python3 scripts/compare-stereo-edges.py --out build/edge-comparison/nope-rail
+```
+
+This saves both eyes, source, depth and anaglyph for the original renderer, the
+experimental disconnected mesh, and its uncovered-pixel mask. `manifest.json`
+marks the set valid only when source/depth hashes, timestamps and disparity
+settings match. The script restores the original renderer switches on failure
+or completion. It uses the sibling DebugTrace client for authentication.
+
+For direct headset A/Bs, the `stereoEdges` debug command accepts `separated` and
+`holes`; both default to false. The experimental renderer is not yet the default.
+Its Nope headset check showed noisy railing outlines. The original renderer's
+background edge-fill heuristic also defaults to off after it damaged jacket
+outlines; use `fill=true` only for comparison.
+
+Aspect-matched models can be generated and installed separately:
+
+```sh
+uv run scripts/convert-depth-model.py --variant small --aspect-preset cinema22 \
+  --out build/models/DepthAnythingV2Small686x308.mlpackage
+scripts/push-depth-model.sh build/models/DepthAnythingV2Small686x308.mlpackage
+```
+
+After relaunch/import, select it under Real-Time 3D Depth Model. Presets `tv`,
+`cinema22` and `cinema239` use 602×336, 686×308 and 700×294 inputs respectively,
+each near the default model's pixel count. Compare the same variant/precision
+and scene; actual inference time and film quality need device measurements.
+For a cheaper widescreen input, use `--width 560 --height 252` instead of an
+aspect preset. On the Nope test, its depth stage measured about 25–34 ms versus
+40–53 ms for 686×308, with some remaining outline artifacts. A similar pixel
+count does not guarantee the same Core ML performance.
+
 ## License
 
 See [LICENSE.txt](LICENSE.txt) for licensing information, and

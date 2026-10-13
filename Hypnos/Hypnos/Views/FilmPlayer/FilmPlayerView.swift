@@ -55,6 +55,7 @@ struct FilmPlayerView: View {
     #if os(visionOS)
     @Environment(AppModel.self) private var appModel
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(SceneDelegate.self) private var sceneDelegate
     @State private var stereoSource: SampleBufferFrameSource?
     /// Set while a 3D film plays as real 3D (eyes cropped from the frame);
     /// nil while a flat film plays as fake-3D.
@@ -139,6 +140,16 @@ struct FilmPlayerView: View {
             .onChange(of: session.loadedItem?.id) { _, _ in stopStereo(keepingPosition: false) }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background { clearLostHolds() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIScene.didDisconnectNotification)) { notification in
+                guard let scene = notification.object as? UIWindowScene,
+                      scene === sceneDelegate.windowScene else { return }
+                stopStereo(keepingPosition: false)
+                guard session.activePlayerView == viewID else { return }
+                session.activePlayerView = nil
+                session.isPlayerOpen = false
+                player.pause()
+                session.saveSound()
             }
             // A 3D film opens in 3D once the server says it is one, and
             // replaces a fake-3D picture the user started before it knew.
@@ -586,6 +597,7 @@ struct FilmPlayerView: View {
     /// picture next: a different film loading, or 3D restarting at once.
     private func stopStereo(keepingPosition: Bool = true) {
         guard let source = stereoSource else { return }
+        source.close()
         let position = player.currentTime
         if stereoTierForDolbyVision != nil, keepingPosition, player.video.pictureHeight == stereoTierForDolbyVision {
             // Back to the original Dolby Vision picture, which the flat
