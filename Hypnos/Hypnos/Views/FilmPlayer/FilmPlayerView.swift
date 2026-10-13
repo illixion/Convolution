@@ -126,11 +126,18 @@ struct FilmPlayerView: View {
                 nowPlaying?.deactivate()
                 nowPlaying = nil
                 AudioSessionConfig.configureMixedPlayback()
+                UIApplication.shared.isIdleTimerDisabled = false
                 #endif
             }
             #if os(tvOS) || os(iOS)
             .onChange(of: session.loadedItem?.name) { _, name in
                 if let name { nowPlaying?.setTitle(name) }
+            }
+            // The display layer's preventsDisplaySleepDuringVideoPlayback
+            // doesn't hold the screen on for a picture fed on our own clock
+            // (the iPad slept mid-film), so the player holds it while playing.
+            .onChange(of: player.isPlaying, initial: true) { _, playing in
+                UIApplication.shared.isIdleTimerDisabled = playing
             }
             #endif
             #if os(visionOS)
@@ -459,6 +466,11 @@ struct FilmPlayerView: View {
                     FilmStageView(player: player) { HeadphoneHeadTracker.shared.orientation }
                 }
                 .overlay { subtitleOverlay }
+                // The layer is sized to the picture and centred here rather
+                // than left to its video gravity, which on iPad drew the
+                // picture against the top of the screen.
+                .aspectRatio(pictureAspect, contentMode: .fit)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             FilmTransport(player: player).padding(16)
         }
         .overlay(alignment: .bottomTrailing) {

@@ -32,14 +32,7 @@ struct IOSRootView: View {
                     .environment(router)
                     .environment(appModel)
             }
-            .sheet(item: Binding(
-                get: { router.sheet },
-                set: { router.sheet = $0 }
-            )) { tool in
-                IOSToolSheetView(tool: tool)
-                    .environment(router)
-                    .environment(appModel)
-            }
+            .iosToolSheets(level: -1, router: router, appModel: appModel)
             .environment(router)
             .environment(appModel)
             .handleIncomingMediaURLs(appModel: appModel)
@@ -72,6 +65,7 @@ private struct IOSCoverLevel: View {
             let destination = router.path[level]
             IOSDestinationView(destination: destination, appModel: appModel)
                 .environment(\.iosWindowToken, destination.id)
+                .iosToolSheets(level: level, router: router, appModel: appModel)
                 .fullScreenCover(item: coverBinding(level: level + 1)) { _ in
                     IOSCoverLevel(level: level + 1, appModel: appModel)
                         .environment(router)
@@ -120,6 +114,23 @@ private struct IOSDestinationView: View {
         // Viewers are dark, full-bleed surfaces on visionOS; keep them that way.
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
+    }
+}
+
+private extension View {
+    /// The tool sheets, presented from this level only while it is on top:
+    /// a sheet asked for from the gallery while a cover was up was refused
+    /// by UIKit (the video's Adjustments did nothing) and then appeared once
+    /// the cover closed.
+    func iosToolSheets(level: Int, router: IOSWindowRouter, appModel: AppModel) -> some View {
+        sheet(item: Binding(
+            get: { router.isTopLevel(level) ? router.sheet : nil },
+            set: { if router.isTopLevel(level) { router.sheet = $0 } }
+        )) { tool in
+            IOSToolSheetView(tool: tool)
+                .environment(router)
+                .environment(appModel)
+        }
     }
 }
 

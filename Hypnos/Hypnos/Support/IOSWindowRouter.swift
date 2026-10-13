@@ -74,10 +74,27 @@ enum IOSToolSheet: String, Identifiable {
 final class IOSWindowRouter {
     /// The covers over the gallery, bottom first. `IOSRootView` presents one
     /// `fullScreenCover` per entry.
-    var path: [IOSWindowDestination] = []
+    var path: [IOSWindowDestination] = [] {
+        didSet {
+            // The adjustments panel belongs to the video it was opened from;
+            // left set, it reappeared empty over the gallery once that
+            // video's cover closed. The film player outlives the cover that
+            // opened it (a disc handoff closes itself right after).
+            if path.count < oldValue.count, sheet == .videoAdjustments {
+                sheet = nil
+            }
+        }
+    }
 
-    /// The tool sheet currently presented, if any.
+    /// The tool sheet currently presented, if any. Presented by whichever
+    /// level is on top (`isTopLevel`): UIKit won't present from a view that
+    /// is already presenting a cover.
     var sheet: IOSToolSheet?
+
+    /// Whether the cover at `level` (-1 for the gallery) is the one showing.
+    func isTopLevel(_ level: Int) -> Bool {
+        path.count == level + 1
+    }
 
     /// Incremented whenever something asks for the main window (a viewer's
     /// Gallery button, a tag tapped in an info sheet). `ContentView` watches it
