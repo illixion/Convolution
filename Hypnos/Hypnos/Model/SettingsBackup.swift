@@ -58,6 +58,7 @@ struct SettingsBackup: Codable {
     var dioramaDistance: Double?
     var roundedCorners: Bool?
     var openMediaInNewWindows: Bool?
+    var pinchToZoomVideos: Bool?
     /// Legacy key for backward compatibility when importing old backups
     var openImagesInSeparateWindows: Bool?
     var rememberImageEnhancements: Bool?

@@ -109,6 +109,10 @@ struct SettingsTabView: View {
                         Toggle("Always Open In New Window", isOn: $appModel.openMediaInNewWindows)
                     }
 
+                    #if !os(tvOS)
+                    Toggle("Pinch to Zoom Videos", isOn: $appModel.pinchToZoomVideos)
+                    #endif
+
                     Toggle("Remember Image Enhancements", isOn: Binding(
                         get: { appModel.rememberImageEnhancements },
                         set: { newValue in

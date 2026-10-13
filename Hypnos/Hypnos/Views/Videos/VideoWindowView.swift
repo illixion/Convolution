@@ -117,6 +117,18 @@ struct VideoWindowView: View {
 
     private var video: GalleryVideo { windowModel.video }
 
+    /// Pinch zoom of a flat picture (Settings → Pinch to Zoom Videos).
+    @State private var zoom = ZoomPanState()
+
+    /// The stereo and immersive pictures are RealityKit planes a SwiftUI
+    /// scale can't reach, so zoom is for the flat renderers only.
+    private var isZoomAvailable: Bool {
+        appModel.pinchToZoomVideos
+            && !appModel.allWindowsHidden
+            && !windowModel.showsStereoPicture
+            && !windowModel.usesImmersiveStereo
+    }
+
     /// A new stereo player per video, attempt and mode: the engine takes its
     /// packed layout when it loads.
     private func stereoPlayerID(live layout: PackedStereoLayout?) -> String {
@@ -266,6 +278,7 @@ struct VideoWindowView: View {
                 // Fake-3D handles the mirror inside the warp shader; mirroring
                 // the RealityView container would invert the stereo pair too.
                 .scaleEffect(x: (windowModel.isFlipped && !windowModel.showsStereoPicture) ? -1 : 1, y: 1)
+                .zoomPanTransform(zoom)
                 .brightness(windowModel.usesImmersiveStereo ? windowModel.effectiveVideoAdjustments.brightness : 0)
                 .contrast(windowModel.usesImmersiveStereo ? windowModel.effectiveVideoAdjustments.contrast : 1)
                 .saturation(windowModel.usesImmersiveStereo ? windowModel.effectiveVideoAdjustments.saturation : 1)
@@ -296,6 +309,10 @@ struct VideoWindowView: View {
                             }
                     }
                 }
+                // After the tap target, which covers the picture and would
+                // otherwise take the touches first. Subtitles stay unzoomed.
+                .zoomPanGestures($zoom, enabled: isZoomAvailable)
+                .onChange(of: video.id) { _, _ in zoom.reset() }
                 .overlay {
                     // Subtitles for the flat renderers; the immersive player
                     // draws its own in the immersive space.

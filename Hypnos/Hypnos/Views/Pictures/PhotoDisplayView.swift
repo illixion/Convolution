@@ -67,6 +67,22 @@ struct PhotoDisplayView: View {
         dismissWindow()
     }
 
+    /// Pinch zoom of the flat picture. Reset whenever the picture changes.
+    @State private var zoom = ZoomPanState()
+
+    /// Zoom applies to the flat picture only: RealityKit's spatial 3D sizes
+    /// itself, and the diorama's layers sit at their own depths.
+    private var isZoomAvailable: Bool {
+        !windowModel.is3DMode
+            && !windowModel.isViewingSpatial3DImmersive
+            && !windowModel.isDioramaMode
+    }
+
+    /// Pull-down-to-close, off while zoomed so a vertical drag pans instead.
+    private var dismissDragAction: (() -> Void)? {
+        zoom.isZoomed ? nil : { dismissViewer() }
+    }
+
     /// Effective swipe navigation state: disabled when window is snapped to a surface,
     /// and only active while the viewer's UI chrome is visible so swipes don't fire
     /// during the hidden-chrome immersive state.
@@ -74,6 +90,7 @@ struct PhotoDisplayView: View {
         enableSwipeNavigation
             && !isWindowSnapped
             && !windowModel.isUIHidden
+            && !zoom.isZoomed
     }
 
     /// Tracks the viewer window's current size (updated live via GeometryReader)
@@ -168,7 +185,10 @@ struct PhotoDisplayView: View {
 
             imageContent
                 .scaleEffect(x: windowModel.isImageFlipped ? -1 : 1, y: 1)
+                .zoomPanTransform(zoom)
+                .zoomPanGestures($zoom, enabled: isZoomAvailable)
                 .offset(x: dragOffset)
+                .onChange(of: windowModel.imageURL) { _, _ in zoom.reset() }
 
             // Diorama layers — backdrop at the window plane, foreground popped
             // forward in z. The ornament has its own z-offset to float above.
@@ -466,7 +486,7 @@ struct PhotoDisplayView: View {
                         }
                 }
             }
-            .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissViewer))
+            .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissDragAction))
             .onAppear {
                 onFirstFramePresented?()
                 let initialBounds = windowModel.savedWindowSize ?? appModel.mainWindowSize
@@ -502,7 +522,7 @@ struct PhotoDisplayView: View {
                             }
                     }
                 }
-                .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissViewer))
+                .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissDragAction))
                 .onAppear {
                     onFirstFramePresented?()
                     let initialBounds = windowModel.savedWindowSize ?? appModel.mainWindowSize
@@ -532,7 +552,7 @@ struct PhotoDisplayView: View {
                             }
                     }
                 }
-                .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissViewer))
+                .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissDragAction))
                 .onAppear {
                     onFirstFramePresented?()
                     let initialBounds = windowModel.savedWindowSize ?? appModel.mainWindowSize
@@ -572,7 +592,7 @@ struct PhotoDisplayView: View {
                             }
                     }
                 }
-                .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissViewer))
+                .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissDragAction))
                 .onAppear {
                     onFirstFramePresented?()
                     let initialBounds = windowModel.savedWindowSize ?? appModel.mainWindowSize
@@ -758,7 +778,7 @@ struct PhotoDisplayView: View {
             .onTapGesture {
                 windowModel.toggleUIVisibility()
             }
-            .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissViewer))
+            .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissDragAction))
             .onAppear {
                 // The 3D-adjustment 2D preview re-mounts this branch
                 // every time is3DMode flips false. Re-running the
@@ -797,7 +817,7 @@ struct PhotoDisplayView: View {
                 .onTapGesture {
                     windowModel.toggleUIVisibility()
                 }
-                .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissViewer))
+                .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissDragAction))
                 .onAppear {
                     onFirstFramePresented?()
                     // Same rationale as the MetalImageView branch above —

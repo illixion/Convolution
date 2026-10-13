@@ -939,6 +939,16 @@ class AppModel {
         #endif
     }
 
+    /// When true, a flat video can be pinched to zoom in, like a photo. Off by
+    /// default: a pinch on a video window is more often a stray than a zoom.
+    var pinchToZoomVideos: Bool {
+        didSet {
+            if pinchToZoomVideos != oldValue {
+                UserDefaults.standard.set(pinchToZoomVideos, forKey: "pinchToZoomVideos")
+            }
+        }
+    }
+
     /// When true, media selections open in separate pop-out windows (openWindow).
     /// When false, media selections use pushWindow for in-place navigation.
     var openMediaInNewWindows: Bool {
@@ -1701,6 +1711,7 @@ class AppModel {
         self.galleryGridStyle = loadedGalleryGridStyle
         self.roundedCorners = loadedRoundedCorners
         self.openMediaInNewWindows = loadedOpenMediaInNewWindows
+        self.pinchToZoomVideos = UserDefaults.standard.bool(forKey: "pinchToZoomVideos")
         self.enableStashTranscoding = loadedEnableStashTranscoding
         self.realtimeDepthModelName = loadedRealtimeDepthModelName
         self.preprocessDepthModelName = loadedPreprocessDepthModelName
@@ -2552,6 +2563,7 @@ class AppModel {
             dioramaDistance: dioramaDistance,
             roundedCorners: roundedCorners,
             openMediaInNewWindows: openMediaInNewWindows,
+            pinchToZoomVideos: pinchToZoomVideos,
             rememberImageEnhancements: rememberImageEnhancements,
             autoRestoreSpatial3D: autoRestoreSpatial3D,
             fullyImmersive3DMode: fullyImmersive3DMode,
@@ -2620,6 +2632,7 @@ class AppModel {
         if let v = backup.dioramaDistance { dioramaDistance = v }
         if let v = backup.roundedCorners { roundedCorners = v }
         if let v = backup.openMediaInNewWindows ?? backup.openImagesInSeparateWindows { openMediaInNewWindows = v }
+        if let v = backup.pinchToZoomVideos { pinchToZoomVideos = v }
         if let v = backup.rememberImageEnhancements { rememberImageEnhancements = v }
         if let v = backup.autoRestoreSpatial3D { autoRestoreSpatial3D = v }
         if let v = backup.fullyImmersive3DMode { fullyImmersive3DMode = v }
