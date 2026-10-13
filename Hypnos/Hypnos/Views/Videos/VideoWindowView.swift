@@ -52,9 +52,11 @@ struct VideoWindowView: View {
     /// transport and feature rows have the same footprint in 2D and fake-3D.
     ///
     /// visionOS hangs the controls below the window instead, so the window is
-    /// the picture alone.
+    /// the picture alone. iOS draws them over the picture (the ornament shim is
+    /// an edge overlay, and they auto-hide), so reserving room only pushed the
+    /// picture up: a 16:9 episode on a landscape iPad sat against the top.
     private var ornamentBottomPadding: CGFloat {
-        #if os(visionOS)
+        #if os(visionOS) || os(iOS)
         return 0
         #else
         if windowModel.shouldUse3DMode { return 60 }
@@ -97,6 +99,9 @@ struct VideoWindowView: View {
     private var overlayBottomInset: CGFloat {
         #if os(visionOS)
         return ornamentBottomPadding + 24
+        #elseif os(iOS)
+        // Clear the overlaid controls, as the old reserved space did.
+        return 160 + 96
         #else
         return ornamentBottomPadding + 96
         #endif
@@ -416,6 +421,26 @@ struct VideoWindowView: View {
             }
 
         }
+        #if os(iOS)
+        // The cover's way out besides the controls' Gallery button, shown and
+        // hidden with the rest of the chrome.
+        .overlay(alignment: .topLeading) {
+            if !windowModel.isUIHidden, !appModel.allWindowsHidden {
+                Button {
+                    dismissWindow()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.title3.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .accessibilityLabel("Close")
+                .padding(16)
+                .transition(.opacity)
+            }
+        }
+        #endif
         .animation(.easeInOut(duration: 0.2), value: windowModel.isUIHidden)
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
