@@ -280,6 +280,11 @@ struct VideoWindowView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                #if os(iOS)
+                // Centred on the whole screen: inside the safe area the
+                // picture jumped each time a tap hid or showed the status bar.
+                .ignoresSafeArea()
+                #endif
                 // Fake-3D handles the mirror inside the warp shader; mirroring
                 // the RealityView container would invert the stereo pair too.
                 .scaleEffect(x: (windowModel.isFlipped && !windowModel.showsStereoPicture) ? -1 : 1, y: 1)
