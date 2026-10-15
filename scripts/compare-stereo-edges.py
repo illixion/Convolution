@@ -34,7 +34,7 @@ def main():
     def call(name, arguments=None):
         status, kind, raw = client["request"](session, "/_call", {"name": name, "arguments": arguments or {}})
         if status >= 400:
-            raise CaptureFailure(f"{name} failed (HTTP {status}); see the app's debug access prompt")
+            raise CaptureFailure(f"{name} failed (HTTP {status}); see the app's debug access and screen capture prompts (Allow for 15 Minutes covers the whole run)")
         if kind.startswith("application/json"):
             reply = json.loads(raw)
             if not reply.get("ok"):

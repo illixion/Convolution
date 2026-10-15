@@ -124,7 +124,8 @@ enum FilmDebugEndpoints {
                                       choices: ["left", "right", "source", "depth", "anaglyph", "difference"]),
                               .string("crop", "x,y,w,h as fractions, e.g. 0.3,0.2,0.4,0.4"),
                               .boolean("fresh", "capture a new frame (default true)", default: true),
-                              .boolean("recompute", "paused: compute the depth afresh (default false)")]) { args in
+                              .boolean("recompute", "paused: compute the depth afresh (default false)")],
+                 sensitivity: .screenCapture) { args in
                 #if os(visionOS)
                 let view = StereoEyeImages.View(rawValue: args.string("view") ?? "") ?? .left
                 let frame: StereoEyeCapture.Frame
