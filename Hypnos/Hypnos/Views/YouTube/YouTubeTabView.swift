@@ -427,9 +427,13 @@ struct YouTubeTabView: View {
     }
 }
 
-/// One video: a 16:9 thumbnail with its length, title, channel and views.
+/// One video: a 16:9 thumbnail with its length, then its title, views,
+/// channel and the day it was published, one line each.
 struct YouTubeVideoCard: View {
     let video: YouTubeVideoSummary
+    @State private var uploadDates = YouTubeUploadDates.shared
+
+    private static let dayStyle = Date.ISO8601FormatStyle(timeZone: .current).year().month().day()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -457,14 +461,18 @@ struct YouTubeVideoCard: View {
                 .font(.headline)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
-            if let byline {
-                Text(byline)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                if let views = video.viewCountText { Text(views) }
+                if let channel = video.author { Text(channel) }
+                if let published = publishedLine { Text(published) }
             }
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
         }
         .contentShape(.rect)
+        .onAppear { uploadDates.want(video.id) }
+        .onDisappear { uploadDates.drop(video.id) }
     }
 
     private var lengthLabel: String? {
@@ -476,9 +484,16 @@ struct YouTubeVideoCard: View {
             : String(format: "%d:%02d", total / 60, total % 60)
     }
 
-    private var byline: String? {
-        let parts = [video.author, video.viewCountText, video.publishedText].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    /// "2026-10-08", in this device's time zone; YouTube's own "3 days ago"
+    /// until the lookup answers, or if it can't. Something from the last
+    /// day keeps "5 hours ago" in front, which says more than the day alone.
+    private var publishedLine: String? {
+        guard let date = uploadDates.dates[video.id] else { return video.publishedText }
+        let day = date.formatted(Self.dayStyle)
+        if let relative = video.publishedText, Date.now.timeIntervalSince(date) < 86_400 {
+            return "\(relative) · \(day)"
+        }
+        return day
     }
 }
 

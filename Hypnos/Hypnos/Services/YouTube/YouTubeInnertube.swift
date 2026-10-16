@@ -1,7 +1,7 @@
 /*
  Hypnos - YouTube's own API, called from the device
 
- Two calls, both unauthenticated:
+ Three calls, all unauthenticated:
 
  - **player**, asked as YouTube's visionOS app (the values yt-dlp 2026.08.19
    sends for its `visionos` client). It answers with an HLS master playlist up
@@ -16,8 +16,12 @@
    unplayable from this client and fall through to the backend.
  - **search**, as the web client. Only `videoRenderer`s are kept (Shorts and
    channel cards are dropped); a continuation token pages further.
+ - **player** again, as the web client, for the day a video was published
+   (`publishDate`). Without a PO token that client won't play anything, but
+   its answer still carries the video's `microformat` (~3 KB), which the
+   visionOS client's lacks. The feeds and search only say "3 days ago".
 
- Both shapes are YouTube's private API and change without notice; every
+ These shapes are YouTube's private API and change without notice; every
  parse is defensive and a missing field degrades to nil rather than failing
  the whole response.
  */
@@ -145,6 +149,39 @@ actor YouTubeInnertube {
         let value = String(match.1)
         visitorData = (value, Date())
         return value
+    }
+
+    // MARK: - Publish date
+
+    /// When a video was published; a live stream on air counts from its
+    /// start. Same request and fields as the "yyyy-mm-dd upload dates"
+    /// userscript (greasyfork 493024) makes from youtube.com.
+    func publishDate(_ id: YouTubeVideoID) async throws -> Date? {
+        let json = try await post("player", body: [
+            "context": ["client": ["clientName": "WEB", "clientVersion": Self.webClientVersion,
+                                   "hl": "en", "gl": "US"]],
+            "videoId": id.rawValue,
+            "contentCheckOk": true,
+            "racyCheckOk": true,
+        ], headers: [
+            "User-Agent": Self.visionAgent,
+            "X-YouTube-Client-Name": "1",
+            "X-YouTube-Client-Version": Self.webClientVersion,
+        ])
+        guard let microformat = (json["microformat"] as? [String: Any])?["playerMicroformatRenderer"]
+            as? [String: Any] else { return nil }
+        let live = microformat["liveBroadcastDetails"] as? [String: Any]
+        let stamp = (live?["isLiveNow"] as? Bool == true ? live?["startTimestamp"] as? String : nil)
+            ?? microformat["publishDate"] as? String
+            ?? microformat["uploadDate"] as? String
+        return stamp.flatMap(Self.date(fromStamp:))
+    }
+
+    /// "2026-10-08T07:00:19-07:00", or a bare "2026-10-08" as older answers
+    /// gave, read as noon UTC so it stays that day almost everywhere.
+    static func date(fromStamp stamp: String) -> Date? {
+        if let date = try? Date(stamp, strategy: .iso8601) { return date }
+        return try? Date(stamp + "T12:00:00Z", strategy: .iso8601)
     }
 
     // MARK: - Search

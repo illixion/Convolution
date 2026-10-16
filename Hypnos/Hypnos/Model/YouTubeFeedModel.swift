@@ -180,15 +180,20 @@ final class YouTubeFeedModel {
 extension YouTubePageScript.Payload.Card {
     var summary: YouTubeVideoSummary? {
         guard let id = YouTubeVideoID(id) else { return nil }
-        let rest = metadata ?? []
+        // Usually [views, age]; a lone item is the views only if it says so,
+        // so an age never lands on the tile's views line.
+        var rest = metadata ?? []
+        let viewsIndex = rest.firstIndex { $0.localizedCaseInsensitiveContains("view") || $0.localizedCaseInsensitiveContains("watching") }
+            ?? (rest.count > 1 ? 0 : nil)
+        let views = viewsIndex.map { rest.remove(at: $0) }
         return YouTubeVideoSummary(
             id: id,
             title: title,
             author: channel,
             lengthText: duration,
             lengthSeconds: duration.flatMap(YouTubeInnertube.seconds(fromClock:)),
-            viewCountText: rest.first,
-            publishedText: rest.count > 1 ? rest.dropFirst().joined(separator: " · ") : nil
+            viewCountText: views,
+            publishedText: rest.isEmpty ? nil : rest.joined(separator: " · ")
         )
     }
 }
