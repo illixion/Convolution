@@ -281,7 +281,7 @@ struct RemoteViewerWindowView: View {
 
             // Video / animated GIF layer (WebVideoPlayerView)
             switch model.currentMediaType {
-            case .video, .videoAsImage:
+            case .video:
                 // Rendered by the unified video layer below (see activeVideoURL)
                 // so the player survives the image→video crossfade commit.
                 EmptyView()
@@ -529,40 +529,28 @@ struct RemoteViewerWindowView: View {
                         // entirely inside this `else`, not spliced across the
                         // `if let url3D` above.
                         #if canImport(WebKit)
-                        if model.activeVideoIsAnimatedImage {
-                            // Native tier: WebKit plays H.264 in an <img>, managing
-                            // playback lifecycle itself (pause / resume on room
-                            // transitions) — no AVPlayer, no isRoomActive/duration
-                            // wiring. If the source isn't a codec <img> can decode,
-                            // onError escalates to the <video> tiers (raw → HLS).
-                            AnimatedImageWebView(imageURL: videoURL, onError: { [weak model] in
-                                model?.videoNativeImgFailed = true
-                            })
-                        } else {
-                            // Fallback tiers: <video> plays the raw source natively
-                            // (WebM/AV1 the device supports); on decode error it
-                            // switches to the HLS stream (server-transcoded H.264).
-                            WebVideoPlayerView(
-                                videoURL: videoURL,
-                                fallbackVideoURL: model.currentVideoHLSURL,
-                                showControls: false,
-                                isRoomActive: model.isRoomActive,
-                                onDurationKnown: { [weak model] seconds in
-                                    // During the image→video crossfade the incoming clip is
-                                    // `nextPost` — loadedmetadata usually fires before the
-                                    // engine commits it to `currentPost`. Attribute the
-                                    // duration to the post that owns the video, not whatever
-                                    // is still fading out.
-                                    guard let model, let post = model.nextPost ?? model.currentPost else { return }
-                                    model.onVideoDurationKnown(seconds, for: post)
-                                },
-                                loop: model.currentVideoLoops
-                            )
-                        }
+                        // <video> plays the raw source natively (WebM/AV1 the
+                        // device supports); on decode error it switches to the
+                        // source's transcode.
+                        WebVideoPlayerView(
+                            videoURL: videoURL,
+                            fallbackVideoURL: model.currentVideoHLSURL,
+                            showControls: false,
+                            isRoomActive: model.isRoomActive,
+                            onDurationKnown: { [weak model] seconds in
+                                // During a crossfade into a video the incoming clip is
+                                // `nextPost` — loadedmetadata usually fires before the
+                                // engine commits it to `currentPost`. Attribute the
+                                // duration to the post that owns the video, not whatever
+                                // is still fading out.
+                                guard let model, let post = model.nextPost ?? model.currentPost else { return }
+                                model.onVideoDurationKnown(seconds, for: post)
+                            },
+                            loop: model.currentVideoLoops
+                        )
                         #else
-                        // tvOS: no WebKit, so no native-<img> or raw/HLS <video>
-                        // tiers either. A slideshow post needing either simply
-                        // doesn't play its video layer here.
+                        // tvOS: no WebKit, so no <video> tier. A slideshow post
+                        // needing it simply doesn't play its video layer here.
                         EmptyView()
                         #endif
                     }
