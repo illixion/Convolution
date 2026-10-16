@@ -3,7 +3,8 @@
 
  Kept on the device only (UserDefaults), newest first, so the YouTube tab
  has something to show before the first search. Nothing is reported to
- YouTube: the app never signs in.
+ YouTube: playback is always signed out, even when the tab's feeds are
+ signed in.
  */
 
 #if HYPNOS_YOUTUBE

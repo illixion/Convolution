@@ -1,8 +1,12 @@
 /*
  Hypnos - YouTube tab (sideload builds only: `HYPNOS_YOUTUBE`)
 
- Search, a pasted link, and what was watched recently. Nothing signs in:
- search is YouTube's public web search, and history stays on the device.
+ Search, a pasted link, the signed-in feeds (Home, Subscriptions, Watch
+ Later, History) and what was watched here recently. Search is YouTube's
+ public web search, signed out. The feeds are YouTube's mobile site itself,
+ signed in on this device and read from a hidden page (`YouTubeFeedModel`),
+ so the account sees only what a phone's Safari would send. Recently
+ Watched stays on the device.
 
  Choosing a video resolves it first (`YouTubeResolver`) and then opens it in
  the platform's own video player: the video window on visionOS/iOS (where
@@ -29,12 +33,22 @@ struct YouTubeTabView: View {
     @State private var searchError: String?
     @State private var resolvingID: YouTubeVideoID?
     @State private var playError: String?
+    @State private var account = YouTubeAccount.shared
+    @State private var feedModel = YouTubeFeedModel()
+    /// nil until the account has been looked at, which picks the first one.
+    @State private var shelf: Shelf?
+    @State private var browser: YouTubeBrowserPurpose?
     #if os(tvOS)
     @State private var presentedVideo: GalleryVideo?
     #endif
     @OpenWindowProxy private var openWindow
 
     private var pastedID: YouTubeVideoID? { YouTubeVideoID(parsing: query) }
+
+    private enum Shelf: Hashable {
+        case feed(YouTubeFeed)
+        case recent
+    }
 
     var body: some View {
         NavigationStack {
@@ -59,6 +73,20 @@ struct YouTubeTabView: View {
             .onChange(of: query) { _, newValue in
                 if newValue.isEmpty { clearSearch() }
             }
+            #if !os(tvOS)
+            .refreshable {
+                if case .feed = shelf, submittedQuery.isEmpty { feedModel.reload() }
+            }
+            #endif
+        }
+        .background {
+            if let session = feedModel.session {
+                YouTubePageHost(session: session)
+            }
+        }
+        .task { await syncWithAccount() }
+        .youTubeBrowser($browser) {
+            Task { await browserClosed() }
         }
         .overlay {
             if resolvingID != nil {
@@ -96,7 +124,94 @@ struct YouTubeTabView: View {
                         .onAppear { loadMore() }
                 }
             }
-        } else if history.videos.isEmpty {
+        } else {
+            shelfBar
+            switch shelf {
+            case .feed(let feed): feedContent(feed)
+            case .recent, nil: recentContent
+            }
+        }
+    }
+
+    // MARK: - Shelves
+
+    private var shelfBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(YouTubeFeed.allCases) { feed in
+                    shelfButton(feed.title, systemImage: feed.systemImage, for: .feed(feed))
+                }
+                shelfButton("Recently Watched", systemImage: "play.circle", for: .recent)
+            }
+            .padding(.vertical, 8)
+        }
+        .scrollClipDisabled()
+    }
+
+    @ViewBuilder
+    private func shelfButton(_ title: String, systemImage: String, for target: Shelf) -> some View {
+        let button = Button { select(target) } label: { Label(title, systemImage: systemImage) }
+        if shelf == target {
+            button.buttonStyle(.borderedProminent)
+        } else {
+            button.buttonStyle(.bordered)
+        }
+    }
+
+    @ViewBuilder
+    private func feedContent(_ feed: YouTubeFeed) -> some View {
+        switch feedModel.phase {
+        case .idle, .loading:
+            ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
+        case .loaded:
+            grid(feedModel.videos, removable: false)
+            if feedModel.hasMore {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    // Nudges again while it stays in view: a batch can take a
+                    // moment, and the nudge only scrolls the page.
+                    .task(id: feedModel.videos.count) {
+                        while !Task.isCancelled {
+                            feedModel.loadMore()
+                            try? await Task.sleep(for: .seconds(4))
+                        }
+                    }
+            }
+        case .empty:
+            ContentUnavailableView {
+                Label("Nothing Here", systemImage: feed.systemImage)
+            } description: {
+                Text("YouTube's \(feed.title) page shows no videos.")
+            } actions: {
+                Button("Reload") { feedModel.reload() }
+            }
+            .padding(.top, 40)
+        case .signedOut:
+            ContentUnavailableView {
+                Label("Sign In to YouTube", systemImage: "person.crop.circle")
+            } description: {
+                Text("Your home page, subscriptions, Watch Later and history come from YouTube's own site, signed in on this device. Videos still play signed out.")
+            } actions: {
+                Button("Sign In") { browser = .signIn }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(.top, 40)
+        case .needsAnswer:
+            ContentUnavailableView {
+                Label("YouTube Is Waiting", systemImage: "exclamationmark.bubble")
+            } description: {
+                Text("YouTube's page is asking something, such as which cookies to allow. Answer it there, then come back.")
+            } actions: {
+                Button("Open YouTube") { browser = .answer(feedModel.pageURL ?? feed.url) }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(.top, 40)
+        }
+    }
+
+    @ViewBuilder
+    private var recentContent: some View {
+        if history.videos.isEmpty {
             ContentUnavailableView(
                 "Search YouTube",
                 systemImage: "play.rectangle",
@@ -111,6 +226,39 @@ struct YouTubeTabView: View {
             }
             grid(history.videos, removable: true)
         }
+    }
+
+    /// Choosing the shelf already shown loads it again.
+    private func select(_ target: Shelf) {
+        if shelf == target, case .feed = target {
+            feedModel.reload()
+            return
+        }
+        shelf = target
+        if case .feed(let feed) = target { feedModel.show(feed) }
+    }
+
+    /// The first time: Home when signed in, else what was watched here (or
+    /// Home's sign-in prompt when nothing was). After that, catches up with a
+    /// sign-in or sign-out made elsewhere (Settings).
+    private func syncWithAccount() async {
+        let signedIn = await account.refresh()
+        guard let shelf else {
+            select(signedIn || history.videos.isEmpty ? .feed(.home) : .recent)
+            return
+        }
+        if case .feed(let feed) = shelf,
+           feedModel.phase == .idle || signedIn == (feedModel.phase == .signedOut) {
+            feedModel.show(feed)
+        }
+    }
+
+    private func browserClosed() async {
+        let signedIn = await account.refresh()
+        if signedIn, shelf == .recent || shelf == nil {
+            shelf = .feed(.home)
+        }
+        if case .feed(let feed) = shelf { feedModel.show(feed) }
     }
 
     #if os(tvOS)

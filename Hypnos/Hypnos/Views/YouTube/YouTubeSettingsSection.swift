@@ -1,8 +1,9 @@
 /*
  Hypnos - YouTube settings (sideload builds only: `HYPNOS_YOUTUBE`)
 
- The optional backend (web-yt-dlp) and SponsorBlock. Shared by every
- platform's Settings screen, like `JellyfinServerSection`.
+ The account (signed in to YouTube's site on this device), the optional
+ backend (web-yt-dlp) and SponsorBlock. Shared by every platform's Settings
+ screen, like `JellyfinServerSection`.
  */
 
 #if HYPNOS_YOUTUBE
@@ -18,8 +19,31 @@ struct YouTubeSettingsSection: View {
     @AppStorage(YouTubeQuality.defaultsKey) private var quality: YouTubeQuality = .auto
     @State private var categoryModes: [SponsorBlockCategory: SponsorBlockCategory.Mode] =
         Dictionary(uniqueKeysWithValues: SponsorBlockCategory.allCases.map { ($0, $0.mode) })
+    @State private var account = YouTubeAccount.shared
+    @State private var browser: YouTubeBrowserPurpose?
 
     var body: some View {
+        Section {
+            // The one row that is always there carries the sheet and the
+            // check, so neither goes away when the account changes.
+            LabeledContent("Account", value: account.isSignedIn == true ? "Signed in" : "Signed out")
+                .task { await account.refresh() }
+                .youTubeBrowser($browser) {
+                    Task { await account.refresh() }
+                }
+            if account.isSignedIn == true {
+                Button("Sign Out", role: .destructive) {
+                    Task { await account.signOut() }
+                }
+            } else {
+                Button("Sign In to YouTube…") { browser = .signIn }
+            }
+        } header: {
+            Text("YouTube Account")
+        } footer: {
+            Text("Signing in adds your home page, subscriptions, Watch Later and history to the YouTube tab. They come from YouTube's own site, which keeps the account in this device's web storage; videos still play signed out. Signing out forgets it here; Google lists the session under your account's devices until you remove it there.")
+        }
+
         Section {
             TextField("Backend (https://host/yt)", text: $backend.endpoint)
                 .textFieldTapTarget()
