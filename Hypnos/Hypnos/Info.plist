@@ -16,7 +16,7 @@
 	<string>Convolution follows your headphones’ head movement so spatial audio stays in place when you turn your head.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- The app talks to user-owned Stash and RoboFrame instances over the
+		<!-- The app talks to user-owned Stash, Nextcloud and Jellyfin servers over the
 		     local network or Tailscale, which commonly serve plain HTTP: an
 		     extra TLS layer adds setup friction (mkcert, trust store) without
 		     a real privacy gain on a private mesh, and Tailscale already

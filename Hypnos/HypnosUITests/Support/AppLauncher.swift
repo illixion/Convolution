@@ -37,7 +37,6 @@ enum AppLauncher {
     ///
     /// A caller's own `defaults` override any of these.
     private static let baseline: [String: String] = [
-        "enableRemoteViewer": "0",
         "showDebugConsole": "0",
     ]
 

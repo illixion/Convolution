@@ -94,7 +94,7 @@ enum AppLogger {
     /// Visual adjustments (brightness, contrast, saturation)
     static let visualAdjustments = DebugLogger(subsystem: subsystem, category: "VisualAdjustments")
 
-    /// Remote API viewer (slideshow, WebSocket, API)
+    /// Slideshow windows (gallery and video slideshows)
     static let remoteViewer = DebugLogger(subsystem: subsystem, category: "RemoteViewer")
 
     /// Streamable-URL handoff (custom scheme, URL classification)

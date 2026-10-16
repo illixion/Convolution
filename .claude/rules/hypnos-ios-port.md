@@ -20,7 +20,7 @@ Moved out of `CLAUDE.md` (the compile check and the "compile both platforms" rul
   in shared code — it will not compile on iOS.
 - **`IOSWindowRouter.swift`** + **`Views/IOS/IOSRootView.swift`** — iOS has
   one scene. The value-carrying scene ids (`photo-detail`, `video-detail`,
-  `shared-photo`, `remote-viewer`, `remote-alert`) become a stack of
+  `shared-photo`, `remote-viewer`) become a stack of
   full-screen covers over the gallery; `console`/`gpu-memory`/
   `video-adjustments` become sheets; `main` dismisses back to the gallery.
   Opening a value already on the stack pops back to it (the summon).

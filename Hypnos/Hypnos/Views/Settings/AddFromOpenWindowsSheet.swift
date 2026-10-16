@@ -1,8 +1,8 @@
 /*
  Hypnos - Add From Open Windows Sheet
 
- Picker for adding currently-open windows — photos, videos, Remote slideshows and
- pinned web pages — to an existing saved window group. Each added entry captures
+ Picker for adding currently-open windows — photos, videos and slideshows — to an
+ existing saved window group. Each added entry captures
  that window's current size, same as saving a fresh group does.
  */
 

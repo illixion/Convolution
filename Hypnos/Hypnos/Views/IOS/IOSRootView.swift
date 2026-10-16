@@ -6,8 +6,7 @@
 
  - `ContentView` (the tabbed gallery) is the base;
  - each viewer the router opens is a full-screen cover, stacked in the order it
-   was opened — a RoboFrame `playVideo` arriving while a photo is open lands on
-   top of the photo, exactly as a new window would have;
+   was opened, exactly as new windows would have;
  - the singleton tool windows (console, GPU monitor, video adjustments) are
    sheets over whatever is showing.
 
@@ -104,9 +103,7 @@ private struct IOSDestinationView: View {
             case .sharedPhoto(let item):
                 SharedPhotoWindowView(item: item, appModel: appModel)
             case .remoteViewer(let value):
-                RemoteViewerSceneRoot(windowValue: value, appModel: appModel)
-            case .remoteAlert(let value):
-                RemoteAlertWindowView(windowValue: value)
+                RemoteViewerWindowView(windowValue: value)
             }
         }
         .environment(appModel)

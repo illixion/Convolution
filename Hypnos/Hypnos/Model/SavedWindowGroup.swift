@@ -5,8 +5,7 @@
 
  A group is heterogeneous by design: what the user is saving is an arrangement
  of *windows* in the room, not a set of images, so a single group can mix photo
- pop-outs, video pop-outs and Remote profile windows (RoboFrame/gallery
- slideshows and pinned web pages). Each entry also carries the window's size at
+ pop-outs, video pop-outs and slideshow windows. Each entry also carries the window's size at
  save time so the restored arrangement comes back at the geometry it was left
  at rather than the scene default.
  */
@@ -26,9 +25,8 @@ struct SavedWindowEntry: Codable, Identifiable, Hashable {
     enum Kind: String, Codable {
         case photo
         case video
-        /// A Remote profile window — slideshow or pinned web page. Which one it
-        /// opens as is a property of the profile (`RemoteViewerConfig.mode`),
-        /// resolved at restore time, so the entry doesn't pin the mode.
+        /// A slideshow window (the picture or the video profile). The raw value
+        /// keeps its original spelling, as saved groups persist it.
         case remote
         /// A kind written by a newer build than this one. Dropped on load rather
         /// than failing the decode of the whole group.
@@ -66,17 +64,11 @@ struct SavedWindowEntry: Codable, Identifiable, Hashable {
     /// `Pseudo3DSettings` about why an unmodified value must not be snapshotted.
     var videoPseudo3DSettings: Pseudo3DSettings?
 
-    // MARK: Remote
+    // MARK: Slideshow
 
     var remoteConfigId: UUID?
-    /// Profile name and identity (device id / page host) snapshotted at save
-    /// time so the entry still reads sensibly if the profile was later renamed
-    /// or deleted.
+    /// Profile name snapshotted at save time.
     var remoteName: String?
-    var remoteDetail: String?
-    /// Whether the profile was a pinned web page when saved. Display only — the
-    /// live profile decides what actually opens.
-    var remoteWasWebPage: Bool
 
     // MARK: - Init
 
@@ -90,9 +82,7 @@ struct SavedWindowEntry: Codable, Identifiable, Hashable {
         videoPseudo3DEnabled: Bool = false,
         videoPseudo3DSettings: Pseudo3DSettings? = nil,
         remoteConfigId: UUID? = nil,
-        remoteName: String? = nil,
-        remoteDetail: String? = nil,
-        remoteWasWebPage: Bool = false
+        remoteName: String? = nil
     ) {
         self.id = UUID()
         self.kind = kind
@@ -105,8 +95,6 @@ struct SavedWindowEntry: Codable, Identifiable, Hashable {
         self.videoPseudo3DSettings = videoPseudo3DSettings
         self.remoteConfigId = remoteConfigId
         self.remoteName = remoteName
-        self.remoteDetail = remoteDetail
-        self.remoteWasWebPage = remoteWasWebPage
     }
 
     static func photo(_ image: GalleryImage, size: CGSize? = nil) -> SavedWindowEntry {
@@ -135,17 +123,13 @@ struct SavedWindowEntry: Codable, Identifiable, Hashable {
     static func remote(
         configId: UUID,
         name: String,
-        detail: String?,
-        isWebPage: Bool,
         size: CGSize? = nil
     ) -> SavedWindowEntry {
         SavedWindowEntry(
             kind: .remote,
             size: size,
             remoteConfigId: configId,
-            remoteName: name,
-            remoteDetail: detail,
-            remoteWasWebPage: isWebPage
+            remoteName: name
         )
     }
 
@@ -155,7 +139,7 @@ struct SavedWindowEntry: Codable, Identifiable, Hashable {
         case id, kind, size, image, video
         case videoStereoscopicOverride, video3DSettings
         case videoPseudo3DEnabled, videoPseudo3DSettings
-        case remoteConfigId, remoteName, remoteDetail, remoteWasWebPage
+        case remoteConfigId, remoteName
     }
 
     init(from decoder: any Decoder) throws {
@@ -171,8 +155,6 @@ struct SavedWindowEntry: Codable, Identifiable, Hashable {
         self.videoPseudo3DSettings = try container.decodeIfPresent(Pseudo3DSettings.self, forKey: .videoPseudo3DSettings)
         self.remoteConfigId = try container.decodeIfPresent(UUID.self, forKey: .remoteConfigId)
         self.remoteName = try container.decodeIfPresent(String.self, forKey: .remoteName)
-        self.remoteDetail = try container.decodeIfPresent(String.self, forKey: .remoteDetail)
-        self.remoteWasWebPage = try container.decodeIfPresent(Bool.self, forKey: .remoteWasWebPage) ?? false
     }
 
     // MARK: - Validity
@@ -207,8 +189,7 @@ struct SavedWindowEntry: Codable, Identifiable, Hashable {
     // MARK: - Presentation
 
     /// Thumbnail to render on the entry's tile. `nil` for windows that have no
-    /// meaningful still image (slideshows, web pages) — those get a textual
-    /// tile instead.
+    /// meaningful still image (slideshows) — those get a textual tile instead.
     var thumbnailURL: URL? {
         switch kind {
         case .photo: return image?.thumbnailURL
@@ -225,14 +206,13 @@ struct SavedWindowEntry: Codable, Identifiable, Hashable {
             return video?.title ?? video?.fileName ?? "Video"
         case .remote:
             let name = remoteName?.trimmingCharacters(in: .whitespaces) ?? ""
-            return name.isEmpty ? "Remote Profile" : name
+            return name.isEmpty ? "Slideshow" : name
         case .unknown:
             return "Unsupported Window"
         }
     }
 
-    /// Second line on the tile: what kind of window this is, plus the identity
-    /// that distinguishes it from its siblings.
+    /// Second line on the tile: what kind of window this is.
     var displaySubtitle: String? {
         switch kind {
         case .photo:
@@ -242,11 +222,7 @@ struct SavedWindowEntry: Codable, Identifiable, Hashable {
             let total = Int(duration.rounded())
             return String(format: "Video · %d:%02d", total / 60, total % 60)
         case .remote:
-            let kindLabel = (remoteWasWebPage ? RemoteViewerMode.webPage : .slideshow).label
-            guard let detail = remoteDetail?.trimmingCharacters(in: .whitespaces), !detail.isEmpty else {
-                return kindLabel
-            }
-            return "\(kindLabel) · \(detail)"
+            return "Slideshow"
         case .unknown:
             return "Saved by a newer version"
         }
@@ -256,7 +232,7 @@ struct SavedWindowEntry: Codable, Identifiable, Hashable {
         switch kind {
         case .photo: return "photo"
         case .video: return "film"
-        case .remote: return remoteWasWebPage ? "globe" : "photo.stack"
+        case .remote: return "play.rectangle"
         case .unknown: return "questionmark.square.dashed"
         }
     }
@@ -342,8 +318,7 @@ struct SavedWindowGroup: Codable, Identifiable {
         }
         append(entries.filter { $0.kind == .photo }.count, "photo", "photos")
         append(entries.filter { $0.kind == .video }.count, "video", "videos")
-        append(entries.filter { $0.kind == .remote && !$0.remoteWasWebPage }.count, "slideshow", "slideshows")
-        append(entries.filter { $0.kind == .remote && $0.remoteWasWebPage }.count, "web page", "web pages")
+        append(entries.filter { $0.kind == .remote }.count, "slideshow", "slideshows")
         return parts.isEmpty ? "empty" : parts.joined(separator: " · ")
     }
 }

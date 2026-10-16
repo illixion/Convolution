@@ -175,8 +175,6 @@ struct ContentView: View {
             WindowsTabView()
         case .settings:
             SettingsTabView()
-        case .remote:
-            RemoteTabView()
         case .console:
             ConsoleTabView()
         }
@@ -210,7 +208,7 @@ struct ContentView: View {
     private func iosTabPage(_ tab: Tab) -> some View {
         Group {
             switch tab {
-            case .filters, .remote, .settings, .library:
+            case .filters, .settings, .library:
                 tabContent(tab)
             #if HYPNOS_YOUTUBE
             case .youtube:

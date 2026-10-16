@@ -1,0 +1,35 @@
+---
+paths:
+  - "Hypnos/Hypnos/Views/Remote/**"
+  - "Hypnos/Hypnos/Model/Remote*"
+  - "Hypnos/Hypnos/Model/GallerySlideshow*"
+  - "Hypnos/Hypnos/Services/Slideshow*"
+  - "Hypnos/Hypnos/Services/SobelFocusAnalyzer.swift"
+  - "Hypnos/Hypnos/Services/GalleryContentProvider.swift"
+  - "Hypnos/Hypnos/Services/VideoSlideshowContentProvider.swift"
+---
+
+# Hypnos: slideshows
+
+Moved out of `CLAUDE.md`. A slideshow plays the app's own pictures or videos in a window of its own, with Ken Burns motion, dynamic brightness, a clock overlay and optional 3D. The files and types still carry the `Remote` prefix of the RoboFrame viewer they grew out of (removed 2026-10-16, along with pinned web-page panels and the Remote tab); the `remote-viewer` scene id and the `.remote` saved-window kind keep that spelling because visionOS scene restoration and saved window groups persist them.
+
+**Entry points** all funnel through `AppModel.startGallerySlideshow(imageSource:filter:)` / `startVideoSlideshow(videoSource:filter:)`: the tab bar's play button (Pictures/Videos), the photo viewer's Slideshow button, `LocalFolderBrowserView`'s per-folder slideshow (Albums, browsing Local), and the video viewer's Slideshow button.
+
+**Profiles.** The *profile* (`RemoteViewerConfig`, display settings only) is one of two reused slots, `AppModel.gallerySlideshowConfig` / `videoSlideshowConfig`, persisted under their own UserDefaults keys, so ornament tweaks persist between launches. The *content* rides along as a transient override (`pendingGallerySlideshowSource` / `pendingVideoSlideshowSource`) set immediately before the window opens, because "whatever I'm looking at" is not something a saved profile can describe. A slideshow restored from a saved window group (long after the override was consumed) falls back to the app-wide source and filter.
+
+**Architecture:**
+- **RemoteViewerWindowView** — the `remote-viewer` scene's root: image/clock layers, the ornament with auto-hide, render recovery, and the content provider chosen from the pending override.
+- **RemoteViewerModel** — `SlideshowEngine` subclass holding the window's profile, the clock toggle and the `display*` setters the ornament and adjustments panel write back through.
+- **SlideshowEngine** — `@MainActor @Observable` state the window renders (current/next image and texture, media type, diorama layers, 3D state, adjustments). Content comes from a `RAVESlideshowEngine` (RAVESDK) fed by the content provider, through `useRAVESlideshowForLocalContent`.
+- **GalleryContentProvider** / **VideoSlideshowContentProvider** — the two content providers, over an `ImageSource` or `VideoSource` and its filter.
+- **WindowSizePersistence** — "remember this window's size across cold relaunches" (restore-with-retry against *this* window's scene, plausibility floors on both ends of the round-trip, debounced write-back into the scene archive + a `RestoredWindowTracker` fallback).
+- **SobelFocusAnalyzer** — pure functions for Sobel edge detection (Ken Burns focus) and average luminance (dynamic brightness).
+
+**Slideshow 3D (`Slideshow3DMode`: `.off` / `.spatial3D` / `.immersive3D`)** applies to both media kinds. Images go to `SlideshowSpatial3DLayer` (RealityKit `ImagePresentationComponent`, two slots). **Videos are converted to windowed stereoscopic 3D in real time** whenever a real-time depth model is installed — the slideshow mounts `Pseudo3DVideoPlayerView` with `depthMode: .realtime` in place of the WebKit tiers. Deliberately **never** `.cached`: the pre-processed path writes a depth video per clip to `DepthCache/`, and a slideshow cycles through far too much content to do that; slideshow depth exists only as long as the frame it warps. Because the stereo pump pulls frames from an `AVPlayerItemVideoOutput`, eligibility needs an AVFoundation-decodable source: `SlideshowEngine.resolvePseudo3DTarget` probes the clip's URL via the shared `NativeVideoDecodeProbe`, memoizing answers in RAM and bounded by a 2s per-candidate timeout. The probe runs *before* the transition so the clip mounts straight into the stereo player instead of painting a flat frame and swapping renderers; it returns without suspending when 3D is off, so the 2D path pays nothing. The resolved `Pseudo3DVideoTarget` is post-id-keyed and read through `activePseudo3DVideoURL`, which re-checks it against the video on screen — so it self-invalidates on every post change with no clearing at the call sites. No model installed, an undecodable source, or `onPlaybackError` → flat playback (`reportPseudo3DVideoFailure`, ignored when it arrives late for a post already gone). Toggling the ornament's 3D mode mid-video re-resolves immediately. Two `Pseudo3DVideoPlayerView` params exist for this caller: `loops` (the slideshow only loops clips shorter than its dwell interval; the video window always loops) and `contentOpacity`, which drives the crossfade through `OpacityComponent` because RealityKit ignores SwiftUI's `.opacity` — routed via the `Animatable` `AnimatableSceneOpacity` modifier so the fade interpolates instead of cutting to black. Adjustments (incl. dynamic brightness) are baked into the warp shader for the same reason.
+
+**Key implementation details:**
+- Visual adjustments (brightness/contrast/saturation) stack: auto (luminance-based) + per-viewer + global.
+- Ornament: [ Grid | Prev | Next | 3D | Resolution | Adjustments | profile name ].
+- The adjustments popover has a "Viewer" tab with display toggles (clock, Ken Burns, diorama, dynamic brightness, background, aspect ratio, interval).
+- **Viewer write-back:** ornament/adjustment changes persist through `onConfigChanged` → `AppModel.persistRemoteViewerConfig`, into whichever slot owns the profile. The window holds a snapshot from when it opened, so only the viewer-owned display fields are merged onto the current profile (`applyViewerDisplaySettings(from:)`); writing the snapshot wholesale would revert what another window of the same profile changed.
+- **Background handling:** on background the engine transitions to `.backgrounded` and tells the RAVESlideshowEngine it's hidden; content is kept, so the return is seamless.

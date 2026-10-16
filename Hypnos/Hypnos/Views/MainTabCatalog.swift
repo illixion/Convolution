@@ -16,7 +16,7 @@ enum MainTabCatalog {
         #if HYPNOS_YOUTUBE
         tabs.append(.youtube)
         #endif
-        return tabs + [.remote, .filters, .windows, .console, .settings]
+        return tabs + [.filters, .windows, .console, .settings]
     }()
 
     /// The tabs to show for the current app state.
@@ -27,8 +27,6 @@ enum MainTabCatalog {
                 // Hidden until a Jellyfin server is configured — see the
                 // Library feature's decision #3.
                 return LibraryService.isAvailable
-            case .remote:
-                return appModel.enableRemoteViewer
             case .console:
                 return appModel.showDebugConsole
             case .filters:
@@ -83,7 +81,7 @@ enum MainTabCatalog {
         // button belongs there rather than here. That includes the Local
         // library's folder browser, which offers its own per-folder
         // "Play Slideshow" control in context instead.
-        case .albums, .library, .filters, .windows, .settings, .remote, .console:
+        case .albums, .library, .filters, .windows, .settings, .console:
             return nil
         #if HYPNOS_YOUTUBE
         case .youtube:

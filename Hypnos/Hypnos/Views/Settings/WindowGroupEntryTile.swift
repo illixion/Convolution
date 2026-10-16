@@ -4,11 +4,9 @@
  The tile used by both window-group sheets (restore and add-from-open-windows) to
  represent one saved window.
 
- Media windows get a thumbnail. Windows with no meaningful still image — Remote
- slideshows and pinned web pages — get a textual card instead: a slideshow's
- content changes every few seconds, so a frame grab identifies nothing, whereas
- the profile name plus its device id / page host is exactly what tells two
- otherwise-identical slideshow windows apart when restoring several at once.
+ Media windows get a thumbnail. Slideshow windows get a textual card instead:
+ their content changes every few seconds, so a frame grab identifies nothing,
+ whereas the profile name (picture or video slideshow) does.
  */
 
 import SwiftUI

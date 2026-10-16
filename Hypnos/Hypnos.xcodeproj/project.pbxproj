@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		AA01000000000000000000A3 /* RAVENet in Frameworks */ = {isa = PBXBuildFile; productRef = AA01000000000000000000A2 /* RAVENet */; };
 		AA05000000000000000000B3 /* RAVEDiagnostics in Frameworks */ = {isa = PBXBuildFile; productRef = AA05000000000000000000B2 /* RAVEDiagnostics */; };
 		AA06000000000000000000C3 /* RAVEUI in Frameworks */ = {isa = PBXBuildFile; productRef = AA06000000000000000000C2 /* RAVEUI */; };
 		AA06000000000000000000C5 /* RAVEConsole in Frameworks */ = {isa = PBXBuildFile; productRef = AA06000000000000000000C4 /* RAVEConsole */; };
@@ -65,7 +64,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AA01000000000000000000A3 /* RAVENet in Frameworks */,
 				AA05000000000000000000B3 /* RAVEDiagnostics in Frameworks */,
 				AA06000000000000000000C3 /* RAVEUI in Frameworks */,
 				AA06000000000000000000C5 /* RAVEConsole in Frameworks */,
@@ -160,7 +158,6 @@
 			);
 			name = Hypnos;
 			packageProductDependencies = (
-				AA01000000000000000000A2 /* RAVENet */,
 				AA05000000000000000000B2 /* RAVEDiagnostics */,
 				AA06000000000000000000C2 /* RAVEUI */,
 				AA06000000000000000000C4 /* RAVEConsole */,
@@ -603,10 +600,6 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		AA01000000000000000000A2 /* RAVENet */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = RAVENet;
-		};
 		AA05000000000000000000B2 /* RAVEDiagnostics */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = AA05000000000000000000B1 /* XCLocalSwiftPackageReference "../../RAVEEngine" */;

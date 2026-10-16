@@ -1,7 +1,7 @@
 # Plan — Restore custom window size after visionOS cold relaunch
 
 > **Status: implemented** (`3062971`, 2026-06-03). The mechanism described here now lives in the shared
-> `WindowSizePersistence` (`PhotoWindowView`, `VideoWindowView`, `RemoteViewerWindowView` and `WebPageWindowView` all drive it),
+> `WindowSizePersistence` (`PhotoWindowView`, `VideoWindowView`, and `RemoteViewerWindowView` all drive it),
 > and is summarised in `CLAUDE.md`. This file is kept as the design rationale; the class and file names below are
 > from before that extraction, so read the code for current behaviour.
 

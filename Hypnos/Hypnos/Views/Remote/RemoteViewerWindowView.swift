@@ -1,9 +1,8 @@
 /*
  Hypnos - Remote Viewer Window View
 
- Main viewer window that displays a slideshow of images from the
- remote API with clock, sensor overlays, Ken Burns animation,
- and ornament controls.
+ The slideshow window: the app's own pictures or videos, with a clock
+ overlay, Ken Burns animation, and ornament controls.
  */
 
 import Combine
@@ -25,7 +24,6 @@ struct RemoteViewerWindowView: View {
     @DismissWindowProxy private var dismissWindow
 
     @State private var viewerModel: RemoteViewerModel?
-    @State private var showHistory = false
     @State private var windowSize: CGSize = .zero
     @State private var currentTime = Date()
     @State private var autoHideTimer: Task<Void, Never>?
@@ -49,7 +47,7 @@ struct RemoteViewerWindowView: View {
     @State private var nudgeAlternator: Bool = false
 
     /// Persists / re-asserts the user's custom window size across cold
-    /// relaunches. Shared with the pinned web-page window.
+    /// relaunches.
     @State private var sizePersistence: WindowSizePersistence?
 
     private let clockTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -95,12 +93,6 @@ struct RemoteViewerWindowView: View {
                         .offset(z: overlayZ)
                 }
 
-                // Sensor overlay
-                if let model = viewerModel, model.showSensors, !model.sortedSensors.isEmpty {
-                    sensorOverlay(model: model)
-                        .offset(z: overlayZ)
-                }
-
                 // Loading indicator — only when truly nothing is on screen.
                 // A video/GIF/WebP plays via its own WKWebView layer (and
                 // leaves currentImage nil), so checking currentImage alone
@@ -138,19 +130,6 @@ struct RemoteViewerWindowView: View {
                     .animation(.easeInOut, value: model.toastMessage)
                     .offset(z: overlayZ)
                 }
-
-                // History overlay
-                if showHistory, let model = viewerModel,
-                   let store = appModel.remoteHistoryStore(for: model.config.apiEndpoint, accessToken: model.config.accessToken) {
-                    RemoteHistoryView(
-                        store: store,
-                        onEntrySelected: { entry in
-                            model.jumpToHistoryEntry(entry)
-                            showHistory = false
-                        }
-                    )
-                    .transition(.opacity)
-                }
             }
             .onAppear {
                 windowSize = geo.size
@@ -168,14 +147,9 @@ struct RemoteViewerWindowView: View {
             attachmentAnchor: .scene(.bottomFront),
             contentAlignment: .top,
             ornament: {
-                if let model = viewerModel, let tlm = model.tagListManager {
-                    RemoteViewerOrnamentView(
-                        model: model,
-                        tagListManager: tlm,
-                        modTagManager: appModel.modTagManager,
-                        showHistory: $showHistory
-                    )
-                    .offset(z: model.enableDiorama ? 30 : 0)
+                if let model = viewerModel {
+                    RemoteViewerOrnamentView(model: model)
+                        .offset(z: model.enableDiorama ? 30 : 0)
                 }
             }
         )
@@ -265,12 +239,6 @@ struct RemoteViewerWindowView: View {
             } else {
                 resetAutoHideTimer()
             }
-        }
-        .onChange(of: showHistory) { _, isOpen in
-            guard isOpen, let model = viewerModel,
-                  let store = appModel.remoteHistoryStore(for: model.config.apiEndpoint, accessToken: model.config.accessToken)
-            else { return }
-            Task { await store.refresh() }
         }
         .contentShape(.rect)
         .onTapGesture {
@@ -407,8 +375,7 @@ struct RemoteViewerWindowView: View {
                         }
                         nudgeWindowSizeForCalibration()
                     },
-                    onSpatial3DGenerated: { image in
-                        model.notifySpatial3DGenerated(image: image)
+                    onSpatial3DGenerated: { _ in
                         markContentPresented(renderer: "RealityKit")
                     }
                 )
@@ -425,14 +392,13 @@ struct RemoteViewerWindowView: View {
                     .clipped()
 
                 // Diorama layers — hidden whenever an ornament-anchored
-                // panel is open (adjustments popover, tag-list / mod-tag
+                // panel is open (adjustments popover, 3D and resolution
                 // menus). The popped-forward foreground at z=40 would
                 // otherwise occlude the menu drop-down which renders near
                 // the window plane.
                 let dioramaVisible = model.enableDiorama
                     && !model.showAdjustmentsPopover
                     && !model.isAnyOrnamentMenuOpen
-                    && !showHistory
 
                 // Wrapped so a single .animation modifier drives the
                 // fade-in when the diorama layers materialize after
@@ -729,43 +695,6 @@ struct RemoteViewerWindowView: View {
         }
     }
 
-    @ViewBuilder
-    private func sensorOverlay(model: RemoteViewerModel) -> some View {
-        let scale = model.config.textSize
-
-        VStack {
-            HStack {
-                Spacer()
-                // Sensors (top-right)
-                VStack(alignment: .trailing, spacing: 4) {
-                    ForEach(model.sortedSensors) { sensor in
-                        HStack(spacing: 4) {
-                            if sensor.isUnavailable {
-                                Text("\u{2757}")
-                            }
-                            Text(sensor.friendlyName + ":")
-                            Text(sensor.isUnavailable ? (sensor.lastKnownState ?? "N/A") : sensor.state)
-                            if !sensor.unitOfMeasurement.isEmpty {
-                                Text(sensor.unitOfMeasurement)
-                            }
-                            Text(sensor.displayEmoji)
-                        }
-                        .font(.system(size: 16 * scale))
-                    }
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.black.opacity(0.7))
-                )
-                .padding(16)
-            }
-            Spacer()
-        }
-    }
-
     private var timeString: String {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss"
@@ -783,7 +712,7 @@ struct RemoteViewerWindowView: View {
             return "Resolving viewer configuration"
         }
         if model.currentPost == nil {
-            return model.isLoading ? "Loading first post" : "Waiting for server playback"
+            return "Loading first post"
         }
         if let texture = model.currentTexture {
             return "Waiting for Metal frame (\(texture.width)x\(texture.height))"
@@ -874,13 +803,13 @@ struct RemoteViewerWindowView: View {
     private func setupModel() {
         guard viewerModel == nil else { return }
 
-        // Look up config from saved configs or the gallery/video slideshow configs
+        // The gallery or video slideshow profile this window was opened for.
         guard let config = appModel.remoteViewerConfig(id: windowValue.configId) else {
             AppLogger.remoteViewer.error("No config found for id \(windowValue.configId.uuidString, privacy: .public)")
             return
         }
 
-        let model = RemoteViewerModel(config: config, windowId: windowValue.id)
+        let model = RemoteViewerModel(config: config)
         model.globalAdjustments = appModel.globalVisualAdjustments
         // Per-profile slideshow resolution caps fall back to the slideshow
         // defaults, which themselves default to 4096px.
@@ -891,78 +820,37 @@ struct RemoteViewerWindowView: View {
         model.slideshow3DMode = config.slideshow3DMode
         model.updateWindowAspectRatio(windowSize)
 
-        // Tag list state is per-window (created in RemoteViewerModel.init); the
-        // current list is server-tracked. Seed the catalog from the last one
-        // the app saw so the ornament has list names before the server
-        // re-pushes `tagLists`, and mirror future pushes back for the next
-        // window that opens.
-        model.tagListManager?.tagLists = appModel.tagListCatalog
-        model.tagListManager?.clampActiveIndex()
-        model.onCatalogReceived = { [weak appModel] lists in
-            appModel?.tagListCatalog = lists
-        }
-        model.modTagManager = appModel.modTagManager
-
-        // Which content this window shows follows from the profile's mode. It
-        // used to hinge on `apiEndpoint.isEmpty`, which made "no server
-        // configured" indistinguishable from "show me the app's own gallery".
-        switch config.mode {
-        case .appGallery:
-            // Launched by the play button, which parks the live source in a
-            // transient override right before opening the window.
-            if let videoOverride = appModel.pendingVideoSlideshowSource,
-               appModel.videoSlideshowConfig?.id == config.id {
-                appModel.pendingVideoSlideshowSource = nil
-                model.contentProvider = VideoSlideshowContentProvider(
-                    videoSource: videoOverride.videoSource,
-                    filter: videoOverride.filter
-                )
-            } else if let override = appModel.pendingGallerySlideshowSource {
-                appModel.pendingGallerySlideshowSource = nil
-                model.contentProvider = GalleryContentProvider(
-                    imageSource: override.imageSource,
-                    filter: override.filter
-                )
-            } else {
-                // No override: a window group restored this slideshow at
-                // launch, long after the source that started it was handed
-                // over. The app-wide source and filter is the closest thing to
-                // what it was showing.
-                model.contentProvider = GalleryContentProvider(
-                    imageSource: appModel.imageSource,
-                    filter: appModel.currentFilter
-                )
-            }
-        case .slideshow:
-            model.contentProvider = RemoteContentProvider(
-                apiClient: model.apiClient,
-                baseURL: config.apiEndpoint,
-                accessToken: config.accessToken,
-                deviceId: model.slideshowDeviceId
+        // The play button parks the live source in a transient override right
+        // before opening the window.
+        if let videoOverride = appModel.pendingVideoSlideshowSource,
+           appModel.videoSlideshowConfig?.id == config.id {
+            appModel.pendingVideoSlideshowSource = nil
+            model.contentProvider = VideoSlideshowContentProvider(
+                videoSource: videoOverride.videoSource,
+                filter: videoOverride.filter
             )
-        case .webPage:
-            // A `.webPage` profile is built by WebPageWindowView, not here;
-            // RemoteViewerSceneRoot routes on the same mode.
-            AppLogger.remoteViewer.error(
-                "Website profile “\(config.name)” reached the slideshow window"
+        } else if let override = appModel.pendingGallerySlideshowSource {
+            appModel.pendingGallerySlideshowSource = nil
+            model.contentProvider = GalleryContentProvider(
+                imageSource: override.imageSource,
+                filter: override.filter
             )
-            return
-        }
-
-        // Wire up window callbacks
-        model.onOpenAlertWindow = { [openWindow] text, bgColor, imageUrl in
-            openWindow(id: "remote-alert", value: RemoteAlertWindowValue(text: text, bgColorHex: bgColor, imageUrl: imageUrl))
-        }
-        model.onDismissAlertWindow = { [dismissWindow] in
-            dismissWindow(id: "remote-alert")
+        } else {
+            // No override: a window group restored this slideshow at
+            // launch, long after the source that started it was handed
+            // over. The app-wide source and filter is the closest thing to
+            // what it was showing.
+            model.contentProvider = GalleryContentProvider(
+                imageSource: appModel.imageSource,
+                filter: appModel.currentFilter
+            )
         }
 
         model.onConfigChanged = { [appModel] updatedConfig in
             // `updatedConfig` is this window's snapshot from when it opened
-            // plus whatever the ornament just changed. Saving it as-is would
-            // revert every unrelated edit the Remote tab made since the window
-            // opened, so merge the viewer-owned display fields onto whatever
-            // the profile looks like now.
+            // plus whatever the ornament just changed. Merge the viewer-owned
+            // display fields onto whatever the profile looks like now, so two
+            // windows of one profile don't revert each other's changes.
             guard var current = appModel.remoteViewerConfig(id: updatedConfig.id) else {
                 appModel.persistRemoteViewerConfig(updatedConfig)
                 return
@@ -975,18 +863,16 @@ struct RemoteViewerWindowView: View {
         self.viewerModel = model
         appModel.registerRemoteViewerWindow(configId: config.id, windowValue: windowValue)
         appModel.registerRemoteViewerModel(model)
-        if config.mode == .appGallery {
-            let mode3D: RAVESlideshow3DMode = switch config.slideshow3DMode {
-            case .off: .off
-            case .spatial3D: .spatial3D
-            case .immersive3D: .immersive3D
-            }
-            model.useRAVESlideshowForLocalContent(
-                mode3D: mode3D,
-                maxImageResolution2D: resolved2D,
-                maxImageResolution3D: resolved3D
-            )
+        let mode3D: RAVESlideshow3DMode = switch config.slideshow3DMode {
+        case .off: .off
+        case .spatial3D: .spatial3D
+        case .immersive3D: .immersive3D
         }
+        model.useRAVESlideshowForLocalContent(
+            mode3D: mode3D,
+            maxImageResolution2D: resolved2D,
+            maxImageResolution3D: resolved3D
+        )
         model.start()
     }
 
@@ -1037,8 +923,7 @@ struct RemoteViewerWindowView: View {
     }
 
     /// Create the size-persistence helper for this window and re-assert the
-    /// user's custom size. The mechanics live in `WindowSizePersistence` so the
-    /// pinned web-page window gets the same behaviour from one implementation.
+    /// user's custom size. The mechanics live in `WindowSizePersistence`.
     private func setupSizePersistence() {
         let persistence = WindowSizePersistence(
             windowId: windowValue.id,

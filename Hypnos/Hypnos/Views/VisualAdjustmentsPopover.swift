@@ -344,8 +344,6 @@ struct VisualAdjustmentsPopover: View {
 
                 Toggle("Show Clock", isOn: $model.displayShowClock)
 
-                Toggle("Show Sensors", isOn: $model.displayShowSensors)
-
                 Toggle("Ken Burns Effect", isOn: $model.displayEnableKenBurns)
 
                 Toggle("Diorama (Foreground Pop-Out)", isOn: $model.displayEnableDiorama)

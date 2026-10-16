@@ -222,9 +222,9 @@ and AV sync. Quest 2/3 performance results determine supported disc profiles.
   Android inference binding. No heuristic depth fallback; offer the feature only
   where measured frame/thermal budgets support it. Quest 2 remains genuine-3D
   only until evidence supports more. HDR sources need a validated SDR path.
-- Remote/RoboFrame workflows follow after these core media paths, with the
-  existing protocol and shared state-machine behavior. Apple-specific features
-  such as Photos integration are capability differences, not promised replicas.
+- Apple-specific features such as Photos integration are capability
+  differences, not promised replicas. (The RoboFrame viewer this roadmap once
+  listed was removed from Hypnos on 2026-10-16.)
 
 ## Validation and maintenance gates
 

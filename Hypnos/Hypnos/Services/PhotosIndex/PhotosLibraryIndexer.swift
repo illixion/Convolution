@@ -501,7 +501,7 @@ final class PhotosLibraryIndexer {
     // MARK: - Change observation
 
     /// Forwards `PHPhotoLibraryChangeObserver` without dragging NSObject into
-    /// the `@Observable` model — the same split `WebPageWindowModel` uses.
+    /// the `@Observable` model.
     ///
     /// The callback deliberately captures nothing: it reaches the singleton
     /// directly, so there is no non-Sendable capture to explain to the compiler.

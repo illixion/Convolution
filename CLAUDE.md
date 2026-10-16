@@ -143,7 +143,7 @@ Spatial 3D) is in `.claude/rules/hypnos-ui-tests.md` (auto-loads when touching `
 ## Architecture
 
 ### App Structure
-- **HypnosApp.swift** - App entry point defining scenes: main window, photo-detail pop-out, video-detail, shared-photo viewer (shared *videos* reuse video-detail), console, GPU memory monitor, remote-viewer, remote-video, remote-alert, and StereoscopicVideoSpace (immersive)
+- **HypnosApp.swift** - App entry point defining scenes: main window, photo-detail pop-out, video-detail, shared-photo viewer (shared *videos* reuse video-detail), console, GPU memory monitor, remote-viewer (slideshows; the id predates the rename), and StereoscopicVideoSpace (immersive)
 - **HypnosAppIntents.swift** - App-target glue for `RAVEOpenMainWindowIntent` (RAVEUI): the `AppIntentsPackage` chain plus the Siri/Shortcuts phrases ("Open a Hypnos window"). Exists because a visionOS icon tap with any window alive summons the nearest window to the user (dragging pinned windows out of their rooms) with no public opt-out — the intent is the supported way to always get a fresh main window at your location. The window-session registry itself is RAVEUI's `RAVEWindowSessionRegistry` (the local `WindowSessionRegistry` was deleted). The type window values persist their size as is likewise RAVEUI's now, `RAVECodableSize` — same property names as the deleted local `CodableSize`, so existing scene-restoration archives still decode.
 - **AppModel.swift** - Central `@Observable` state container for gallery data, server config, filter state, video playback state, memory monitoring, and persisted settings (UserDefaults)
 - **PhotoWindowModel.swift** - Per-window `@Observable` model for individual photo viewers. Contains all stored properties, init/start lifecycle, core image loading pipeline, interaction tracking, shared utilities, and resource cleanup. Split into extension files by concern:
@@ -179,9 +179,9 @@ Source protocols:
 - `VideoSource` - Protocol for paginated video fetching
 
 ### Tab Navigation
-Tabs defined in `Tab.swift`: Pictures, Videos, Albums, Library (Jellyfin), Filters, Windows (visionOS only), Settings, Remote (developer), Console (developer). Tab switching managed by `ContentView` with ornament-based navigation via `TabBarOrnament`. Remote and Console are conditionally visible based on `appModel.enableRemoteViewer`/`showDebugConsole`; Filters hides itself while browsing Local (nothing there to filter by — no tags, albums or galleries) and `ContentView` redirects away from it if it was already open when the library changed.
+Tabs defined in `Tab.swift`: Pictures, Videos, Albums, Library (Jellyfin), Filters, Windows (visionOS only), Settings, Console (developer). Tab switching managed by `ContentView` with ornament-based navigation via `TabBarOrnament`. Console is conditionally visible based on `appModel.showDebugConsole`; Filters hides itself while browsing Local (nothing there to filter by — no tags, albums or galleries) and `ContentView` redirects away from it if it was already open when the library changed.
 
-Past a separator at the **end of the tab bar**, `TabBarOrnament` shows a **play button** that starts a slideshow of what the current tab is showing (Pictures/Videos with the filter in force). It's absent on other tabs, and on Pictures/Videos until content has loaded. This is the supported way to get "slideshow of what I'm looking at"; see "Gallery mode" in `.claude/rules/hypnos-remote-viewer.md`. There used to be a Local tab with its own ornament-level slideshow case; Local is a library source now (see Data Flow above), and its folder browser (`LocalFolderBrowserView`, under Albums) offers its own per-folder "Play Slideshow" control in context instead.
+Past a separator at the **end of the tab bar**, `TabBarOrnament` shows a **play button** that starts a slideshow of what the current tab is showing (Pictures/Videos with the filter in force). It's absent on other tabs, and on Pictures/Videos until content has loaded. This is the supported way to get "slideshow of what I'm looking at"; see `.claude/rules/hypnos-slideshows.md`. There used to be a Local tab with its own ornament-level slideshow case; Local is a library source now (see Data Flow above), and its folder browser (`LocalFolderBrowserView`, under Albums) offers its own per-folder "Play Slideshow" control in context instead.
 
 ### Albums Tab
 `AlbumsTabView` browses whichever library is in force. For Photos and Stash, a container (`MediaContainer` — a Photos album/smart album, a Stash gallery, or for video a Stash group) is a single filter value: opening one calls `AppModel.applyContainer(_:isVideo:)`, which sets the matching field on `currentFilter`/`currentVideoFilter` and switches to Pictures/Videos, so there's no second content pipeline — paging, sort, and the rest of the filter are all the one the grids already use. `AppliedContainerBanner` is the way back, reading the applied filter rather than separate state so it can't disagree with the grid it's captioning.
@@ -203,7 +203,7 @@ work on an area without having touched one of those files yet.
 | `hypnos-film-player.md` | Object-audio film player, audio governor, Dolby Vision, picture tiers, the room |
 | `hypnos-library-jellyfin.md` | Library tab, stream quality, Jellyfin 12.x, subtitles, offline downloads |
 | `hypnos-youtube.md` | YouTube resolver chain, surround splice, quality caps, SponsorBlock |
-| `hypnos-remote-viewer.md` | RoboFrame slideshow viewer, WebSocket protocol notes, gallery slideshows, web-page panels, Slideshow 3D |
+| `hypnos-slideshows.md` | Picture and video slideshows, their profiles and window, Slideshow 3D |
 | `hypnos-ios-port.md`, `hypnos-tvos-port.md`, `hypnos-macos-port.md`, `hypnos-quest-port.md` | One file per platform port |
 | `hypnos-ui-tests.md` | XCUITest wiring |
 
@@ -212,7 +212,6 @@ Invariants that bite outside the files above, so they stay here:
 - **`AppModel.init` sets `RAVEMediaPolicy.depthCacheCap`.** Remove it and the depth cache never evicts.
 - **Fake-3D needs real depth.** No depth model and no cache means the flat 2D player, never a heuristic warp.
 - **The app never does Dolby processing itself** (decided 2026-10-10): only the OS codecs and renderers read a Dolby Vision RPU; when a picture needs converting, the server does it.
-- **Remote mode is server-driven.** No client-side advance and no wake-advance; the server owns dwell timing (details in `hypnos-remote-viewer.md`).
 - **YouTube is sideload-only (`HYPNOS_YOUTUBE`).** Nothing YouTube may compile into a submission build; build all four platforms both with and without `YOUTUBE_CONDITION=HYPNOS_YOUTUBE` before committing.
 
 ### Memory Management

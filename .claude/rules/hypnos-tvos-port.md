@@ -41,8 +41,7 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   Pictures, Videos, Albums, Films, Settings (`TVTab.swift`, a small tvOS-only
   enum — not an extra case on the shared `Tab`, which is keyed to
   `RAVEA11y`/`RAVETabItem` and the visionOS/iOS developer-tab rules). No
-  Windows tab (one scene, nothing to summon), no Filters tab, no Remote
-  tab. A sixth, Console (RAVEConsole's live log), appears while Settings →
+  Windows tab (one scene, nothing to summon), no Filters tab. A sixth, Console (RAVEConsole's live log), appears while Settings →
   Developer → Show Debug Console is on.
 - **`TVPicturesTabView` / `TVVideosTabView`** — `LazyVGrid` over the same
   source/filter/pagination the visionOS/iOS grids use
@@ -271,11 +270,11 @@ pattern in the main CLAUDE.md:
   on tvOS, no AirDrop/Files/Messages target for a Siri Remote UX to hand a
   file to either.
 - **WebKit-only files** (already `#if canImport(WebKit)` since commit
-  f4f914e: the web video player, animated GIF/WebP/JXL views, pinned web
-  pages, WebM thumbnails) — every *caller* of the types they declare
+  f4f914e: the web video player, animated GIF/WebP/JXL views, WebM
+  thumbnails) — every *caller* of the types they declare
   (`PhotoDisplayView`'s animated-image tiers, `RemoteViewerWindowView`,
   `VideoWindowView`, `VideoQuickLookView`, `ThumbnailGenerator`'s WebM poster
-  path, `RemoteViewerSceneRoot`'s web-page mode) is gated the same way, with
+  path) is gated the same way, with
   a Metal/native fallback or a static first frame in place of the animation.
   **There is no WebKit fallback on tvOS, full stop** — an animated
   GIF/WebP/JXL shows its first decoded frame rather than animating, and a
@@ -302,7 +301,7 @@ screens, without duplicating those views:
 Remaining `Slider`/`DatePicker`/`DragGesture`/`Gauge`/
 `navigationBarTitleDisplayMode`/`UIPasteboard` call sites are wrapped
 `#if !os(tvOS)` individually at each site (`FiltersTabView`,
-`RemoteTabView`, `VisualAdjustmentsPopover`, `Video3DSettingsSheet`,
+`VisualAdjustmentsPopover`, `Video3DSettingsSheet`,
 `GPUMemoryMonitorView`, `VideoControlBar`, `MediaDetailSheet`,
 `DepthCacheSettingsView`/`DepthPipelineSpikeSection`, `ContentView`,
 `Views/IOS/IOSRootView.swift`) — all belong to visionOS/iOS-only screens the

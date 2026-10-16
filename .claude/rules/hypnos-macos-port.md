@@ -177,9 +177,7 @@ handful of call sites each gap actually reaches:
   above) — a real, bounded upgrade for later, not a platform limitation.
 - **WKWebView-based views — also stubbed, for the same "nothing calls it"
   reason, but with a real platform-API wrinkle**: `AnimatedImageWebView`,
-  `AnimatedJXLWebView`, `WebVideoPlayerView`, `PinnedWebPageView` (+
-  `WebPageWindowModel`/`WebPageWindowView`/`WebPageOrnamentView`, whose sole
-  caller is one of the above). Their transparent-background/no-scroll setup
+  `AnimatedJXLWebView`, `WebVideoPlayerView`. Their transparent-background/no-scroll setup
   (`webView.isOpaque`, `.backgroundColor`, `.scrollView.*`) is UIKit-`WKWebView`
   API with **no macOS equivalent property** (macOS's `WKWebView` has no
   `.scrollView` at all, and no public `drawsBackground`-style toggle either —
@@ -200,12 +198,7 @@ handful of call sites each gap actually reaches:
   `.topBarTrailing`/`.toolbarVisibility(for: .tabBar)` (iOS/tvOS-only
   placements), `AVAudioSession` (no per-app audio-session category system on
   macOS — `AudioSessionConfig.configureMixedPlayback()` no-ops there),
-  `os_proc_available_memory()` (iOS/tvOS/visionOS jetsam telemetry, no macOS
-  equivalent — `DeviceMetrics` reports 0 for `availableMB` there),
-  `UIBackgroundTaskIdentifier`/`UIApplication.beginBackgroundTask`
-  (`RemoteViewerModel`'s background-flush assertion — macOS apps aren't
-  suspended when backgrounded the way iOS ones are, so there's nothing to
-  hold open), `UIAccessibility.isReduceMotionEnabled`/
+  `UIAccessibility.isReduceMotionEnabled`/
   `reduceMotionStatusDidChangeNotification` → `NSWorkspace.shared.
   accessibilityDisplayShouldReduceMotion`/`accessibilityDisplayOptionsDidChangeNotification`,
   `UIApplication.openSettingsURLString` → `x-apple.systempreferences:` (only

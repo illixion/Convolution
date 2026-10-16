@@ -217,11 +217,11 @@ struct HypnosApp: App {
         .windowResizability(.contentSize)
         .defaultLaunchBehavior(.suppressed)
 
-        // Remote viewer - RoboFrame/gallery slideshow, or a pinned web page
-        // (the profile's `mode` decides; see RemoteViewerSceneRoot).
+        // Slideshow of the app's own pictures or videos. The scene id keeps its
+        // original spelling: visionOS restores open windows by it.
         WindowGroup(id: "remote-viewer", for: RemoteViewerWindowValue.self) { $windowValue in
             if let windowValue = windowValue {
-                RemoteViewerSceneRoot(windowValue: windowValue, appModel: appModel, onSizeSettled: { size in
+                RemoteViewerWindowView(windowValue: windowValue, onSizeSettled: { size in
                     $windowValue.wrappedValue?.restoredSize = RAVECodableSize(size)
                 })
                     .environment(appModel)
@@ -245,19 +245,6 @@ struct HypnosApp: App {
         .windowStyle(.plain)
         .windowResizability(.contentMinSize)
         .defaultSize(width: 1400, height: 900)
-        .defaultLaunchBehavior(.suppressed)
-
-        // Remote alert - WebSocket-triggered text alerts
-        WindowGroup(id: "remote-alert", for: RemoteAlertWindowValue.self) { $windowValue in
-            if let windowValue = windowValue {
-                RemoteAlertWindowView(windowValue: windowValue)
-                    .captureOpenWindowAction()
-                    .handleIncomingMediaURLs(appModel: appModel)
-                    .manageWindow(ManagedWindows.remoteAlert(windowValue))
-            }
-        }
-        .windowStyle(.plain)
-        .defaultSize(width: 800, height: 500)
         .defaultLaunchBehavior(.suppressed)
 
         // Immersive space for stereoscopic 3D video playback

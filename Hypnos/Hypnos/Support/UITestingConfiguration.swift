@@ -55,8 +55,8 @@ enum UITestingConfiguration {
     /// state they depend on rather than trusting this.** On the simulator
     /// `cfprefsd` will serve a value that is in neither the persistent domain
     /// nor the on-disk plist: measured directly, `persistentDomain(forName:)`
-    /// came back empty and listed no `enableRemoteViewer` key, no plist on the
-    /// device contained the string at all, and `bool(forKey:)` on the very next
+    /// came back empty and listed no key for a developer tab's flag, no plist
+    /// on the device contained the string at all, and `bool(forKey:)` on the very next
     /// line still returned `true` — a value written by a test run minutes
     /// earlier. Nothing this side of the process boundary removes it, so the
     /// baseline in `AppLauncher` sets every flag a test reads explicitly.

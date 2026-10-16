@@ -7,9 +7,8 @@
 
  States: idle → loading → displaying ⇄ paused / backgrounded → stopped
 
- This is the reusable base class. RemoteViewerModel subclasses it to
- add WebSocket, save/block, sensor display, and display sync features.
- Gallery-mode slideshows can use this class directly.
+ This is the base class; RemoteViewerModel subclasses it with the window's
+ profile and display toggles.
  */
 
 import CoreGraphics
@@ -170,57 +169,6 @@ class SlideshowEngine {
     var isRoomActive: Bool = true
     var isTransitioning: Bool = false
     var isLoading: Bool = false
-
-    /// Remote mode is purely server-paced: the orchestrator's `playback`
-    /// frames are the sole advance trigger and the engine never advances on
-    /// its own dwell clock. This guarantees the displayed post always matches
-    /// the server's `current`, so `imageReady` can't report an image the
-    /// server hasn't committed (which the readiness barrier would drop,
-    /// stalling the channel). Gallery mode leaves this false and runs the
-    /// local dwell timer. Set by the remote viewer before the run loop starts.
-    var serverDriven: Bool = false
-    /// The orchestrator's latest `current` post (remote mode only). The engine
-    /// advances toward this whenever it's in a state where jumping is safe.
-    private(set) var serverCurrentPost: RemotePost?
-
-    /// The orchestrator's latest `next` post (remote mode only). In server-
-    /// driven mode display always flows through the `pendingPost` path, so
-    /// `prefetchedImages` is never consumed in id order and its `.first` is a
-    /// stale duplicate of an early image — not the true look-ahead. The 3D
-    /// pre-generation layer needs the real next, so `peekedNextImage` resolves
-    /// the prefetched image whose id matches this instead.
-    private(set) var serverNextPost: RemotePost?
-
-    /// Record the orchestrator's announced `next`. Set from the remote
-    /// viewer's `playback` handler alongside `setServerCurrent`.
-    func setServerNext(_ post: RemotePost?) {
-        serverNextPost = post
-    }
-
-    /// Drop prefetched images the orchestrator has moved past (remote mode
-    /// only). In server-driven mode the buffer is drained solely by exact id
-    /// match in `fetchAndDisplayPost`, so entries whose post never becomes a
-    /// future `current` are stranded forever: the copy prefetch finished
-    /// downloading *after* the display path already fetched the same post
-    /// directly (a race every short-interval channel hits), and any announced
-    /// next/upcoming the server skipped past (block from another device,
-    /// requestNext, dark advance, merge-driver change). The provider's
-    /// `seenIds` dedup guarantees a stranded id never re-enqueues. Once
-    /// strays fill the buffer to `prefetchTarget`, prefetch stops downloading
-    /// entirely and `peekedNextImage` can never resolve again — the 3D
-    /// layer's hidden slot then fades in stale content on every crossfade.
-    /// Called on each `playback` frame with the server's full announced
-    /// look-ahead (current + next + upcoming), so a stray lives at most one
-    /// interval.
-    func pruneStalePrefetchedImages(keepingPostIds ids: Set<Int>) {
-        guard serverDriven else { return }
-        let before = prefetchedImages.count
-        prefetchedImages.removeAll { !ids.contains($0.post._id) }
-        let dropped = before - prefetchedImages.count
-        if dropped > 0 {
-            AppLogger.remoteViewer.debug("Pruned \(dropped, privacy: .public) stale prefetched image(s) the server moved past")
-        }
-    }
 
     /// True once the slideshow has shown a real image at least once. Used to
     /// distinguish the cold-start case (allow a bounded wait for the first
@@ -464,19 +412,7 @@ class SlideshowEngine {
     /// image at the start of the crossfade and generation visibly runs
     /// twice (once in each slot).
     var peekedNextImage: UIImage? {
-        if serverDriven {
-            // Server-paced: the prefetch buffer isn't drained in id order
-            // (display goes through the `pendingPost` path, not the fast
-            // path), so `.first` is a stale duplicate of an early image, not
-            // the real look-ahead. Resolve the prefetched image whose post id
-            // matches the orchestrator's announced `next` — this is the same
-            // instance `fetchAndDisplayPost` will reuse when it commits, so
-            // the hidden 3D slot's pre-generated depth map survives the
-            // crossfade without a wasteful regen.
-            guard let nextId = serverNextPost?._id else { return nil }
-            return prefetchedImages.first(where: { $0.post._id == nextId })?.image
-        }
-        return prefetchedImages.first?.image
+        prefetchedImages.first?.image
     }
 
     /// Diorama mode — when enabled, the engine generates an uncropped
@@ -490,35 +426,6 @@ class SlideshowEngine {
     /// When true, the crossfade between images is replaced with an instant
     /// switch (driven by AppModel's effectiveReduceMotion).
     var reduceMotion: Bool = false
-
-    /// Deadline for a one-shot instant (cut, not crossfade) transition, armed
-    /// when the viewer becomes present again. While we were away the server
-    /// dark-advanced to a fresh post and parked it; committing that post is not
-    /// a slideshow advance the user watched happen, and protocol.md describes
-    /// the return as "no stale hold and no old→new crossfade" — dissolving the
-    /// stale image into the fresh one advertises exactly the staleness the dark
-    /// advance exists to hide. Bounded rather than a bare one-shot: if the
-    /// server had nothing newer for us, the arm must expire instead of stealing
-    /// the crossfade from a later, legitimate advance.
-    private var instantTransitionDeadline: Date?
-
-    /// How long after becoming present a commit still counts as "the post we
-    /// returned to". Covers download + decode (+ 3D generation) of the parked
-    /// post; past it we're in steady state and crossfade normally.
-    private static let postReturnCutWindow: TimeInterval = 10
-
-    /// Arm the post-return cut. Called when this session flips back to present.
-    func armInstantTransition() {
-        instantTransitionDeadline = Date().addingTimeInterval(Self.postReturnCutWindow)
-    }
-
-    /// Take the arm if it's still valid. Consumed either way so a stale arm
-    /// can't leak into a later transition.
-    private func consumeInstantTransition() -> Bool {
-        guard let deadline = instantTransitionDeadline else { return false }
-        instantTransitionDeadline = nil
-        return Date() < deadline
-    }
 
     /// Uncropped foreground for the currently displayed post, when diorama
     /// is enabled. GPU-private MTLTexture so the pixels live in GPU
@@ -550,13 +457,11 @@ class SlideshowEngine {
     /// alongside the slots in `clearDioramaForegrounds`.
     private var dioramaCache: [Int: (foreground: MTLTexture?, backdrop: MTLTexture?)] = [:]
 
-    // MARK: - Content Provider & Tag List Manager
+    // MARK: - Content Provider
 
     var contentProvider: SlideshowContentProvider?
     private var sharedLocalEngine: RAVESlideshowEngine?
     private var usesSharedLocalEngine = false
-    var tagListManager: TagListManager?
-    let engineId = UUID()
 
     // MARK: - Private
 
@@ -773,12 +678,6 @@ class SlideshowEngine {
             return
         }
 
-        if let tagListManager {
-            tagListManager.addChangeHandler(id: engineId) { [weak self] in
-                self?.handleTagListChanged()
-            }
-        }
-
         transition(to: .loading)
         startRunLoop()
     }
@@ -799,7 +698,6 @@ class SlideshowEngine {
         watchdogTask = nil
         pseudo3DResolveTask?.cancel()
         pseudo3DResolveTask = nil
-        tagListManager?.removeChangeHandler(id: engineId)
     }
 
     func useRAVESlideshowForLocalContent(
@@ -807,7 +705,7 @@ class SlideshowEngine {
         maxImageResolution2D: Int = 0,
         maxImageResolution3D: Int = 0
     ) {
-        guard !serverDriven, let provider = contentProvider as? any RAVESlideshowContentProvider else {
+        guard let provider = contentProvider as? any RAVESlideshowContentProvider else {
             return
         }
         let settings = RAVESlideshowDisplaySettings(
@@ -940,9 +838,8 @@ class SlideshowEngine {
         guard isRoomActive else { return }
 
         // Case 1: overdue in .displaying — force the advance the run loop
-        // missed. Skipped when server-driven: there is no local deadline to be
-        // "overdue" against; advances come only from the orchestrator.
-        if !serverDriven, state == .displaying, let deadline = displayDeadline {
+        // missed.
+        if state == .displaying, let deadline = displayDeadline {
             let overdue = Date().timeIntervalSince(deadline)
             if overdue > Self.watchdogAdvanceGrace {
                 AppLogger.remoteViewer.warning("Watchdog: stuck in .displaying \(Int(overdue), privacy: .public)s past deadline — forcing advance")
@@ -978,22 +875,15 @@ class SlideshowEngine {
         // On visionOS scenePhase flips to .inactive constantly — gaze shifts,
         // Control Center, notifications, or simply not being the user's current
         // focus. A wall-snapped ambient slideshow is *meant* to sit unfocused,
-        // so it lives in .inactive almost permanently; treating that as hidden
-        // would skip imageReady and report visibility=false, parking the channel
-        // for a single-window deployment (the window's own report leaves the
-        // server with zero visible sessions). Only .background means the window
-        // is truly gone — app suspended, headset off, or window closed.
-        // "Nobody in the room" is handled separately via HA displayState frames.
+        // so it lives in .inactive almost permanently and keeps cycling there.
+        // Only .background means the window is truly gone — app suspended,
+        // headset off, or window closed.
         let wasVisible = oldPhase != .background
         let isVisible = newPhase != .background
         guard wasVisible != isVisible else { return }
 
         if isVisible {
             sharedLocalEngine?.setVisible(true)
-            // Returning to visible. isRoomActive flips before the hook runs
-            // so overrides observe the new activity state — the model's
-            // barrier-rejoin imageReady gates on it and would be silently
-            // dropped under the old value.
             isRoomActive = true
 
             if state == .backgrounded {
@@ -1016,23 +906,8 @@ class SlideshowEngine {
                     transition(to: .loading)
                 }
             }
-
-            // The hook runs *after* the restore, not before it. Overrides use it
-            // to rejoin the server (reconcile onto the post the server
-            // dark-advanced to, re-report readiness), and every one of those
-            // paths is gated on being out of `.backgrounded` —
-            // `reconcileWithServer` requires `.displaying`/`.idle`. Calling the
-            // hook first made the whole rejoin a silent no-op, and in remote
-            // mode there is no local clock to recover with (`runDisplayingPhase`
-            // just awaits a state change and the watchdog refuses to advance a
-            // server-driven engine), so the window sat on the stale post
-            // forever.
-            onBecameActive()
         } else {
-            // Truly backgrounded. Same ordering as above: the hook observes
-            // the new state.
             isRoomActive = false
-            onEnteredBackground()
 
             // Remember current state so we can restore it properly
             if state != .stopped && state != .idle && state != .backgrounded {
@@ -1045,9 +920,6 @@ class SlideshowEngine {
         }
     }
 
-    func onBecameActive() {}
-    func onEnteredBackground() {}
-
     func updateWindowAspectRatio(_ size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
         windowAspectRatio = size.width / size.height
@@ -1057,28 +929,6 @@ class SlideshowEngine {
 
     func goToNextImage() {
         pendingPost = nil
-        transition(to: .loading)
-    }
-
-    // MARK: - Server-driven advance (remote mode)
-
-    /// Record the orchestrator's current post and advance toward it. Called
-    /// from every `playback` frame. The advance is deferred (not lost) when
-    /// the engine is mid-load / transitioning / paused: `reconcileWithServer`
-    /// re-runs from `onPostTransitioned` and `onBecameActive`, so the engine
-    /// always converges on the server's current without racing ahead of it.
-    func setServerCurrent(_ post: RemotePost?) {
-        serverCurrentPost = post
-        reconcileWithServer()
-    }
-
-    /// Advance to the server's current post if we're in a state where a jump
-    /// is safe and we're not already on it. No-op when not server-driven.
-    func reconcileWithServer() {
-        guard serverDriven, let target = serverCurrentPost else { return }
-        guard state == .displaying || state == .idle else { return }
-        guard target._id != currentPost?._id else { return }
-        pendingPost = target
         transition(to: .loading)
     }
 
@@ -1122,26 +972,6 @@ class SlideshowEngine {
             guard !Task.isCancelled else { return }
             withAnimation { toastMessage = nil }
         }
-    }
-
-    // MARK: - Tag List Change
-
-    func handleTagListChanged() {
-        fetchReturnedEmpty = false
-        cachedPosts.removeAll()
-        prefetchedImages.removeAll()
-        // Cache was just invalidated; allow the cold-start wait so the current
-        // image stays on screen while the new list's first image loads,
-        // instead of immediately flashing the placeholder.
-        hasDisplayedFirstMedia = false
-        cancelPrefetch()
-        contentProvider?.resetPagination()
-        if let tlm = tagListManager {
-            let firstTag = tlm.tagLists[safe: tlm.activeIndex]?.first ?? ""
-            showToast("List \(tlm.activeIndex + 1)/\(tlm.tagLists.count): \(firstTag)")
-        }
-        pendingPost = nil
-        transition(to: .loading)
     }
 
     // MARK: - Run Loop
@@ -1310,16 +1140,6 @@ class SlideshowEngine {
     private func runDisplayingPhase() async {
         let versionAtEntry = stateVersion
 
-        // Server-paced: hold the current image until the orchestrator pushes a
-        // new `current` (which drives the transition via reconcileWithServer).
-        // No local dwell timer means the engine can't diverge from the server,
-        // so it never reports `imageReady` for a frame the server hasn't
-        // committed.
-        if serverDriven {
-            await waitForStateChange()
-            return
-        }
-
         // Defensive: if no deadline was set (shouldn't normally happen since
         // displayImage/displayVideo set it), establish one now.
         if displayDeadline == nil {
@@ -1403,14 +1223,9 @@ class SlideshowEngine {
             return true
         }
 
-        // Reuse an already-prefetched copy when one exists. This is the
-        // common case in server-driven mode, where every display arrives via
-        // this path rather than the prefetch fast-path. Reusing the buffered
-        // entry (a) hands the crossfade the *same* `UIImage` instance the 3D
-        // layer pre-generated its depth map against — so the hidden slot just
-        // promotes instead of regenerating — and (b) drains the buffer so
-        // `prefetchedImages` doesn't grow stale (which is what corrupted
-        // `peekedNextImage`). Prefetched entries are only ever images, so
+        // Reuse an already-prefetched copy when one exists, so the crossfade
+        // gets the *same* `UIImage` instance the 3D layer pre-generated its
+        // depth map against. Prefetched entries are only ever images, so
         // videos never match and fall through to the download path.
         if let idx = prefetchedImages.firstIndex(where: { $0.post._id == post._id }) {
             let entry = prefetchedImages.remove(at: idx)
@@ -1589,9 +1404,8 @@ class SlideshowEngine {
         }
         let hadCurrentMedia = currentPost != nil
 
-        if reduceMotion || consumeInstantTransition() || !hadCurrentMedia {
-            // Instant switch — reduce-motion, the post we returned to (see
-            // instantTransitionDeadline), or the cold-start first video
+        if reduceMotion || !hadCurrentMedia {
+            // Instant switch — reduce-motion, or the cold-start first video
             // (nothing on screen to crossfade from).
             clearImageDisplayState()
             isTransitioning = false
@@ -1723,10 +1537,9 @@ class SlideshowEngine {
             return
         }
 
-        // Crossfade transition (skipped under reduce motion, or when this is
-        // the post we returned to — see instantTransitionDeadline)
+        // Crossfade transition (skipped under reduce motion)
         transition(to: .transitioning)
-        if reduceMotion || consumeInstantTransition() {
+        if reduceMotion {
             var t = Transaction(); t.disablesAnimations = true
             withTransaction(t) {
                 nextImage = image
@@ -1929,7 +1742,7 @@ class SlideshowEngine {
         isFetching = true
         defer { isFetching = false }
 
-        let tagQuery = tagListManager?.activeTagQuery ?? "order:random"
+        let tagQuery = "order:random"
 
         var ratioRange: String?
         if useAspectRatio {

@@ -19,7 +19,6 @@ It is one codebase with a single app target and platform-specific scene roots. T
 - **Slideshows** — Ken Burns motion, dynamic brightness, clock overlay, optional 3D layers, for anything you are browsing
 - **Stash integration** — filters, saved presets, ratings, tags, performers, studios, metadata editing and multi-select delete, over the GraphQL API
 - **Multiple windows** — visionOS and macOS open real separate windows; on visionOS a Windows tab lists every open one and can summon or close each
-- **Pinned web pages and a RoboFrame viewer** — optional developer features
 - **Set up Apple TV from another device** — send server settings and keys by scanning a QR code
 - **Settings backup, cache manager and in-app console** — export and import settings, per-cache budgets and a log viewer
 
@@ -75,7 +74,7 @@ The same app on iPhone, Apple TV and Mac, each with its own shell around the sha
 | Photo viewer, adjustments, background removal, slideshows, share/info/edit | ✓ | ✓ | basic viewer | ✓ |
 | Video playback, custom transport, A-B loop, transcode fallback | ✓ | ✓ | ✓ | ✓ |
 | Object-audio film player | ✓ spatial sources | ✓ AirPods tracking | ✓ head-tracked binaural | ✓ AirPods tracking |
-| Pinned web pages and `hypnos://play` handoff | ✓ | ✓ | — | ✓ |
+| `hypnos://play` handoff | ✓ | ✓ | — | ✓ |
 | Settings backup export and import | ✓ | ✓ | — no Files app | ✓ |
 | Cache manager and in-app debug console | ✓ | ✓ | ✓ | ✓ |
 | Spatial 3D photo conversion and immersive 3D | ✓ | — needs a stereoscopic display | — | — |
@@ -250,13 +249,10 @@ Filter Stash content by title, galleries, performers, studios and tags, by ratin
 visionOS only. Lists every open window with **Summon** and **Close**, plus Hide All and Close All. Summon recreates the window where you are, which also recovers windows left behind in other rooms. macOS uses its own sidebar, menu bar and Window menu instead.
 
 ### Settings tab
-Display and viewer options, slideshow defaults, the Photos, Local, Stash, Nextcloud and Jellyfin sections, window groups (visionOS), cache manager (presets and per-cache usage), backup export and import (not on Apple TV), and a Developer section: depth model manager, converted-video cache, RoboFrame viewer, debug console and diagnostics.
+Display and viewer options, slideshow defaults, the Photos, Local, Stash, Nextcloud and Jellyfin sections, window groups (visionOS), cache manager (presets and per-cache usage), backup export and import (not on Apple TV), and a Developer section: depth model manager, converted-video cache, debug console and diagnostics.
 
 ### URL handoff
 The app registers a `hypnos://` URL scheme. `hypnos://play?url=<link>` plays a direct video link (MP4 or HLS) in a new window, `hypnos://image?id=<id>` opens a Stash image, and `hypnos://setup` carries settings from another device.
-
-## RoboFrame viewer (Developer)
-A slideshow viewer for a [RoboFrame](https://github.com/illixion/RoboFrame) proxy, with WebSocket control, multi-device sync and Home Assistant sensor overlays. Enable it in Settings → Developer → **Enable RoboFrame Viewer**, which adds a Remote tab with saved profiles. Profiles can also pin an ordinary web page as a panel in your space.
 
 ## Architecture
 

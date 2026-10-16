@@ -1,8 +1,8 @@
 /*
  Hypnos - Window Group Restore Sheet
 
- Grid of the windows in a saved group — photos, videos, Remote slideshows and
- pinned web pages alike. Supports restoring one at a time (each at the size it
+ Grid of the windows in a saved group — photos, videos and slideshows alike.
+ Supports restoring one at a time (each at the size it
  was saved at), multi-select delete, and adding currently-open windows.
  */
 

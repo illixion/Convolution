@@ -58,13 +58,6 @@ extension RemoteViewerWindowValue {
     }
 }
 
-extension RemoteAlertWindowValue {
-    /// Same alert content under a fresh window identity.
-    func recreated() -> RemoteAlertWindowValue {
-        RemoteAlertWindowValue(text: text, bgColorHex: bgColorHex, imageUrl: imageUrl)
-    }
-}
-
 // MARK: - Descriptors
 
 enum ManagedWindows {
@@ -125,29 +118,13 @@ enum ManagedWindows {
 
     @MainActor
     static func remoteViewer(_ value: RemoteViewerWindowValue, appModel: AppModel) -> RAVEManagedWindow {
-        let config = appModel.remoteViewerConfig(id: value.configId)
-        let isWebPage = config?.mode == .webPage
-        return .value(
+        .value(
             id: "remote-viewer",
             value,
             label: RAVEWindowLabel(
-                title: isWebPage ? "Web Page" : "Slideshow",
-                subtitle: config?.name,
-                systemImage: isWebPage ? "globe" : "play.square.stack"
-            ),
-            recreate: { $0.recreated() }
-        )
-    }
-
-    @MainActor
-    static func remoteAlert(_ value: RemoteAlertWindowValue) -> RAVEManagedWindow {
-        .value(
-            id: "remote-alert",
-            value,
-            label: RAVEWindowLabel(
-                title: "Alert",
-                subtitle: value.text,
-                systemImage: "exclamationmark.bubble"
+                title: "Slideshow",
+                subtitle: appModel.remoteViewerConfig(id: value.configId)?.name,
+                systemImage: "play.square.stack"
             ),
             recreate: { $0.recreated() }
         )

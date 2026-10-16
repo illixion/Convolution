@@ -2,12 +2,12 @@
  Hypnos - iOS window router
 
  On visionOS every viewer is its own window: the gallery `pushWindow`s a photo,
- a share opens a shared-photo window, a RoboFrame `playVideo` frame opens a
- video window, and the console is a singleton `Window`. iOS has one window, so
+ a share opens a shared-photo window, a slideshow opens its own window, and the
+ console is a singleton `Window`. iOS has one window, so
  this router is what those scene ids resolve to:
 
  - the value-carrying scenes (`photo-detail`, `video-detail`, `shared-photo`,
-   `remote-viewer`, `remote-alert`) become a stack of full-screen covers over
+   `remote-viewer`) become a stack of full-screen covers over
    the gallery, in the order they were opened (`IOSRootView` presents them);
  - the singleton tool windows (`console`, `gpu-memory`, `video-adjustments`)
    become sheets over whatever is showing;
@@ -33,7 +33,6 @@ enum IOSWindowDestination: Hashable, Identifiable {
     case video(VideoWindowValue)
     case sharedPhoto(SharedMediaItem)
     case remoteViewer(RemoteViewerWindowValue)
-    case remoteAlert(RemoteAlertWindowValue)
 
     /// Stable identity, doubling as the token `dismissWindow()` uses to find
     /// the presentation the calling view lives in.
@@ -43,7 +42,6 @@ enum IOSWindowDestination: Hashable, Identifiable {
         case .video(let value): return "video-detail:\(value.id.uuidString)"
         case .sharedPhoto(let item): return "shared-photo:\(item.id)"
         case .remoteViewer(let value): return "remote-viewer:\(value.id.uuidString)"
-        case .remoteAlert(let value): return "remote-alert:\(value.id.uuidString)"
         }
     }
 
@@ -54,7 +52,6 @@ enum IOSWindowDestination: Hashable, Identifiable {
         case .video: return "video-detail"
         case .sharedPhoto: return "shared-photo"
         case .remoteViewer: return "remote-viewer"
-        case .remoteAlert: return "remote-alert"
         }
     }
 }
@@ -129,10 +126,6 @@ final class IOSWindowRouter {
             guard let value = value as? RemoteViewerWindowValue else { return unroutable(id, value) }
             present(.remoteViewer(value))
 
-        case "remote-alert":
-            guard let value = value as? RemoteAlertWindowValue else { return unroutable(id, value) }
-            present(.remoteAlert(value))
-
         case "console":
             sheet = .console
         case "gpu-memory":
@@ -183,8 +176,7 @@ final class IOSWindowRouter {
     }
 
     /// `dismissWindow(id:value:)` — a specific window value, wherever it is on
-    /// the stack. Used by the remote viewer's `stopVideo`/`dismissText` frames
-    /// and by saved-group restores.
+    /// the stack. Used by saved-group restores.
     func dismiss(id: String, value: any Codable & Hashable) {
         path.removeAll { destination in
             guard destination.sceneID == id else { return false }
@@ -193,7 +185,6 @@ final class IOSWindowRouter {
             case (.video(let a), let b as VideoWindowValue): return a == b
             case (.sharedPhoto(let a), let b as SharedMediaItem): return a == b
             case (.remoteViewer(let a), let b as RemoteViewerWindowValue): return a == b
-            case (.remoteAlert(let a), let b as RemoteAlertWindowValue): return a == b
             default: return false
             }
         }

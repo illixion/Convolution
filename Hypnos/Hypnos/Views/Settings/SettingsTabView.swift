@@ -220,7 +220,6 @@ struct SettingsTabView: View {
                     }
 
                     Toggle("Show Clock", isOn: $appModel.slideshowShowClock)
-                    Toggle("Show Sensors", isOn: $appModel.slideshowShowSensors)
                     Toggle("Fit to Window Aspect Ratio", isOn: $appModel.slideshowUseAspectRatio)
                     Toggle("Ken Burns Effect", isOn: $appModel.slideshowEnableKenBurns)
                     Toggle("Dynamic Brightness", isOn: $appModel.slideshowEnableDynamicBrightness)
@@ -259,7 +258,7 @@ struct SettingsTabView: View {
                 } header: {
                     Text("Slideshow Defaults")
                 } footer: {
-                    Text("Used when starting a slideshow from any source. Saved Remote API profiles override these per-profile.")
+                    Text("Used for the first picture slideshow and the first video slideshow; after that, each remembers the changes made in its window.")
                 }
 
                 if PlatformCapabilities.supportsMultipleWindows {
@@ -441,19 +440,6 @@ struct SettingsTabView: View {
                 #endif
 
                 Section("Developer") {
-                    Toggle("Enable RoboFrame Viewer", isOn: Binding(
-                        get: { appModel.enableRemoteViewer },
-                        set: { newValue in
-                            appModel.enableRemoteViewer = newValue
-                            if !newValue && windowModel.selectedTab == .remote {
-                                windowModel.selectedTab = .settings
-                            }
-                        }
-                    ))
-                    Text("Enable viewer for RoboFrame photo slideshow engine, see README.md for info on backend setup.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-
                     Toggle("Show Debug Console", isOn: Binding(
                         get: { appModel.showDebugConsole },
                         set: { newValue in
@@ -661,7 +647,7 @@ struct SettingsTabView: View {
         } header: {
             Text("Window Groups")
         } footer: {
-            Text("Saves every open pop-out window — photos, videos, RoboFrame slideshows and pinned web pages — and restores each one at the size it was saved at.")
+            Text("Saves every open pop-out window — photos, videos and slideshows — and restores each one at the size it was saved at.")
         }
     }
 

@@ -18,7 +18,6 @@ enum Tab: String, CaseIterable {
     case filters = "Filters"
     case windows = "Windows"
     case settings = "Settings"
-    case remote = "Remote"
     case console = "Console"
 
 
@@ -41,7 +40,6 @@ enum Tab: String, CaseIterable {
         case .filters: return "line.3.horizontal.decrease.circle"
         case .windows: return "macwindow.on.rectangle"
         case .settings: return "gearshape"
-        case .remote: return "network"
         case .console: return "apple.terminal"
         }
     }

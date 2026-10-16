@@ -616,16 +616,6 @@ class AppModel {
         bypassDuplicatePrompt: Bool = false,
         restoredSize: CGSize? = nil
     ) {
-        // A profile that can't describe what to show has nothing to open. The
-        // window would come up empty (or, before this was refused, quietly
-        // showing whatever the Pictures tab happened to be on).
-        if let config = remoteViewerConfig(id: configId), !config.isLaunchable {
-            AppLogger.remoteViewer.error(
-                "Refusing to open “\(config.name)”: \(config.launchBlockedReason ?? "not launchable", privacy: .public)"
-            )
-            return
-        }
-
         let request = RemoteViewerOpenRequest(
             configId: configId,
             bypassDuplicatePrompt: bypassDuplicatePrompt,
@@ -709,39 +699,6 @@ class AppModel {
 
     func unregisterRemoteViewerModel(_ model: RemoteViewerModel) {
         activeRemoteViewerModels.removeValue(forKey: ObjectIdentifier(model))
-    }
-
-    // MARK: - Remote History Stores
-    //
-    // One store per (endpoint, token) pair. All viewer windows pointed at
-    // the same RoboFrame instance share the same store so the history
-    // grid reflects what's actually been shown across the room, not just
-    // what this window has seen.
-
-    private var remoteHistoryStores: [String: RemoteHistoryStore] = [:]
-    private let sharedRemoteAPIClient = RemoteAPIClient()
-
-    private func historyStoreKey(endpoint: String, accessToken: String) -> String {
-        "\(endpoint)\u{1}\(accessToken)"
-    }
-
-    func remoteHistoryStore(for endpoint: String, accessToken: String) -> RemoteHistoryStore? {
-        guard !endpoint.isEmpty else { return nil }
-        let key = historyStoreKey(endpoint: endpoint, accessToken: accessToken)
-        if let existing = remoteHistoryStores[key] { return existing }
-        let store = RemoteHistoryStore(endpoint: endpoint, accessToken: accessToken, apiClient: sharedRemoteAPIClient)
-        remoteHistoryStores[key] = store
-        return store
-    }
-
-    /// Eagerly prime history stores for every saved Remote config that has
-    /// an API endpoint. Called once after init so the grid renders
-    /// instantly the first time a viewer's history button is pressed.
-    func refreshAllRemoteHistoryStores() {
-        for config in savedRemoteConfigs where !config.apiEndpoint.isEmpty {
-            guard let store = remoteHistoryStore(for: config.apiEndpoint, accessToken: config.accessToken) else { continue }
-            Task { await store.refresh() }
-        }
     }
 
     // MARK: - Remote Viewer Window Summon
@@ -1109,26 +1066,16 @@ class AppModel {
         }
     }
 
-    // MARK: - Remote Viewer
+    // MARK: - Slideshows
 
-    /// Last tag list catalog the server pushed to any open viewer. The catalog
-    /// is identical for every window, so it's mirrored here to seed a freshly
-    /// opened viewer's ornament before the server re-pushes `tagLists` (which
-    /// only happens on connect — a late joiner on an already-open shared WS
-    /// connection would otherwise start with no list names). The current list
-    /// itself is fully server-tracked (per-window TagListManager active index).
-    var tagListCatalog: [[String]] = []
-    let modTagManager = ModTagManager()
-
-    /// Persistent config for the gallery slideshow launched from photo viewer ornament.
-    /// Stored separately from savedRemoteConfigs so it doesn't clutter the Remote tab.
+    /// Persistent profile for picture slideshows (the tab bar's play button,
+    /// the photo viewer's Slideshow button, a local folder's slideshow).
     var gallerySlideshowConfig: RemoteViewerConfig? {
         didSet { persistImplicitSlideshowConfig(gallerySlideshowConfig, key: Self.gallerySlideshowConfigKey) }
     }
 
-    /// Persistent config for the video slideshow launched from the video viewer
-    /// ornament. Stored separately from savedRemoteConfigs and the gallery
-    /// (image) slideshow config so each keeps its own display settings.
+    /// Persistent profile for video slideshows, kept apart from the picture
+    /// one so each keeps its own display settings.
     var videoSlideshowConfig: RemoteViewerConfig? {
         didSet { persistImplicitSlideshowConfig(videoSlideshowConfig, key: Self.videoSlideshowConfigKey) }
     }
@@ -1138,14 +1085,12 @@ class AppModel {
 
     /// Start a slideshow of the content the user is looking at right now.
     ///
-    /// The *profile* is a reused `.appGallery` one, so display tweaks made in
-    /// the slideshow's ornament (clock, Ken Burns, 3D mode…) persist between
-    /// launches. The *content* rides along as a transient override, because it
-    /// is by definition not something a saved profile can describe — trying to
-    /// make a profile mean "whatever I'm looking at" is what made the old
-    /// blank-endpoint mode unpredictable.
+    /// The *profile* is reused, so display tweaks made in the slideshow's
+    /// ornament (clock, Ken Burns, 3D mode…) persist between launches. The
+    /// *content* rides along as a transient override, because "whatever I'm
+    /// looking at" is not something a saved profile can describe.
     func startGallerySlideshow(imageSource: any ImageSource, filter: ImageFilterCriteria?) {
-        let config = gallerySlideshowConfig ?? makeAppGallerySlideshowConfig(name: "Gallery Slideshow")
+        let config = gallerySlideshowConfig ?? makeSlideshowConfig(name: "Gallery Slideshow")
         gallerySlideshowConfig = config
         pendingGallerySlideshowSource = GallerySlideshowSourceOverride(
             imageSource: imageSource,
@@ -1161,7 +1106,7 @@ class AppModel {
         if let existing = videoSlideshowConfig {
             config = existing
         } else {
-            var fresh = makeAppGallerySlideshowConfig(name: "Video Slideshow")
+            var fresh = makeSlideshowConfig(name: "Video Slideshow")
             // Spatial 3D is image-only — never engage it for a video slideshow.
             fresh.slideshow3DMode = .off
             config = fresh
@@ -1174,10 +1119,8 @@ class AppModel {
         enqueueRemoteViewerOpen(configId: config.id)
     }
 
-    private func makeAppGallerySlideshowConfig(name: String) -> RemoteViewerConfig {
+    private func makeSlideshowConfig(name: String) -> RemoteViewerConfig {
         var config = RemoteViewerConfig(name: name)
-        config.mode = .appGallery
-        config.apiEndpoint = ""
         applySlideshowDefaults(to: &config)
         return config
     }
@@ -1190,7 +1133,6 @@ class AppModel {
         UserDefaults.standard.set(data, forKey: key)
     }
 
-    /// When true, the Remote tab appears in the tab bar ornament
     /// Which library the Pictures and Videos tabs browse.
     ///
     /// Only consulted when a Stash server is configured — with no server there
@@ -1200,14 +1142,6 @@ class AppModel {
             guard librarySource != oldValue else { return }
             UserDefaults.standard.set(librarySource.rawValue, forKey: "librarySource")
             applyLibrarySource()
-        }
-    }
-
-    var enableRemoteViewer: Bool {
-        didSet {
-            if enableRemoteViewer != oldValue {
-                UserDefaults.standard.set(enableRemoteViewer, forKey: "enableRemoteViewer")
-            }
         }
     }
 
@@ -1248,63 +1182,22 @@ class AppModel {
         return true
     }
 
-    /// Saved remote viewer configurations
-    var savedRemoteConfigs: [RemoteViewerConfig] = [] {
-        didSet {
-            if let data = try? JSONEncoder().encode(savedRemoteConfigs) {
-                UserDefaults.standard.set(data, forKey: "savedRemoteConfigs")
-            }
-        }
-    }
-
-    func saveRemoteConfig(_ config: RemoteViewerConfig) {
-        if let index = savedRemoteConfigs.firstIndex(where: { $0.id == config.id }) {
-            savedRemoteConfigs[index] = config
-        } else {
-            savedRemoteConfigs.append(config)
-        }
-    }
-
-    /// Persist a profile back into whichever store owns it.
-    ///
-    /// The gallery and video slideshow profiles live in their own slots
-    /// precisely so they stay out of the Remote tab's list, but a viewer window
-    /// persisting an ornament tweak only knows an id. Routing through here
-    /// keeps that write-back from appending a copy of them to the saved list —
-    /// which it did on every launch, since those slots start empty and the
-    /// launching ornament mints a fresh id when it finds no config.
+    /// Persist a slideshow window's profile back into its slot (picture or
+    /// video). A profile in neither slot belongs to a window from before the
+    /// slot was replaced, and there is nothing left to save it to.
     func persistRemoteViewerConfig(_ config: RemoteViewerConfig) {
-        if gallerySlideshowConfig?.id == config.id,
-           !savedRemoteConfigs.contains(where: { $0.id == config.id }) {
+        if gallerySlideshowConfig?.id == config.id {
             gallerySlideshowConfig = config
-        } else if videoSlideshowConfig?.id == config.id,
-                  !savedRemoteConfigs.contains(where: { $0.id == config.id }) {
+        } else if videoSlideshowConfig?.id == config.id {
             videoSlideshowConfig = config
-        } else {
-            saveRemoteConfig(config)
         }
     }
 
-    /// Resolve a viewer profile by id across the saved profiles and the two
-    /// implicit slideshow profiles (gallery / video), which are stored outside
-    /// `savedRemoteConfigs` so they don't clutter the Remote tab. The
-    /// `remote-viewer` scene needs this before it can decide which window to
-    /// build for a given window value.
+    /// The slideshow profile a window value names: the picture or the video one.
     func remoteViewerConfig(id: UUID) -> RemoteViewerConfig? {
-        if let saved = savedRemoteConfigs.first(where: { $0.id == id }) { return saved }
         if let gallery = gallerySlideshowConfig, gallery.id == id { return gallery }
         if let video = videoSlideshowConfig, video.id == id { return video }
         return nil
-    }
-
-    func deleteRemoteConfig(_ config: RemoteViewerConfig) {
-        savedRemoteConfigs.removeAll { $0.id == config.id }
-    }
-
-    func renameRemoteConfig(_ config: RemoteViewerConfig, newName: String) {
-        if let index = savedRemoteConfigs.firstIndex(where: { $0.id == config.id }) {
-            savedRemoteConfigs[index].name = newName
-        }
     }
 
     // MARK: - Debug Console
@@ -1316,34 +1209,8 @@ class AppModel {
         didSet {
             if showDebugConsole != oldValue {
                 UserDefaults.standard.set(showDebugConsole, forKey: "showDebugConsole")
-                updateDeviceTelemetry()
             }
         }
-    }
-
-    /// Wire the process-wide device-telemetry ticker (SlideshowSyncHub) to the
-    /// Console developer toggle — quasi-dev-mode. When on, periodic
-    /// `reportMetrics` + event `reportLog` frames flow to the RoboFrame backend
-    /// over the existing slideshow WS (see DeviceMetrics / protocol.md).
-    func updateDeviceTelemetry() {
-        let enabled = showDebugConsole
-        SlideshowSyncHub.shared.setTelemetryEnabled(enabled, provider: enabled ? { [weak self] in
-            self?.captureDeviceMetrics() ?? DeviceMetrics.capture(deviceId: "hypnos", app: "hypnos", photoWindows: 0, slideshowWindows: 0)
-        } : nil)
-    }
-
-    /// Build a process-wide telemetry sample. deviceId is best-effort: the first
-    /// active remote viewer's stable device identity, else a generic label.
-    private func captureDeviceMetrics() -> DeviceMetrics {
-        let deviceId = activeRemoteViewerModels.values
-            .map(\.slideshowDeviceId)
-            .first ?? "hypnos"
-        return DeviceMetrics.capture(
-            deviceId: deviceId,
-            app: "hypnos",
-            photoWindows: openPhotoWindowCount,
-            slideshowWindows: activeRemoteViewerModels.count
-        )
     }
 
     /// When true, the app responds to system memory pressure by downscaling
@@ -1385,11 +1252,9 @@ class AppModel {
     ]
 
     /// Default slideshow display settings, used as initial values for every
-    /// slideshow source (gallery, local folder, video, remote API). Saved
-    /// `RemoteViewerConfig` profiles override these per-profile but inherit
-    /// them when first created.
+    /// slideshow source (gallery, local folder, video). The slideshow
+    /// profiles override these but inherit them when first created.
     var slideshowShowClock: Bool { didSet { if slideshowShowClock != oldValue { UserDefaults.standard.set(slideshowShowClock, forKey: "slideshowShowClock") } } }
-    var slideshowShowSensors: Bool { didSet { if slideshowShowSensors != oldValue { UserDefaults.standard.set(slideshowShowSensors, forKey: "slideshowShowSensors") } } }
     var slideshowUseAspectRatio: Bool { didSet { if slideshowUseAspectRatio != oldValue { UserDefaults.standard.set(slideshowUseAspectRatio, forKey: "slideshowUseAspectRatio") } } }
     var slideshowEnableKenBurns: Bool { didSet { if slideshowEnableKenBurns != oldValue { UserDefaults.standard.set(slideshowEnableKenBurns, forKey: "slideshowEnableKenBurns") } } }
     var slideshowEnableDynamicBrightness: Bool { didSet { if slideshowEnableDynamicBrightness != oldValue { UserDefaults.standard.set(slideshowEnableDynamicBrightness, forKey: "slideshowEnableDynamicBrightness") } } }
@@ -1419,12 +1284,10 @@ class AppModel {
     }
 
     /// Apply the current slideshow defaults to a `RemoteViewerConfig`. Used
-    /// when creating a new gallery/local/video slideshow config and when
-    /// initializing a fresh profile in the Remote tab editor.
+    /// when creating the picture or video slideshow profile.
     func applySlideshowDefaults(to config: inout RemoteViewerConfig) {
         config.delay = slideshowDelay
         config.showClock = slideshowShowClock
-        config.showSensors = slideshowShowSensors
         config.useAspectRatio = slideshowUseAspectRatio
         config.enableKenBurns = slideshowEnableKenBurns
         config.enableDynamicBrightness = slideshowEnableDynamicBrightness
@@ -1498,7 +1361,6 @@ class AppModel {
             UserDefaults.standard.object(forKey: key) != nil ? UserDefaults.standard.bool(forKey: key) : defaultValue
         }
         let loadedSlideshowShowClock = loadBool("slideshowShowClock", default: true)
-        let loadedSlideshowShowSensors = loadBool("slideshowShowSensors", default: true)
         let loadedSlideshowUseAspectRatio = loadBool("slideshowUseAspectRatio", default: true)
         let loadedSlideshowEnableKenBurns = loadBool("slideshowEnableKenBurns", default: true)
         let loadedSlideshowEnableDynamicBrightness = loadBool("slideshowEnableDynamicBrightness", default: true)
@@ -1647,7 +1509,6 @@ class AppModel {
                 return .stash
                 #endif
             }()
-        let loadedEnableRemoteViewer = UserDefaults.standard.bool(forKey: "enableRemoteViewer")
 
         // Unset means "never decided", which for an install that already has a
         // server or a settled photo-library prompt means "already set up".
@@ -1694,7 +1555,6 @@ class AppModel {
         self.autoHideDelay = loadedAutoHideDelay
         self.slideshowDelay = loadedSlideshowDelay
         self.slideshowShowClock = loadedSlideshowShowClock
-        self.slideshowShowSensors = loadedSlideshowShowSensors
         self.slideshowUseAspectRatio = loadedSlideshowUseAspectRatio
         self.slideshowEnableKenBurns = loadedSlideshowEnableKenBurns
         self.slideshowEnableDynamicBrightness = loadedSlideshowEnableDynamicBrightness
@@ -1724,7 +1584,6 @@ class AppModel {
         self.defaultImageViewingMode = loadedDefaultImageViewingMode
         self.librarySource = loadedLibrarySource
         self.hasCompletedWelcome = loadedHasCompletedWelcome
-        self.enableRemoteViewer = loadedEnableRemoteViewer
         self.showDebugConsole = loadedShowDebugConsole
         self.respectMemoryAlerts = loadedRespectMemoryAlerts
         self.useLossyTextureCompression = loadedUseLossyTextureCompression
@@ -1820,16 +1679,13 @@ class AppModel {
         // Load saved views and window groups from UserDefaults
         loadSavedViews()
         loadSavedVideoViews()
+        // Slideshow profiles first: loading the window groups drops windows
+        // whose profile is gone.
+        loadSlideshowConfigs()
         loadSavedWindowGroups()
-        loadSavedRemoteConfigs()
-        modTagManager.load()
 
         // Apply default views on startup
         applyDefaultViewsOnStartup()
-
-        // Start device telemetry if Console (dev mode) was already enabled —
-        // property didSet doesn't fire for in-init assignment.
-        updateDeviceTelemetry()
 
         // Same reason: the server settings were assigned during phase-1 init,
         // so their observers never ran and nothing registered the credentials.
@@ -1896,11 +1752,6 @@ class AppModel {
                     for model in self.activeRemoteViewerModels.values {
                         model.trimForMemoryPressure()
                     }
-                    SlideshowSyncHub.shared.emitTelemetryLog(
-                        level: "warning",
-                        domain: "memory",
-                        message: "Memory warning — trimmed \(self.activeRemoteViewerModels.count) slideshow window(s), \(self.openPhotoWindowCount) photo window(s)"
-                    )
                 } else {
                     AppLogger.appModel.warning("Memory warning received — ignored (Respect System Memory Alerts is off)")
                 }
@@ -2194,76 +2045,41 @@ class AppModel {
            var groups = try? JSONDecoder().decode([SavedWindowGroup].self, from: data) {
             for groupIndex in groups.indices {
                 // Drop entries this build can't restore (a kind written by a
-                // newer version) rather than showing dead tiles, and re-resolve
-                // local file URLs — the app sandbox container UUID changes on
-                // every launch, so persisted absolute file URLs go stale.
+                // newer version, or a window of a RoboFrame or web-page profile,
+                // which no longer exist) rather than showing dead tiles, and
+                // re-resolve local file URLs — the app sandbox container UUID
+                // changes on every launch, so persisted absolute file URLs go stale.
                 groups[groupIndex].entries = groups[groupIndex].entries
-                    .filter(\.isRestorable)
+                    .filter { $0.isRestorable && ($0.kind != .remote || remoteViewerConfig(id: $0.remoteConfigId!) != nil) }
                     .map { $0.resolvingLocalFileURLs() }
             }
+            groups.removeAll { $0.entries.isEmpty }
             savedWindowGroups = groups
             persistSavedWindowGroups()
             AppLogger.windowState.info("Loaded \(groups.count, privacy: .public) saved window groups")
         }
     }
 
-    private func loadSavedRemoteConfigs() {
-        if let data = UserDefaults.standard.data(forKey: "savedRemoteConfigs"),
-           let configs = try? JSONDecoder().decode([RemoteViewerConfig].self, from: data) {
-            savedRemoteConfigs = configs
-            AppLogger.remoteViewer.info("Loaded \(configs.count, privacy: .public) saved remote configs")
-            refreshAllRemoteHistoryStores()
-        }
-
-        loadImplicitSlideshowConfig(key: Self.gallerySlideshowConfigKey) { self.gallerySlideshowConfig = $0 }
-        loadImplicitSlideshowConfig(key: Self.videoSlideshowConfigKey) { self.videoSlideshowConfig = $0 }
-        adoptStrandedImplicitSlideshowConfigs()
+    private func loadSlideshowConfigs() {
+        loadSlideshowConfig(key: Self.gallerySlideshowConfigKey) { self.gallerySlideshowConfig = $0 }
+        loadSlideshowConfig(key: Self.videoSlideshowConfigKey) { self.videoSlideshowConfig = $0 }
+        removeRoboFrameViewerDefaults()
     }
 
-    private func loadImplicitSlideshowConfig(key: String, assign: (RemoteViewerConfig) -> Void) {
+    private func loadSlideshowConfig(key: String, assign: (RemoteViewerConfig) -> Void) {
         guard let data = UserDefaults.standard.data(forKey: key),
-              var config = try? JSONDecoder().decode(RemoteViewerConfig.self, from: data) else { return }
-        // These slots are always the app-content slideshow, whatever mode they
-        // were stored with — they predate `.appGallery`, and a `.slideshow`
-        // profile with no endpoint is refused now.
-        config.mode = .appGallery
+              let config = try? JSONDecoder().decode(RemoteViewerConfig.self, from: data) else { return }
         assign(config)
     }
 
-    /// Reclaim the gallery/video slideshow profiles that older builds leaked
-    /// into the saved list.
-    ///
-    /// Those two profiles were never persisted in their own right, so each
-    /// launch minted a fresh one, and the first ornament tweak in the resulting
-    /// window appended it to `savedRemoteConfigs` — one throwaway row per
-    /// launch, in the list that's supposed to hold profiles the user made. The
-    /// newest of each kind becomes the profile for its slot (so its display
-    /// settings survive) and the rest are dropped. Matched narrowly: our own
-    /// name, blank endpoint, slideshow mode.
-    private func adoptStrandedImplicitSlideshowConfigs() {
-        func reclaim(name: String, slot: RemoteViewerConfig?) -> RemoteViewerConfig? {
-            let stranded = savedRemoteConfigs.filter {
-                $0.name == name && $0.mode == .slideshow && $0.apiEndpoint.isEmpty
-            }
-            guard !stranded.isEmpty else { return nil }
-            savedRemoteConfigs.removeAll { config in stranded.contains { $0.id == config.id } }
-            AppLogger.remoteViewer.info(
-                "Reclaimed \(stranded.count, privacy: .public) stranded “\(name, privacy: .public)” config(s) from the saved list"
-            )
-            // A slot restored from its own key wins — it's the one the
-            // slideshow has actually been using since the leak was fixed.
-            guard slot == nil, var adopted = stranded.max(by: { $0.savedDate < $1.savedDate }) else {
-                return nil
-            }
-            adopted.mode = .appGallery
-            return adopted
-        }
-
-        if let adopted = reclaim(name: "Gallery Slideshow", slot: gallerySlideshowConfig) {
-            gallerySlideshowConfig = adopted
-        }
-        if let adopted = reclaim(name: "Video Slideshow", slot: videoSlideshowConfig) {
-            videoSlideshowConfig = adopted
+    /// What the RoboFrame viewer persisted. Nothing reads it any more, and the
+    /// saved profiles held RoboFrame access tokens, so it isn't left behind.
+    private func removeRoboFrameViewerDefaults() {
+        for key in [
+            "savedRemoteConfigs", "enableRemoteViewer", "slideshowShowSensors",
+            "modTagManager.modTagLists", "modTagManager.defaultIndex", "modTagManager.lastActiveIndex",
+        ] {
+            UserDefaults.standard.removeObject(forKey: key)
         }
     }
 
@@ -2282,7 +2098,7 @@ class AppModel {
     ///
     /// Sizes come from `RestoredWindowTracker`, which every window type writes
     /// its settled size into: it's the one store that's already kept in lockstep
-    /// with the live geometry for photo, video and Remote windows alike. A window
+    /// with the live geometry for photo, video and slideshow windows alike. A window
     /// that hasn't reported a size yet yields `nil`, and restores at its natural
     /// size rather than a guess.
     var openWindowEntries: [SavedWindowEntry] {
@@ -2308,26 +2124,11 @@ class AppModel {
             entries.append(.remote(
                 configId: config.id,
                 name: config.name,
-                detail: Self.remoteIdentityDetail(for: config),
-                isWebPage: config.mode == .webPage,
                 size: RestoredWindowTracker.windowSize(for: value.id)
             ))
         }
 
         return entries
-    }
-
-    /// Short identity for a Remote profile — the RoboFrame device id for a
-    /// slideshow, the page host for a pinned web page. Mirrors what each
-    /// window's ornament shows so a saved entry and a live window read alike.
-    static func remoteIdentityDetail(for config: RemoteViewerConfig) -> String? {
-        if config.mode == .webPage {
-            return config.resolvedWebPageURL?.host ?? config.webPageURL
-        }
-        let deviceId = config.wsDeviceId.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !deviceId.isEmpty { return deviceId }
-        if config.apiEndpoint.trimmingCharacters(in: .whitespaces).isEmpty { return "Gallery" }
-        return URL(string: config.apiEndpoint)?.host
     }
 
     // MARK: - Saved Window Group Mutations
@@ -2549,7 +2350,6 @@ class AppModel {
             autoHideDelay: autoHideDelay,
             slideshowDelay: slideshowDelay,
             slideshowShowClock: slideshowShowClock,
-            slideshowShowSensors: slideshowShowSensors,
             slideshowUseAspectRatio: slideshowUseAspectRatio,
             slideshowEnableKenBurns: slideshowEnableKenBurns,
             slideshowEnableDynamicBrightness: slideshowEnableDynamicBrightness,
@@ -2569,19 +2369,10 @@ class AppModel {
             fullyImmersive3DMode: fullyImmersive3DMode,
             showDebugConsole: showDebugConsole,
             respectMemoryAlerts: respectMemoryAlerts,
-            enableRemoteViewer: enableRemoteViewer,
             librarySource: librarySource.rawValue,
             savedViews: savedViews,
             savedVideoViews: savedVideoViews,
             savedWindowGroups: savedWindowGroups,
-            savedRemoteConfigs: savedRemoteConfigs,
-            // The tag list (catalog and current selection) is fully
-            // server-tracked, so nothing about it is exported. These legacy
-            // global fields are left nil for backward-compatible decoding of
-            // older backups.
-            tagLists: nil,
-            tagListDefaultIndex: nil,
-            tagListLastActiveIndex: nil,
             video3DSettings: video3DData,
             imageEnhancementConvertedURLs: imageEnhancementData.convertedURLs,
             imageEnhancementLastViewingModes: imageEnhancementData.lastViewingModes,
@@ -2618,7 +2409,6 @@ class AppModel {
         if let v = backup.autoHideDelay { autoHideDelay = v }
         if let v = backup.slideshowDelay { slideshowDelay = v }
         if let v = backup.slideshowShowClock { slideshowShowClock = v }
-        if let v = backup.slideshowShowSensors { slideshowShowSensors = v }
         if let v = backup.slideshowUseAspectRatio { slideshowUseAspectRatio = v }
         if let v = backup.slideshowEnableKenBurns { slideshowEnableKenBurns = v }
         if let v = backup.slideshowEnableDynamicBrightness { slideshowEnableDynamicBrightness = v }
@@ -2638,7 +2428,6 @@ class AppModel {
         if let v = backup.fullyImmersive3DMode { fullyImmersive3DMode = v }
         if let v = backup.showDebugConsole { showDebugConsole = v }
         if let v = backup.respectMemoryAlerts { respectMemoryAlerts = v }
-        if let v = backup.enableRemoteViewer { enableRemoteViewer = v }
         if let v = backup.librarySource.flatMap(LibrarySource.init(rawValue:)) { librarySource = v }
         if let raw = backup.thumbnailStyle, let style = ThumbnailStyle(rawValue: raw) { thumbnailStyle = style }
         if let raw = backup.galleryGridStyle, let style = GalleryGridStyle(rawValue: raw) { galleryGridStyle = style }
@@ -2672,13 +2461,6 @@ class AppModel {
             savedWindowGroups = v
             persistSavedWindowGroups()
         }
-        if let v = backup.savedRemoteConfigs {
-            savedRemoteConfigs = v
-        }
-        // Tag list selection is per-profile now and travels inside
-        // savedRemoteConfigs. The legacy global `tagListDefaultIndex` from
-        // older backups is intentionally ignored (it can't sensibly map onto
-        // a specific profile, and per-profile values already restored above).
 
         // Actor-based trackers
         if let settings = backup.video3DSettings {
@@ -2960,8 +2742,7 @@ class AppModel {
     /// network. Gates the local-network permission prewarm so a Photos-only
     /// user is never prompted for access the app will not use.
     var usesLocalNetworkFeatures: Bool {
-        if hasStashServer { return true }
-        return savedRemoteConfigs.contains { !$0.apiEndpoint.isEmpty }
+        hasStashServer
     }
 
     /// The library sources currently selectable. Photos and Local need no

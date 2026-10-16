@@ -39,23 +39,21 @@ final class SharedTabBarUITests: XCTestCase {
         }
     }
 
-    /// Remote and Console are developer tabs, and hiding them is what keeps the
-    /// bar down to a usable width for everyone else.
+    /// Console is a developer tab, and hiding it is what keeps the bar down to
+    /// a usable width for everyone else.
     func testDeveloperTabsAreHiddenUntilEnabled() {
         let app = AppLauncher.launch(welcome: .dismissed)
         app.buttons[RAVEA11y.tab("pictures")].require("The Pictures tab")
 
         XCTAssertFalse(app.buttons[RAVEA11y.tab("console")].exists, "Console should be hidden by default")
-        XCTAssertFalse(app.buttons[RAVEA11y.tab("remote")].exists, "Remote should be hidden by default")
     }
 
     func testDeveloperTabsAppearWhenTheSettingIsOn() {
         let app = AppLauncher.launch(
             welcome: .dismissed,
-            defaults: ["showDebugConsole": "1", "enableRemoteViewer": "1"]
+            defaults: ["showDebugConsole": "1"]
         )
         app.buttons[RAVEA11y.tab("console")].require("The Console tab, with the setting on")
-        XCTAssertTrue(app.buttons[RAVEA11y.tab("remote")].exists, "The Remote tab, with the setting on")
     }
 
     func testSwitchingTabsChangesWhatIsShown() {

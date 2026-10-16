@@ -1,7 +1,8 @@
 /*
  Hypnos - Remote Post Model
 
- Represents an image post from the RoboFrame API.
+ One item in a slideshow: a picture or video from the app's own library,
+ in the shape the slideshow engine queues and displays.
  */
 
 import Foundation
