@@ -38,8 +38,14 @@ struct YouTubeTabView: View {
     /// nil until the account has been looked at, which picks the first one.
     @State private var shelf: Shelf?
     @State private var browser: YouTubeBrowserPurpose?
+    @State private var watchHistory = YouTubeWatchHistory.shared
+    /// Loads YouTube's history page in a second hidden page once a day, to
+    /// import what was watched in YouTube's own apps.
+    @State private var importModel: YouTubeFeedModel?
     #if os(tvOS)
     @State private var presentedVideo: GalleryVideo?
+    @State private var presentedStart: Double?
+    @State private var tvReporter: YouTubeWatchReporter?
     #endif
     @OpenWindowProxy private var openWindow
 
@@ -83,8 +89,23 @@ struct YouTubeTabView: View {
             if let session = feedModel.session {
                 YouTubePageHost(session: session)
             }
+            if let session = importModel?.session {
+                YouTubePageHost(session: session)
+            }
         }
-        .task { await syncWithAccount() }
+        .task {
+            watchHistory.refreshTiles()
+            watchHistory.flush()
+            await syncWithAccount()
+            await importYouTubeHistoryIfDue()
+        }
+        // YouTube's own history shelf, whenever it's shown, is imported too.
+        .task(id: feedModel.feed == .history && feedModel.phase == .loaded ? feedModel.videos.count : 0) {
+            guard feedModel.feed == .history, feedModel.phase == .loaded, !feedModel.videos.isEmpty else { return }
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            await watchHistory.importFromYouTube(feedModel.videos)
+        }
         .youTubeBrowser($browser) {
             Task { await browserClosed() }
         }
@@ -102,7 +123,13 @@ struct YouTubeTabView: View {
         }
         #if os(tvOS)
         .fullScreenCover(item: $presentedVideo) { video in
-            TVVideoPlayerView(video: video)
+            TVVideoPlayerView(video: video, onProgress: { position, duration, paused in
+                tvReporter?.update(position: position, duration: duration, isPaused: paused)
+            }, startSeconds: presentedStart)
+            .onDisappear {
+                tvReporter?.finish()
+                tvReporter = nil
+            }
         }
         #endif
     }
@@ -141,7 +168,8 @@ struct YouTubeTabView: View {
                 ForEach(YouTubeFeed.allCases) { feed in
                     shelfButton(feed.title, systemImage: feed.systemImage, for: .feed(feed))
                 }
-                shelfButton("Recently Watched", systemImage: "play.circle", for: .recent)
+                shelfButton(watchHistory.isAvailable ? "Watched" : "Recently Watched",
+                            systemImage: "play.circle", for: .recent)
             }
             .padding(.vertical, 8)
         }
@@ -211,6 +239,51 @@ struct YouTubeTabView: View {
 
     @ViewBuilder
     private var recentContent: some View {
+        if watchHistory.isAvailable {
+            serverHistoryContent
+        } else {
+            deviceHistoryContent
+        }
+    }
+
+    /// Everything watched on every device, from the YouTube backend.
+    @ViewBuilder
+    private var serverHistoryContent: some View {
+        let videos = watchHistory.recent.compactMap(\.summary)
+        Group {
+            if videos.isEmpty, watchHistory.isLoadingRecent {
+                ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
+            } else if videos.isEmpty, let error = watchHistory.recentError {
+                ContentUnavailableView {
+                    Label("Watched Isn't Available", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Try Again") { Task { await watchHistory.loadRecent() } }
+                }
+                .padding(.top, 40)
+            } else if videos.isEmpty {
+                ContentUnavailableView(
+                    "Nothing Watched Yet",
+                    systemImage: "play.rectangle",
+                    description: Text("Videos you watch on any of your devices show here, with where you left them.")
+                )
+                .padding(.top, 40)
+            } else {
+                Text("Watched").font(.title2.bold())
+                grid(videos, removable: true)
+                if watchHistory.recentNext != nil {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .task(id: videos.count) { await watchHistory.loadRecent(more: true) }
+                }
+            }
+        }
+        .task { await watchHistory.loadRecent() }
+    }
+
+    @ViewBuilder
+    private var deviceHistoryContent: some View {
         if history.videos.isEmpty {
             ContentUnavailableView(
                 "Search YouTube",
@@ -307,6 +380,9 @@ struct YouTubeTabView: View {
                         if removable {
                             Button("Remove from History", systemImage: "trash", role: .destructive) {
                                 history.remove(video.id)
+                                if watchHistory.isAvailable {
+                                    Task { await watchHistory.remove(video.id) }
+                                }
                             }
                         }
                     }
@@ -383,21 +459,48 @@ struct YouTubeTabView: View {
                 if let title = resolution.video.title { recorded.title = title }
                 if recorded.lengthSeconds == nil { recorded.lengthSeconds = resolution.video.duration }
                 history.record(recorded)
-                present(resolution.video)
+                watchHistory.noteOpening(recorded)
+                let start = await watchHistory.resumePosition(for: summary.id)
+                present(resolution.video, startingAt: start)
             } catch {
                 playError = error.localizedDescription
             }
         }
     }
 
-    private func present(_ video: GalleryVideo) {
+    /// `start` is where the watch history says it was left.
+    private func present(_ video: GalleryVideo, startingAt start: Double?) {
         #if os(tvOS)
+        presentedStart = start
+        tvReporter = YouTubeWatchReporter(video: video)
         presentedVideo = video
         #elseif os(macOS)
+        LibraryResumePoints.set(start, for: video.identity)
         openWindow(id: "video-detail", value: video)
         #else
-        openWindow(id: "video-detail", value: VideoWindowValue(video: video, galleryVideos: [video]))
+        var value = VideoWindowValue(video: video, galleryVideos: [video])
+        value.startSeconds = start
+        openWindow(id: "video-detail", value: value)
         #endif
+    }
+
+    /// Once a day, signed in: YouTube's history page, loaded in a second
+    /// hidden page and scrolled a little, so what was watched in YouTube's
+    /// own apps reaches the watch history.
+    private func importYouTubeHistoryIfDue() async {
+        guard importModel == nil, watchHistory.isImportDue, account.isSignedIn == true else { return }
+        let model = YouTubeFeedModel()
+        importModel = model
+        defer { importModel = nil }
+        model.show(.history)
+        for _ in 0..<40 {
+            try? await Task.sleep(for: .seconds(1))
+            if Task.isCancelled || (model.phase != .loading && model.phase != .loaded) { return }
+            if model.phase == .loaded, model.videos.count >= 60 || !model.hasMore { break }
+            model.loadMore()
+        }
+        guard model.phase == .loaded else { return }
+        await watchHistory.importFromYouTube(model.videos)
     }
 
     // MARK: - Metrics
@@ -432,6 +535,7 @@ struct YouTubeTabView: View {
 struct YouTubeVideoCard: View {
     let video: YouTubeVideoSummary
     @State private var uploadDates = YouTubeUploadDates.shared
+    @State private var watchHistory = YouTubeWatchHistory.shared
 
     private static let dayStyle = Date.ISO8601FormatStyle(timeZone: .current).year().month().day()
 
@@ -450,6 +554,11 @@ struct YouTubeVideoCard: View {
                         .padding(.vertical, 2)
                         .background(.black.opacity(0.75), in: .rect(cornerRadius: 4))
                         .padding(6)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if let fraction = watchedFraction {
+                    watchedBar(fraction)
                 }
             }
             .clipShape(.rect(cornerRadius: 12))
@@ -471,8 +580,29 @@ struct YouTubeVideoCard: View {
             .lineLimit(1)
         }
         .contentShape(.rect)
-        .onAppear { uploadDates.want(video.id) }
+        .onAppear {
+            uploadDates.want(video.id)
+            watchHistory.want(video.id)
+        }
         .onDisappear { uploadDates.drop(video.id) }
+    }
+
+    /// How far it was watched: the watch history's position, or failing
+    /// that YouTube's own bar on a signed-in page.
+    private var watchedFraction: Double? {
+        if let entry = watchHistory.entries[video.id] { return entry.fraction }
+        return video.watchedFraction.flatMap { $0 > 0 ? $0 : nil }
+    }
+
+    /// YouTube's red bar along the bottom of the thumbnail.
+    private func watchedBar(_ fraction: Double) -> some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Rectangle().fill(.white.opacity(0.35))
+                Rectangle().fill(.red).frame(width: proxy.size.width * max(fraction, 0.03))
+            }
+        }
+        .frame(height: 4)
     }
 
     private var lengthLabel: String? {

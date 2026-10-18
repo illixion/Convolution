@@ -51,6 +51,9 @@ enum YouTubePageScript {
             var channel: String?
             var duration: String?
             var metadata: [String]?
+            /// YouTube's red watched bar over the thumbnail, 0–1 (signed-in
+            /// pages only).
+            var progress: Double?
         }
 
         var cards: [Card]
@@ -148,7 +151,16 @@ enum YouTubePageScript {
                 : [];
             }
             metadata = metadata.filter((s) => s !== channel && !durationPattern.test(s));
-            return { id, title, channel, duration, metadata: [...new Set(metadata)] };
+            // YouTube's red watched bar: its fill is an inline width.
+            const bar = card.querySelector([
+              '.thumbnail-overlay-resume-playback-progress',
+              '[class*="ResumePlaybackProgress"]',
+              '[class*="resume-playback-progress"]',
+              '[class*="WatchedProgressBarSegment"]'
+            ].join(','));
+            const width = bar && parseFloat(bar.style.width);
+            const progress = Number.isFinite(width) ? Math.min(Math.max(width / 100, 0), 1) : null;
+            return { id, title, channel, duration, metadata: [...new Set(metadata)], progress };
           };
 
           // `ytcfg` is the page's, so a content world can't see it; the
@@ -181,7 +193,7 @@ enum YouTubePageScript {
               const item = card && extract(card);
               if (!item || seen.has(item.id)) return;
               seen.add(item.id);
-              const key = [item.title, item.channel, item.duration, item.metadata.join('|')].join('\\u0001');
+              const key = [item.title, item.channel, item.duration, item.metadata.join('|'), item.progress].join('\\u0001');
               if (sent.get(item.id) === key) return;
               sent.set(item.id, key);
               cards.push(item);

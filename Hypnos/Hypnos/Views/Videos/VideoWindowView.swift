@@ -596,8 +596,25 @@ struct VideoWindowView: View {
                 currentTime: { windowModel.video.identity == reported.identity ? windowModel.currentTime : nil },
                 isPaused: { windowModel.isPaused }
             )
+            #if HYPNOS_YOUTUBE
+            await followYouTubeProgress(reported)
+            #endif
         }
     }
+
+    #if HYPNOS_YOUTUBE
+    /// A YouTube video's progress, to the watch history on the YouTube
+    /// backend (`YouTubeWatchHistory`); never to YouTube.
+    private func followYouTubeProgress(_ reported: GalleryVideo) async {
+        guard let reporter = YouTubeWatchReporter(video: reported) else { return }
+        defer { reporter.finish() }
+        while !Task.isCancelled, windowModel.video.identity == reported.identity {
+            reporter.update(position: windowModel.currentTime, duration: windowModel.duration,
+                            isPaused: windowModel.isPaused)
+            try? await Task.sleep(for: .seconds(1))
+        }
+    }
+    #endif
 
     private var skipSegmentButton: SkipSegmentButton? {
         guard let segment = windowModel.offeredSegment else { return nil }

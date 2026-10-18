@@ -54,6 +54,9 @@ struct YouTubeVideoSummary: Identifiable, Hashable, Codable, Sendable {
     var lengthSeconds: Double?
     var viewCountText: String?
     var publishedText: String?
+    /// How far YouTube's own history says it was watched, 0–1, from a
+    /// signed-in page's red bar.
+    var watchedFraction: Double?
 
     var thumbnailURL: URL { YouTubeInnertube.thumbnailURL(for: id) }
 }

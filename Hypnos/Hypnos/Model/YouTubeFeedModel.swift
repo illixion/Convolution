@@ -193,7 +193,8 @@ extension YouTubePageScript.Payload.Card {
             lengthText: duration,
             lengthSeconds: duration.flatMap(YouTubeInnertube.seconds(fromClock:)),
             viewCountText: views,
-            publishedText: rest.isEmpty ? nil : rest.joined(separator: " · ")
+            publishedText: rest.isEmpty ? nil : rest.joined(separator: " · "),
+            watchedFraction: progress
         )
     }
 }

@@ -43,6 +43,10 @@ struct MacVideoPlayerWindow: View {
     @State private var failureMessage: String?
     /// Library (Jellyfin) videos only: watch progress back to the server.
     @State private var progressReporter: GenericProgressReporter?
+    #if HYPNOS_YOUTUBE
+    /// YouTube videos only: progress to the watch history on the backend.
+    @State private var youTubeReporter: YouTubeWatchReporter?
+    #endif
     @State private var timeObserver: Any?
     /// Skip Intro / Skip Credits for a Library video.
     @State private var skipper = MediaSegmentSkipper()
@@ -71,6 +75,10 @@ struct MacVideoPlayerWindow: View {
                         segmentObserver = nil
                         progressReporter?.finish()
                         progressReporter = nil
+                        #if HYPNOS_YOUTUBE
+                        youTubeReporter?.finish()
+                        youTubeReporter = nil
+                        #endif
                     }
             } else if let failureMessage {
                 ContentUnavailableView(
@@ -110,6 +118,19 @@ struct MacVideoPlayerWindow: View {
                 }
             }
         }
+        #if HYPNOS_YOUTUBE
+        if timeObserver == nil, let reporter = YouTubeWatchReporter(video: video) {
+            youTubeReporter = reporter
+            timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 1),
+                                                          queue: .main) { [weak player] time in
+                guard let player else { return }
+                MainActor.assumeIsolated {
+                    reporter.update(position: time.seconds, duration: player.currentItem?.duration.seconds,
+                                    isPaused: player.rate == 0)
+                }
+            }
+        }
+        #endif
         await watchSegments(player)
     }
 
