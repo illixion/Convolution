@@ -672,8 +672,7 @@ struct CinemaButton: View {
                     close()
                     Task { await cinema.setMode(mode, for: owner, open: openImmersiveSpace, dismiss: dismissImmersiveSpace) }
                 } label: {
-                    Label(mode.title, systemImage: "checkmark")
-                        .labelStyle(CheckmarkLabelStyle(isChecked: mode == cinema.mode(for: owner)))
+                    PlayerChoiceRow(mode.title, isChecked: mode == cinema.mode(for: owner))
                 }
                 .disabled(mode == .bigScreen && !bigScreenAvailable)
             }
@@ -685,8 +684,7 @@ struct CinemaButton: View {
                                                open: openImmersiveSpace, dismiss: dismissImmersiveSpace)
                 }
             } label: {
-                Label("Head-Locked Sound", systemImage: "checkmark")
-                    .labelStyle(CheckmarkLabelStyle(isChecked: cinema.headLocked))
+                PlayerChoiceRow("Head-Locked Sound", isChecked: cinema.headLocked)
             }
             .help("The sound turns with your head instead of staying in the room")
         }

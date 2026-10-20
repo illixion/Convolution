@@ -942,8 +942,7 @@ struct FilmTransport: View {
                     close()
                     if stereo != stereoEnabled { toggle() }
                 } label: {
-                    Label(stereo ? stereoMode : "2D", systemImage: "checkmark")
-                        .labelStyle(CheckmarkLabelStyle(isChecked: stereo == stereoEnabled))
+                    PlayerChoiceRow(stereo ? stereoMode : "2D", isChecked: stereo == stereoEnabled)
                 }
             }
         }
@@ -1234,16 +1233,3 @@ struct FilmTelemetry: View {
     }
 }
 
-/// A menu row whose checkmark shows only on the chosen one, keeping the
-/// titles aligned.
-struct CheckmarkLabelStyle: LabelStyle {
-    let isChecked: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        Label {
-            configuration.title
-        } icon: {
-            configuration.icon.opacity(isChecked ? 1 : 0)
-        }
-    }
-}

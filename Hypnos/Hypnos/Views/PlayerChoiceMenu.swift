@@ -14,6 +14,11 @@ import SwiftUI
 ///
 /// With a `badge`, the bar shows the value in force ("1080p", "AI 3D") in
 /// place of the icon, so it reads without opening the menu.
+///
+/// A choice reports the menu closed itself: a Menu whose choice opens or
+/// closes an immersive space never reported closing (Cinema, device,
+/// 2026-10-20), and the video window, still counting a real menu open, kept
+/// the AI 3D picture receded and deaf to the tap that would have cleared it.
 struct PlayerChoiceMenu<Items: View>: View {
     let title: String
     let systemImage: String
@@ -21,7 +26,8 @@ struct PlayerChoiceMenu<Items: View>: View {
     var badgeIsActive = false
     var help: String?
     var onOpenChanged: (Bool) -> Void = { _ in }
-    /// The rows; each calls the passed closure to close the popover first.
+    /// The rows; each calls the passed closure first, which closes the
+    /// popover, or reports the menu closed.
     @ViewBuilder let items: (_ close: @escaping () -> Void) -> Items
 
     @Environment(\.ravePlayerControlsInMenu) private var inMenu
@@ -54,7 +60,7 @@ struct PlayerChoiceMenu<Items: View>: View {
 
     private var menu: some View {
         Menu {
-            Group { items {} }
+            Group { items { onOpenChanged(false) } }
                 // Silent inside the bar's More menu (tvOS), which reports for it.
                 .ravePlayerMenuReporting(onOpenChanged)
         } label: {
@@ -66,6 +72,38 @@ struct PlayerChoiceMenu<Items: View>: View {
             }
         }
         .help(help ?? title)
+    }
+}
+
+/// A choice with a checkmark when it is the one in force. A system menu
+/// draws whatever icon a label has, a hidden one included, so in a menu the
+/// row has an icon only when checked (the menu aligns the titles itself); in
+/// a popover the checkmark is hidden instead, keeping the titles aligned.
+struct PlayerChoiceRow: View {
+    let title: String
+    let isChecked: Bool
+
+    init(_ title: String, isChecked: Bool) {
+        self.title = title
+        self.isChecked = isChecked
+    }
+
+    @Environment(\.ravePlayerControlsInMenu) private var inMenu
+
+    var body: some View {
+        #if os(tvOS)
+        // tvOS has no popovers: always a system menu.
+        let inPopover = false
+        #else
+        let inPopover = inMenu
+        #endif
+        if inPopover {
+            Label { Text(title) } icon: { Image(systemName: "checkmark").opacity(isChecked ? 1 : 0) }
+        } else if isChecked {
+            Label(title, systemImage: "checkmark")
+        } else {
+            Text(title)
+        }
     }
 }
 
