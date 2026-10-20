@@ -277,11 +277,11 @@ struct HypnosApp: App {
         .immersionStyle(selection: .constant(.mixed), in: .mixed)
         .immersiveEnvironmentBehavior(.coexist)
 
-        // The film player's cinema: the object audio around the wearer's
-        // head and, for Big Screen, the picture on a screen further and
-        // larger than a window may go (see FilmCinema.swift).
-        ImmersiveSpace(id: FilmCinema.spaceID) {
-            FilmCinemaSpaceView()
+        // The players' cinema: the film's object audio around the wearer's
+        // head and, for Big Screen, a picture on a screen further and larger
+        // than a window may go (see Views/Cinema/Cinema.swift).
+        ImmersiveSpace(id: Cinema.spaceID) {
+            CinemaSpaceView()
         }
         .immersionStyle(selection: .constant(.mixed), in: .mixed)
         .immersiveEnvironmentBehavior(.coexist)

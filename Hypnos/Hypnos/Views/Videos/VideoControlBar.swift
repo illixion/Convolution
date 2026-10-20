@@ -6,10 +6,13 @@ import SwiftUI
 /// closures always belong to the active renderer, never to the UI.
 struct VideoControlBar<Accessories: View>: View {
     @Bindable var windowModel: VideoWindowModel
+    private let pinned: AnyView?
     private let accessories: Accessories
 
-    init(windowModel: VideoWindowModel, @ViewBuilder accessories: () -> Accessories) {
+    /// - Parameter pinned: stays on the bar when the accessories collapse into "More".
+    init(windowModel: VideoWindowModel, pinned: AnyView? = nil, @ViewBuilder accessories: () -> Accessories) {
         self.windowModel = windowModel
+        self.pinned = pinned
         self.accessories = accessories()
     }
 
@@ -45,7 +48,8 @@ struct VideoControlBar<Accessories: View>: View {
             layout: Self.layout,
             onMenuChanged: { open in windowModel.ornamentMenu("More", opened: open) },
             setVolume: { windowModel.setVolume($0) },
-            menuDismissal: windowModel.menuDismissals
+            menuDismissal: windowModel.menuDismissals,
+            pinned: pinned
         ) {
             accessories
         }

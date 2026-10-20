@@ -184,6 +184,9 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             playbackModel.setVolumeCommand = { [weak coordinator] volume in
                 coordinator?.setVolume(Float(volume))
             }
+            coordinator.onPlayerChanged = { [weak playbackModel] player in
+                playbackModel?.noteNativePlayer(player)
+            }
             coordinator.onPlaybackUpdate = { [weak playbackModel] state in
                 playbackModel?.applyPlaybackState(
                     currentTime: state.currentTime,
@@ -240,6 +243,8 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         private var criteriaTask: Task<Void, Never>?
         var onVideoSizeKnown: ((CGSize) -> Void)?
         var onPlaybackUpdate: ((PlaybackState) -> Void)?
+        /// The AVPlayer, as each load makes one and teardown drops it.
+        var onPlayerChanged: ((AVPlayer?) -> Void)?
         var onPlaybackError: (() -> Void)?
         var startMuted = true
         var startVolume: Float = 1
@@ -327,6 +332,7 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             self.player = player
             self.playerItem = item
             self.videoOutput = output
+            onPlayerChanged?(player)
             usesSystemLayer = false
             showSystemLayer(false)
 
@@ -503,6 +509,7 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         }
 
         private func cleanupPlayer() {
+            if player != nil { onPlayerChanged?(nil) }
             if let timeObserver, let player {
                 player.removeTimeObserver(timeObserver)
             }

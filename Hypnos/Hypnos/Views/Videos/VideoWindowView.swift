@@ -141,6 +141,15 @@ struct VideoWindowView: View {
         return "\(video.id)_\(mode)_\(windowModel.playbackAttempt)"
     }
 
+    /// This window's picture is on the cinema's big screen.
+    private var cinemaShowsScreen: Bool {
+        #if os(visionOS)
+        Cinema.shared.showsScreen(for: .video(ObjectIdentifier(windowModel)))
+        #else
+        false
+        #endif
+    }
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
@@ -297,6 +306,9 @@ struct VideoWindowView: View {
                         ? windowModel.effectiveVideoAdjustments.opacity
                         : 1
                 )
+                // On the cinema's big screen: hidden, not removed, so its
+                // player keeps playing for the screen.
+                .opacity(cinemaShowsScreen ? 0 : 1)
                 .overlay {
                     // Transparent tap target over the video surface. Keep it
                     // present when chrome is visible too so tapping the video
@@ -338,6 +350,17 @@ struct VideoWindowView: View {
                 Spacer()
                     .frame(height: ornamentBottomPadding)
             }
+            #if os(visionOS)
+            .modifier(CinemaVideoWindowHook(windowModel: windowModel))
+            #endif
+
+            #if os(visionOS)
+            if cinemaShowsScreen {
+                CinemaBigScreenCard(owner: .video(ObjectIdentifier(windowModel))) {
+                    windowModel.toggleUIVisibility()
+                }
+            }
+            #endif
 
             if !appModel.allWindowsHidden, !windowModel.usesImmersiveStereo,
                windowModel.playbackFailure != nil || windowModel.isLoadStalled {

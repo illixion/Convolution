@@ -162,6 +162,18 @@ final class VideoWindowModel {
     @ObservationIgnored private var loadStallTask: Task<Void, Never>?
     static let loadStallTimeout: Duration = .seconds(20)
 
+    /// The native renderer's player, lent to the cinema's big screen. Set by
+    /// `NativeMetalVideoPlayerView` as it loads and tears down; observe
+    /// `nativePlayerGeneration` for changes.
+    @ObservationIgnored private(set) weak var nativePlayer: AVPlayer?
+    private(set) var nativePlayerGeneration = 0
+
+    func noteNativePlayer(_ player: AVPlayer?) {
+        guard nativePlayer !== player else { return }
+        nativePlayer = player
+        nativePlayerGeneration += 1
+    }
+
     /// Command hooks bound by WebVideoPlayerView.updateUIView (only when this
     /// model is passed as the player's `playbackModel`). They evaluate JS on
     /// the underlying <video> element.

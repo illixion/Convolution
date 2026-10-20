@@ -57,8 +57,19 @@ struct VideoOrnamentsView: View {
                 .padding(12).glassBackgroundEffect()
         } else {
             // The title is the window's own; the one-row bar has no room for it.
-            VideoControlBar(windowModel: windowModel) { ornamentItems(showsTitle: false) }
+            VideoControlBar(windowModel: windowModel, pinned: cinemaButton) { ornamentItems(showsTitle: false) }
         }
+    }
+
+    /// The Cinema button, kept on the bar.
+    private var cinemaButton: AnyView? {
+        #if os(visionOS)
+        AnyView(CinemaButton(owner: .video(ObjectIdentifier(windowModel)),
+                             bigScreenAvailable: windowModel.playbackRenderer == .nativeMetal || windowModel.canUseTranscodedStream,
+                             onOpenChanged: { windowModel.ornamentMenu("Cinema", opened: $0) }))
+        #else
+        nil
+        #endif
     }
 
     /// The window's feature buttons: inline on the bar, or grouped rows in

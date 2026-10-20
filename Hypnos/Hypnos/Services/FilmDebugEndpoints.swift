@@ -31,8 +31,9 @@ enum FilmDebugEndpoints {
                    + "isn't ready.") { _ in
                 reply()
             },
-            .query("filmCinema", "The film player's cinema space (visionOS): mode (window, roomSound, bigScreen), "
-                   + "whether the space is open and holds the picture, and in the space's metres the head, the film "
+            .query("filmCinema", "The players' cinema space (visionOS): its owner (film or a video window), mode "
+                   + "(window, roomSound, bigScreen), head-locked sound, whether the space is open and holds the "
+                   + "picture (and for a video window whether it lent its player), and in the space's metres the head, the film "
                    + "window, the room's centre and the screen, with the distances between them. A head that never "
                    + "appears means head tracking isn't running; a window that never appears means the window's "
                    + "pose in the space can't be read.") { _ in
@@ -225,6 +226,9 @@ enum FilmDebugEndpoints {
     }
 
     struct CinemaReply: Encodable {
+        var owner: String?
+        var headLocked: Bool
+        var screenPlayer: Bool
         var mode: String
         var open: Bool
         var screenAttached: Bool
@@ -240,13 +244,19 @@ enum FilmDebugEndpoints {
 
     private static func cinemaReply() -> CinemaReply {
         #if os(visionOS)
-        let cinema = FilmCinema.shared
+        let cinema = Cinema.shared
         func position(_ m: simd_float4x4?) -> SIMD3<Float>? { m.map { SIMD3($0.columns.3.x, $0.columns.3.y, $0.columns.3.z) } }
         func array(_ v: SIMD3<Float>?) -> [Float]? { v.map { [$0.x, $0.y, $0.z] } }
         let head = position(cinema.headPose)
         let window = position(cinema.windowPose)
         let screen = position(cinema.screenPose)
+        let owner: String? = switch cinema.owner {
+        case .film: "film"
+        case .video: "videoWindow"
+        case nil: nil
+        }
         return CinemaReply(
+            owner: owner, headLocked: cinema.headLocked, screenPlayer: cinema.screenPlayer != nil,
             mode: cinema.mode.rawValue, open: cinema.isOpen, screenAttached: cinema.screenAttached,
             status: cinema.status, head: array(head), window: array(window),
             room: array(position(cinema.roomPose)), screen: array(screen),
@@ -255,7 +265,8 @@ enum FilmDebugEndpoints {
             screenWidthMetres: cinema.screenPose == nil ? nil : cinema.screenWidth
         )
         #else
-        return CinemaReply(mode: "window", open: false, screenAttached: false, status: "visionOS only")
+        return CinemaReply(headLocked: false, screenPlayer: false, mode: "window", open: false, screenAttached: false,
+                           status: "visionOS only")
         #endif
     }
 
