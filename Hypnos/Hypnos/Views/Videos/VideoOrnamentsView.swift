@@ -484,11 +484,11 @@ struct VideoOrnamentsView: View {
 
                 // A stereo video plays live in the window; Immersive 3D
                 // downloads and converts it first for the immersive screen.
-                modeButton("3D", mode: .stereoscopic) {
+                modeButton(ViewMode.stereoscopic.title, mode: .stereoscopic) {
                     Task { await windowModel.enable3DMode() }
                 }
 
-                modeButton("Immersive 3D", mode: .immersive) {
+                modeButton(ViewMode.immersive.title, mode: .immersive) {
                     Task { await windowModel.enable3DMode(immersive: true) }
                 }
 
@@ -512,11 +512,21 @@ struct VideoOrnamentsView: View {
                 Divider()
 
                 // Named apart from "3D": this is depth estimated from a 2D
-                // picture, not a 3D movie's own two eyes.
-                modeButton(ViewMode.pseudo3D.title, subtitle: windowModel.pseudo3DAvailable
-                           ? "Adds depth to a 2D video" : "Not available for this video",
-                           mode: .pseudo3D) {
-                    windowModel.requestPseudo3D()
+                // picture, not a 3D movie's own two eyes. Two items rather
+                // than one with a follow-up prompt, so Pre-Processed can be
+                // chosen while Real-Time is already playing: the conversion
+                // runs and the window switches over at the safe point.
+                modeButton(ViewMode.ai3DRealtime.title, subtitle: windowModel.pseudo3DAvailable
+                           ? "Starts instantly" : "Not available for this video",
+                           mode: .ai3DRealtime) {
+                    windowModel.requestRealtimePseudo3D()
+                }
+                .disabled(!windowModel.pseudo3DAvailable)
+
+                modeButton(ViewMode.ai3DPreprocessed.title, subtitle: windowModel.pseudo3DAvailable
+                           ? "Analyzes the video first, then plays smoother" : nil,
+                           mode: .ai3DPreprocessed) {
+                    windowModel.requestPreprocessedPseudo3D()
                 }
                 .disabled(!windowModel.pseudo3DAvailable)
 
@@ -569,27 +579,35 @@ struct VideoOrnamentsView: View {
     /// The three window viewing modes, mutually exclusive by construction
     /// (shouldUsePseudo3D already excludes shouldUse3DMode).
     private enum ViewMode {
-        case flat, stereoscopic, immersive, pseudo3D
+        case flat, stereoscopic, immersive, ai3DRealtime, ai3DPreprocessed
 
-        /// The menu item's name, also shown beside the bar's icon.
+        /// The menu item's name. Variants go in parentheses after the
+        /// mode, as in the photo viewer's "RealityKit 3D (Immersive)".
         var title: String {
             switch self {
             case .flat: "2D"
             case .stereoscopic: "3D"
-            case .immersive: "Immersive 3D"
-            case .pseudo3D: "AI 3D"
+            case .immersive: "3D (Immersive)"
+            case .ai3DRealtime: "AI 3D (Real-Time)"
+            case .ai3DPreprocessed: "AI 3D (Pre-Processed)"
             }
         }
 
-        /// The bar's badge: the title, short enough for the bar.
-        var badge: String { self == .immersive ? "Immersive" : title }
+        /// The bar's badge: short enough for the bar.
+        var badge: String {
+            switch self {
+            case .flat, .stereoscopic: title
+            case .immersive: "Immersive"
+            case .ai3DRealtime, .ai3DPreprocessed: "AI 3D"
+            }
+        }
 
         var systemImage: String {
             switch self {
             case .flat: "rectangle"
             case .stereoscopic: "view.3d"
             case .immersive: "inset.filled.pano"
-            case .pseudo3D: "wand.and.sparkles"
+            case .ai3DRealtime, .ai3DPreprocessed: "wand.and.sparkles"
             }
         }
     }
@@ -597,7 +615,10 @@ struct VideoOrnamentsView: View {
     private var currentViewMode: ViewMode {
         if windowModel.usesImmersiveStereo { return .immersive }
         if windowModel.shouldUse3DMode { return .stereoscopic }
-        if windowModel.shouldUsePseudo3D { return .pseudo3D }
+        if windowModel.shouldUsePseudo3D {
+            if case .cached = windowModel.pseudo3DDepthMode { return .ai3DPreprocessed }
+            return .ai3DRealtime
+        }
         return .flat
     }
 

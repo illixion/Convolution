@@ -191,7 +191,8 @@ extension VideoWindowModel {
     /// what would help.
     func noteStereoPerformance(_ sample: StereoPerformance) {
         guard showsStereoPicture, !isPaused, !isScrubbing, !isChangingQuality,
-              Date.now >= stereoLoadGraceUntil, sample.isOverloaded else {
+              Date.now >= stereoLoadGraceUntil, sample.isOverloaded,
+              !isRealtimeAI3DSharingWithConversion else {
             stereoLoadStrikes = 0
             return
         }
@@ -224,11 +225,20 @@ extension VideoWindowModel {
         if choosesQuality {
             advice = "3D can't keep up with this video. Choose a lower quality for smooth playback."
         } else if isAI3D, case .realtime = pseudo3DDepthMode {
-            advice = "AI 3D can't keep up with this video. Pre-Process it for smooth 3D."
+            advice = "AI 3D can't keep up with this video. Choose AI 3D (Pre-Processed) for smooth 3D."
         } else {
             advice = "3D can't keep up with this video's resolution."
         }
         showQualityNotice(advice)
+    }
+
+    /// Real-time AI 3D while this video's own conversion runs: the two share
+    /// the Neural Engine until the converted depth takes over, so dropped
+    /// frames are expected and short-lived, and a lower quality wouldn't
+    /// cure them.
+    private var isRealtimeAI3DSharingWithConversion: Bool {
+        guard shouldUsePseudo3D, case .realtime = pseudo3DDepthMode else { return false }
+        return DepthConversionManager.shared.isProcessing(videoIdentity: video.identity)
     }
 
     /// The picture's height: as the pump measured it, else what the level

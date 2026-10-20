@@ -754,9 +754,49 @@ final class VideoWindowModel {
         showPseudo3DModePrompt = true
     }
 
+    /// ViewMode "AI 3D (Real-Time)": live inference, from 2D or from
+    /// pre-processed AI 3D.
+    func requestRealtimePseudo3D() {
+        guard !DepthModelStore.installedModelNames().isEmpty else {
+            showDepthModelSetup = true
+            return
+        }
+        engageRealtimePseudo3D()
+    }
+
+    /// ViewMode "AI 3D (Pre-Processed)". Offered from 2D and from real-time
+    /// AI 3D alike: a finished conversion engages at once; otherwise the
+    /// conversion starts while the window keeps playing as it was, and the
+    /// progressive monitor switches it to the converted depth at the safe
+    /// point. From real-time AI 3D that is an in-place swap of the depth
+    /// source, position and pause state kept.
+    func requestPreprocessedPseudo3D() {
+        if DepthCacheStore.engageEntry(videoIdentity: video.identity) != nil {
+            engageCachedPseudo3D()
+            return
+        }
+        if DepthModelStore.installedModelNames().isEmpty {
+            showDepthModelSetup = true
+            return
+        }
+        if DepthConversionManager.shared.isProcessing(videoIdentity: video.identity) {
+            startProgressiveEngageMonitor()
+            return
+        }
+        startDepthPreprocessing()
+    }
+
     /// Engage the realtime (synchronous inference) fake-3D path. Never starts a
-    /// background conversion — it would fight the live inference for the ANE.
+    /// background conversion on its own; the user can start one from the menu
+    /// while this plays (`requestPreprocessedPseudo3D`), and the two then share
+    /// the Neural Engine until the converted depth takes over.
     func engageRealtimePseudo3D() {
+        // Already in AI 3D (pre-processed): swap the depth source in place.
+        // The player reloads its pipeline keeping position and pause state.
+        if pseudo3DEnabled {
+            pseudo3DDepthMode = .realtime
+            return
+        }
         pseudo3DEngageResumeTime = currentTime
         pseudo3DEngagePaused = false
         pseudo3DDepthMode = .realtime
@@ -769,6 +809,14 @@ final class VideoWindowModel {
     /// progressive engage mid-conversion — see `pseudo3DEngagePaused`).
     func engageCachedPseudo3D(startPaused: Bool = false) {
         dismissDepthReadyPrompt()
+        // Already in AI 3D (real-time): swap the depth source in place, as
+        // above. `startPaused` exists for a fresh engage from 2D, where it
+        // keeps a second decode session from starting under the converter;
+        // real-time AI 3D already runs one, so its playback just continues.
+        if pseudo3DEnabled {
+            pseudo3DDepthMode = .cached(videoIdentity: video.identity)
+            return
+        }
         pseudo3DEngageResumeTime = currentTime
         pseudo3DEngagePaused = startPaused
         if startPaused { isPaused = true }
@@ -789,10 +837,14 @@ final class VideoWindowModel {
         startProgressiveEngageMonitor()
     }
 
-    /// Whether this window is plain-2D and eligible to be auto-switched into
-    /// cached fake-3D (never override an explicit 3D/realtime choice).
+    /// Whether this window may be auto-switched into cached fake-3D: plain 2D,
+    /// or real-time AI 3D, which the converted depth upgrades. Never overrides
+    /// genuine stereo.
     private var canAutoEngageProgressive3D: Bool {
-        !shouldUse3DMode && !pseudo3DEnabled && playbackRenderer == .nativeMetal
+        guard !shouldUse3DMode, playbackRenderer == .nativeMetal else { return false }
+        guard pseudo3DEnabled else { return true }
+        if case .realtime = pseudo3DDepthMode { return true }
+        return false
     }
 
     /// While this video converts, poll for the point where 3D playback can
@@ -847,9 +899,11 @@ final class VideoWindowModel {
                 let remainingConversion = max(self.duration - status.frontier, 0)
                 if lead >= Self.progressiveMinLeadSeconds,
                    remainingConversion <= status.rate * remainingPlayback * Self.progressiveSafetyFactor {
-                    AppLogger.videoWindow.info("Progressive 3D engage (paused): frontier \(status.frontier, privacy: .public)s, rate \(status.rate, privacy: .public)x, playhead \(playhead, privacy: .public)s")
-                    // Engage paused: show one 3D frame without a second decode
-                    // session fighting the converter. Manual Play starts it.
+                    let fromRealtime = self.pseudo3DEnabled
+                    AppLogger.videoWindow.info("Progressive 3D engage (\(fromRealtime ? "from real-time" : "paused", privacy: .public)): frontier \(status.frontier, privacy: .public)s, rate \(status.rate, privacy: .public)x, playhead \(playhead, privacy: .public)s")
+                    // From 2D, engage paused: show one 3D frame without a
+                    // second decode session fighting the converter. Manual
+                    // Play starts it. From real-time, swap depth in place.
                     self.engageCachedPseudo3D(startPaused: true)
                     engagedProgressively = true
                 }
@@ -871,6 +925,9 @@ final class VideoWindowModel {
     func presentDepthReadyPrompt(message: String = "3D version ready") {
         // Already watching from the cache — nothing to offer.
         if shouldUsePseudo3D, case .cached = pseudo3DDepthMode { return }
+        // The progressive monitor engages it on its next poll (from 2D or
+        // from real-time AI 3D), which would dismiss the pill straight away.
+        if progressiveEngageTask != nil, canAutoEngageProgressive3D { return }
         depthReadyPromptMessage = message
         showDepthReadyPrompt = true
         depthReadyPromptDismissTask?.cancel()
