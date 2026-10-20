@@ -22,6 +22,10 @@
  Switching between 2D and 3D never moves the playhead: both directions
  re-prime the picture at the position the toggle was pressed at.
 
+ The Cinema menu (FilmCinema.swift) opens an immersive space that centres
+ the sound on the wearer's head (Room Sound) or also moves the picture onto
+ a big screen in it (Big Screen); the window then shows a card instead.
+
  iOS/macOS use the AirPods tracker for the listener; Recenter is beside the
  transport when tracking is active. tvOS keeps its PHASE stage and focusable
  controls. Head tracking recentres on resume on all three platforms.
@@ -56,6 +60,8 @@ struct FilmPlayerView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.scenePhase) private var scenePhase
     @Environment(SceneDelegate.self) private var sceneDelegate
+    @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
+    private var cinema: FilmCinema { .shared }
     @State private var stereoSource: SampleBufferFrameSource?
     /// Set while a 3D film plays as real 3D (eyes cropped from the frame);
     /// nil while a flat film plays as fake-3D.
@@ -122,6 +128,9 @@ struct FilmPlayerView: View {
                 player.pause()
                 session.isPlayerOpen = false
                 session.saveSound()
+                #if os(visionOS)
+                closeCinema()
+                #endif
                 #if os(tvOS) || os(iOS)
                 nowPlaying?.deactivate()
                 nowPlaying = nil
@@ -160,7 +169,13 @@ struct FilmPlayerView: View {
                 session.isPlayerOpen = false
                 player.pause()
                 session.saveSound()
+                closeCinema()
             }
+            // AI 3D draws in the window, so the big screen plays 2D.
+            .onChange(of: cinema.mode) { _, mode in
+                if mode == .bigScreen { stopStereo() }
+            }
+            .onChange(of: cinema.screenTaps) { toggleChrome() }
             // A 3D film opens in 3D once the server says it is one, and
             // replaces a fake-3D picture the user started before it knew.
             // Initial too: a Blu-ray disc knows it is 3D before the window opens.
@@ -373,14 +388,24 @@ struct FilmPlayerView: View {
                 FilmVideoView(player: player.video, squareCorners: !appModel.roundedCorners,
                               opacity: stereoSource != nil ? 0 : (chromeOpen ? 0.12 : 1),
                               takesInput: stereoSource == nil && (!chromeOpen || (morePopoverOpen && chromeHolds == 1)),
+                              showsPicture: !cinema.screenAttached,
                               onTap: { toggleChrome() })
                     // The audio stage contributes no window depth. It remains
-                    // mounted when only the picture changes to stereo.
+                    // mounted when only the picture changes to stereo, and
+                    // moves into the cinema space while that is open.
                     .background {
-                        FilmStageView(player: player, listenerDistance: session.listenerPlacement,
-                                      onWindowScale: { session.windowScale = $0 })
-                            .frame(depth: 0)
+                        ZStack {
+                            if !cinema.isOpen {
+                                FilmStageView(player: player, listenerDistance: session.listenerPlacement,
+                                              onWindowScale: { session.windowScale = $0 })
+                            }
+                            FilmWindowMarker()
+                        }
+                        .frame(depth: 0)
                     }
+                if cinema.screenAttached {
+                    FilmBigScreenCard(onTap: { toggleChrome() })
+                }
                 if let source = stereoSource {
                     RAVEExternalStereoVideoView(
                         source: source, settings: session.stereoSettings, chromeOpen: chromeOpen,
@@ -405,7 +430,7 @@ struct FilmPlayerView: View {
                         }
                     }
                 }
-                if stereoSource == nil, flatSubtitleStyle == .inPicture {
+                if stereoSource == nil, flatSubtitleStyle == .inPicture, !cinema.screenAttached {
                     subtitleOverlay
                 }
             }
@@ -424,7 +449,7 @@ struct FilmPlayerView: View {
                 filmTime: { player.currentTime }
             ) {
             FilmTransport(player: player, stereoEnabled: stereoSource != nil,
-                          onToggle3D: { stereoSource == nil ? startStereo() : stopStereo() },
+                          onToggle3D: cinema.mode == .bigScreen ? nil : { stereoSource == nil ? startStereo() : stopStereo() },
                           onModalChanged: { open in
                               chromeOpen = open
                               holdChrome(open)
@@ -564,8 +589,14 @@ struct FilmPlayerView: View {
 
     static let dolbyVisionOriginalIn3D = "This film's Dolby Vision picture plays in 3D only as the server's converted copy. Playback continues in 2D."
 
+    /// The cinema space belongs to this window: it closes with it.
+    private func closeCinema() {
+        guard cinema.isOpen else { return }
+        Task { await dismissImmersiveSpace() }
+    }
+
     private func startStereo() {
-        guard stereoSource == nil else { return }
+        guard stereoSource == nil, cinema.mode != .bigScreen else { return }
         // A 3D film already has both eyes; only a flat one needs depth.
         let layout = session.stereoFormat?.packedLayout(eyesReversed: false)
         guard layout != nil || CoreMLDepthProvider.hasAvailableModel(role: .realtime) else {
@@ -901,6 +932,9 @@ struct FilmTransport: View {
         if let onToggle3D {
             viewModeMenu(toggle: onToggle3D)
         }
+        #if os(visionOS)
+        FilmCinemaMenu(onOpenChanged: menuChanged)
+        #endif
         if player.audioTracks.count > 1 {
             FilmAudioTrackMenu(player: player, onOpenChanged: menuChanged)
         }
@@ -1098,6 +1132,11 @@ struct FilmTuning: View {
             } else {
                 slider("You, in front of the window", value: $session.listenerDistance, in: 0.3 ... 12, unit: "m")
             }
+            if FilmCinema.shared.isOpen {
+                Text("Cinema is open: the sound is centred on your head, so these are a fallback.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            FilmCinemaSettings()
             #endif
             VStack(alignment: .leading, spacing: 2) {
                 Text(String(format: "Picture offset: %+.0f ms", player.avOffsetMs)).font(.caption)
@@ -1178,7 +1217,7 @@ struct FilmTelemetry: View {
 
 /// A menu row whose checkmark shows only on the chosen one, keeping the
 /// titles aligned.
-private struct CheckmarkLabelStyle: LabelStyle {
+struct CheckmarkLabelStyle: LabelStyle {
     let isChecked: Bool
 
     func makeBody(configuration: Configuration) -> some View {

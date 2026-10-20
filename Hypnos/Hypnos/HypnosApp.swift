@@ -254,11 +254,15 @@ struct HypnosApp: App {
         // stands in front of it and hides it.
         DebugApprovalWindow()
 
+        // Every immersive space leaves a system environment (Mount Hood and
+        // the rest) as it is rather than closing it (visionOS 26): mixed
+        // spaces show around it, and the wearer is back in it after a full one.
         ImmersiveSpace(id: "StereoscopicVideoSpace") {
             ImmersiveVideoView()
                 .environment(appModel)
         }
         .immersionStyle(selection: .constant(.full), in: .full)
+        .immersiveEnvironmentBehavior(.coexist)
 
         // Mixed immersive space for the "Fully Immersive 3D" photo viewer mode.
         // Opened by PhotoDisplayView when AppModel.fullyImmersive3DMode is on
@@ -271,6 +275,16 @@ struct HypnosApp: App {
             }
         }
         .immersionStyle(selection: .constant(.mixed), in: .mixed)
+        .immersiveEnvironmentBehavior(.coexist)
+
+        // The film player's cinema: the object audio around the wearer's
+        // head and, for Big Screen, the picture on a screen further and
+        // larger than a window may go (see FilmCinema.swift).
+        ImmersiveSpace(id: FilmCinema.spaceID) {
+            FilmCinemaSpaceView()
+        }
+        .immersionStyle(selection: .constant(.mixed), in: .mixed)
+        .immersiveEnvironmentBehavior(.coexist)
 
         // Film player: picture plus Atmos objects as spatial sources around
         // this window (Settings → Developer → Film Player). Opened with a

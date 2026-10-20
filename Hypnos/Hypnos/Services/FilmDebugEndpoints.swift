@@ -14,6 +14,7 @@ import Foundation
 import RAVEFilm
 #if os(visionOS)
 import RAVEMedia
+import simd
 #endif
 
 @MainActor
@@ -29,6 +30,13 @@ enum FilmDebugEndpoints {
                    + "A picture that never appears shows here as a decoder phase that doesn't move or a renderer that "
                    + "isn't ready.") { _ in
                 reply()
+            },
+            .query("filmCinema", "The film player's cinema space (visionOS): mode (window, roomSound, bigScreen), "
+                   + "whether the space is open and holds the picture, and in the space's metres the head, the film "
+                   + "window, the room's centre and the screen, with the distances between them. A head that never "
+                   + "appears means head tracking isn't running; a window that never appears means the window's "
+                   + "pose in the space can't be read.") { _ in
+                cinemaReply()
             },
             .command("filmDiscAudio", "For a Blu-ray disc: switch from the plugin's object audio to the disc's own AC-3 "
                      + "5.1, decoded on the device, keeping the position. Returns the film state after the switch.") { _ in
@@ -214,6 +222,41 @@ enum FilmDebugEndpoints {
         var windowScale: Float
         var listenerDistanceAuto: Bool
         var listenerDistanceMetres: Float?
+    }
+
+    struct CinemaReply: Encodable {
+        var mode: String
+        var open: Bool
+        var screenAttached: Bool
+        var status: String
+        var head: [Float]?
+        var window: [Float]?
+        var room: [Float]?
+        var screen: [Float]?
+        var headToWindowMetres: Float?
+        var headToScreenMetres: Float?
+        var screenWidthMetres: Float?
+    }
+
+    private static func cinemaReply() -> CinemaReply {
+        #if os(visionOS)
+        let cinema = FilmCinema.shared
+        func position(_ m: simd_float4x4?) -> SIMD3<Float>? { m.map { SIMD3($0.columns.3.x, $0.columns.3.y, $0.columns.3.z) } }
+        func array(_ v: SIMD3<Float>?) -> [Float]? { v.map { [$0.x, $0.y, $0.z] } }
+        let head = position(cinema.headPose)
+        let window = position(cinema.windowPose)
+        let screen = position(cinema.screenPose)
+        return CinemaReply(
+            mode: cinema.mode.rawValue, open: cinema.isOpen, screenAttached: cinema.screenAttached,
+            status: cinema.status, head: array(head), window: array(window),
+            room: array(position(cinema.roomPose)), screen: array(screen),
+            headToWindowMetres: head.flatMap { h in window.map { simd_distance(h, $0) } },
+            headToScreenMetres: head.flatMap { h in screen.map { simd_distance(h, $0) } },
+            screenWidthMetres: cinema.screenPose == nil ? nil : cinema.screenWidth
+        )
+        #else
+        return CinemaReply(mode: "window", open: false, screenAttached: false, status: "visionOS only")
+        #endif
     }
 
     #if os(visionOS)
