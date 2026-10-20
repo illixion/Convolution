@@ -54,6 +54,9 @@ extension PhotoWindowModel {
             if isDioramaMode {
                 await setDioramaMode(false)
             }
+            if isAIDepthMode {
+                await setAIDepthMode(false)
+            }
             if is3DMode || desiredViewingMode != .mono {
                 await switchToViewingMode(.mono)
             }

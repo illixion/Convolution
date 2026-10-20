@@ -193,10 +193,10 @@ struct RemoteViewerWindowView: View {
             // point (both slots at ~0.5 opacity). No-op unless
             // slideshow 3D is active.
             guard isTransitioning == true,
-                  viewerModel?.isSlideshow3DActive == true else { return }
+                  viewerModel?.isSlideshowRealityKitActive == true else { return }
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(500))
-                guard viewerModel?.isSlideshow3DActive == true else { return }
+                guard viewerModel?.isSlideshowRealityKitActive == true else { return }
                 nudgeWindowSizeForCalibration()
             }
         }
@@ -205,7 +205,7 @@ struct RemoteViewerWindowView: View {
         }
         .onChange(of: scenePhase) { oldPhase, newPhase in
             viewerModel?.handleScenePhaseChange(from: oldPhase, to: newPhase)
-            if newPhase == .active && oldPhase != .active, viewerModel?.isSlideshow3DActive == true {
+            if newPhase == .active && oldPhase != .active, viewerModel?.isSlideshowRealityKitActive == true {
                 nudgeWindowSizeForCalibration()
             }
             // Restart Ken Burns animation on return to foreground — the SwiftUI
@@ -252,7 +252,7 @@ struct RemoteViewerWindowView: View {
             // viewer's tap behaviour. The per-crossfade nudge already
             // covers steady-state, but a stray tap is the user's
             // expected escape hatch when calibration has drifted.
-            if viewerModel?.isSlideshow3DActive == true {
+            if viewerModel?.isSlideshowRealityKitActive == true {
                 nudgeWindowSizeForCalibration()
             }
         }
@@ -351,7 +351,7 @@ struct RemoteViewerWindowView: View {
             // layer owns two slot entities and pre-generates the next
             // image while the current is on screen, then crossfades by
             // swapping which slot is visible.
-            if model.currentMediaType == .image && model.isSlideshow3DActive {
+            if model.currentMediaType == .image && model.isSlideshowRealityKitActive {
                 // Tap callback fires from a targeted-entity gesture
                 // wired inside each slot's RealityView — visionOS hit-
                 // tests RealityKit entities in 3D space ahead of SwiftUI
@@ -382,7 +382,7 @@ struct RemoteViewerWindowView: View {
             }
 
             // Current image (shown for .image type, or as static first frame while GIF converts)
-            if model.currentMediaType == .image && !model.isSlideshow3DActive, let image = model.currentImage {
+            if model.currentMediaType == .image && !model.isSlideshowRealityKitActive, let image = model.currentImage {
                 let useKenBurns = model.enableKenBurns && !model.isCurrentPostAnimatedGIF
                 currentImageRenderer(model: model, image: image)
                     .aspectRatio(image.size, contentMode: .fit)
@@ -442,11 +442,42 @@ struct RemoteViewerWindowView: View {
                 .animation(appModel.effectiveReduceMotion ? nil : .easeInOut(duration: 0.5), value: dioramaVisible)
                 .animation(appModel.effectiveReduceMotion ? nil : .easeInOut(duration: 0.5), value: model.currentForegroundTexture != nil)
                 .animation(appModel.effectiveReduceMotion ? nil : .easeInOut(duration: 0.5), value: model.currentBackdropTexture != nil)
+
+                #if os(visionOS)
+                // AI 3D: the depth mesh over the picture, faded out for the
+                // crossfade (the incoming picture is flat until it commits)
+                // and while a menu or the adjustments panel is open, which
+                // the popped-forward picture would otherwise cover. The
+                // input layer in front hands taps to the window's tap
+                // gesture: the mesh's RealityView would swallow them.
+                if model.isSlideshowAIDepthActive, let cgImage = image.cgImage, let depth = model.currentDepth {
+                    AIDepthPhotoView(
+                        image: cgImage,
+                        depth: depth,
+                        contentID: ObjectIdentifier(image),
+                        adjustments: AIDepthPhotoView.Adjustments(
+                            brightness: model.effectiveBrightness,
+                            contrast: model.effectiveContrast,
+                            saturation: model.effectiveSaturation
+                        ),
+                        opacity: model.isTransitioning || model.showAdjustmentsPopover || model.isAnyOrnamentMenuOpen ? 0 : 1,
+                        fadeDuration: model.isTransitioning && !appModel.effectiveReduceMotion ? 0.6 : 0.25
+                    )
+                    .aspectRatio(image.size, contentMode: .fit)
+                    // A fresh view per picture, so its mesh fades in once
+                    // built instead of the last picture's showing meanwhile.
+                    .id(ObjectIdentifier(image))
+
+                    Color.white.opacity(0.001)
+                        .aspectRatio(image.size, contentMode: .fit)
+                        .offset(z: AIDepthPhotoView.inputTargetZ)
+                }
+                #endif
             }
 
 // Next image (fading in during transition) — skipped when slideshow 3D
             // owns the rendering since that path stacks two RealityViews.
-            if !model.isSlideshow3DActive, let image = model.nextImage, model.isTransitioning {
+            if !model.isSlideshowRealityKitActive, let image = model.nextImage, model.isTransitioning {
                 nextImageRenderer(model: model, image: image)
                     .aspectRatio(image.size, contentMode: .fit)
                     .opacity(1)
@@ -851,13 +882,8 @@ struct RemoteViewerWindowView: View {
         self.viewerModel = model
         appModel.registerRemoteViewerWindow(configId: config.id, windowValue: windowValue)
         appModel.registerRemoteViewerModel(model)
-        let mode3D: RAVESlideshow3DMode = switch config.slideshow3DMode {
-        case .off: .off
-        case .spatial3D: .spatial3D
-        case .immersive3D: .immersive3D
-        }
         model.useRAVESlideshowForLocalContent(
-            mode3D: mode3D,
+            mode3D: config.slideshow3DMode.raveMode,
             maxImageResolution2D: resolved2D,
             maxImageResolution3D: resolved3D
         )

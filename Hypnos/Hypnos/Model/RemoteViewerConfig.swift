@@ -7,22 +7,49 @@
  */
 
 import Foundation
+import RAVESlideshow
 
-/// Per-slideshow 3D rendering mode. When non-`.off`, each image is loaded
-/// into a RealityKit `ImagePresentationComponent` instead of a 2D SwiftUI
-/// `Image`, and Ken Burns + Diorama are bypassed (RealityKit owns the
-/// rendered geometry, so the SwiftUI transforms don't apply).
+/// Per-slideshow 3D rendering mode. In the RealityKit modes each image is
+/// loaded into a RealityKit `ImagePresentationComponent` instead of a 2D
+/// SwiftUI `Image`; in AI 3D a depth mesh is laid over the 2D image. Any 3D
+/// mode bypasses Ken Burns + Diorama (the 3D geometry doesn't follow the
+/// SwiftUI transforms).
 enum Slideshow3DMode: String, Codable, CaseIterable, Identifiable {
     case off
     case spatial3D
     case immersive3D
+    /// Pictures as a depth-displaced mesh from the real-time depth model
+    /// (`AIDepthPhotoView`). Videos convert in real time in every 3D mode.
+    case aiDepth
 
     var id: String { rawValue }
+    /// Menu names. The raw values predate them and stay: they're persisted.
     var label: String {
         switch self {
         case .off: return "2D"
-        case .spatial3D: return "3D"
-        case .immersive3D: return "Immersive 3D"
+        case .spatial3D: return "RealityKit 3D"
+        case .immersive3D: return "RealityKit 3D (Immersive)"
+        case .aiDepth: return "AI 3D"
+        }
+    }
+    /// The short form, for the ornament button's tooltip.
+    var shortLabel: String {
+        switch self {
+        case .off: return "2D"
+        case .spatial3D: return "RK 3D"
+        case .immersive3D: return "RK 3D (Immersive)"
+        case .aiDepth: return "AI 3D"
+        }
+    }
+    /// Pictures go through RealityKit's `ImagePresentationComponent`.
+    var usesRealityKit: Bool { self == .spatial3D || self == .immersive3D }
+    /// What the shared slideshow engine is told: AI 3D textures a mesh from
+    /// the 2D-sized picture, so it takes the 2D resolution cap.
+    var raveMode: RAVESlideshow3DMode {
+        switch self {
+        case .off, .aiDepth: return .off
+        case .spatial3D: return .spatial3D
+        case .immersive3D: return .immersive3D
         }
     }
     var systemImage: String {
@@ -32,6 +59,7 @@ enum Slideshow3DMode: String, Codable, CaseIterable, Identifiable {
         case .off: return "view.3d"
         case .spatial3D: return "spatial.capture.fill"
         case .immersive3D: return "inset.filled.pano"
+        case .aiDepth: return "wand.and.sparkles"
         }
     }
 }

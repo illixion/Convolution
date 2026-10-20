@@ -33,6 +33,7 @@ extension PhotoWindowModel {
             if is3DMode || desiredViewingMode != .mono {
                 await switchToViewingMode(.mono)
             }
+            exitAIDepthMode()
             // Diorama is also mutually exclusive with background removal —
             // mixing the masked foreground with the bg-removed display texture
             // produces a broken composite (two foreground copies), so restore

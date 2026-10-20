@@ -20,6 +20,9 @@ extension PhotoWindowModel {
         // image without writing it into ImageEnhancementTracker — the
         // immersive preference shouldn't follow every image they tap.
         let wasHostingFullyImmersive = hostFullyImmersiveSpace
+        // AI 3D follows the user from image to image (it's one inference),
+        // without being recorded as each image's remembered mode.
+        let wasAIDepth = isAIDepthMode
         image = newImage
         imageURL = newImage.fullSizeURL
         // Drop the previous image's failure before the new load starts, so a
@@ -69,6 +72,7 @@ extension PhotoWindowModel {
         clearAutoEnhanceState()
         clearBackgroundRemovalState()
         clearDioramaState()
+        clearAIDepthState()
 
         is3DMode = false
         desiredViewingMode = .mono
@@ -128,6 +132,15 @@ extension PhotoWindowModel {
         // per-image last-viewing-mode preference is left untouched.
         if wasHostingFullyImmersive && appModel.fullyImmersive3DMode && !isAnimatedImage {
             await switchToViewingMode(.spatial3DImmersive, trackChange: false)
+        }
+
+        // Fire-and-forget, like the Diorama default: the flat picture slides
+        // in now and the depth fades in over it once ready.
+        if wasAIDepth, !isAIDepthMode, !isAnimatedImage, !is3DMode, desiredViewingMode == .mono,
+           !isDioramaMode, backgroundRemovalState == .original {
+            Task { @MainActor [weak self] in
+                await self?.setAIDepthMode(true, trackChange: false)
+            }
         }
     }
 

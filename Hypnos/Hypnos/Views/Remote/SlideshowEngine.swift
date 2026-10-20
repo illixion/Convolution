@@ -207,15 +207,22 @@ class SlideshowEngine {
     var maxImageResolution: Int = 0 { didSet { if maxImageResolution != oldValue { pushDisplaySettings() } } }
     var maxImageResolution3D: Int = 0 { didSet { if maxImageResolution3D != oldValue { pushDisplaySettings() } } }
 
-    /// When non-`.off`, the window view renders via RealityKit
-    /// `ImagePresentationComponent` instead of a SwiftUI `Image`.
+    /// In the RealityKit modes the window view renders via RealityKit
+    /// `ImagePresentationComponent` instead of a SwiftUI `Image`; in AI 3D
+    /// it lays a depth mesh over the SwiftUI image.
     var slideshow3DMode: Slideshow3DMode = .off {
         didSet {
             guard slideshow3DMode != oldValue else { return }
             if slideshow3DMode != .off {
-                // Ken Burns + diorama don't apply to the RealityKit pipeline.
+                // Ken Burns + diorama don't apply to either 3D picture: the
+                // geometry doesn't follow the SwiftUI transforms.
                 if enableKenBurns { enableKenBurns = false }
                 if enableDiorama { enableDiorama = false }
+            }
+            if isSlideshowAIDepthActive {
+                promoteDepth()
+            } else {
+                clearDepth()
             }
             pushDisplaySettings()
             // A video already on screen converts (or drops back to flat)
@@ -224,9 +231,14 @@ class SlideshowEngine {
         }
     }
 
-    /// True when the engine is rendering through RealityKit. View layer
-    /// reads this to suppress Ken Burns + diorama overlays.
+    /// Any 3D mode. Videos convert to stereo in real time in all of them.
     var isSlideshow3DActive: Bool { slideshow3DMode != .off }
+
+    /// Pictures render through RealityKit's `ImagePresentationComponent`.
+    var isSlideshowRealityKitActive: Bool { slideshow3DMode.usesRealityKit }
+
+    /// Pictures get an AI 3D depth mesh over the 2D image.
+    var isSlideshowAIDepthActive: Bool { slideshow3DMode == .aiDepth }
 
     /// Diorama mode — when enabled, each image gets an uncropped foreground
     /// (background removed) the view layer pops forward in z. Expensive
@@ -387,6 +399,18 @@ class SlideshowEngine {
     /// diorama off can cancel it.
     private var dioramaTasks: [Int: Task<Void, Never>] = [:]
 
+    // MARK: - AI 3D
+
+    /// Depth map for the picture on screen, while AI 3D is on. Nil until the
+    /// model has run on it; the flat picture shows meanwhile.
+    var currentDepth: StillDepthMap?
+
+    /// Maps by item id: the current picture's and the peek's, made while the
+    /// current one is on screen so the next arrives with its depth. RAM
+    /// only: a slideshow passes through far too much to cache on disk.
+    private var depthMaps: [String: StillDepthMap] = [:]
+    private var depthTasks: [String: Task<Void, Never>] = [:]
+
     /// Completed pairs keyed by post id. Generation can finish before the
     /// post reaches a slot, so results land here and the commit picks them up.
     private var dioramaCache: [Int: (foreground: MTLTexture?, backdrop: MTLTexture?)] = [:]
@@ -476,13 +500,8 @@ class SlideshowEngine {
 
     private func pushDisplaySettings() {
         guard let sharedEngine else { return }
-        let mode3D: RAVESlideshow3DMode = switch slideshow3DMode {
-        case .off: .off
-        case .spatial3D: .spatial3D
-        case .immersive3D: .immersive3D
-        }
         sharedEngine.displaySettings = displaySettings(
-            mode3D: mode3D,
+            mode3D: slideshow3DMode.raveMode,
             maxImageResolution2D: maxImageResolution,
             maxImageResolution3D: maxImageResolution3D
         )
@@ -529,6 +548,7 @@ class SlideshowEngine {
             decode(peek.item.id, data) { [weak self] image, _ in
                 guard let self, self.sharedEngine?.peekedNext?.item.id == peek.item.id else { return }
                 self.peekedNextImage = image
+                if self.isSlideshowAIDepthActive { self.requestDepth(for: peek.item.id, image: image) }
             }
         }
     }
@@ -603,6 +623,7 @@ class SlideshowEngine {
                     self.currentTexture = texture
                     self.analyze(image, post: post)
                     self.promoteDiorama(for: post)
+                    self.promoteDepth()
                 }
             }
         case let .animatedImage(data, url):
@@ -634,6 +655,7 @@ class SlideshowEngine {
             autoContrastAdjustment = 1.0
         }
         promoteDiorama(for: post)
+        promoteDepth()
         if case .video = currentMediaType { refreshPseudo3DForActiveVideo() }
         if previousPostId != post._id { evictDecodedImages() }
     }
@@ -669,7 +691,7 @@ class SlideshowEngine {
         }
         guard !decodingIds.contains(id) else { return }
         decodingIds.insert(id)
-        let maxDimension = CGFloat(isSlideshow3DActive ? maxImageResolution3D : maxImageResolution)
+        let maxDimension = CGFloat(isSlideshowRealityKitActive ? maxImageResolution3D : maxImageResolution)
         Task { [weak self] in
             let image = await Task.detached { MetalImageRenderer.downsampledImage(from: data, maxDimension: maxDimension) }.value
             var texture: MTLTexture?
@@ -800,6 +822,50 @@ class SlideshowEngine {
         nextBackdropTexture = nil
     }
 
+    // MARK: - AI 3D
+
+    /// The picture now on screen: show its depth, or make it. Drops every
+    /// map but this one's and the peek's.
+    private func promoteDepth() {
+        guard isSlideshowAIDepthActive, currentMediaType == .image,
+              let post = currentPost, let image = currentImage else {
+            currentDepth = nil
+            return
+        }
+        let id = String(post._id)
+        let keep = Set([id, sharedEngine?.peekedNext?.item.id].compactMap { $0 })
+        depthMaps = depthMaps.filter { keep.contains($0.key) }
+        for (taskId, task) in depthTasks where !keep.contains(taskId) {
+            task.cancel()
+            depthTasks.removeValue(forKey: taskId)
+        }
+        currentDepth = depthMaps[id]
+        if currentDepth == nil { requestDepth(for: id, image: image) }
+    }
+
+    /// Run the real-time depth model on `image` (one inference at a time,
+    /// shared with the "3D Depth" thumbnails and the photo viewer's AI 3D).
+    private func requestDepth(for id: String, image: UIImage) {
+        guard depthMaps[id] == nil, depthTasks[id] == nil, let cgImage = image.cgImage else { return }
+        depthTasks[id] = Task { @MainActor [weak self] in
+            let map = await ThumbnailDepthEstimator.shared.depth(for: cgImage)
+            guard let self, !Task.isCancelled else { return }
+            self.depthTasks.removeValue(forKey: id)
+            guard let map, self.isSlideshowAIDepthActive else { return }
+            self.depthMaps[id] = map
+            if self.currentPost.map({ String($0._id) }) == id, self.currentImage === image {
+                self.currentDepth = map
+            }
+        }
+    }
+
+    private func clearDepth() {
+        depthTasks.values.forEach { $0.cancel() }
+        depthTasks.removeAll()
+        depthMaps.removeAll()
+        currentDepth = nil
+    }
+
     /// Upload a diorama UIImage to a GPU-private MTLTexture off the main
     /// actor. Uses lossy compression — diorama is a decorative overlay,
     /// the small color delta from lossy texture compression is invisible
@@ -825,6 +891,9 @@ class SlideshowEngine {
         nextForegroundTexture = nil
         nextBackdropTexture = nil
         dioramaCache.removeAll(keepingCapacity: false)
+        if let post = currentPost {
+            depthMaps = depthMaps.filter { $0.key == String(post._id) }
+        }
         evictDecodedImages()
     }
 

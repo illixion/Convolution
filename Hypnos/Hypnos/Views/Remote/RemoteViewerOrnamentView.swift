@@ -124,6 +124,9 @@ struct RemoteViewerOrnamentView: View {
                             }
                         }
                     }
+                    // AI 3D runs the real-time depth model, pictures and
+                    // videos alike.
+                    .disabled(mode == .aiDepth && !ThumbnailDepthEstimator.shared.isModelAvailable)
                 }
             }
             .onAppear { updateOrnamentMenuCount(opened: true) }
@@ -136,7 +139,7 @@ struct RemoteViewerOrnamentView: View {
         }
         .menuStyle(.button)
         .raveChromeButtonStyle()
-        .help("Slideshow 3D Mode")
+        .help("Slideshow 3D: \(model.config.slideshow3DMode.shortLabel)")
     }
 
     private func applySlideshow3DMode(_ mode: Slideshow3DMode) {
@@ -148,7 +151,8 @@ struct RemoteViewerOrnamentView: View {
     }
 
     private var resolutionMenu: some View {
-        let is3D = model.config.slideshow3DMode != .off
+        // AI 3D textures its mesh from the 2D-sized picture.
+        let is3D = model.config.slideshow3DMode.usesRealityKit
         let currentValue: Int = is3D
             ? (model.config.maxImageResolution3D ?? appModel.slideshowMaxImageResolution3D)
             : (model.config.maxImageResolution2D ?? appModel.slideshowMaxImageResolution2D)

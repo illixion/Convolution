@@ -76,6 +76,7 @@ struct PhotoDisplayView: View {
         !windowModel.is3DMode
             && !windowModel.isViewingSpatial3DImmersive
             && !windowModel.isDioramaMode
+            && !windowModel.isAIDepthMode
     }
 
     /// Pull-down-to-close, off while zoomed so a vertical drag pans instead.
@@ -236,12 +237,16 @@ struct PhotoDisplayView: View {
             .animation(appModel.effectiveReduceMotion ? nil : .easeInOut(duration: 0.5), value: windowModel.isDioramaMode)
             .animation(appModel.effectiveReduceMotion ? nil : .easeInOut(duration: 0.5), value: windowModel.dioramaForegroundTexture != nil)
 
+            #if os(visionOS)
+            aiDepthLayer
+            #endif
+
             // 3D restore prompt pill at the bottom
             if windowModel.showAutoRestorePrompt {
                 VStack {
                     Spacer()
                     HStack(spacing: 12) {
-                        Text("Switch to \(windowModel.autoRestoreImmersive ? "immersive 3D" : "3D")?")
+                        Text("Switch to \(windowModel.autoRestoreImmersive ? "RealityKit 3D (Immersive)" : "RealityKit 3D")?")
                             .font(.callout)
                             .lineLimit(1)
 
@@ -298,8 +303,9 @@ struct PhotoDisplayView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .animation(.easeInOut(duration: 0.3), value: windowModel.showAutoRestorePrompt)
                 // Match the ornament's z-offset so the pill stays above the
-                // diorama foreground (which sits at appModel.dioramaDistance).
-                .offset(z: windowModel.isDioramaMode ? 30 : 0)
+                // diorama foreground (which sits at appModel.dioramaDistance),
+                // and clear AI 3D's input target (AIDepthPhotoView.inputTargetZ).
+                .offset(z: windowModel.isAIDepthMode ? 70 : windowModel.isDioramaMode ? 30 : 0)
             }
         }
         #if os(iOS)
@@ -847,6 +853,48 @@ struct PhotoDisplayView: View {
             loadStatusPlaceholder
         }
     }
+
+    #if os(visionOS)
+    /// AI 3D: the depth mesh over the flat picture, which keeps showing (and
+    /// sizing the window) underneath until the mesh is up. The mesh takes no
+    /// input, so a near-invisible layer in front of it carries the flat
+    /// picture's tap and swipe.
+    @ViewBuilder
+    private var aiDepthLayer: some View {
+        if windowModel.isAIDepthMode,
+           !windowModel.is3DMode,
+           let source = windowModel.aiDepthSource,
+           let depth = windowModel.aiDepthMap {
+            let adjustments = windowModel.effectiveAdjustments
+            AIDepthPhotoView(
+                image: source,
+                depth: depth,
+                contentID: windowModel.imageURL,
+                adjustments: AIDepthPhotoView.Adjustments(
+                    brightness: adjustments.brightness,
+                    contrast: adjustments.contrast,
+                    saturation: adjustments.saturation,
+                    autoEnhance: adjustments.isAutoEnhanced
+                ),
+                cornerRadius: appModel.photoCornerRadius,
+                isFlipped: windowModel.isImageFlipped,
+                opacity: windowModel.hasOpenPopover ? 0 : adjustments.opacity
+            )
+            .aspectRatio(windowModel.imageAspectRatio, contentMode: .fit)
+            .offset(x: dragOffset)
+
+            Color.white.opacity(0.001)
+                .aspectRatio(windowModel.imageAspectRatio, contentMode: .fit)
+                .contentShape(.rect)
+                .onTapGesture {
+                    windowModel.toggleUIVisibility()
+                }
+                .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissDragAction))
+                .offset(x: dragOffset)
+                .offset(z: AIDepthPhotoView.inputTargetZ)
+        }
+    }
+    #endif
 
     // MARK: - Loading / Failure Placeholder
 

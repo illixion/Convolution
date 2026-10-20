@@ -233,8 +233,10 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
             // .onAppear/.onDisappear pause the host's auto-hide while the menu
             // is open (same pattern as VideoOrnamentsView).
             Group {
+                // Menus spell the pipeline out; "RK" is only the short form
+                // (the button's tooltip). AI 3D stays last.
                 nativeMenuButton(
-                    title: "3D",
+                    title: "RealityKit 3D",
                     icon: "spatial.capture.fill",
                     isChecked: windowModel.desiredViewingMode == .spatial3D,
                     isDisabled: windowModel.spatial3DImageState == .generating && windowModel.desiredViewingMode != .spatial3DImmersive
@@ -249,7 +251,7 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
                 }
 
                 nativeMenuButton(
-                    title: "Immersive 3D",
+                    title: "RealityKit 3D (Immersive)",
                     icon: "inset.filled.pano",
                     isChecked: windowModel.desiredViewingMode == .spatial3DImmersive,
                     isDisabled: windowModel.spatial3DImageState == .generating && windowModel.desiredViewingMode != .spatial3D
@@ -274,6 +276,20 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
                     }
                 }
 
+                // Depth from the real-time model on one mesh: engages in
+                // about a second, where RealityKit 3D takes several.
+                nativeMenuButton(
+                    title: windowModel.isAIDepthAvailable ? "AI 3D" : "AI 3D (needs a depth model)",
+                    icon: "wand.and.sparkles",
+                    isChecked: windowModel.isAIDepthMode,
+                    isDisabled: !windowModel.isAIDepthAvailable || windowModel.isAnimatedImage
+                        || windowModel.isRealityKitDisplay || windowModel.isProcessingAIDepth
+                ) {
+                    Task {
+                        await windowModel.toggleAIDepth()
+                    }
+                }
+
                 if isAnyAlternateModeActive {
                     Divider()
 
@@ -286,6 +302,9 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
                             if windowModel.isDioramaMode {
                                 await windowModel.setDioramaMode(false)
                             }
+                            if windowModel.isAIDepthMode {
+                                await windowModel.setAIDepthMode(false)
+                            }
                             if windowModel.desiredViewingMode != .mono {
                                 await windowModel.switchToViewingMode(.mono)
                             }
@@ -297,7 +316,7 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
             .onDisappear { updateOrnamentMenuCount(opened: false) }
         } label: {
             Group {
-                if windowModel.spatial3DImageState == .generating {
+                if windowModel.spatial3DImageState == .generating || windowModel.isProcessingAIDepth {
                     // Constrain the spinner to the icon's footprint. scaleEffect
                     // only scales rendering, not layout, so without a fixed frame
                     // the default ProgressView is taller than the .title3 icon and
@@ -319,7 +338,19 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
         // frame (the same explicit path the auto-restore pill uses), and 2D
         // returns to the animation. Diorama stays disabled for animated via its
         // own item flag — it's a separate pipeline, not part of this.
-        .help("3D")
+        .help(threeDMenuHelp)
+    }
+
+    /// The short form of the mode in force: there's no room for
+    /// "RealityKit" in a tooltip.
+    private var threeDMenuHelp: String {
+        if windowModel.isAIDepthMode { return "3D: AI 3D" }
+        if windowModel.isDioramaMode { return "3D: Diorama" }
+        switch windowModel.desiredViewingMode {
+        case .spatial3D: return "3D: RK 3D"
+        case .spatial3DImmersive: return "3D: RK 3D (Immersive)"
+        default: return "3D"
+        }
     }
 
     private var is3DModeActive: Bool {
@@ -327,10 +358,11 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
     }
 
     private var isAnyAlternateModeActive: Bool {
-        is3DModeActive || windowModel.isDioramaMode
+        is3DModeActive || windowModel.isDioramaMode || windowModel.isAIDepthMode
     }
 
     private var threeDMenuIcon: String {
+        if windowModel.isAIDepthMode { return "wand.and.sparkles" }
         if windowModel.isDioramaMode { return "spatial.capture.on.hexagon" }
         switch windowModel.desiredViewingMode {
         case .spatial3D: return "spatial.capture.fill"

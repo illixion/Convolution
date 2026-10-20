@@ -13,6 +13,7 @@
 import DebugTrace
 import ImageIO
 import Metal
+import RAVEMedia
 import RealityKit
 import SwiftUI
 
@@ -251,6 +252,28 @@ class PhotoWindowModel {
     /// Task for diorama foreground generation (cancellable on cleanup / image switch).
     var dioramaTask: Task<Void, Never>?
 
+    // MARK: - AI 3D State
+
+    /// Whether the photo viewer shows the picture as AI 3D: a mesh displaced
+    /// by the real-time depth model's map (`AIDepthPhotoView`). A sibling
+    /// viewing mode to Diorama and the RealityKit 3D modes, mutually
+    /// exclusive with all of them. Persisted via `ViewingModePreference.aiDepth`.
+    var isAIDepthMode: Bool = false
+
+    /// Whether the depth map or the mesh's source picture is being prepared.
+    var isProcessingAIDepth: Bool = false
+
+    /// The picture the AI 3D mesh is textured with: decoded oriented, at most
+    /// 2048 px on its long edge. Held only while AI 3D is on.
+    var aiDepthSource: CGImage? = nil
+
+    /// The current image's depth map. Shared with the "3D Depth" thumbnail
+    /// cache (keyed by the thumbnail URL), so a picture already seen in the
+    /// grid with that style engages without running the model.
+    var aiDepthMap: StillDepthMap? = nil
+
+    var aiDepthTask: Task<Bool, Never>?
+
     // MARK: - Visual Adjustments State
 
     /// Per-image visual adjustments (Current tab values)
@@ -391,6 +414,7 @@ class PhotoWindowModel {
         guard backgroundRemovalState == .original else { return }
         guard !is3DMode, desiredViewingMode == .mono else { return }
         guard !currentAdjustments.isAutoEnhanced else { return }
+        guard !isAIDepthMode else { return }
 
         // Diorama default takes precedence over any per-image remembered mode
         // and is not blocked by the 3D auto-restore prompt — the user has
@@ -407,6 +431,15 @@ class PhotoWindowModel {
             Task { @MainActor [weak self] in
                 await self?.setDioramaMode(true)
                 self?.isApplyingDefaultViewingMode = false
+            }
+            return
+        }
+        // AI 3D likewise: cheap, fire-and-forget, and ahead of a remembered
+        // mode. Not recorded per image (the default speaks for every image).
+        if appModel.defaultImageViewingMode == .aiDepth {
+            guard !isDioramaMode else { return }
+            Task { @MainActor [weak self] in
+                await self?.setAIDepthMode(true, trackChange: false)
             }
             return
         }
@@ -430,6 +463,10 @@ class PhotoWindowModel {
                 await setDioramaMode(true)
                 return
             }
+            if lastMode == .aiDepth {
+                await setAIDepthMode(true)
+                return
+            }
             // Other modes (.backgroundRemoved, .autoEnhanced, etc.) are
             // restored by autoRestorePreviousEnhancement; don't override them.
             return
@@ -439,7 +476,7 @@ class PhotoWindowModel {
         defer { isApplyingDefaultViewingMode = false }
 
         switch appModel.defaultImageViewingMode {
-        case .mono, .diorama:
+        case .mono, .diorama, .aiDepth:
             return
         case .spatial3D:
             await switchToViewingMode(.spatial3D)
@@ -1382,6 +1419,7 @@ class PhotoWindowModel {
         clearAutoEnhanceState()
         clearBackgroundRemovalState()
         clearDioramaState()
+        clearAIDepthState()
 
         // Only remove the component if generation is NOT active.
         // If active, the entity retains the component until ARC releases both.

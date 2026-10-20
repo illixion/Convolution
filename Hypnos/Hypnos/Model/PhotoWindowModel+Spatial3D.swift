@@ -531,6 +531,8 @@ extension PhotoWindowModel {
         // Only `.mono` exists off visionOS; every other mode needs the
         // RealityKit conversion this platform doesn't have.
         guard PlatformCapabilities.supportsSpatial3D || mode == .mono else { return }
+        // The RealityKit modes replace AI 3D; the mode recorded is theirs.
+        if mode != .mono { exitAIDepthMode() }
         if isLoadingDetailImage {
             pendingViewingMode = mode
             desiredViewingMode = mode
