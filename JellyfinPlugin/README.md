@@ -154,6 +154,7 @@ other value is a 400, and a tier the index doesn't offer for the item a 404.
 | `GET /Spatial/{itemId}` | Whether the item is spatial video, and its side-by-side stream: `{spatial, reason, width, height, eyeWidth, eyeHeight, video3DFormat, hdr, durationSeconds, segmentSeconds, segments, bitsPerSecond, playlist}` (see [Spatial video](#spatial-video)) |
 | `GET /Spatial/{itemId}/main.m3u8` | HLS media playlist of the side-by-side stream |
 | `GET /Spatial/{itemId}/init.mp4`, `/Segments/{n}.m4s` | Its init segment and segment `n`, converted on request |
+| `GET /FilmSubtitles/{itemId}/{streamIndex}.vtt?startSeconds=T` | An embedded text subtitle stream as WebVTT from `T` (default 0) on, written as the file is read (see [Subtitles](#subtitles)). `X-Subtitles-Complete: 1` when it is the whole track, kept from an earlier run. 404 for external files and image subtitles |
 
 A segment request waits until that segment has been decoded, up to 45 s. It
 starts a decode at that segment unless one is already running just before
@@ -529,6 +530,31 @@ Tested on Jellyfin 10.11.11 on macOS with a Vision Pro recording: the stream
 fetched in any order, or played straight through by ffmpeg and AVPlayer
 (seeks included), holds every frame once at its own time (within 2 ticks of
 1/96000 s) and every audio packet, joined across runs.
+
+## Subtitles
+
+Jellyfin's own `Videos/{id}/{source}/Subtitles/{n}/Stream.vtt` extracts an
+embedded subtitle stream by reading the whole video file before it sends a
+byte (all subtitle streams at once, then cached). An Archer episode on a
+network share took 15–90 s to show its first subtitle in Hypnos, and
+Jellyfin's web player waits the same; a UHD remux takes minutes.
+
+`FilmSubtitles` (`SubtitleStreamService`) is for Hypnos: ffmpeg seeks to
+`startSeconds` with the container's index and streams the stream as WebVTT
+while it reads (`-ss T -copyts -start_at_zero … -map 0:s:N -c:s webvtt
+-flush_packets 1`), so the cues at the playhead go out in milliseconds and
+the rest follow at the speed the file reads. Timestamps are the file's own,
+the same timeline as Jellyfin's extraction. The stream is chosen by its place
+among the file's embedded subtitle streams (`0:s:N`), because Jellyfin numbers
+external files first and its `Index` is off by their count. A run from 0 that
+reaches the end is kept under the cache folder as
+`v2/{item}/subtitles/{index}-{file mtime ticks}.vtt` and served whole to any
+later request; a replaced file gets a new name, and older versions are
+deleted when the new one is kept. The client starts a run 30 s before its
+playhead (from 0 in the first 90 s), shows cues as they arrive, starts
+again on a seek outside what has arrived, and once a run reaches the end
+fetches the stretch before it from 0 (`SubtitleController` in the app).
+Jellyfin's web player and other clients keep Jellyfin's own route.
 
 ## Cache and sessions
 

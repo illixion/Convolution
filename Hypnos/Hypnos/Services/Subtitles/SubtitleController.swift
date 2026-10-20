@@ -18,6 +18,15 @@
  none if the user last turned subtitles off. Until they have chosen either
  way, only a forced track (foreign dialogue in an otherwise native film)
  shows.
+
+ An embedded text track is streamed (`SubtitleSource.progressive`, the
+ plugin's `FilmSubtitles` route) rather than fetched whole: Jellyfin's own
+ `Stream.vtt` reads the whole video file before answering, 15–90 s for an
+ Archer episode on a network share. The stream starts just before the
+ player's playhead, the cues show as they arrive, and a seek outside what
+ has arrived starts it again from there. Once a run reaches the end of the
+ file, the stretch before it is fetched from the start and merged. Without
+ the plugin (a 404) the track is fetched whole as before.
  */
 
 import DebugTrace
@@ -31,6 +40,9 @@ struct SubtitleSource: Sendable {
     var id: String
     var tracks: @Sendable () async throws -> [LibrarySubtitleTrack]
     var data: @Sendable (LibrarySubtitleTrack) async throws -> Data
+    /// An embedded text track from a start time on, growing as it arrives;
+    /// nil when the source can't stream that track.
+    var progressive: (@Sendable (LibrarySubtitleTrack, Double) -> AsyncThrowingStream<SubtitleStreamChunk, Error>?)? = nil
     /// Cues that grow while the film plays, for bitmap tracks
     /// (`LibrarySubtitleTrack.isBitmap`): each element replaces the last.
     var live: (@Sendable (LibrarySubtitleTrack) -> AsyncStream<RAVESubtitleTrack>)? = nil
@@ -42,7 +54,8 @@ struct SubtitleSource: Sendable {
         return SubtitleSource(
             id: "jellyfin:\(itemId)",
             tracks: { try await library.subtitleTracks(itemId: itemId) },
-            data: { try await library.subtitleData(itemId: itemId, track: $0) }
+            data: { try await library.subtitleData(itemId: itemId, track: $0) },
+            progressive: { library.subtitleStream(itemId: itemId, track: $0, from: $1) }
         )
     }
 
@@ -157,6 +170,9 @@ final class SubtitleController {
     private(set) var error: String?
     /// Seconds; positive shows each cue later.
     var delay: Double = 0
+    /// The player's position, where a streamed track starts and what a seek
+    /// is measured against. Set by the player that owns this controller.
+    @ObservationIgnored var playhead: @MainActor () -> Double = { 0 }
 
     @ObservationIgnored private var source: SubtitleSource?
     @ObservationIgnored private var listTask: Task<Void, Never>?
@@ -240,6 +256,16 @@ final class SubtitleController {
         }
         cues = nil
         isFetching = true
+        if track.isText, track.isEmbedded, let progressive = source.progressive {
+            fetchTask = Task { [weak self] in
+                await self?.stream(track, progressive: progressive, fallback: source)
+            }
+            return
+        }
+        fetchWhole(track, from: source)
+    }
+
+    private func fetchWhole(_ track: LibrarySubtitleTrack, from source: SubtitleSource) {
         fetchTask = Task { [weak self] in
             do {
                 let data = try await source.data(track)
@@ -259,6 +285,131 @@ final class SubtitleController {
                 self.error = error.localizedDescription
                 AppLogger.subtitles.error("Subtitle track \(track.id, privacy: .public) failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             }
+        }
+    }
+
+    // MARK: Streamed tracks
+
+    /// How a streamed run ended.
+    private enum RunEnd {
+        /// It reached the end of the file (or the server sent the whole track).
+        case finished(wholeTrack: Bool)
+        /// The playhead left what the run covers; start again there.
+        case moved(to: Double)
+        /// The source can't stream this track (no plugin route): fetch it whole.
+        case unsupported
+    }
+
+    /// Where a run for a playhead at `time` starts: a little before it, for
+    /// a cue already showing, and from the top near the beginning, where one
+    /// run gets the whole track (which the server then keeps).
+    private static func runStart(at time: Double) -> Double {
+        time < 90 ? 0 : time - 30
+    }
+
+    private func stream(_ track: LibrarySubtitleTrack,
+                        progressive: @escaping @Sendable (LibrarySubtitleTrack, Double) -> AsyncThrowingStream<SubtitleStreamChunk, Error>?,
+                        fallback source: SubtitleSource) async {
+        let began = Date.now
+        var have: [RAVESubtitleCue] = []
+        var start = Self.runStart(at: playhead())
+        var tailStart = start
+        do {
+            // From the playhead to the end of the file, restarting on a seek.
+            runs: while true {
+                guard let run = progressive(track, start) else {
+                    return fetchWhole(track, from: source)
+                }
+                switch try await consume(run, of: track, from: start, merging: &have, began: began) {
+                case .unsupported:
+                    AppLogger.subtitles.info("Subtitle track \(track.id, privacy: .public): no streaming route, fetching it whole")
+                    return fetchWhole(track, from: source)
+                case .moved(let time):
+                    start = Self.runStart(at: time)
+                    AppLogger.subtitles.info("Subtitle track \(track.id, privacy: .public): seek outside what has arrived, streaming from \(start, format: .fixed(precision: 0), privacy: .public) s")
+                case .finished(let wholeTrack):
+                    tailStart = wholeTrack ? 0 : start
+                    break runs
+                }
+            }
+            // The stretch before the run that reached the end.
+            if tailStart > 0, let head = progressive(track, 0) {
+                _ = try await consume(head, of: track, from: 0, until: tailStart, merging: &have, began: began)
+            }
+            guard !Task.isCancelled, selected == track else { return }
+            let complete = RAVESubtitleTrack(cues: have)
+            parsed[track.id] = complete
+            cues = complete
+            isFetching = false
+            AppLogger.subtitles.info("Subtitle track \(track.id, privacy: .public): \(have.count, privacy: .public) cues, whole track in \(Date.now.timeIntervalSince(began), format: .fixed(precision: 1), privacy: .public) s")
+        } catch {
+            guard !Task.isCancelled, selected == track else { return }
+            if have.isEmpty {
+                isFetching = false
+                self.error = error.localizedDescription
+            }
+            AppLogger.subtitles.error("Subtitle track \(track.id, privacy: .public) stream failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+        }
+    }
+
+    /// Reads one run into `have`, showing the cues as they come. With
+    /// `until`, stops once the run reaches it (the head before a tail);
+    /// otherwise stops early when the playhead leaves what the run covers.
+    private func consume(_ run: AsyncThrowingStream<SubtitleStreamChunk, Error>, of track: LibrarySubtitleTrack,
+                         from start: Double, until: Double? = nil,
+                         merging have: inout [RAVESubtitleCue], began: Date) async throws -> RunEnd {
+        do {
+            for try await chunk in run {
+                try Task.checkCancellation()
+                guard selected == track else { throw CancellationError() }
+                let data = chunk.data
+                let received = await Task.detached(priority: .userInitiated) {
+                    (try? RAVESubtitleTrack(data: data))?.cues ?? []
+                }.value
+                let reached = received.last?.start ?? start
+                let kept = until.map { limit in received.filter { $0.start < limit } } ?? received
+                have = Self.merged(have, kept)
+                if !have.isEmpty {
+                    if isFetching {
+                        AppLogger.subtitles.info("Subtitle track \(track.id, privacy: .public): first cues after \(Date.now.timeIntervalSince(began), format: .fixed(precision: 1), privacy: .public) s")
+                    }
+                    cues = RAVESubtitleTrack(cues: have)
+                    isFetching = false
+                }
+                if chunk.isFinished { return .finished(wholeTrack: chunk.isWholeTrack) }
+                if chunk.isWholeTrack { continue }
+                if let until {
+                    if reached >= until { return .finished(wholeTrack: false) }
+                    continue
+                }
+                // A seek ahead of what has arrived, or behind where the run began.
+                let time = playhead()
+                if time > reached + 120 || time < start - 5 { return .moved(to: time) }
+            }
+            return .finished(wholeTrack: false)
+        } catch JellyfinLibraryError.http(_, 404) {
+            return .unsupported
+        }
+    }
+
+    /// `old` and `new` together in start order, each cue once.
+    private static func merged(_ old: [RAVESubtitleCue], _ new: [RAVESubtitleCue]) -> [RAVESubtitleCue] {
+        guard !old.isEmpty else { return new }
+        var seen = Set(old.map(CueKey.init))
+        var all = old
+        for cue in new where seen.insert(CueKey(cue)).inserted { all.append(cue) }
+        return all.sorted { $0.start < $1.start }
+    }
+
+    private struct CueKey: Hashable {
+        let start: Int
+        let end: Int
+        let text: String
+
+        init(_ cue: RAVESubtitleCue) {
+            start = Int((cue.start * 1000).rounded())
+            end = Int((cue.end * 1000).rounded())
+            text = cue.plainText
         }
     }
 }

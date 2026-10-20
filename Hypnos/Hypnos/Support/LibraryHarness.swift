@@ -221,6 +221,7 @@ enum LibraryHarness {
         }
 
         await checkStereoFormats(library: library)
+        await checkStreamedSubtitles(library: library)
 
         if let atmosDemo {
             await checkSubtitles(library: library, item: atmosDemo)
@@ -276,6 +277,57 @@ enum LibraryHarness {
             log("stereo: \(movies.filter { $0.stereoFormat != nil }.count) of \(movies.count) movies are 3D")
         } catch {
             log("stereo FAILED: \(error)")
+        }
+    }
+
+    /// The plugin's streamed subtitles through a real `SubtitleController`,
+    /// on the first movie with an embedded text track (the dev seed's
+    /// `Subtitle Window (2026)`, a 10-minute MKV with an SRT cue every 5 s,
+    /// is meant for it). Resumed at 300 s, the cues there must come first
+    /// and the head before them after; from the top, one run the server
+    /// keeps; resumed again, the kept track whole. Clear the plugin's
+    /// `subtitles` cache folder first for the first case to stream.
+    @MainActor
+    private static func checkStreamedSubtitles(library: JellyfinLibrary) async {
+        do {
+            let movies = try await library.browse(kind: .movie, startIndex: 0, limit: 100)
+            var found: (LibraryItem, LibrarySubtitleTrack)?
+            for movie in movies where found == nil {
+                if let track = try await library.subtitleTracks(itemId: movie.id).first(where: { $0.isText && $0.isEmbedded }) {
+                    found = (movie, track)
+                }
+            }
+            guard let (movie, track) = found else {
+                log("streamedSubtitles: no movie with an embedded text track")
+                return
+            }
+            let whole = try RAVESubtitleTrack(data: try await library.subtitleData(itemId: movie.id, track: track)).cues.count
+            for (label, playhead) in [("resumed", 300.0), ("fromStart", 0.0), ("resumedAgain", 300.0)] {
+                let controller = SubtitleController()
+                controller.playhead = { playhead }
+                let itemId = movie.id
+                controller.load(SubtitleSource(
+                    id: "harness:\(itemId):\(label)",
+                    tracks: { [track] },
+                    data: { try await library.subtitleData(itemId: itemId, track: $0) },
+                    progressive: { library.subtitleStream(itemId: itemId, track: $0, from: $1) }))
+                // The controller starts the preferred track; pick this one.
+                controller.select(track)
+                let began = Date.now
+                var firstAtPlayhead: TimeInterval?
+                while Date.now.timeIntervalSince(began) < 60 {
+                    if firstAtPlayhead == nil, let cues = controller.cues,
+                       cues.cues.contains(where: { $0.start >= playhead && $0.start < playhead + 10 }) {
+                        firstAtPlayhead = Date.now.timeIntervalSince(began)
+                    }
+                    if !controller.isFetching, controller.cues?.cues.count == whole { break }
+                    try await Task.sleep(for: .milliseconds(20))
+                }
+                let count = controller.cues?.cues.count ?? 0
+                log("streamedSubtitles(\(movie.title))[\(label) @\(Int(playhead))s]: cue at playhead after \(firstAtPlayhead.map { String(format: "%.2f s", $0) } ?? "never"), \(count)/\(whole) cues after \(String(format: "%.2f", Date.now.timeIntervalSince(began))) s \(count == whole && firstAtPlayhead != nil ? "OK" : "FAIL") error=\(controller.error ?? "nil")")
+            }
+        } catch {
+            log("streamedSubtitles FAILED: \(error)")
         }
     }
 

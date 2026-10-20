@@ -114,6 +114,7 @@ final class FilmSession {
 
     private init() {
         restoreSound()
+        subtitles.playhead = { [weak self] in self?.player.currentTime ?? 0 }
         Self.excludeFromOtherCredentials(server)
         // Starts watching the network, so Auto object-audio quality knows
         // the path by the time a film loads.

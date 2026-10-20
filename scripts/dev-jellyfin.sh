@@ -493,6 +493,27 @@ META
     write_movie_nfo "$m/movie.nfo" "Twin Horizon" 2020 "Sci-Fi" \
         "Two survey drones map the same canyon from a hand's width apart." 7.0
     gen_art "$m" "TWIN HORIZON" "#3a2b55"
+
+    # "Subtitle Window", ten minutes of MKV with an embedded SRT track and no
+    # sidecar: the TV-episode shape whose subtitles Jellyfin only extracts by
+    # reading the whole file, for the plugin's streamed FilmSubtitles route
+    # (the -LibraryHarness's streamedSubtitles check uses it).
+    local w="$root/data/movies/Subtitle Window (2026)"
+    mkdir -p "$w"
+    local window="$w/Subtitle Window (2026).mkv"
+    if [[ ! -f "$window" ]]; then
+        gen_srt "$w/.embedded.srt" 600 "Window"
+        ffmpeg -loglevel error -y \
+            -f lavfi -i "testsrc=size=640x360:rate=24:duration=600" \
+            -f lavfi -i "sine=frequency=440:duration=600" \
+            -i "$w/.embedded.srt" \
+            -map 0:v -map 1:a -map 2:s \
+            -c:v libx264 -preset ultrafast -g 48 -pix_fmt yuv420p -c:a aac -c:s srt \
+            -metadata:s:s:0 language=eng "$window"
+        rm -f "$w/.embedded.srt"
+    fi
+    write_movie_nfo "$w/movie.nfo" "Subtitle Window" 2026 "Drama" \
+        "Ten minutes of test pattern with a cue every few seconds." 6.0
 }
 
 install_plugin_config() {

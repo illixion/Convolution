@@ -360,6 +360,7 @@ final class VideoWindowModel {
     func start() {
         guard !didStart else { return }
         didStart = true
+        subtitles.playhead = { [weak self] in self?.currentTime ?? 0 }
         appModel.lastViewedVideoId = video.id
         if let popOutWindowValue {
             appModel.registerVideoWindow(video: video, windowValue: popOutWindowValue)

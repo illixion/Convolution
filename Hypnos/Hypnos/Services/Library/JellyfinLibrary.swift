@@ -783,7 +783,8 @@ actor JellyfinLibrary: MediaServerLibrary {
                 isHearingImpaired: stream.IsHearingImpaired ?? false,
                 isText: isText,
                 // Blu-ray image subtitles, drawn from the raw stream (`PGSSupFile`).
-                isBitmap: !isText && Self.isPGS(stream.Codec))
+                isBitmap: !isText && Self.isPGS(stream.Codec),
+                isEmbedded: !(stream.IsExternal ?? false))
         }
     }
 
@@ -810,6 +811,59 @@ actor JellyfinLibrary: MediaServerLibrary {
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard status == 200 else { throw JellyfinLibraryError.http(path: path, status: status) }
         return data
+    }
+
+    /// The plugin's `FilmSubtitles/{id}/{index}.vtt?startSeconds=` (see
+    /// `JellyfinPlugin/README.md` → Subtitles): ffmpeg seeks to the start
+    /// and the cues stream as the file reads, instead of Jellyfin's
+    /// `Stream.vtt` reading the whole file before its first byte. A 404 (no
+    /// plugin) ends the stream with `.http(_, 404)`, for the caller to fall
+    /// back to `subtitleData`.
+    nonisolated func subtitleStream(itemId: String, track: LibrarySubtitleTrack,
+                                    from startSeconds: Double) -> AsyncThrowingStream<SubtitleStreamChunk, Error>? {
+        guard track.isText, track.isEmbedded, LibraryOfflineStore.shared.record(for: itemId) == nil else { return nil }
+        let path = "FilmSubtitles/\(itemId)/\(track.id).vtt"
+        var url = baseURL.appending(path: path)
+        if startSeconds > 0 {
+            url.append(queryItems: [URLQueryItem(name: "startSeconds", value: String(format: "%.3f", startSeconds))])
+        }
+        var request = URLRequest(url: url)
+        request.setValue(JellyfinClientIdentity.authorizationHeader(token: authHeaderToken), forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 600
+        let sent = request
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let (bytes, response) = try await URLSession.shared.bytes(for: sent)
+                    let http = response as? HTTPURLResponse
+                    guard http?.statusCode == 200 else {
+                        throw JellyfinLibraryError.http(path: path, status: http?.statusCode ?? -1)
+                    }
+                    let whole = http?.value(forHTTPHeaderField: "X-Subtitles-Complete") == "1"
+                    var data = Data()
+                    var lastSent = ContinuousClock.now - .seconds(10)
+                    var sentAny = false
+                    var previous: UInt8 = 0
+                    for try await byte in bytes {
+                        data.append(byte)
+                        // At a cue boundary: the first cues at once, then
+                        // every couple of seconds, so a growing track isn't
+                        // re-parsed on every cue.
+                        let boundary = byte == 0x0A && previous == 0x0A
+                        previous = byte
+                        guard boundary, !sentAny || ContinuousClock.now - lastSent > .seconds(2) else { continue }
+                        sentAny = true
+                        lastSent = .now
+                        continuation.yield(SubtitleStreamChunk(data: data, isWholeTrack: whole, isFinished: false))
+                    }
+                    continuation.yield(SubtitleStreamChunk(data: data, isWholeTrack: whole, isFinished: true))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     // MARK: - Media segments (Skip Intro / Skip Credits)

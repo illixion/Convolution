@@ -196,6 +196,9 @@ struct LibrarySubtitleTrack: Identifiable, Hashable, Sendable {
     var isText: Bool = true
     /// An image track (a disc's PGS) that its source can draw.
     var isBitmap: Bool = false
+    /// Inside the video file rather than a sidecar: the server has to read
+    /// the file to extract it (see `MediaServerLibrary.subtitleStream`).
+    var isEmbedded: Bool = false
 
     /// Whether a player can show it.
     var isPlayable: Bool { isText || isBitmap }

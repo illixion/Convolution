@@ -111,12 +111,30 @@ protocol MediaServerLibrary: PlaybackProgressReporting {
     /// (the server converts SubRip, ASS and embedded text tracks).
     func subtitleData(itemId: String, track: LibrarySubtitleTrack) async throws -> Data
 
+    /// An embedded text stream as WebVTT from `startSeconds` on, arriving as
+    /// the server reads the file, so the cues at the playhead come at once
+    /// rather than after the whole file has been read. Nil when the server
+    /// can't (the track isn't embedded text, or it's a download).
+    func subtitleStream(itemId: String, track: LibrarySubtitleTrack,
+                        from startSeconds: Double) -> AsyncThrowingStream<SubtitleStreamChunk, Error>?
+
     /// The intro, credits and other skippable stretches of `itemId`, in
     /// order; empty when the server knows of none.
     func mediaSegments(itemId: String) async throws -> [LibraryMediaSegment]
 
     func setPlayed(itemId: String, played: Bool) async throws
     func setFavorite(itemId: String, favorite: Bool) async throws
+}
+
+/// What a streamed subtitle track has delivered so far.
+struct SubtitleStreamChunk: Sendable {
+    /// Everything received, cut at the last whole cue.
+    var data: Data
+    /// The server sent the whole track (it had kept it from an earlier
+    /// run), whatever the start asked for.
+    var isWholeTrack: Bool
+    /// The last chunk: the stream reached the end of the file.
+    var isFinished: Bool
 }
 
 extension MediaServerLibrary {

@@ -90,5 +90,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<AtmosSceneService>();
         serviceCollection.AddSingleton<VideoSegmentService>();
         serviceCollection.AddSingleton<SpatialStreamService>();
+        serviceCollection.AddSingleton<SubtitleStreamService>();
     }
 }
