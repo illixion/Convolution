@@ -209,6 +209,11 @@ enum FilmDebugEndpoints {
         var audioTracks: Int
         var picture: Picture
         var disc: MVCPictureSource.Diagnostics?
+        /// visionOS: the player window's dynamic scale and the listener
+        /// distance the stage uses with it (real metres).
+        var windowScale: Float
+        var listenerDistanceAuto: Bool
+        var listenerDistanceMetres: Float?
     }
 
     #if os(visionOS)
@@ -237,6 +242,11 @@ enum FilmDebugEndpoints {
         default: "unknown"
         }
         let disc = video.pictureSource as? MVCPictureSource
+        #if os(visionOS)
+        let listenerDistanceMetres: Float? = FilmSession.shared.listenerPlacement.metres(windowScale: FilmSession.shared.windowScale)
+        #else
+        let listenerDistanceMetres: Float? = nil
+        #endif
         return Reply(
             playing: player.isPlaying,
             playerOpen: FilmSession.shared.isPlayerOpen,
@@ -265,7 +275,10 @@ enum FilmDebugEndpoints {
                 rendererReadyForMore: renderer.isReadyForMoreMediaData,
                 stereoTap: video.onSampleBuffer != nil
             ),
-            disc: disc?.diagnostics
+            disc: disc?.diagnostics,
+            windowScale: FilmSession.shared.windowScale,
+            listenerDistanceAuto: FilmSession.shared.listenerDistanceAuto,
+            listenerDistanceMetres: listenerDistanceMetres
         )
     }
 }

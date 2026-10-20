@@ -377,7 +377,8 @@ struct FilmPlayerView: View {
                     // The audio stage contributes no window depth. It remains
                     // mounted when only the picture changes to stereo.
                     .background {
-                        FilmStageView(player: player, listenerDistance: session.listenerDistance)
+                        FilmStageView(player: player, listenerDistance: session.listenerPlacement,
+                                      onWindowScale: { session.windowScale = $0 })
                             .frame(depth: 0)
                     }
                 if let source = stereoSource {
@@ -1083,7 +1084,20 @@ struct FilmTuning: View {
             slider("Room half-depth", value: $player.roomHalfDepth, in: 0.5 ... 5, unit: "m")
             slider("Ceiling above ears", value: $player.roomHeight, in: 0 ... 3, unit: "m")
             #if os(visionOS)
-            slider("You, in front of the window", value: $session.listenerDistance, in: 0.3 ... 4, unit: "m")
+            Toggle("Follow the window's distance", isOn: Binding {
+                session.listenerDistanceAuto
+            } set: { auto in
+                // Manual starts where the guess was, so the sound doesn't jump.
+                if !auto { session.listenerDistance = min(max(session.listenerPlacement.metres(windowScale: session.windowScale), 0.3), 12) }
+                session.listenerDistanceAuto = auto
+            })
+            if session.listenerDistanceAuto {
+                Text(String(format: "You, in front of the window: about %.1f m (window scaled ×%.2f)",
+                            session.listenerPlacement.metres(windowScale: session.windowScale), session.windowScale))
+                    .font(.caption)
+            } else {
+                slider("You, in front of the window", value: $session.listenerDistance, in: 0.3 ... 12, unit: "m")
+            }
             #endif
             VStack(alignment: .leading, spacing: 2) {
                 Text(String(format: "Picture offset: %+.0f ms", player.avOffsetMs)).font(.caption)

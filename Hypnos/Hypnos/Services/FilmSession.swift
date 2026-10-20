@@ -92,9 +92,20 @@ final class FilmSession {
     /// replacement appeared mustn't pause or close the new playback.
     @ObservationIgnored var activePlayerView: UUID?
 
-    /// visionOS: how far in front of the player window the listener is
-    /// assumed to sit. A window can't see the head, so this is a guess.
+    /// visionOS: whether the listener's assumed distance from the player
+    /// window follows the window's dynamic scale (`FilmListenerDistance.automatic`).
+    /// A window can't see the head, so either way it is a guess.
+    var listenerDistanceAuto = true
+    /// visionOS: the listener's distance in real metres while not automatic.
     var listenerDistance: Float = 1.5
+    /// visionOS: the player window's dynamic scale, as the stage last read it.
+    var windowScale: Float = 1
+
+    #if os(visionOS)
+    var listenerPlacement: FilmListenerDistance {
+        listenerDistanceAuto ? .automatic() : .fixed(listenerDistance)
+    }
+    #endif
     /// tvOS: whether PHASE turns the listener with the wearer's head
     /// (AirPods). Persisted with the rest of the sound settings.
     var headTracking = true
@@ -127,6 +138,9 @@ final class FilmSession {
         var headTracking: Bool
         /// Optional: settings saved before it existed decode as `.system`.
         var roomSource: FilmRoomSource?
+        /// Optional: settings saved before they existed decode as automatic.
+        var listenerDistanceAuto: Bool?
+        var listenerDistance: Float?
     }
 
     private static let soundKey = "filmPlayer.sound"
@@ -136,7 +150,8 @@ final class FilmSession {
             masterGainDB: player.masterGainDB, lfeGainDB: player.lfeGainDB, reverbDB: player.reverbDB,
             reverbPreset: player.reverbPreset, roomHalfWidth: player.roomHalfWidth,
             roomHalfDepth: player.roomHalfDepth, roomHeight: player.roomHeight,
-            avOffsetMs: player.avOffsetMs, headTracking: headTracking, roomSource: player.roomSource
+            avOffsetMs: player.avOffsetMs, headTracking: headTracking, roomSource: player.roomSource,
+            listenerDistanceAuto: listenerDistanceAuto, listenerDistance: listenerDistance
         )
         if let data = try? JSONEncoder().encode(settings) {
             UserDefaults.standard.set(data, forKey: Self.soundKey)
@@ -163,6 +178,8 @@ final class FilmSession {
         player.roomHeight = settings.roomHeight
         player.avOffsetMs = settings.avOffsetMs
         headTracking = settings.headTracking
+        listenerDistanceAuto = settings.listenerDistanceAuto ?? true
+        listenerDistance = settings.listenerDistance ?? listenerDistance
     }
 
     /// Whether a Jellyfin server is configured at all — the gate for
