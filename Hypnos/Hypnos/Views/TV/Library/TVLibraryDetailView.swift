@@ -34,6 +34,8 @@ struct TVLibraryDetailView: View {
     @State private var actionError: String?
     @State private var scrollOffset: CGFloat = 0
     @State private var resumeChoice: LibraryItem?
+    @State private var showsSkipHint = false
+    @State private var settingUpSkipMarkers = false
     @FocusState private var focus: Action?
 
     private enum Action: Hashable { case play, startOver, played, favorite }
@@ -59,6 +61,12 @@ struct TVLibraryDetailView: View {
 
                         if shown.kind == .series {
                             seasonsSection.focusSection().id("seasons")
+                        }
+                        if showsSkipHint {
+                            SkipMarkersHint(onSetUp: { settingUpSkipMarkers = true },
+                                            onDismiss: { showsSkipHint = false })
+                                .padding(.horizontal, 90)
+                                .focusSection()
                         }
                         if !similar.isEmpty {
                             TVLibraryShelfRow(shelf: LibraryShelf(id: "similar", title: "More Like This", items: similar),
@@ -92,6 +100,7 @@ struct TVLibraryDetailView: View {
         .toolbar(.hidden, for: .navigationBar)
         .defaultFocus($focus, .play)
         .task(id: LibraryService.configurationKey) { await load() }
+        .skipMarkersSetupSheet(isPresented: $settingUpSkipMarkers) { showsSkipHint = $0 }
         .onChange(of: LibraryWatchState.shared.revision) {
             Task { await reloadWatchState() }
         }
@@ -287,6 +296,7 @@ struct TVLibraryDetailView: View {
                     ?? seasons.first
                 selectedSeasonId = initial?.id
                 await loadEpisodes()
+                showsSkipHint = await IntroSkipperSetup.shared.suggestsInstall(for: nextEpisode)
             }
             similar = (try? await library.similar(itemId: fresh.seriesId ?? fresh.id)) ?? []
         } catch {

@@ -521,6 +521,21 @@ before touching progress reporting again:**
   stereo picture. The log line "No skippable segments: MediaSegments …"
   says why a title offers none. The macOS `-LibraryHarness`
   checks its segments, Up Next ordering and the fresh-resume path.
+- **Getting a server markers** (2026-10-20): stock Jellyfin makes none, so
+  without a provider plugin only files with named chapters skip (Archer on
+  the user's server does, House M.D.'s "Chapter 1…6" doesn't).
+  `IntroSkipperSetup` reads the server's plugin list and, for an admin,
+  installs Intro Skipper through the server's own API (add the
+  `intro-skipper.org/manifest.json` repository, `POST
+  Packages/Installed/Intro Skipper`, then `System/Restart`, then optionally
+  its `IntroSkipperDetectSegmentsTask` rather than waiting for its nightly
+  run). `SkipMarkersSection` (under Settings → Jellyfin, all platforms) is
+  the UI; `SkipMarkersHint` offers it on a series page whose Play episode
+  has no markers. **The app itself never calls a third-party service** (no
+  IntroDB lookups the way Infuse does): the install's confirmation says the
+  *server* downloads from intro-skipper.org and GitHub. The harness reports
+  the status, and with `HYPNOS_HARNESS_INTRO_SKIPPER_INSTALL=1` runs
+  install → restart → analyse on the dev server.
 
 ### Library UI: driving it without a remote or taps
 

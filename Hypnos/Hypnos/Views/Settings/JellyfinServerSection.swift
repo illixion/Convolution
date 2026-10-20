@@ -87,6 +87,8 @@ struct JellyfinServerSection: View {
         } footer: {
             Text("Powers the Library tab and Film Player. Needs the Convolution Object Audio plugin on the server for a film's object audio; other items play through direct/transcoded streaming.")
         }
+
+        SkipMarkersSection()
     }
 
     private func signIn() async {

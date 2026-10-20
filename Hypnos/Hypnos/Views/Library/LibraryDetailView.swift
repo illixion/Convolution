@@ -30,6 +30,8 @@ struct LibraryDetailView: View {
     @State private var similar: [LibraryItem] = []
     @State private var actionError: String?
     @State private var resumeChoice: LibraryItem?
+    @State private var showsSkipHint = false
+    @State private var settingUpSkipMarkers = false
 
     private var shown: LibraryItem { detail ?? item }
     private var library: JellyfinLibrary? { LibraryService.current() }
@@ -49,7 +51,10 @@ struct LibraryDetailView: View {
                 playback: playback,
                 onEpisode: tapEpisode,
                 onTogglePlayed: { Task { await togglePlayed() } },
-                onToggleFavorite: { Task { await toggleFavorite() } }
+                onToggleFavorite: { Task { await toggleFavorite() } },
+                showsSkipHint: showsSkipHint,
+                onSetUpSkipMarkers: { settingUpSkipMarkers = true },
+                onDismissSkipHint: { showsSkipHint = false }
             )
         }
         .ignoresSafeArea(edges: .top)
@@ -68,6 +73,7 @@ struct LibraryDetailView: View {
             await LibraryDownloads.shared.refreshPolicy()
             await load()
         }
+        .skipMarkersSetupSheet(isPresented: $settingUpSkipMarkers) { showsSkipHint = $0 }
         .onChange(of: selectedSeasonId) { _, _ in Task { await loadEpisodes() } }
         // Whatever changed the watch state (a player closing here, in another
         // window, or over this one in a pushed stack), once the server has it.
@@ -114,6 +120,7 @@ struct LibraryDetailView: View {
                     ?? seasons.first
                 selectedSeasonId = initial?.id
                 await loadEpisodes()
+                showsSkipHint = await IntroSkipperSetup.shared.suggestsInstall(for: nextEpisode)
             }
             similar = (try? await library.similar(itemId: fresh.seriesId ?? fresh.id)) ?? []
         } catch {
@@ -173,6 +180,9 @@ private struct LibraryDetailContent: View {
     let onEpisode: (LibraryItem) -> Void
     let onTogglePlayed: () -> Void
     let onToggleFavorite: () -> Void
+    let showsSkipHint: Bool
+    let onSetUpSkipMarkers: () -> Void
+    let onDismissSkipHint: () -> Void
 
     @Environment(\.libraryMetrics) private var metrics
 
@@ -180,6 +190,10 @@ private struct LibraryDetailContent: View {
         VStack(alignment: .leading, spacing: 28) {
             header
             if shown.kind == .series { seasonSection }
+            if showsSkipHint {
+                SkipMarkersHint(onSetUp: onSetUpSkipMarkers, onDismiss: onDismissSkipHint)
+                    .padding(.horizontal, metrics.gutter)
+            }
             if !similar.isEmpty {
                 LibraryShelfRow(shelf: LibraryShelf(id: "similar", title: "More Like This", items: similar),
                                 playback: playback)

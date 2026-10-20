@@ -232,8 +232,36 @@ enum LibraryHarness {
         if let series {
             await checkSegmentsAndFreshResume(library: library, server: server, series: series)
         }
+        await checkIntroSkipperSetup(library: library)
 
         log("DONE")
+    }
+
+    /// The Skip Intro setup against the dev server: the plugin status, and
+    /// with `HYPNOS_HARNESS_INTRO_SKIPPER_INSTALL=1` the whole install →
+    /// restart → analyse path (the dev server then downloads the plugin from
+    /// intro-skipper.org and GitHub). Uninstall it on the dev server first to
+    /// run that path again.
+    @MainActor
+    private static func checkIntroSkipperSetup(library: JellyfinLibrary) async {
+        let setup = IntroSkipperSetup(server: { library.http })
+        await setup.refresh(force: true)
+        log("introSkipper.status=\(setup.status) analysis=\(String(describing: setup.analysis))")
+        guard ProcessInfo.processInfo.environment["HYPNOS_HARNESS_INTRO_SKIPPER_INSTALL"] == "1" else { return }
+        if setup.status == .missing {
+            await setup.install()
+            log("introSkipper.install status=\(setup.status) (expect needsRestart) error=\(setup.error ?? "nil")")
+        }
+        if setup.status == .needsRestart {
+            await setup.restartServer()
+            log("introSkipper.restart status=\(setup.status) (expect active) error=\(setup.error ?? "nil")")
+        }
+        if setup.status == .active {
+            await setup.startAnalysis()
+            try? await Task.sleep(for: .seconds(2))
+            await setup.refreshAnalysis()
+            log("introSkipper.analysis=\(String(describing: setup.analysis)) error=\(setup.error ?? "nil")")
+        }
     }
 
     /// Every movie's 3D format, through browse (the list DTO) and item (the

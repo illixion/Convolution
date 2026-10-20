@@ -1296,6 +1296,12 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// `item(id:)` just to show a synopsis.
     private static let listFields = URLQueryItem(name: "Fields", value: "Overview,Genres,CanDownload")
 
+    /// The same server and credentials for calls outside this file's own
+    /// DTOs (the server-admin requests in `IntroSkipperSetup`).
+    nonisolated var http: JellyfinHTTP {
+        JellyfinHTTP(baseURL: baseURL, authorization: JellyfinClientIdentity.authorizationHeader(token: authHeaderToken))
+    }
+
     private func fetchItems(path: String, query: [URLQueryItem]) async throws -> [LibraryItem] {
         let page: JFPage = try await get(path, query: query + [Self.listFields])
         return page.Items.map(LibraryItem.init)
