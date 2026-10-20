@@ -7,6 +7,7 @@
 
 import DebugTrace
 import DebugTraceUI
+import RAVEMedia
 import SwiftUI
 
 struct GalleryThumbnailView: View {
@@ -178,7 +179,7 @@ struct GalleryThumbnailView: View {
     /// `.depth` with a model to run it. Without one the style behaves as
     /// `.diorama`, so choosing it before installing a model isn't a dead end.
     private var usesDepth: Bool {
-        appModel.effectiveThumbnailDepth && ThumbnailDepthEstimator.shared.isModelAvailable
+        appModel.effectiveThumbnailDepth && RAVEStillDepthEstimator.shared.isModelAvailable
     }
 
     private func preloadCachedDepth() async -> ThumbnailDioramaCache.ThumbnailDepth? {

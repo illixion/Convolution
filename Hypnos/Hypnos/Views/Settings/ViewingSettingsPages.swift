@@ -86,7 +86,7 @@ struct GallerySettingsPage: View {
                     }
                     .pickerStyle(.menu)
                     if appModel.thumbnailStyle == .depth {
-                        Text(ThumbnailDepthEstimator.shared.isModelAvailable
+                        Text(RAVEStillDepthEstimator.shared.isModelAvailable
                              ? "Shows each thumbnail in 3D using the Real-Time depth model."
                              : "Needs a depth model (Settings → AI 3D → Manage Depth Models). Diorama is used until one is installed.")
                             .font(.caption)

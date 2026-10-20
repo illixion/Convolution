@@ -58,9 +58,11 @@ struct RemoteViewerWindowView: View {
             // dioramaDistance in Z. Overlays anchored at z=0 would be occluded,
             // so lift them in front of the foreground plane. Match the
             // ornament's +30pt clearance on top of the foreground offset.
+            // AI 3D's mesh and its input layer sit in front of the window
+            // plane in the same way.
             let overlayZ: CGFloat = (viewerModel?.enableDiorama ?? false)
                 ? appModel.dioramaDistance + 30
-                : 0
+                : (viewerModel?.isSlideshowAIDepthActive ?? false) ? 70 : 0
             ZStack {
                 // Background
                 if !(viewerModel?.config.transparentBackground ?? false) {
@@ -451,11 +453,11 @@ struct RemoteViewerWindowView: View {
                 // input layer in front hands taps to the window's tap
                 // gesture: the mesh's RealityView would swallow them.
                 if model.isSlideshowAIDepthActive, let cgImage = image.cgImage, let depth = model.currentDepth {
-                    AIDepthPhotoView(
+                    RAVEAIDepthPhotoView(
                         image: cgImage,
                         depth: depth,
                         contentID: ObjectIdentifier(image),
-                        adjustments: AIDepthPhotoView.Adjustments(
+                        adjustments: RAVEAIDepthPhotoView.Adjustments(
                             brightness: model.effectiveBrightness,
                             contrast: model.effectiveContrast,
                             saturation: model.effectiveSaturation
@@ -470,7 +472,7 @@ struct RemoteViewerWindowView: View {
 
                     Color.white.opacity(0.001)
                         .aspectRatio(image.size, contentMode: .fit)
-                        .offset(z: AIDepthPhotoView.inputTargetZ)
+                        .offset(z: RAVEAIDepthPhotoView.inputTargetZ)
                 }
                 #endif
             }

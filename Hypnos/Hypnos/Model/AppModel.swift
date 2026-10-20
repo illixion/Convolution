@@ -867,7 +867,7 @@ class AppModel {
     }
 
     /// `.depth` chosen. The cell falls back to the Vision diorama itself when
-    /// no depth model is installed (`ThumbnailDepthEstimator.isModelAvailable`).
+    /// no depth model is installed (`RAVEStillDepthEstimator.isModelAvailable`).
     var effectiveThumbnailDepth: Bool {
         effectiveThumbnailStyle == .depth
     }

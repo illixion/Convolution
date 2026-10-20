@@ -42,7 +42,7 @@ struct DepthTileView: View {
     /// Vertices along the tile's long edge. With the depth softened, this
     /// is dense enough that a subject's outline doesn't read as stepped.
     nonisolated static let gridLongSide = 112
-    nonisolated static let shape = DepthMesh.Shape(span: span, edgeFalloff: edgeFalloff, gridLongSide: gridLongSide)
+    nonisolated static let shape = RAVEDepthMesh.Shape(span: span, edgeFalloff: edgeFalloff, gridLongSide: gridLongSide)
 
     var body: some View {
         let widthMeters = Float(metrics.convert(size.width, to: .meters))
@@ -81,17 +81,17 @@ struct DepthTileView: View {
         widthMeters: Float, heightMeters: Float, spanMeters: Float
     ) async -> Entity? {
         guard let cgImage = image.cgImage, size.width > 0, size.height > 0 else { return nil }
-        let crop = DepthMesh.fillCrop(imageWidth: CGFloat(cgImage.width), imageHeight: CGFloat(cgImage.height), cell: size)
+        let crop = RAVEDepthMesh.fillCrop(imageWidth: CGFloat(cgImage.width), imageHeight: CGFloat(cgImage.height), cell: size)
         let built = await Task.detached(priority: .userInitiated) { () -> Built? in
-            guard let texture = DepthMesh.renderTexture(cgImage, crop: crop, cell: size, cornerRadius: cornerRadius) else { return nil }
-            let mesh = DepthMesh.meshDescriptor(
+            guard let texture = RAVEDepthMesh.renderTexture(cgImage, crop: crop, cell: size, cornerRadius: cornerRadius) else { return nil }
+            let mesh = RAVEDepthMesh.meshDescriptor(
                 depth: depth, crop: crop, cell: size, shape: shape,
                 widthMeters: widthMeters, heightMeters: heightMeters, spanMeters: spanMeters
             )
             return Built(texture: texture, mesh: mesh)
         }.value
         guard let built else { return nil }
-        return await DepthMesh.makeModel(texture: built.texture, mesh: built.mesh)
+        return await RAVEDepthMesh.makeModel(texture: built.texture, mesh: built.mesh)
     }
 
     /// Built off the main actor, handed back once. `MeshDescriptor` isn't

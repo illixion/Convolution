@@ -19,7 +19,7 @@ enum Slideshow3DMode: String, Codable, CaseIterable, Identifiable {
     case spatial3D
     case immersive3D
     /// Pictures as a depth-displaced mesh from the real-time depth model
-    /// (`AIDepthPhotoView`). Videos convert in real time in every 3D mode.
+    /// (`RAVEAIDepthPhotoView`). Videos convert in real time in every 3D mode.
     case aiDepth
 
     var id: String { rawValue }

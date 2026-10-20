@@ -7,7 +7,6 @@ paths:
   - "Hypnos/Hypnos/Model/Video3DSettings.swift"
   - "Hypnos/Hypnos/Services/Depth*"
   - "Hypnos/Hypnos/Services/StereoEyeImages.swift"
-  - "Hypnos/Hypnos/Services/ThumbnailDepthEstimator.swift"
   - "Hypnos/Hypnos/Services/StereoscopicFormat.swift"
 ---
 

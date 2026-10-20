@@ -255,7 +255,7 @@ class PhotoWindowModel {
     // MARK: - AI 3D State
 
     /// Whether the photo viewer shows the picture as AI 3D: a mesh displaced
-    /// by the real-time depth model's map (`AIDepthPhotoView`). A sibling
+    /// by the real-time depth model's map (`RAVEAIDepthPhotoView`). A sibling
     /// viewing mode to Diorama and the RealityKit 3D modes, mutually
     /// exclusive with all of them. Persisted via `ViewingModePreference.aiDepth`.
     var isAIDepthMode: Bool = false

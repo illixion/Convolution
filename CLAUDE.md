@@ -153,7 +153,7 @@ Spatial 3D) is in `.claude/rules/hypnos-ui-tests.md` (auto-loads when touching `
   - **PhotoWindowModel+MemoryManagement.swift** - Idle downscale (release/thumbnail/restore), scene phase tracking, lightweight display transition
   - **PhotoWindowModel+GalleryNavigation.swift** - Gallery image switching, prev/next navigation, lazy loading pagination, rating/activity counter updates
   - **PhotoWindowModel+UIControls.swift** - Share sheet, UI auto-hide timers, image flip
-  - **PhotoWindowModel+AIDepth.swift** - AI 3D: the depth-mesh viewing mode (`AIDepthPhotoView`), its source picture and depth map, and how it yields to the other modes
+  - **PhotoWindowModel+AIDepth.swift** - AI 3D: the depth-mesh viewing mode (RAVEMedia's `RAVEAIDepthPhotoView`), its source picture and depth map, and how it yields to the other modes
 
 ### Windows Tab (window manager)
 `WindowsTabView` is the app's window inventory: every open window with **Summon** and **Close** on each, plus Hide All / Close All underneath. The registry, the rows and the recycle mechanics are **RAVEUI's** `RAVEWindowRegistry` / `RAVEWindowManagerView`; the app supplies only labels and fresh-identity clones, in `Model/ManagedWindows.swift`, applied to each scene root in `HypnosApp` via `.manageWindow(...)`.

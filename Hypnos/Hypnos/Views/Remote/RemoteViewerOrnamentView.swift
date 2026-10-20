@@ -5,6 +5,7 @@
  [ Grid | Prev | Next | 3D | Resolution | Adjustments | Profile ]
  */
 
+import RAVEMedia
 import RAVEUI
 import SwiftUI
 
@@ -126,7 +127,7 @@ struct RemoteViewerOrnamentView: View {
                     }
                     // AI 3D runs the real-time depth model, pictures and
                     // videos alike.
-                    .disabled(mode == .aiDepth && !ThumbnailDepthEstimator.shared.isModelAvailable)
+                    .disabled(mode == .aiDepth && !RAVEStillDepthEstimator.shared.isModelAvailable)
                 }
             }
             .onAppear { updateOrnamentMenuCount(opened: true) }

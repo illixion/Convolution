@@ -2,7 +2,7 @@
  Hypnos - Photo Window Model: AI 3D
 
  AI 3D shows the photo as a mesh displaced by the real-time depth model's map
- (`AIDepthPhotoView`): one inference and one RealityKit mesh, the cheap
+ (`RAVEAIDepthPhotoView`): one inference and one RealityKit mesh, the cheap
  alternative to "RealityKit 3D" (`ImagePresentationComponent`), which takes
  seconds and a large memory spike to generate.
 
@@ -28,7 +28,7 @@ extension PhotoWindowModel {
 
     /// Whether a real-time depth model is installed to run AI 3D.
     var isAIDepthAvailable: Bool {
-        ThumbnailDepthEstimator.shared.isModelAvailable
+        RAVEStillDepthEstimator.shared.isModelAvailable
     }
 
     /// The 3D menu's AI 3D item.

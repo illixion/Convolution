@@ -6,7 +6,6 @@ paths:
   - "Hypnos/Hypnos/Views/Pictures/MetalImageView.swift"
   - "Hypnos/Hypnos/Views/Pictures/Spatial3D*"
   - "Hypnos/Hypnos/Views/Pictures/QuickLook3DView.swift"
-  - "Hypnos/Hypnos/Views/Pictures/AIDepthPhotoView.swift"
   - "Hypnos/Hypnos/Views/ZoomPan.swift"
   - "Hypnos/Hypnos/Model/PhotoWindow*"
   - "Hypnos/Hypnos/Services/WindowResizeCoalescer.swift"
@@ -45,12 +44,12 @@ The two thin wrapper views:
 - **Important:** When swapping `displayTexture` (e.g. toggling background removal or auto-enhance from in-memory cache), `imageAspectRatio` must always be updated from the new texture's dimensions. The Metal renderer stretches the texture to fill its view — aspect ratio is controlled externally by SwiftUI's `.aspectRatio()` modifier driven by `imageAspectRatio`.
 
 ## AI 3D
-The cheap 3D: the "3D Depth" thumbnail's mesh at window size (`AIDepthPhotoView`, built from `DepthMesh`). One pass of the real-time depth model, then one RealityKit mesh, against RealityKit 3D's seconds-long generation and memory spike. visionOS only; needs a real-time depth model (the menu item says so when there is none).
+The cheap 3D: the "3D Depth" thumbnail's mesh at window size (RAVEMedia's `RAVEAIDepthPhotoView`, built from `RAVEDepthMesh`; shared with RoboFrame's slideshows, design notes in RAVESDK's `CLAUDE.md`). One pass of the real-time depth model, then one RealityKit mesh, against RealityKit 3D's seconds-long generation and memory spike. visionOS only; needs a real-time depth model (the menu item says so when there is none).
 - **State** in `PhotoWindowModel+AIDepth.swift`: `isAIDepthMode`, `aiDepthSource` (the picture, oriented, ≤2048 px, held only while on), `aiDepthMap`. A sibling mode to Diorama and the RealityKit modes, mutually exclusive with them and with background removal (its cut-out is cropped to the subject, so depth no longer lines up). `switchToViewingMode` to a RealityKit mode and `setDioramaMode(true)` exit it. Recorded as `ViewingModePreference.aiDepth`; a default viewing mode too.
 - **Follows gallery navigation** (unlike Diorama): `switchToImage` re-engages it on the next picture without recording it as that picture's mode.
 - **Depth is shared with the thumbnail cache**, keyed by `image.thumbnailURL` (`ThumbnailDioramaCache.depth(for:source:)`, same estimator queue): a picture seen in the 3D Depth grid engages without inference, and one seen here shows in 3D in the grid.
 - **Laid over the flat picture**, which keeps sizing the window and shows until the mesh fades in. Same rect and corner radius; the mesh floats 1 pt off the plane. Depth is 8% of the short side (24–64 pt).
-- **Input:** the mesh's RealityView takes no input but would swallow it, so a near-invisible layer at `AIDepthPhotoView.inputTargetZ` carries the tap and swipe; the restore pill is lifted above it. Pinch zoom is off in AI 3D.
+- **Input:** the mesh's RealityView takes no input but would swallow it, so a near-invisible layer at `RAVEAIDepthPhotoView.inputTargetZ` carries the tap and swipe; the restore pill is lifted above it. Pinch zoom is off in AI 3D.
 - **Adjustments are baked into the texture** (CIColorControls with the same contrast remap as the RealityKit re-bake, plus auto-enhance), re-baked 350 ms after the sliders settle and swapped in place. Flip is a negative x scale on the entity. The mesh fades out while any menu or popover is open.
 - **Resizing** scales the entity uniformly (the aspect is fixed); only a ~30% change rebuilds it, for texture detail.
 

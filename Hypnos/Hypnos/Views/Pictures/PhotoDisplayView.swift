@@ -7,6 +7,7 @@
  */
 
 import DebugTrace
+import RAVEMedia
 import RealityKit
 import SwiftUI
 #if canImport(UIKit)
@@ -304,7 +305,7 @@ struct PhotoDisplayView: View {
                 .animation(.easeInOut(duration: 0.3), value: windowModel.showAutoRestorePrompt)
                 // Match the ornament's z-offset so the pill stays above the
                 // diorama foreground (which sits at appModel.dioramaDistance),
-                // and clear AI 3D's input target (AIDepthPhotoView.inputTargetZ).
+                // and clear AI 3D's input target (RAVEAIDepthPhotoView.inputTargetZ).
                 .offset(z: windowModel.isAIDepthMode ? 70 : windowModel.isDioramaMode ? 30 : 0)
             }
         }
@@ -866,11 +867,11 @@ struct PhotoDisplayView: View {
            let source = windowModel.aiDepthSource,
            let depth = windowModel.aiDepthMap {
             let adjustments = windowModel.effectiveAdjustments
-            AIDepthPhotoView(
+            RAVEAIDepthPhotoView(
                 image: source,
                 depth: depth,
                 contentID: windowModel.imageURL,
-                adjustments: AIDepthPhotoView.Adjustments(
+                adjustments: RAVEAIDepthPhotoView.Adjustments(
                     brightness: adjustments.brightness,
                     contrast: adjustments.contrast,
                     saturation: adjustments.saturation,
@@ -891,7 +892,7 @@ struct PhotoDisplayView: View {
                 }
                 .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissDragAction))
                 .offset(x: dragOffset)
-                .offset(z: AIDepthPhotoView.inputTargetZ)
+                .offset(z: RAVEAIDepthPhotoView.inputTargetZ)
         }
     }
     #endif

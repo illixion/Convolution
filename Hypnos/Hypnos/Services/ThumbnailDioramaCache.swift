@@ -178,9 +178,9 @@ final class ThumbnailDioramaCache {
         if let cached = depthCache.object(forKey: url as NSURL) { return cached }
         if withoutDepth.contains(url) { return nil }
         guard let cgImage = source()?.cgImage else { return nil }
-        guard let map = await ThumbnailDepthEstimator.shared.depth(for: cgImage) else {
+        guard let map = await RAVEStillDepthEstimator.shared.depth(for: cgImage) else {
             // Cancelled (scrolled away) or no model: both retry next time.
-            if !Task.isCancelled, ThumbnailDepthEstimator.shared.isModelAvailable {
+            if !Task.isCancelled, RAVEStillDepthEstimator.shared.isModelAvailable {
                 withoutDepth.insert(url)
                 AppLogger.backgroundRemover.warning("Thumbnail depth inference failed; keeping it flat")
             }

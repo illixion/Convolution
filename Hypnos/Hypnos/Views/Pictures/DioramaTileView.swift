@@ -8,13 +8,14 @@
  against each other under it (device, 2026-10-07, worst in the square grid).
  Inside one RealityView the pair scales as one unit.
 
- Shares `DepthMesh`'s crop-and-round texture path, so both panels show
+ Shares `RAVEDepthMesh`'s crop-and-round texture path, so both panels show
  exactly the cell's visible region, and the same input and z-fight rules
  (see the cell in `GalleryThumbnailView`).
  */
 
 #if os(visionOS)
 import DebugTraceUI
+import RAVEMedia
 import RealityKit
 import SwiftUI
 
@@ -69,9 +70,9 @@ struct DioramaTileView: View {
         guard let bg = backdrop.cgImage, let fg = foreground.cgImage, size.width > 0, size.height > 0 else { return nil }
         let rendered = await Task.detached(priority: .userInitiated) { () -> Textures? in
             // The pair is uncropped and shares one frame, so one crop fits both.
-            let crop = DepthMesh.fillCrop(imageWidth: CGFloat(bg.width), imageHeight: CGFloat(bg.height), cell: size)
-            guard let bgTexture = DepthMesh.renderTexture(bg, crop: crop, cell: size, cornerRadius: DepthTileView.cornerRadius),
-                  let fgTexture = DepthMesh.renderTexture(fg, crop: crop, cell: size, cornerRadius: DepthTileView.cornerRadius, edgeFade: DepthTileView.edgeFalloff)
+            let crop = RAVEDepthMesh.fillCrop(imageWidth: CGFloat(bg.width), imageHeight: CGFloat(bg.height), cell: size)
+            guard let bgTexture = RAVEDepthMesh.renderTexture(bg, crop: crop, cell: size, cornerRadius: DepthTileView.cornerRadius),
+                  let fgTexture = RAVEDepthMesh.renderTexture(fg, crop: crop, cell: size, cornerRadius: DepthTileView.cornerRadius, edgeFade: DepthTileView.edgeFalloff)
             else { return nil }
             return Textures(backdrop: bgTexture, foreground: fgTexture)
         }.value
@@ -97,7 +98,7 @@ struct DioramaTileView: View {
             options: .init(semantic: .color, mipmapsMode: .allocateAndGenerateAll)
         ) else { return nil }
         var material = UnlitMaterial(applyPostProcessToneMap: false)
-        material.color = .init(tint: .white, texture: DepthMesh.clampedTexture(texture))
+        material.color = .init(tint: .white, texture: RAVEDepthMesh.clampedTexture(texture))
         material.blending = .transparent(opacity: .init(floatLiteral: 1))
         let entity = ModelEntity(mesh: .generatePlane(width: width, height: height), materials: [material])
         // Both panels are transparent; the subject must always draw over the
