@@ -208,7 +208,7 @@ For a film's object audio, install the companion plugin on the Jellyfin server �
 ## Usage
 
 ### Pictures tab
-Browse your photos in a grid (square or original aspect ratio, set in Settings → Display → **Pictures Grid**). Tap an image to open it in the viewer:
+Browse your photos in a grid (square or original aspect ratio, set in Settings → Gallery → **Pictures Grid**). Tap an image to open it in the viewer:
 - **Swipe** left/right to move between images
 - The **2D/3D** menu generates a spatial 3D version, switches to immersive 3D, or returns to 2D
 - The **Adjustments** button opens brightness, contrast, saturation, sharpen, opacity, auto-enhance, background removal and flip in one place
@@ -226,9 +226,9 @@ Browse and play videos. The **view mode** button in the ornament switches betwee
 Windowed stereoscopic 3D from any flat video, using Core ML monocular depth (Depth Anything V2 Small):
 - **Real-Time** — instant, with depth inferred at about 30 Hz and held for the in-between frame
 - **Pre-Process** — converts in the background and caches the depth in a compact HEVC sidecar. The video keeps playing in 2D meanwhile and switches to 3D automatically once enough depth is ready. Later plays read the cache at full frame rate with no Neural Engine load
-- The first time you convert, a setup sheet offers a depth model to download from Apple's Hugging Face repo (about 19–50 MB, in four precision variants). Choose which installed model each pipeline uses under Settings → Display, or from the view-mode menu
+- The first time you convert, a setup sheet offers a depth model to download from Apple's Hugging Face repo (about 19–50 MB, in four precision variants). Choose which installed model each pipeline uses under Settings → AI 3D, or from the view-mode menu
 - **Convergence** — which depth sits on the window plane — is adjusted in the Adjustments window, which opens as its own repositionable window so it never sits behind the 3D video. Depth strength is fixed
-- **Real-Time 3D for All Videos** (Settings → Display) opens eligible videos in 3D automatically, preferring cached depth when it exists
+- **Real-Time 3D for All Videos** (Settings → AI 3D) opens eligible videos in 3D automatically, preferring cached depth when it exists
 
 #### Stereoscopic 3D
 Videos tagged side-by-side or over-under in Stash convert to MV-HEVC and play in a full immersive space.

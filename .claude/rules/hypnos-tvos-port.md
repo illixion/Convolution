@@ -116,9 +116,10 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   on the transport's Recenter button. Show Objects overlays
   `FilmObjectMapPanel` (top and front views, overhead count).
 - **`TVSettingsView`** — a remote-friendly subset of `SettingsTabView`,
-  laid out like the tvOS Settings app: a short top page of rows showing
-  their current value (Set Up from Another Device, Library Source, the
-  three servers, Cache, Developer), each opening its own page. No display
+  laid out like the tvOS Settings app (which `SettingsTabView` now copies):
+  a short top page of rows showing their current value (Device Setup,
+  Library Source, the servers, Cache, Developer), each opening its own
+  page. The Stash page is the shared `StashServerSection`. No display
   adjustments, depth models, or Backup import/export (no Files app on tvOS
   to pick a file from or save one to). Two tvOS rules the pages follow,
   both learned on hardware: **no `Picker`** — its default style pushes a
@@ -135,20 +136,22 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   view `@State` with it: with `.tag`/`.tabItem` tabs a pushed Settings page
   went blank with no way back. `TVRootView` uses `Tab(value:)`, which stops
   the blanking, and Settings keeps its navigation path and the setup
-  receiver in `TVSettingsState` rather than `@State`, so a rebuild lands on
-  the same page. (`Tab.hidden` would avoid the rebuild but is unavailable
+  receiver (in `DeviceSetup`, ended when the page leaves the path) rather
+  than in `@State`, so a rebuild lands on the same page. (`Tab.hidden` would avoid the rebuild but is unavailable
   on tvOS.) DEBUG `-UITestDefault tvSettingsInitialPage=<page>` opens a
   Settings page directly; with it, a setup transfer can be driven in the
   simulator by decoding the QR code from a `simctl io` screenshot with
   `RAVESetupQRCode.codes(inImageData:service:)` and sending from a Mac
   harness.
-- **Apple TV setup** (`Services/DeviceSetup/`, RAVESDK's
-  `RAVEDeviceSetup`) — Settings → Set Up from Another Device
-  (`TVDeviceSetupView`) shows a QR code; Hypnos on another device sends
-  its server addresses and credentials to it, encrypted to the key in the
-  code: the iPhone/iPad Camera opens the code's `hypnos://setup` link,
-  and Settings → Apple TV → Scan a Photo of the Code works everywhere
-  (`DeviceSetupSendSection`, then `DeviceSetupSendSheet` to pick servers).
+- **Device Setup** (`Services/DeviceSetup/`, RAVESDK's
+  `RAVEDeviceSetup`; Apple TV only until 2026-10-20, now any platform to
+  any other) — Settings → Device Setup shows a QR code
+  (`DeviceSetupReceiveView`; elsewhere under Show Setup Code); Hypnos on
+  another device sends its server addresses and credentials to it,
+  encrypted to the key in the code: the iPhone/iPad Camera opens the
+  code's `hypnos://setup` link, and Settings → Device Setup → Scan a Photo
+  of the Code works on every platform but tvOS
+  (`DeviceSetupSettingsPage`, then `DeviceSetupSendSheet` to pick servers).
   Neither route asks for camera or photo access. `DeviceSetupPayload` is
   what travels — Stash URL and API key, Nextcloud URL, user, app password
   and root, Jellyfin server, API key and signed-in session

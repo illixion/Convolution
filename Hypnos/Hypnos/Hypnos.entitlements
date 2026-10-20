@@ -12,6 +12,11 @@
 	     Tailscale mesh. -->
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<!-- Settings → Device Setup → Show Setup Code: listens on the local
+	     network (Bonjour + TCP) while the code is on screen, so another
+	     device can send its servers. -->
+	<key>com.apple.security.network.server</key>
+	<true/>
 	<!-- Settings → Backup export/import (SettingsBackupDocument's
 	     fileExporter/fileImporter) goes through the system's Open/Save
 	     panels, which need this entitlement under App Sandbox even though

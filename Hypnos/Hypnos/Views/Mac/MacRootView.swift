@@ -84,7 +84,7 @@ struct MacRootView: View {
             YouTubeTabView()
         #endif
         case .settings:
-            MacSettingsView()
+            SettingsTabView()
         }
     }
 }

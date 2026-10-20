@@ -7,7 +7,7 @@
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Convolution shows your photos and videos, and on Apple Vision Pro converts them to 3D. Your library is read on this device only — nothing is uploaded.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Convolution connects to the media servers you configure so you can browse and stream your own libraries, and to your other devices running Convolution when you set up an Apple TV from them.</string>
+	<string>Convolution connects to the media servers you configure so you can browse and stream your own libraries, and to your other devices running Convolution when you send settings between them with Device Setup.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_hypnos-setup._tcp</string>

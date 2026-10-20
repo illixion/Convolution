@@ -1,9 +1,14 @@
 /*
- Hypnos - confirm sending server settings to an Apple TV
+ Hypnos - Settings → Device Setup (visionOS, iOS, macOS; tvOS has its own
+ page, which can only receive)
 
- Shown for a scanned setup code (`DeviceSetup.pending`). Lists what this
- device has configured, one toggle per server, and sends the chosen ones,
- keys included, sealed to the TV's key (RAVESDK's `RAVESetupSender`).
+ `DeviceSetupSettingsPage` offers both directions: send this device's
+ servers to another one (scan its code from a photo; on iPhone and iPad the
+ Camera works too), or show a code here to be set up from another device
+ (`DeviceSetupReceiveView`). `DeviceSetupSendSheet` is the confirmation for a
+ scanned code (`DeviceSetup.pending`): one toggle per configured server, and
+ the chosen ones are sent, keys included, sealed to the other device's key
+ (RAVESDK's `RAVESetupSender`).
  */
 
 #if !os(tvOS)
@@ -62,9 +67,9 @@ struct DeviceSetupSendSheet: View {
                             }
                         }
                     } header: {
-                        Text("Send to Apple TV")
+                        Text("Send to the Other Device")
                     } footer: {
-                        Text("Addresses, sign-ins and keys are encrypted to the code on the Apple TV's screen, so only that Apple TV can read them. The Apple TV uses the same keys as this device.")
+                        Text("Addresses, sign-ins and keys are encrypted to the code on the other device's screen, so only that device can read them. It uses the same keys as this device.")
                     }
 
                     Section {
@@ -78,7 +83,7 @@ struct DeviceSetupSendSheet: View {
                                 Text("Sending…").foregroundStyle(.secondary)
                             }
                         case .sent:
-                            Label("Sent. The Apple TV is set up.", systemImage: "checkmark.circle.fill")
+                            Label("Sent. The other device is set up.", systemImage: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
                         }
                         if case .failed(let message) = phase {
@@ -88,7 +93,7 @@ struct DeviceSetupSendSheet: View {
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle("Set Up Apple TV")
+            .navigationTitle("Set Up Another Device")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(phase == .sent ? "Done" : "Cancel") { dismiss() }
@@ -142,22 +147,35 @@ private struct DeviceSetupSheetPresenter: ViewModifier {
     }
 }
 
-/// Settings → Apple TV: the ways to get a setup code into `DeviceSetup.pending`.
-struct DeviceSetupSendSection: View {
+struct DeviceSetupSettingsPage: View {
     @State private var scanError: String?
 
     var body: some View {
-        Section {
-            RAVESetupScanPhotoButton(service: DeviceSetup.service, onResult: scanned) {
-                Label("Scan a Photo of the Code", systemImage: "qrcode.viewfinder")
+        SettingsPage("Device Setup") {
+            Section {
+                RAVESetupScanPhotoButton(service: DeviceSetup.service, onResult: scanned) {
+                    Label("Scan a Photo of the Code", systemImage: "qrcode.viewfinder")
+                }
+                if let scanError {
+                    Text(scanError).font(.caption).foregroundStyle(.red)
+                }
+            } header: {
+                Text("Set Up Another Device")
+            } footer: {
+                Text(sendFooter)
             }
-            if let scanError {
-                Text(scanError).font(.caption).foregroundStyle(.red)
+
+            Section {
+                NavigationLink {
+                    DeviceSetupReceiveView()
+                } label: {
+                    Label("Show Setup Code", systemImage: "qrcode")
+                }
+            } header: {
+                Text("Set Up This Device")
+            } footer: {
+                Text("Shows a code another device running Convolution can send its servers to. This device listens on the local network only while the code is on screen.")
             }
-        } header: {
-            Text("Apple TV")
-        } footer: {
-            Text(footer)
         }
     }
 
@@ -171,11 +189,11 @@ struct DeviceSetupSendSection: View {
         }
     }
 
-    private var footer: String {
+    private var sendFooter: String {
         #if os(iOS)
-        "On the Apple TV, open Convolution → Settings → Set Up from Another Device, then point the Camera app at the code. Or take a photo of it and pick it here."
+        "Sends this device's server addresses and sign-ins, so you don't have to type them again. On the other device (an Apple TV, iPhone, iPad, Mac or Vision Pro), open Convolution → Settings → Device Setup, then point the Camera app at its code. Or take a photo of the code and pick it here."
         #else
-        "On the Apple TV, open Convolution → Settings → Set Up from Another Device, take a photo of the code, and pick it here."
+        "Sends this device's server addresses and sign-ins, so you don't have to type them again. On the other device (an Apple TV, iPhone, iPad, Mac or Vision Pro), open Convolution → Settings → Device Setup, take a photo of its code, and pick it here."
         #endif
     }
 }

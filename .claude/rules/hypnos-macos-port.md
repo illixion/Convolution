@@ -73,9 +73,13 @@ gaze/touch-shaped chrome is worse than a small platform-native one):
 - **`MacFilmsView.swift`** — Jellyfin search over the same `FilmSession`;
   opens the film in its own "Film Player" window rather than a cover/sheet
   (macOS has no `fullScreenCover`).
-- **`MacSettingsView.swift`** — library source, Stash server + test
-  connection, `NextcloudSettingsSection` and `CacheSettingsSection` reused
-  verbatim (same as tvOS — neither needed any change for a third platform).
+- **Settings** — the shared `SettingsTabView` (since 2026-10-20; the old
+  `MacSettingsView` is gone), showing only what the Mac windows read: a
+  Library picker (the sidebar has no library switch), the servers, Device
+  Setup, Cache and Backup. The viewing, AI 3D and Developer pages are left
+  out because nothing in `Views/Mac/` reads those settings. Device Setup's
+  Show Setup Code listens on the network, hence `network.server` in the
+  entitlements.
 - **`HypnosCommands.swift`** — the menu bar (`.commands` on the main
   `WindowGroup`): File → New Window, a Library menu with one item per
   `MacTab` plus Play/Pause (space bar). Tab selection and play/pause both go

@@ -38,8 +38,8 @@ enum TVSettingsPage: String, Hashable {
 /// loses a tab (Library appears once Jellyfin is configured) tvOS rebuilds
 /// the other tabs' content, and view `@State` goes with it: a pushed page
 /// went blank with no way back (tvOS 27). Kept here, a rebuild lands back
-/// on the same page — including Set Up from Another Device's result, whose
-/// payload is exactly what adds the Library tab.
+/// on the same page — including Device Setup's result (kept in
+/// `DeviceSetup`), whose payload is exactly what adds the Library tab.
 @MainActor
 @Observable
 final class TVSettingsState {
@@ -47,14 +47,11 @@ final class TVSettingsState {
 
     var path: [TVSettingsPage] = [] {
         didSet {
-            if !path.contains(.deviceSetup) { endDeviceSetup() }
+            // The page's view can be rebuilt while it stays open, so it
+            // stops listening when it leaves the path, not on disappear.
+            if !path.contains(.deviceSetup) { DeviceSetup.shared.endReceiving() }
         }
     }
-
-    /// The setup page's receiver and what it received, while that page is
-    /// in `path`.
-    private(set) var setupReceiver: RAVESetupReceiver<DeviceSetupPayload>?
-    private(set) var setupReceived: DeviceSetupPayload?
 
     private init() {
         // DEBUG-only, like `tvInitialTab`: `-UITestDefault
@@ -65,23 +62,6 @@ final class TVSettingsState {
             path = [page]
         }
         #endif
-    }
-
-    /// Starts listening unless a receiver is already up or has finished.
-    func beginDeviceSetup(applying apply: @escaping @MainActor (DeviceSetupPayload) -> Void) {
-        guard setupReceiver == nil, setupReceived == nil else { return }
-        let receiver = RAVESetupReceiver<DeviceSetupPayload>(service: DeviceSetup.service) { [weak self] payload in
-            apply(payload)
-            self?.setupReceived = payload
-        }
-        receiver.start()
-        setupReceiver = receiver
-    }
-
-    private func endDeviceSetup() {
-        setupReceiver?.stop()
-        setupReceiver = nil
-        setupReceived = nil
     }
 }
 
@@ -104,7 +84,7 @@ struct TVSettingsView: View {
                 // tvOS pins the bar's large title over a scrolled list; this scrolls with it.
                 RAVEScreenHeading("Settings")
                 Section {
-                    row(.deviceSetup, "Set Up from Another Device", systemImage: "qrcode", value: "")
+                    row(.deviceSetup, "Device Setup", systemImage: "qrcode", value: "")
                 }
                 Section {
                     row(.librarySource, "Library Source", systemImage: appModel.effectiveLibrarySource.symbolName,
@@ -132,7 +112,7 @@ struct TVSettingsView: View {
             .navigationDestination(for: Page.self) { page in
                 if page == .deviceSetup {
                     // A QR code and instructions, not a list.
-                    TVDeviceSetupView()
+                    DeviceSetupReceiveView { state.path.removeAll() }
                 } else {
                     Form {
                         RAVEScreenHeading(title(for: page))
@@ -168,7 +148,7 @@ struct TVSettingsView: View {
 
     private func title(for page: Page) -> String {
         switch page {
-        case .deviceSetup: "Set Up from Another Device"
+        case .deviceSetup: "Device Setup"
         case .librarySource: "Library Source"
         case .jellyfin: "Jellyfin"
         case .stash: "Stash"
@@ -187,7 +167,7 @@ struct TVSettingsView: View {
         case .deviceSetup: EmptyView()
         case .librarySource: TVLibrarySourceSection { state.path.removeLast() }
         case .jellyfin: JellyfinServerSection()
-        case .stash: TVStashServerSection()
+        case .stash: StashServerSection()
         case .nextcloud: NextcloudSettingsSection()
         case .cache: CacheSettingsSection()
         case .developer: TVDeveloperSection()
@@ -242,63 +222,6 @@ private struct TVLibrarySourceSection: View {
             }
         } footer: {
             Text("Local Files browses files placed in this app's Documents folder. Stash and Nextcloud appear once their server is set up.")
-        }
-    }
-}
-
-private struct TVStashServerSection: View {
-    @Environment(AppModel.self) private var appModel
-    @State private var connectionTestResult: ConnectionTestOutcome?
-
-    var body: some View {
-        Section {
-            TextField("Server URL", text: Binding(
-                get: { appModel.stashServerURL },
-                set: { appModel.stashServerURL = $0 }
-            ))
-            .autocorrectionDisabled()
-
-            SecureField("API Key (optional)", text: Binding(
-                get: { appModel.stashAPIKey },
-                set: { appModel.stashAPIKey = $0 }
-            ))
-
-            Button("Apply & Test Connection") {
-                appModel.updateAPIClient()
-                connectionTestResult = nil
-                Task { await testConnection() }
-            }
-
-            if let connectionTestResult {
-                if connectionTestResult.isFailure {
-                    Label(connectionTestResult.message, systemImage: "exclamationmark.triangle.fill")
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(.red)
-                } else {
-                    Text(connectionTestResult.message)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Toggle("Server-Side Transcoding", isOn: Binding(
-                get: { appModel.enableStashTranscoding },
-                set: { appModel.enableStashTranscoding = $0 }
-            ))
-        } footer: {
-            Text("Connects to a self-hosted Stash server to browse and convert its library.")
-        }
-    }
-
-    private func testConnection() async {
-        do {
-            let count = try await appModel.verifyStashServer(
-                url: appModel.stashServerURL,
-                apiKey: appModel.stashAPIKey
-            )
-            connectionTestResult = .success("Connected — \(count) image\(count == 1 ? "" : "s")")
-        } catch {
-            connectionTestResult = .failure(error.localizedDescription)
         }
     }
 }

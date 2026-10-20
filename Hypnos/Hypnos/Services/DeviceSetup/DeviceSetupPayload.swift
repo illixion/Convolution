@@ -1,20 +1,21 @@
 /*
- Hypnos - what an Apple TV setup transfer carries
+ Hypnos - what a Device Setup transfer carries
 
  Server addresses and their credentials — the things that are painful to
- type with a Siri Remote — and the library choice. Deliberately not the
- settings backup: that leaves every secret out by design (see
- `SettingsBackup.stashAPIKey`) and carries display preferences a TV has no
- use for, while this exists precisely to move the secrets.
+ type, on a Siri Remote most of all — and the library choice. Deliberately
+ not the settings backup: that leaves every secret out by design (see
+ `SettingsBackup.stashAPIKey`) and carries display preferences another kind
+ of device may have no use for, while this exists precisely to move the
+ secrets.
 
- Credentials are copied, not re-issued: the TV uses the same Stash API key,
+ Credentials are copied, not re-issued: the receiver uses the same Stash API key,
  Nextcloud app password and Jellyfin access token as the sender, so each
  server lists the two as one device. Jellyfin tolerates a token used from
  two devices (its own auth code allows for tokens shared with casting
  devices); it only relabels the device with whichever name last used it.
 
  Applying overwrites only the servers present in the payload and leaves the
- rest of the TV's configuration alone.
+ rest of the receiver's configuration alone.
  */
 
 import Foundation

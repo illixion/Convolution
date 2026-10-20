@@ -3,8 +3,8 @@
 
  Server address, username/password sign-in, and an API-key fallback for
  anyone who'd rather paste a key than sign in. Shared by every platform's
- Settings screen (`SettingsTabView` on visionOS/iOS, `TVSettingsView`,
- `MacSettingsView`) — the same Jellyfin server config file/keychain entries
+ Settings screen (`SettingsTabView` on visionOS/iOS/macOS, `TVSettingsView`)
+ — the same Jellyfin server config file/keychain entries
  back both the Library tab and the older Film Player tuning controls
  (`FilmPlayerSection`), via `FilmSession.shared`.
 

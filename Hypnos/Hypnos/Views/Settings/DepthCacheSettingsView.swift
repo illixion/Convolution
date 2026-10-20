@@ -1,8 +1,8 @@
 /*
  Hypnos - Depth Cache Settings
 
- Management UI for pre-processed fake-3D depth caches (Settings → Developer,
- below the depth model picker): lists converted videos with the model that
+ Management UI for pre-processed fake-3D depth caches (Settings → AI 3D →
+ Converted Videos): lists converted videos with the model that
  produced them and their on-disk size, with per-entry delete and Clear All.
  Entries from an older pipeline version are marked outdated — they no longer
  match at playback and can be re-converted.
@@ -17,7 +17,10 @@ struct DepthCacheSettingsView: View {
 
     var body: some View {
         Group {
-            if !entries.isEmpty {
+            if entries.isEmpty {
+                Text("No converted videos yet.")
+                    .foregroundStyle(.secondary)
+            } else {
                 platformDisclosureGroup {
                     ForEach(entries, id: \.directory) { entry in
                         HStack {
