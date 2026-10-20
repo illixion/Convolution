@@ -38,6 +38,7 @@ struct LibraryTabRootView: View {
                     LibraryDownloadsView(playback: playback)
                 }
                 .navigationTitle("Library")
+                .moreTabBackButton()
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         LibraryDownloadsToolbarButton { path.append(LibraryDownloadsRequest()) }

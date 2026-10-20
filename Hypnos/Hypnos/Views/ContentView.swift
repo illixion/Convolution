@@ -210,9 +210,11 @@ struct ContentView: View {
             switch tab {
             case .filters, .settings, .library:
                 tabContent(tab)
+                    .ownsNavigationInMoreTab()
             #if HYPNOS_YOUTUBE
             case .youtube:
                 tabContent(tab)
+                    .ownsNavigationInMoreTab()
             #endif
             default:
                 NavigationStack {

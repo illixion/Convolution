@@ -68,6 +68,7 @@ struct YouTubeTabView: View {
             NavigationStack {
                 YouTubeConsentWall { consentGranted = true }
                     .navigationTitle("YouTube")
+                    .moreTabBackButton()
             }
         }
     }
@@ -88,6 +89,7 @@ struct YouTubeTabView: View {
                 .padding(.vertical, 16)
             }
             .navigationTitle("YouTube")
+            .moreTabBackButton()
             #if !os(tvOS)
             .searchable(text: $query, prompt: "Search YouTube or paste a link")
             .onSubmit(of: .search) { submit() }

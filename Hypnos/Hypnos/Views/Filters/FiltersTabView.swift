@@ -150,6 +150,7 @@ struct FiltersTabView: View {
                 }
             }
             .navigationTitle(isVideoFilter ? "Video Filters" : "Picture Filters")
+            .moreTabBackButton()
             .task {
                 await appModel.loadAutocompleteData(isVideo: isVideoFilter)
             }

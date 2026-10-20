@@ -63,4 +63,13 @@ Moved out of `CLAUDE.md` (the compile check and the "compile both platforms" rul
   remembered 3D preference never activates a 3D path on iOS.
 - The iOS app icon is `Assets.xcassets/AppIcon.appiconset` (a flattened
   composite of the visionOS layer stack, which keeps the same `AppIcon` name).
+- **Tabs under More that bring their own `NavigationStack`** (Settings,
+  Filters, Library, YouTube) showed two navigation bars once a page was
+  pushed: More is a UINavigationController of its own, and SwiftUI offers no
+  opt-out (Apple forums thread 764293). `Views/IOS/MoreTabNavigation.swift`:
+  `ownsNavigationInMoreTab()` on the tab page (in `ContentView.iosTabPage`)
+  hides More's bar while the tab is on screen, and `moreTabBackButton()` on
+  the stack's root page adds the way back to the More list. A new
+  stack-owning tab needs both. Verified on an iPhone 17 simulator
+  (2026-10-20).
 - `HypnosUITests` stays visionOS-only.
