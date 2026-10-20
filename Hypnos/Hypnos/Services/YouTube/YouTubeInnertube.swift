@@ -144,6 +144,7 @@ actor YouTubeInnertube {
         if let visitorData, Date().timeIntervalSince(visitorData.fetched) < 6 * 3600 {
             return visitorData.value
         }
+        try YouTubeConsent.require()
         var request = URLRequest(url: id.watchURL)
         request.setValue(Self.visionAgent, forHTTPHeaderField: "User-Agent")
         let (data, _) = try await session.data(for: request)
@@ -262,6 +263,7 @@ actor YouTubeInnertube {
     // MARK: - Transport
 
     private func post(_ endpoint: String, body: [String: Any], headers: [String: String]) async throws -> [String: Any] {
+        try YouTubeConsent.require()
         var components = URLComponents(url: Self.base.appendingPathComponent(endpoint), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "prettyPrint", value: "false")]
         var request = URLRequest(url: components.url!)

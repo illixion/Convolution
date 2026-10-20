@@ -14,6 +14,10 @@
  on macOS, the full-screen system player on tvOS. Resolving before opening
  rather than in the player keeps every player unaware of YouTube apart from
  refreshing an expired stream (`VideoWindowModel+YouTube`).
+
+ Until the person has turned YouTube on once (`YouTubeConsent`), the tab is
+ only `YouTubeConsentWall`: nothing is searched, loaded or shown from
+ YouTube before that.
  */
 
 #if HYPNOS_YOUTUBE
@@ -48,6 +52,7 @@ struct YouTubeTabView: View {
     @State private var tvReporter: YouTubeWatchReporter?
     #endif
     @OpenWindowProxy private var openWindow
+    @AppStorage(YouTubeConsent.defaultsKey) private var consentGranted = false
 
     private var pastedID: YouTubeVideoID? { YouTubeVideoID(parsing: query) }
 
@@ -57,6 +62,23 @@ struct YouTubeTabView: View {
     }
 
     var body: some View {
+        if consentGranted {
+            enabledBody
+        } else {
+            NavigationStack {
+                YouTubeConsentWall { consentGranted = true }
+                    .navigationTitle("YouTube")
+            }
+            // Turned off in Settings: the hidden pages go with it.
+            .onAppear {
+                feedModel = YouTubeFeedModel()
+                importModel = nil
+                clearSearch()
+            }
+        }
+    }
+
+    private var enabledBody: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
@@ -624,6 +646,35 @@ struct YouTubeVideoCard: View {
             return "\(relative) · \(day)"
         }
         return day
+    }
+}
+
+/// What the YouTube tab shows until YouTube has been turned on once, the
+/// same shape as the old sample-images wall: say what would be contacted,
+/// and contact nothing until asked.
+struct YouTubeConsentWall: View {
+    static let explanation = "Searching, browsing and playing YouTube videos connects this device to YouTube (Google), and to SponsorBlock for skipping sponsor segments. Nothing is sent to either until you turn this on. You can turn it off again in Settings."
+
+    let onTurnOn: () -> Void
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "play.rectangle")
+                .font(.system(size: 64))
+                .foregroundStyle(.secondary)
+            Text("Turn On YouTube?")
+                .font(.title2)
+            Text(Self.explanation)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 480)
+            Button("Turn On YouTube", action: onTurnOn)
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("youtube.turnOn")
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

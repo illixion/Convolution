@@ -64,6 +64,7 @@ final class YouTubePageSession: NSObject {
     }
 
     func load(_ url: URL) {
+        guard YouTubeConsent.isGranted else { return }
         awaitingCommit = true
         webView.load(URLRequest(url: url))
     }
@@ -200,6 +201,7 @@ final class YouTubePageSession: NSObject {
     }
 
     func load(_ url: URL) {
+        guard YouTubeConsent.isGranted else { return }
         finishedHref = nil
         // Until the new document replaces it, the old one is still polled;
         // marked, its queue is thrown away instead of read.

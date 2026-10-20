@@ -53,6 +53,9 @@ enum YouTubeResolver {
     /// Resolves `id` down the chain. `allowSurround: false` skips the backend's
     /// surround track (the retry after a surround playlist failed to play).
     static func resolve(_ id: YouTubeVideoID, allowSurround: Bool = true) async throws -> YouTubeResolution {
+        // Before the backend fallback too, so a refused device call doesn't
+        // turn into a request elsewhere.
+        try YouTubeConsent.require()
         let backend = YouTubeBackend.shared
         let wantsSurround = allowSurround && backend.isConfigured
         async let surroundLookup: YouTubeSurroundAudio? = wantsSurround ? backend.surroundAudio(for: id) : nil

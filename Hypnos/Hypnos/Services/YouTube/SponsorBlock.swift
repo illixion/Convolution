@@ -102,7 +102,7 @@ enum SponsorBlock {
     /// The enabled categories' segments for `id`, sorted by start. Empty on
     /// any failure: missing segments only mean nothing gets skipped.
     static func segments(for id: YouTubeVideoID) async -> [Segment] {
-        guard isEnabled else { return [] }
+        guard isEnabled, YouTubeConsent.isGranted else { return [] }
         let categories = SponsorBlockCategory.allCases.filter { $0.mode != .off }
         guard !categories.isEmpty else { return [] }
         let hash = SHA256.hash(data: Data(id.rawValue.utf8)).map { String(format: "%02x", $0) }.joined()

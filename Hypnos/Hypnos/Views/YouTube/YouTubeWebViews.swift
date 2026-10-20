@@ -217,6 +217,7 @@ final class YouTubeBrowserPage {
     var currentURL: URL? { webView.url }
 
     func load(_ url: URL) {
+        guard YouTubeConsent.isGranted else { return }
         webView.load(URLRequest(url: url))
     }
 
@@ -233,6 +234,7 @@ final class YouTubeBrowserPage {
     var currentURL: URL? { evaluate("location.href").flatMap(URL.init(string:)) }
 
     func load(_ url: URL) {
+        guard YouTubeConsent.isGranted else { return }
         (webView as AnyObject).loadRequest?(URLRequest(url: url))
     }
 
