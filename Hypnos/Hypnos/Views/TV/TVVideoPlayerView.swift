@@ -29,6 +29,14 @@
  A Photos-sourced video is a `photos-asset:///` identity, not something
  AVPlayer can open at all, so it is resolved to a real file URL first via
  `PhotosAssetStore`, the same as `VideoWindowModel.resolvePlaybackRenderer`.
+
+ Subtitles are the app's own, as in every other player: a
+ `SubtitleController` over `SubtitleSource.forVideo` (a Jellyfin item's
+ streams, a Stash scene's captions, a local file's sidecars), drawn in the
+ player's `contentOverlayView` so they sit inside the picture and under the
+ transport bar, and picked from a Subtitles menu in the transport bar.
+ AVKit has nothing to offer for most of these anyway: a Jellyfin remux's
+ HLS carries no subtitle renditions.
  */
 
 #if os(tvOS)
@@ -68,6 +76,7 @@ struct TVVideoPlayerView: View {
     @State private var resolvedURL: URL?
     @State private var failureMessage: String?
     @State private var skipper = MediaSegmentSkipper()
+    @State private var subtitles = SubtitleController()
 
     var body: some View {
         Group {
@@ -75,6 +84,8 @@ struct TVVideoPlayerView: View {
                 TVAVPlayerViewControllerRepresentable(url: resolvedURL, startSeconds: startSeconds, loops: loops,
                                                       maximumResolution: maximumResolution,
                                                       segments: skipper.segments,
+                                                      subtitles: subtitles,
+                                                      subtitleSource: { SubtitleSource.forVideo(video) },
                                                       onProgress: onProgress, onPlayedToEnd: onPlayedToEnd) {
                     failureMessage = "This video's format isn't supported on Apple TV."
                     self.resolvedURL = nil
@@ -147,6 +158,10 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
     /// Offered as the player's own contextual action (Skip Intro) while
     /// the playhead is in one.
     var segments: [LibraryMediaSegment] = []
+    let subtitles: SubtitleController
+    /// Where the video's subtitle tracks come from; read once, when the
+    /// player is made.
+    var subtitleSource: @MainActor () -> SubtitleSource? = { nil }
     var onProgress: (Double, Double, Bool) -> Void = { _, _, _ in }
     var onPlayedToEnd: (() -> Void)?
     var onPlaybackFailed: () -> Void = {}
@@ -170,6 +185,8 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         // `@Sendable` NotificationCenter/KVO closures at all.
         let coordinator = context.coordinator
         coordinator.loops = loops
+        coordinator.controller = controller
+        coordinator.subtitles = subtitles
         // A resume point needs the item's own readiness (below), so only a
         // from-the-start clip takes the gapless looper.
         let useLooper = loops && (startSeconds ?? 0) <= 0
@@ -188,20 +205,8 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
             // end handler below rewinds it when looping is on.
             player.actionAtItemEnd = .none
         }
-        // The transport bar's own menu: a Loop toggle, since a clip may want
-        // looping where the default is off and the other way round.
-        func loopItem() -> UIAction {
-            // The transport bar shows only the icon, so the state is the fill.
-            UIAction(title: "Loop",
-                     image: UIImage(systemName: coordinator.loops ? "repeat.circle.fill" : "repeat.circle"),
-                     state: coordinator.loops ? .on : .off) { [weak coordinator, weak controller] _ in
-                guard let coordinator, let controller else { return }
-                coordinator.loops.toggle()
-                if !coordinator.loops { coordinator.looper?.disableLooping() }
-                controller.transportBarCustomMenuItems = [loopItem()]
-            }
-        }
-        controller.transportBarCustomMenuItems = [loopItem()]
+        // The transport bar's own menus: Subtitles, and a Loop toggle.
+        coordinator.observeTransportBar()
         coordinator.failureObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemFailedToPlayToEndTime,
             object: item,
@@ -233,6 +238,40 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
                 break
             }
         }
+
+        // Subtitles, drawn in the content overlay: inside the picture, and
+        // under the transport bar and info panel rather than over them.
+        let picture = TVPlayerPicture()
+        coordinator.picture = picture
+        subtitles.playhead = { [weak coordinator, weak player] in
+            // Until the resume seek is issued the player is still at zero,
+            // and a streamed track should start where playback will.
+            guard let coordinator, let player, coordinator.didStart else { return startSeconds }
+            return player.currentTime().seconds
+        }
+        let overlay = UIHostingController(rootView: TVSubtitleLayer(controller: subtitles, picture: picture) { [weak player] in
+            player?.currentTime().seconds ?? 0
+        })
+        overlay.safeAreaRegions = []
+        overlay.view.backgroundColor = .clear
+        overlay.view.isUserInteractionEnabled = false
+        controller.loadViewIfNeeded()
+        if let contentOverlay = controller.contentOverlayView {
+            controller.addChild(overlay)
+            overlay.view.frame = contentOverlay.bounds
+            overlay.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            contentOverlay.addSubview(overlay.view)
+            overlay.didMove(toParent: controller)
+        }
+        coordinator.pictureObservation = player.observe(\.currentItem?.presentationSize, options: [.initial, .new]) { [weak coordinator] player, _ in
+            let size = player.currentItem?.presentationSize ?? .zero
+            guard size.width > 0, size.height > 0 else { return }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { coordinator?.picture?.aspect = size.width / size.height }
+            }
+        }
+        subtitles.load(subtitleSource())
+
         // Library-feature progress sync: every ~5s, report (position,
         // duration, paused) up to the SwiftUI view — a no-op for every
         // caller that doesn't pass `onProgress` (see `TVVideoPlayerView`'s
@@ -305,6 +344,9 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
 
     static func dismantleUIViewController(_ uiViewController: AVPlayerViewController, coordinator: Coordinator) {
         coordinator.statusObservation?.invalidate()
+        coordinator.pictureObservation?.invalidate()
+        // A streamed track keeps the server reading the file until stopped.
+        coordinator.subtitles?.reset()
         coordinator.looperObservation?.invalidate()
         coordinator.looper?.disableLooping()
         if let observer = coordinator.failureObserver {
@@ -344,11 +386,104 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         var segmentObserver: Any?
         var segments: [LibraryMediaSegment] = []
         var offeredSegment: LibraryMediaSegment?
+        weak var controller: AVPlayerViewController?
+        var subtitles: SubtitleController?
+        var picture: TVPlayerPicture?
+        var pictureObservation: NSKeyValueObservation?
 
         init(onPlaybackFailed: @escaping () -> Void, onProgress: @escaping (Double, Double, Bool) -> Void) {
             self.onPlaybackFailed = onPlaybackFailed
             self.onProgress = onProgress
         }
+
+        /// Builds the transport bar's menus, and again whenever the
+        /// subtitles they show change (tracks listed, one chosen, loaded,
+        /// retimed). Re-armed every time, as observation tracking fires once.
+        @MainActor func observeTransportBar() {
+            withObservationTracking {
+                refreshTransportBar()
+            } onChange: { [weak self] in
+                Task { @MainActor [weak self] in self?.observeTransportBar() }
+            }
+        }
+
+        @MainActor private func refreshTransportBar() {
+            guard let controller else { return }
+            controller.transportBarCustomMenuItems = [subtitleMenu(), loopItem()].compactMap { $0 }
+            if subtitles?.selected != nil { silenceSystemSubtitles() }
+        }
+
+        /// Off and each track, then the timing offset while one shows.
+        /// Absent until the tracks are listed, and for a video with none.
+        @MainActor private func subtitleMenu() -> UIMenu? {
+            guard let subtitles, !subtitles.tracks.isEmpty else { return nil }
+            let selected = subtitles.selected
+            var items: [UIMenuElement] = [
+                UIAction(title: "Off", state: selected == nil ? .on : .off) { _ in subtitles.select(nil) },
+            ]
+            for track in subtitles.tracks {
+                items.append(UIAction(title: subtitles.menuTitle(of: track),
+                                      attributes: track.isPlayable ? [] : .disabled,
+                                      state: selected == track ? .on : .off) { _ in subtitles.select(track) })
+            }
+            if selected != nil {
+                items.append(UIMenu(title: String(format: "Timing %+.1f s", subtitles.delay), options: .displayInline, children: [
+                    UIAction(title: "Earlier", image: UIImage(systemName: "backward")) { _ in subtitles.delay -= 0.5 },
+                    UIAction(title: "Later", image: UIImage(systemName: "forward")) { _ in subtitles.delay += 0.5 },
+                    UIAction(title: "Reset Timing", attributes: subtitles.delay == 0 ? .disabled : []) { _ in
+                        subtitles.delay = 0
+                    },
+                ]))
+            }
+            return UIMenu(title: "Subtitles",
+                          image: UIImage(systemName: selected == nil ? "captions.bubble" : "captions.bubble.fill"),
+                          children: items)
+        }
+
+        /// A Loop toggle, since a clip may want looping where the default
+        /// is off and the other way round.
+        @MainActor private func loopItem() -> UIAction {
+            // The transport bar shows only the icon, so the state is the fill.
+            UIAction(title: "Loop",
+                     image: UIImage(systemName: loops ? "repeat.circle.fill" : "repeat.circle"),
+                     state: loops ? .on : .off) { [weak self] _ in
+                guard let self else { return }
+                loops.toggle()
+                if !loops { looper?.disableLooping() }
+                refreshTransportBar()
+            }
+        }
+
+        /// AVKit draws an MP4's own text track when one is selected, which
+        /// the system's subtitle setting can do on its own: with ours
+        /// showing, it would show twice.
+        @MainActor private func silenceSystemSubtitles() {
+            guard let item = controller?.player?.currentItem else { return }
+            Task { @MainActor in
+                guard let group = try? await item.asset.loadMediaSelectionGroup(for: .legible),
+                      item.currentMediaSelection.selectedMediaOption(in: group) != nil
+                else { return }
+                item.select(nil, in: group)
+            }
+        }
+    }
+}
+
+/// The playing picture's shape, for placing subtitles inside it.
+@MainActor
+@Observable
+private final class TVPlayerPicture {
+    var aspect: CGFloat?
+}
+
+/// The subtitles hosted in the player's content overlay.
+private struct TVSubtitleLayer: View {
+    let controller: SubtitleController
+    let picture: TVPlayerPicture
+    let time: @MainActor () -> Double
+
+    var body: some View {
+        SubtitleOverlay(controller: controller, pictureAspect: picture.aspect, filmTime: time)
     }
 }
 

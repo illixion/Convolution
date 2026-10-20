@@ -73,7 +73,14 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   (see "Auth" below). DEBUG-only `tvAutoOpenPictureIndex=N` /
   `tvAutoPlayVideoIndex=N` launch args (mirroring `tvInitialTab`) open a
   specific gallery item's viewer/player immediately, since there is no other
-  way to drive a tap into either view for testing this path.
+  way to drive a tap into either view for testing this path. Subtitles are the
+  app's own `SubtitleController` (`SubtitleSource.forVideo`: Jellyfin,
+  Stash captions, local sidecars), drawn in `contentOverlayView` and chosen
+  from a Subtitles transport-bar menu; see `hypnos-library-jellyfin.md` →
+  Subtitles. Verified in the simulator on the dev seed's `Subtitle Window`
+  (streamed embedded SRT over an HLS remux) and `Twin Horizon` (direct-play
+  MP4); the menu itself is unverified, since the simulator takes no remote
+  presses.
 - **`TVAlbumsTabView`** — the same `MediaContainer` grid and
   `AppModel.applyContainer(_:isVideo:)` the visionOS/iOS Albums tab uses;
   switches the tab selection to Pictures/Videos afterward instead of a

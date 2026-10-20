@@ -24,22 +24,12 @@ struct SubtitleMenu: View {
             Button { close(); controller.select(nil) } label: { item("Off", isSelected: controller.selected == nil) }
             ForEach(controller.tracks) { track in
                 Button { close(); controller.select(track) } label: {
-                    item(title(of: track), isSelected: controller.selected == track)
+                    item(controller.menuTitle(of: track), isSelected: controller.selected == track)
                 }
                 .disabled(!track.isPlayable)
             }
         }
         .accessibilityIdentifier("player.subtitles")
-    }
-
-    /// The chosen track says when it is still on its way (an embedded
-    /// track's first extraction on the server can take minutes) or failed.
-    private func title(of track: LibrarySubtitleTrack) -> String {
-        guard track.isPlayable else { return "\(track.title) (Image, unsupported)" }
-        guard controller.selected == track else { return track.title }
-        if controller.error != nil { return "\(track.title) (Failed)" }
-        if controller.isFetching { return "\(track.title) (Loading…)" }
-        return track.title
     }
 
     private var statusText: String {
@@ -55,6 +45,19 @@ struct SubtitleMenu: View {
         } else {
             Text(title)
         }
+    }
+}
+
+extension SubtitleController {
+    /// A track's row in a subtitle menu. The chosen track says when it is
+    /// still on its way (an embedded track's first extraction on the server
+    /// can take minutes) or failed.
+    func menuTitle(of track: LibrarySubtitleTrack) -> String {
+        guard track.isPlayable else { return "\(track.title) (Image, unsupported)" }
+        guard selected == track else { return track.title }
+        if error != nil { return "\(track.title) (Failed)" }
+        if isFetching { return "\(track.title) (Loading…)" }
+        return track.title
     }
 }
 
