@@ -12,19 +12,27 @@ import SwiftUI
 /// underneath it, already holds the chrome, and a reported "menu" would take
 /// the stereo picture's input away (see `VideoWindowModel.pictureTakesInputWithChrome`).
 ///
+/// `asPopover` makes it a popover on the bar too, reported exactly through
+/// `onOpenChanged` from its binding and closed when `dismissal` changes:
+/// like the bar's More, a tap on the picture can then close it. Cinema is
+/// one, since a Menu whose choice opens or closes an immersive space didn't
+/// report closing (device, 2026-10-20).
+///
 /// With a `badge`, the bar shows the value in force ("1080p", "AI 3D") in
 /// place of the icon, so it reads without opening the menu.
 ///
-/// A choice reports the menu closed itself: a Menu whose choice opens or
-/// closes an immersive space never reported closing (Cinema, device,
-/// 2026-10-20), and the video window, still counting a real menu open, kept
-/// the AI 3D picture receded and deaf to the tap that would have cleared it.
+/// A choice in a Menu reports it closed itself, in case its content's
+/// disappear never comes (the same Cinema bug): a host still counting a real
+/// menu open keeps a 3D picture receded and deaf to the tap that would clear it.
 struct PlayerChoiceMenu<Items: View>: View {
     let title: String
     let systemImage: String
     var badge: String?
     var badgeIsActive = false
     var help: String?
+    var asPopover = false
+    /// Bumped by the host to close an `asPopover` popover.
+    var dismissal = 0
     var onOpenChanged: (Bool) -> Void = { _ in }
     /// The rows; each calls the passed closure first, which closes the
     /// popover, or reports the menu closed.
@@ -42,20 +50,47 @@ struct PlayerChoiceMenu<Items: View>: View {
             Button { showsPopover.toggle() } label: {
                 Label(badge.map { "\(title): \($0)" } ?? title, systemImage: systemImage)
             }
-            .popover(isPresented: $showsPopover, arrowEdge: .trailing) {
-                VStack(alignment: .leading, spacing: 4) {
-                    items { showsPopover = false }
-                }
-                .buttonStyle(PlayerPopoverRowStyle())
-                .padding(12)
-                .frame(minWidth: 220)
-            }
+            .popover(isPresented: $showsPopover, arrowEdge: .trailing) { popoverRows }
             .onDisappear { showsPopover = false }
             .help(help ?? title)
+        } else if asPopover {
+            Button { showsPopover.toggle() } label: { barLabel }
+                .popover(isPresented: $showsPopover, arrowEdge: .bottom) {
+                    popoverRows
+                        // Rows read as in More's popover (checkmarks aligned).
+                        .environment(\.ravePlayerControlsInMenu, true)
+                        // Taps reach the window, so one on the picture closes it.
+                        .presentationBackgroundInteraction(.enabled)
+                }
+                .onChange(of: showsPopover) { _, shown in onOpenChanged(shown) }
+                .onChange(of: dismissal) { showsPopover = false }
+                .onDisappear {
+                    if showsPopover { onOpenChanged(false) }
+                    showsPopover = false
+                }
+                .help(help ?? title)
         } else {
             menu
         }
         #endif
+    }
+
+    private var popoverRows: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            items { showsPopover = false }
+        }
+        .buttonStyle(PlayerPopoverRowStyle())
+        .padding(12)
+        .frame(minWidth: 220)
+    }
+
+    @ViewBuilder private var barLabel: some View {
+        if let badge {
+            PlayerBadge(text: badge, isActive: badgeIsActive)
+                .accessibilityLabel("\(title): \(badge)")
+        } else {
+            Label(title, systemImage: systemImage).ravePlayerAccessoryLabel()
+        }
     }
 
     private var menu: some View {
@@ -64,12 +99,7 @@ struct PlayerChoiceMenu<Items: View>: View {
                 // Silent inside the bar's More menu (tvOS), which reports for it.
                 .ravePlayerMenuReporting(onOpenChanged)
         } label: {
-            if let badge {
-                PlayerBadge(text: badge, isActive: badgeIsActive)
-                    .accessibilityLabel("\(title): \(badge)")
-            } else {
-                Label(title, systemImage: systemImage).ravePlayerAccessoryLabel()
-            }
+            barLabel
         }
         .help(help ?? title)
     }

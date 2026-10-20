@@ -651,6 +651,8 @@ struct CinemaButton: View {
     let owner: CinemaOwner
     /// Big Screen can be had (a video that can reach the AVFoundation renderer).
     var bigScreenAvailable = true
+    /// Bumped by the host to close the popover (a tap on the picture).
+    var dismissal = 0
     var onOpenChanged: (Bool) -> Void = { _ in }
     private let cinema = Cinema.shared
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
@@ -666,6 +668,7 @@ struct CinemaButton: View {
         PlayerChoiceMenu(title: "Cinema", systemImage: "sparkles.tv", badge: badge,
                          badgeIsActive: cinema.mode(for: owner) != .window,
                          help: "Big screen and how the sound is placed",
+                         asPopover: true, dismissal: dismissal,
                          onOpenChanged: onOpenChanged) { close in
             ForEach(owner.modes) { mode in
                 Button {

@@ -274,10 +274,10 @@ final class VideoWindowModel {
             || showPseudo3DModePrompt || showDepthModelSetup
     }
 
-    /// The ornament "menus" that are popovers: the control bar's More, and
+    /// The ornament "menus" that are popovers: the control bar's More,
     /// More Options nested in it (on the bar, More Options is a real Menu
-    /// and reports as "More Options").
-    static let popoverMenuNames: Set<String> = ["More", "More Options popover"]
+    /// and reports as "More Options"), and Cinema.
+    static let popoverMenuNames: Set<String> = ["More", "More Options popover", "Cinema"]
 
     /// Only popovers are open: they keep the gaze even with the stereo
     /// picture tappable, so a tap on the picture can close them. A real menu

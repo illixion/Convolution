@@ -70,13 +70,14 @@ struct FilmPlayerView: View {
     @State private var stereoLayout: PackedStereoLayout?
     @State private var mountedDepthModelName: String?
     @State private var showsDepthSetup = false
-    @State private var chromeOpen = false
-    /// The transport's More popover is open, which keeps the gaze with the
-    /// stereo picture still tappable.
-    @State private var morePopoverOpen = false
     @State private var menuDismissals = 0
     @State private var chromeVisible = true
-    @State private var chromeHolds = 0
+    /// What holds the chrome up, by name: menus, popovers, the sound sheet,
+    /// a scrub. Named rather than counted, so a close reported twice counts
+    /// once and one never reported can't leave a count behind: a lost Cinema
+    /// close kept the count at 2 under More, and a tap on the picture no
+    /// longer reached it (device, 2026-10-20).
+    @State private var chromeHolds: Set<String> = []
     @State private var chromeHideTask: Task<Void, Never>?
     @State private var stereoFailure: String?
     /// When the 3D picture keeps dropping frames: under Auto the picture
@@ -400,7 +401,7 @@ struct FilmPlayerView: View {
                 // A tap on it toggles the chrome.
                 FilmVideoView(player: player.video, squareCorners: !appModel.roundedCorners,
                               opacity: stereoSource != nil ? 0 : (chromeOpen ? 0.12 : 1),
-                              takesInput: stereoSource == nil && (!chromeOpen || (morePopoverOpen && chromeHolds == 1)),
+                              takesInput: stereoSource == nil && (!chromeOpen || pictureTakesInputWithChrome),
                               showsPicture: !cinema.showsScreen(for: .film),
                               onTap: { toggleChrome() })
                     // The audio stage contributes no window depth. It remains
@@ -422,7 +423,7 @@ struct FilmPlayerView: View {
                 if let source = stereoSource {
                     RAVEExternalStereoVideoView(
                         source: source, settings: session.stereoSettings, chromeOpen: chromeOpen,
-                        chromeTakesInput: morePopoverOpen && chromeHolds == 1,
+                        chromeTakesInput: pictureTakesInputWithChrome,
                         packedStereo: stereoLayout,
                         squareCorners: !appModel.roundedCorners,
                         subtitles: stereoSubtitles,
@@ -463,14 +464,10 @@ struct FilmPlayerView: View {
             ) {
             FilmTransport(player: player, stereoEnabled: stereoSource != nil,
                           onToggle3D: cinema.mode(for: .film) == .bigScreen ? nil : { stereoSource == nil ? startStereo() : stopStereo() },
-                          onModalChanged: { open in
-                              chromeOpen = open
-                              holdChrome(open)
-                          },
-                          onMoreChanged: { morePopoverOpen = $0 },
+                          onModalChanged: { name, open in holdChrome(name, open) },
                           menuDismissal: menuDismissals,
                           onInteraction: { revealChrome() },
-                          onHold: { holdChrome($0) })
+                          onHold: { holdChrome(Self.scrubHold, $0) })
             }
         }
         .animation(.easeInOut(duration: 0.2), value: chromeVisible)
@@ -548,7 +545,7 @@ struct FilmPlayerView: View {
         // has closed a real menu by now, the More popover closes on
         // `menuDismissals`, and holds that never let go are dropped (see
         // `clearLostHolds`).
-        if chromeOpen || chromeHolds > 0 {
+        if !chromeHolds.isEmpty {
             clearLostHolds()
             menuDismissals += 1
             revealChrome()
@@ -572,14 +569,26 @@ struct FilmPlayerView: View {
     /// another app's immersive space) never lets go: the picture stayed
     /// dimmed and the chrome pinned (device, 2026-10-07).
     private func clearLostHolds() {
-        chromeOpen = false
-        morePopoverOpen = false
-        chromeHolds = 0
+        chromeHolds = []
+    }
+
+    private static let scrubHold = "Scrub"
+    /// The holds that are popovers (More, with the volume popover, and
+    /// Cinema): they keep the gaze with the picture still tappable.
+    private static let popoverHolds: Set<String> = ["More", "Cinema"]
+
+    /// A menu, popover or sheet is open over the picture, which dims for it.
+    private var chromeOpen: Bool { !chromeHolds.subtracting([Self.scrubHold]).isEmpty }
+
+    /// Only popovers are open, so a tap on the picture can close them; a real
+    /// menu or sheet takes the picture's input away.
+    private var pictureTakesInputWithChrome: Bool {
+        !chromeHolds.isEmpty && chromeHolds.isSubset(of: Self.popoverHolds)
     }
 
     /// A menu, sheet or scrub is holding the chrome up (true) or let go.
-    private func holdChrome(_ held: Bool) {
-        chromeHolds = max(0, chromeHolds + (held ? 1 : -1))
+    private func holdChrome(_ name: String, _ held: Bool) {
+        if held { chromeHolds.insert(name) } else { chromeHolds.remove(name) }
         if held {
             chromeHideTask?.cancel()
             chromeVisible = true
@@ -592,10 +601,10 @@ struct FilmPlayerView: View {
     /// its controls, the way the system player does.
     private func scheduleChromeHide() {
         chromeHideTask?.cancel()
-        guard chromeHolds == 0 else { return }
+        guard chromeHolds.isEmpty else { return }
         chromeHideTask = Task {
             try? await Task.sleep(for: Self.chromeHideDelay)
-            guard !Task.isCancelled, player.isPlaying, chromeHolds == 0 else { return }
+            guard !Task.isCancelled, player.isPlaying, chromeHolds.isEmpty else { return }
             chromeVisible = false
         }
     }
@@ -826,9 +835,8 @@ struct FilmTransport: View {
     let player: FilmPlayer
     var stereoEnabled = false
     var onToggle3D: (() -> Void)?
-    var onModalChanged: (Bool) -> Void = { _ in }
-    /// The More popover alone (it also reports through `onModalChanged`).
-    var onMoreChanged: (Bool) -> Void = { _ in }
+    /// A menu, popover or sheet opened or closed, by name ("More", "Cinema").
+    var onModalChanged: (String, Bool) -> Void = { _, _ in }
     /// Bumped by the host to close the More popover.
     var menuDismissal = 0
     /// Any touch of the controls, so auto-hide can restart its countdown.
@@ -841,7 +849,8 @@ struct FilmTransport: View {
     /// (the clock stops updating `now`, the buffered position isn't read),
     /// since every update re-renders and re-lays out the bar, and an open
     /// visionOS menu redrew with it each time (device, 2026-10-08).
-    @State private var menuOpen = false
+    @State private var openMenus: Set<String> = []
+    private var menuOpen: Bool { !openMenus.isEmpty }
     @State private var showsSound = false
     #if os(visionOS)
     @OpenWindowProxy private var openWindow
@@ -859,10 +868,7 @@ struct FilmTransport: View {
             onInteraction: onInteraction,
             onScrubbingChanged: onHold,
             layout: Self.layout,
-            onMenuChanged: { open in
-                onMoreChanged(open)
-                onModalChanged(open)
-            },
+            onMenuChanged: { onModalChanged("More", $0) },
             setVolume: { value in
                 player.volume = Float(value)
                 PlayerVolume.saved = value
@@ -904,12 +910,12 @@ struct FilmTransport: View {
             #endif
         }
         .onChange(of: showsSound) { _, showing in
-            onModalChanged(showing)
+            onModalChanged("Sound and Picture", showing)
             if !showing { session.saveSound() }
         }
         // The host closes every menu with this; a menu that never reported
         // closing mustn't leave the clock stopped.
-        .onChange(of: menuDismissal) { menuOpen = false }
+        .onChange(of: menuDismissal) { openMenus = [] }
         .task {
             while !Task.isCancelled {
                 if !menuOpen { now = player.currentTime }
@@ -921,7 +927,8 @@ struct FilmTransport: View {
     /// The Cinema button, kept on the bar.
     private var cinemaButton: AnyView? {
         #if os(visionOS)
-        AnyView(CinemaButton(owner: .film, onOpenChanged: menuChanged))
+        AnyView(CinemaButton(owner: .film, dismissal: menuDismissal,
+                             onOpenChanged: { onModalChanged("Cinema", $0) }))
         #else
         nil
         #endif
@@ -936,7 +943,7 @@ struct FilmTransport: View {
     private func viewModeMenu(toggle: @escaping () -> Void) -> some View {
         PlayerChoiceMenu(title: "View Mode", systemImage: isStereoFilm ? "view.3d" : "wand.and.sparkles",
                          badge: stereoEnabled ? stereoMode : "2D", badgeIsActive: stereoEnabled,
-                         onOpenChanged: menuChanged) { close in
+                         onOpenChanged: { menuChanged("View Mode", $0) }) { close in
             ForEach([false, true], id: \.self) { stereo in
                 Button {
                     close()
@@ -954,16 +961,16 @@ struct FilmTransport: View {
             viewModeMenu(toggle: onToggle3D)
         }
         if player.audioTracks.count > 1 {
-            FilmAudioTrackMenu(player: player, onOpenChanged: menuChanged)
+            FilmAudioTrackMenu(player: player, onOpenChanged: { menuChanged("Audio", $0) })
         }
         if player.audioEncoding != nil {
-            ObjectAudioQualityMenu(player: player, onOpenChanged: menuChanged)
+            ObjectAudioQualityMenu(player: player, onOpenChanged: { menuChanged("Audio Quality", $0) })
         }
         if !player.video.offeredPictureHeights.isEmpty {
-            FilmPictureQualityMenu(player: player.video, onOpenChanged: menuChanged)
+            FilmPictureQualityMenu(player: player.video, onOpenChanged: { menuChanged("Picture Quality", $0) })
         }
         if !session.subtitles.tracks.isEmpty {
-            SubtitleMenu(controller: session.subtitles, onOpenChanged: menuChanged)
+            SubtitleMenu(controller: session.subtitles, onOpenChanged: { menuChanged("Subtitles", $0) })
         }
         #if os(iOS) || os(macOS)
         if session.headTracking, HeadphoneHeadTracker.shared.isTracking {
@@ -1000,9 +1007,9 @@ struct FilmTransport: View {
     }
     #endif
 
-    private func menuChanged(_ open: Bool) {
-        menuOpen = open
-        onModalChanged(open)
+    private func menuChanged(_ name: String, _ open: Bool) {
+        if open { openMenus.insert(name) } else { openMenus.remove(name) }
+        onModalChanged(name, open)
     }
 
     #if os(visionOS)
