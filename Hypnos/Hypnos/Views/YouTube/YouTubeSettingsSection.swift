@@ -3,9 +3,10 @@
 
  The account (signed in to YouTube's site on this device), the optional
  backend (web-yt-dlp) and SponsorBlock. Shared by every platform's Settings
- screen, like `JellyfinServerSection`. Until YouTube has been turned on
- (`YouTubeConsent`) it is a single row that turns it on; afterwards the
- last row turns it off again.
+ screen, like `JellyfinServerSection`. Absent until the YouTube tab's
+ one-time approval (`YouTubeConsent`): there is nothing to set up before
+ then, and no off switch after it, since leaving the tab alone sends
+ nothing.
  */
 
 #if HYPNOS_YOUTUBE
@@ -27,25 +28,12 @@ struct YouTubeSettingsSection: View {
 
     var body: some View {
         if consentGranted {
-            enabledSections
-            Section {
-                Button("Turn Off YouTube", role: .destructive) { consentGranted = false }
-            } footer: {
-                Text("Stops every request to YouTube and SponsorBlock until it's turned on again. Your sign-in and these settings stay.")
-            }
-        } else {
-            Section {
-                Button("Turn On YouTube") { consentGranted = true }
-            } header: {
-                Text("YouTube")
-            } footer: {
-                Text(YouTubeConsentWall.explanation)
-            }
+            sections
         }
     }
 
     @ViewBuilder
-    private var enabledSections: some View {
+    private var sections: some View {
         Section {
             // The one row that is always there carries the sheet and the
             // check, so neither goes away when the account changes.

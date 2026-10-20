@@ -4,9 +4,10 @@
  Everything YouTube does talks to services outside the user's own servers:
  YouTube's player API, search and site (Google), its thumbnail CDN, and
  SponsorBlock for skip segments. None of it may happen until the person has
- said yes once, on the YouTube tab's wall (`YouTubeConsentWall`) or in
- Settings. The answer is kept, so the feature stays on from then on, and
- Settings can turn it off again.
+ said yes once, on the YouTube tab's wall (`YouTubeConsentWall`). The answer
+ is kept, so the feature stays on from then on. There is deliberately no off
+ switch: nothing is sent unless the person uses the tab or opens a YouTube
+ link.
 
  The wall is the visible gate; the services check `isGranted` themselves
  too (`YouTubeInnertube`, the hidden and visible pages, SponsorBlock,

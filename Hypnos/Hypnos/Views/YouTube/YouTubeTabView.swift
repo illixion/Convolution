@@ -69,12 +69,6 @@ struct YouTubeTabView: View {
                 YouTubeConsentWall { consentGranted = true }
                     .navigationTitle("YouTube")
             }
-            // Turned off in Settings: the hidden pages go with it.
-            .onAppear {
-                feedModel = YouTubeFeedModel()
-                importModel = nil
-                clearSearch()
-            }
         }
     }
 
@@ -653,7 +647,7 @@ struct YouTubeVideoCard: View {
 /// same shape as the old sample-images wall: say what would be contacted,
 /// and contact nothing until asked.
 struct YouTubeConsentWall: View {
-    static let explanation = "Searching, browsing and playing YouTube videos connects this device to YouTube (Google), and to SponsorBlock for skipping sponsor segments. Nothing is sent to either until you turn this on. You can turn it off again in Settings."
+    private static let explanation = "Searching, browsing and playing YouTube videos connects this device to YouTube (Google), and to SponsorBlock for skipping sponsor segments. Nothing is sent to either until you turn this on, and afterwards only when you use YouTube here."
 
     let onTurnOn: () -> Void
 

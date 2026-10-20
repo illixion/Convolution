@@ -93,6 +93,10 @@ struct TVSettingsView: View {
     @Bindable private var jellyfin = JellyfinAuth.shared
     @Bindable private var state = TVSettingsState.shared
     @State private var cachePreset = CacheBudget.preset
+    #if HYPNOS_YOUTUBE
+    /// No YouTube page until the YouTube tab has been turned on once.
+    @AppStorage(YouTubeConsent.defaultsKey) private var youTubeOn = false
+    #endif
 
     var body: some View {
         NavigationStack(path: $state.path) {
@@ -113,8 +117,10 @@ struct TVSettingsView: View {
                     row(.nextcloud, "Nextcloud", systemImage: LibrarySource.nextcloud.symbolName,
                         value: appModel.hasNextcloudServer ? host(appModel.nextcloudServerURL) : "Not set")
                     #if HYPNOS_YOUTUBE
-                    row(.youtube, "YouTube", systemImage: "play.rectangle",
-                        value: YouTubeBackend.shared.baseURL?.host ?? "No backend")
+                    if youTubeOn {
+                        row(.youtube, "YouTube", systemImage: "play.rectangle",
+                            value: YouTubeBackend.shared.baseURL?.host ?? "No backend")
+                    }
                     #endif
                 }
                 Section {
