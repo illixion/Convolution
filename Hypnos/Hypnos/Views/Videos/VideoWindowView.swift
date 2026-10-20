@@ -144,7 +144,7 @@ struct VideoWindowView: View {
     /// This window's picture is on the cinema's big screen.
     private var cinemaShowsScreen: Bool {
         #if os(visionOS)
-        Cinema.shared.showsScreen(for: .video(ObjectIdentifier(windowModel)))
+        Cinema.shared.hidesPicture(for: .video(ObjectIdentifier(windowModel)))
         #else
         false
         #endif

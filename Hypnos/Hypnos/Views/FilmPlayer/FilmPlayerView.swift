@@ -175,7 +175,10 @@ struct FilmPlayerView: View {
             }
             // AI 3D draws in the window, so the big screen plays 2D.
             .onChange(of: cinema.mode(for: .film)) { _, mode in
-                if mode == .bigScreen { stopStereo() }
+                guard mode == .bigScreen else { return }
+                stopStereo()
+                let player = player
+                cinema.setSubtitles(CinemaSubtitles(controller: session.subtitles, time: { player.currentTime }), for: .film)
             }
             .onChange(of: cinema.screenTaps) {
                 if cinema.owner == .film { toggleChrome() }
@@ -413,7 +416,7 @@ struct FilmPlayerView: View {
                         }
                         .frame(depth: 0)
                     }
-                if cinema.showsScreen(for: .film) {
+                if cinema.hidesPicture(for: .film) {
                     CinemaBigScreenCard(owner: .film, onTap: { toggleChrome() })
                 }
                 if let source = stereoSource {

@@ -168,6 +168,11 @@ final class VideoWindowModel {
     @ObservationIgnored private(set) weak var nativePlayer: AVPlayer?
     private(set) var nativePlayerGeneration = 0
 
+    /// The cinema's big screen shows this window's picture: a new episode
+    /// stays 2D rather than starting AI 3D or a stereo video's 3D in the
+    /// window, and a WebKit-only source goes straight to the transcode.
+    var holdsBigScreen = false
+
     func noteNativePlayer(_ player: AVPlayer?) {
         guard nativePlayer !== player else { return }
         nativePlayer = player
@@ -579,8 +584,8 @@ final class VideoWindowModel {
         subtitles.load(SubtitleSource.forVideo(newVideo))
         endHandled = false
 
-        // Reset per-window viewing state
-        stereoscopicOverride = nil
+        // Reset per-window viewing state (2D on the big screen)
+        stereoscopicOverride = holdsBigScreen ? false : nil
         video3DSettings = nil
         pseudo3DEnabled = false
         pseudo3DDepthMode = .realtime
@@ -1215,6 +1220,10 @@ final class VideoWindowModel {
                 #if HYPNOS_YOUTUBE
                 if !isPlayable, self.dropYouTubeSurround(reason: "the surround stream isn't decodable") { return }
                 #endif
+                // The big screen needs AVFoundation; don't mount WebKit (and
+                // play its sound) on the way to the transcode.
+                if !isPlayable, self.holdsBigScreen,
+                   self.switchToTranscodedStream(reason: "the Big Screen needs the AVFoundation renderer") { return }
                 self.playbackRenderer = isPlayable ? .nativeMetal : .webKit
                 // A fake-3D engage waiting on the transcode swap resolves here.
                 if self.pendingPseudo3DEngage != nil {
@@ -1256,7 +1265,7 @@ final class VideoWindowModel {
     /// overridden by an old cache), else real-time inference; with no depth
     /// model installed it stays 2D silently — never forces the setup sheet.
     private func autoEngagePseudo3DIfPreferred() {
-        guard appModel.defaultRealtimePseudo3D,
+        guard appModel.defaultRealtimePseudo3D, !holdsBigScreen,
               !pseudo3DEnabled, !shouldUse3DMode,
               // WebKit-decoded sources qualify too — enablePseudo3D swaps them
               // onto the server transcode first (WebM with transcoding on).

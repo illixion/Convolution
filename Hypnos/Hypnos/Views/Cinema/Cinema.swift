@@ -40,6 +40,14 @@
  The room follows the head's position slowly (1.5 s), so leaning gives a
  little parallax and walking re-centres it. Positions are set in scene
  space, which in an immersive space is ARKit's origin.
+
+ Subtitles go on the screen too: the owner's `SubtitleController` drawn by
+ the same overlay as in its window, as a view attachment scaled to the
+ screen. A video window going to its next episode keeps Big Screen: its
+ picture stays hidden behind the card for as long as Big Screen is chosen,
+ the screen keeps the last picture until the new player is lent, and while
+ it holds the screen the window doesn't start AI 3D or a stereo episode's
+ 3D on its own (`VideoWindowModel.holdsBigScreen`).
  */
 
 #if os(visionOS)
@@ -73,6 +81,12 @@ enum CinemaMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// What the screen's subtitles come from: the owner's controller and clock.
+struct CinemaSubtitles {
+    let controller: SubtitleController
+    let time: @MainActor () -> Double
+}
+
 /// Which player the space is serving.
 enum CinemaOwner: Equatable {
     case film
@@ -104,6 +118,8 @@ final class Cinema {
     private(set) var screenPose: simd_float4x4?
     /// A video window's player, shown on the screen through a `VideoPlayerComponent`.
     private(set) var screenPlayer: AVPlayer?
+    /// The owner's subtitles, drawn on the screen.
+    private(set) var screenSubtitles: CinemaSubtitles?
     /// Taps on the screen, for the owner's window to toggle its controls.
     private(set) var screenTaps = 0
     private(set) var status = "Closed"
@@ -174,6 +190,15 @@ final class Cinema {
     /// The owner's picture is on the big screen, so its window shows the card.
     func showsScreen(for owner: CinemaOwner) -> Bool { self.owner == owner && screenAttached }
 
+    /// A video window keeps its picture hidden for as long as Big Screen is
+    /// chosen, through a renderer switch or the next episode, so it never
+    /// flashes back into the window between players.
+    func hidesPicture(for owner: CinemaOwner) -> Bool {
+        guard self.owner == owner else { return false }
+        if case .video = owner { return mode == .bigScreen }
+        return screenAttached
+    }
+
     /// The film's object audio plays in the space rather than its window.
     var hostsFilmSound: Bool { isOpen && owner == .film }
 
@@ -218,10 +243,16 @@ final class Cinema {
 
     /// A video window lends the player its picture plays on (nil while it
     /// has none, such as during a renderer switch).
+    /// The screen keeps showing the last player's picture until the next
+    /// one is lent, so an episode change doesn't blank it.
     func setScreenPlayer(_ player: AVPlayer?, for owner: CinemaOwner) {
         guard self.owner == owner, screenPlayer !== player else { return }
         screenPlayer = player
-        if player == nil { screenAttached = false }
+    }
+
+    func setSubtitles(_ subtitles: CinemaSubtitles, for owner: CinemaOwner) {
+        guard self.owner == owner else { return }
+        screenSubtitles = subtitles
     }
 
     /// The owner's window closed: the space closes with it.
@@ -254,6 +285,7 @@ final class Cinema {
         mode = .window
         screenAttached = false
         screenPlayer = nil
+        screenSubtitles = nil
         screenPose = nil
     }
 
@@ -425,6 +457,11 @@ struct CinemaSpaceView: View {
     /// A video window's picture: a `VideoPlayerComponent` on its player.
     @State private var playerPicture = Entity()
     @State private var playerPictureSource: ObjectIdentifier?
+    /// The subtitles over the picture, a view attachment.
+    @State private var subtitles = Entity()
+    @State private var subtitlesSource: ObjectIdentifier?
+    /// The attachment's size in points; its aspect follows the picture's.
+    private static let subtitleWidthPoints: CGFloat = 1600
 
     var body: some View {
         ZStack {
@@ -434,6 +471,7 @@ struct CinemaSpaceView: View {
             RealityView { content in
                 screen.name = "cinema-screen"
                 playerPicture.name = "cinema-player-picture"
+                subtitles.name = "cinema-subtitles"
                 content.add(screen)
             }
             .gesture(SpatialTapGesture().targetedToAnyEntity().onEnded { _ in cinema.noteScreenTap() })
@@ -458,10 +496,12 @@ struct CinemaSpaceView: View {
         if cinema.owner != .film || cinema.mode != .bigScreen, filmPicture.parent === screen {
             filmPicture.removeFromParent()
         }
-        if cinema.owner == .film || cinema.screenPlayer == nil || cinema.mode != .bigScreen {
+        // A video window between players keeps the last one's picture.
+        if cinema.owner == .film || cinema.owner == nil || cinema.mode != .bigScreen {
             releasePlayerPicture()
         }
         guard cinema.mode == .bigScreen, let owner = cinema.owner, let pose = cinema.screenPose else {
+            releaseSubtitles()
             cinema.noteScreenAttached(false)
             return
         }
@@ -476,18 +516,19 @@ struct CinemaSpaceView: View {
             aspect = video.pictureAspect ?? 16 / 9
             video.pictureAttached = true
         case .video:
-            guard let player = cinema.screenPlayer else {
-                cinema.noteScreenAttached(false)
-                return
-            }
-            if playerPictureSource != ObjectIdentifier(player) {
+            if let player = cinema.screenPlayer, playerPictureSource != ObjectIdentifier(player) {
                 playerPicture.components.set(VideoPlayerComponent(avPlayer: player))
                 playerPictureSource = ObjectIdentifier(player)
                 AppLogger.videoWindow.info("Cinema: video player on the big screen")
             }
+            // Nothing lent yet (the space opened before the player resolved).
+            guard playerPictureSource != nil else {
+                cinema.noteScreenAttached(false)
+                return
+            }
             picture = playerPicture
-            let size = player.currentItem?.presentationSize ?? .zero
-            aspect = size.width > 0 && size.height > 0 ? Float(size.width / size.height) : 16 / 9
+            let size = cinema.screenPlayer?.currentItem?.presentationSize ?? .zero
+            aspect = size.width > 0 && size.height > 0 ? Float(size.width / size.height) : lastAspect(of: picture)
         }
         if picture.parent !== screen {
             screen.addChild(picture)
@@ -507,7 +548,46 @@ struct CinemaSpaceView: View {
         if picture.components[InputTargetComponent.self]?.isEnabled != true {
             picture.components.set(InputTargetComponent())
         }
+        placeSubtitles(aspect: aspect)
         cinema.noteScreenAttached(true)
+    }
+
+    /// The aspect the picture was last scaled for, from its collision box.
+    private func lastAspect(of picture: Entity) -> Float {
+        guard let shape = picture.components[CollisionComponent.self]?.shapes.first else { return 16 / 9 }
+        let extents = shape.bounds.extents
+        return extents.y > 0 ? extents.x / extents.y : 16 / 9
+    }
+
+    /// The owner's subtitles over the picture, as large as the screen.
+    private func placeSubtitles(aspect: Float) {
+        guard let source = cinema.screenSubtitles else {
+            releaseSubtitles()
+            return
+        }
+        let height = Self.subtitleWidthPoints / CGFloat(max(aspect, 0.1))
+        if subtitlesSource != ObjectIdentifier(source.controller) {
+            let time = source.time
+            subtitles.components.set(ViewAttachmentComponent(rootView:
+                SubtitleOverlay(controller: source.controller, pictureAspect: CGFloat(aspect), filmTime: time)
+                    .frame(width: Self.subtitleWidthPoints, height: height)))
+            subtitlesSource = ObjectIdentifier(source.controller)
+        }
+        if subtitles.parent !== screen { screen.addChild(subtitles) }
+        // Just in front of the picture, scaled from the attachment's own
+        // measured width to the screen's.
+        guard let bounds = subtitles.components[ViewAttachmentComponent.self]?.bounds,
+              bounds.extents.x > 1e-4 else { return }
+        let scale = cinema.screenWidth / bounds.extents.x
+        let transform = Transform(scale: SIMD3(repeating: scale), translation: SIMD3(0, 0, 0.05))
+        if subtitles.transform != transform { subtitles.transform = transform }
+    }
+
+    private func releaseSubtitles() {
+        guard subtitlesSource != nil else { return }
+        subtitles.components.remove(ViewAttachmentComponent.self)
+        subtitles.removeFromParent()
+        subtitlesSource = nil
     }
 
     private func releasePlayerPicture() {
@@ -551,7 +631,7 @@ struct CinemaBigScreenCard: View {
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "sparkles.tv").font(.system(size: 44))
-            Text("Playing on the Big Screen").font(.title2)
+            Text(Cinema.shared.screenAttached ? "Playing on the Big Screen" : "Opening the Big Screen…").font(.title2)
             HStack(spacing: 12) {
                 Button("Place in Front of Me", systemImage: "scope") { Cinema.shared.placeScreenInFront() }
                 Button("Back to Window", systemImage: "macwindow") {
@@ -627,7 +707,8 @@ struct CinemaVideoWindowHook: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onChange(of: onBigScreen) { _, on in
+            .onChange(of: onBigScreen, initial: true) { _, on in
+                windowModel.holdsBigScreen = on
                 if on { prepare() }
             }
             .onChange(of: windowModel.playbackRenderer) {
@@ -644,12 +725,16 @@ struct CinemaVideoWindowHook: ViewModifier {
                 if cinema.owner == owner { windowModel.toggleUIVisibility() }
             }
             .onDisappear {
+                windowModel.holdsBigScreen = false
                 let owner = owner
                 Task { await Cinema.shared.release(owner, dismiss: dismissImmersiveSpace) }
             }
     }
 
     private func prepare() {
+        let model = windowModel
+        cinema.setSubtitles(CinemaSubtitles(controller: model.subtitles, time: { [weak model] in model?.currentTime ?? 0 }),
+                            for: owner)
         if windowModel.pseudo3DEnabled { windowModel.disablePseudo3D() }
         if windowModel.stereoscopicOverride == true { windowModel.stereoscopicOverride = false }
         if windowModel.playbackRenderer == .webKit,
