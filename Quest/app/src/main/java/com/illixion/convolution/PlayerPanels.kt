@@ -33,6 +33,12 @@ object WindowStereo {
     }
 }
 
+/** The speeds every Convolution player offers (the Apple players' list). */
+val PLAYBACK_SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
+
+/** "1×", "1.25×", "0.5×". */
+fun speedLabel(speed: Float): String = (if (speed % 1f == 0f) speed.toInt().toString() else speed.toString()) + "×"
+
 @Composable
 fun PlayerControls(session: PlaybackSession, spatial: Boolean, switchMode: () -> Unit, leave: () -> Unit) {
     var position by remember { mutableDoubleStateOf(session.position()) }
@@ -40,8 +46,10 @@ fun PlayerControls(session: PlaybackSession, spatial: Boolean, switchMode: () ->
     var paused by remember { mutableStateOf(session.paused()) }
     var scrub by remember { mutableStateOf<Float?>(null) }
     var skip by remember { mutableStateOf<org.json.JSONObject?>(session.skipSuggestion()) }
+    var speed by remember { mutableFloatStateOf(session.speed()) }
+    var choosingSpeed by remember { mutableStateOf(false) }
     LaunchedEffect(session) {
-        while (true) { position = session.position(); duration = session.duration(); paused = session.paused(); skip=session.skipSuggestion(); delay(200) }
+        while (true) { position = session.position(); duration = session.duration(); paused = session.paused(); skip=session.skipSuggestion(); speed = session.speed(); delay(200) }
     }
     Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.large) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -55,6 +63,17 @@ fun PlayerControls(session: PlaybackSession, spatial: Boolean, switchMode: () ->
                 Button(onClick = { session.toggleVideo() }) { Text(if (paused) "Play" else "Pause") }
                 Button(onClick = { session.seekVideo(10) }) { Text("+10s") }
                 skip?.let { suggestion -> Button(onClick={session.skipSegment()}) {Text(suggestion.optString("title","Skip segment"))} }
+                Box {
+                    OutlinedButton(onClick = { choosingSpeed = true }) { Text(speedLabel(speed)) }
+                    DropdownMenu(expanded = choosingSpeed, onDismissRequest = { choosingSpeed = false }) {
+                        PLAYBACK_SPEEDS.forEach { choice ->
+                            DropdownMenuItem(
+                                text = { Text(if (choice == 1f) "Normal (1×)" else speedLabel(choice)) },
+                                leadingIcon = { if (choice == speed) Text("✓") },
+                                onClick = { choosingSpeed = false; session.setSpeed(choice); speed = choice })
+                        }
+                    }
+                }
                 OutlinedButton(onClick = switchMode, enabled = !spatial || session.packing() == 0 || WindowStereo.supported()) { Text(if (spatial) "Window" else "Spatial view") }
                 OutlinedButton(onClick = leave) { Text("Library") }
             }

@@ -57,6 +57,8 @@ public final class PlaybackSession {
     private int layout;
     private long lastReport = 0, lastStallCheck = 0;
     private boolean changingQuality = false;
+    /** Playback speed; kept by the session so a rebuilt decoder plays at it too. */
+    private float speed = 1f;
     private volatile JSONObject skipSuggestion;
     private volatile boolean skipCheckPending = false;
     private long lastSkipCheck = 0;
@@ -99,6 +101,8 @@ public final class PlaybackSession {
                 new DefaultMediaSourceFactory(new DefaultDataSource.Factory(context,http))).build();
             player.setVideoSurface(videoSurface);
             player.setAudioAttributes(new AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),true);
+            // Media3 keeps the pitch at any speed.
+            player.setPlaybackSpeed(speed);
             // Captions are fetched/parsed by the Swift core and placed on their own XR layer.
             player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT,true).build());
             player.addListener(new Player.Listener() {
@@ -281,6 +285,11 @@ public final class PlaybackSession {
     public void toggleVideo() { main.post(() -> { if (player != null) { if (player.getPlaybackState()==Player.STATE_ENDED) { player.seekTo(0); intendedPlay = true; } else intendedPlay = !intendedPlay; player.setPlayWhenReady(active && intendedPlay); report("seekGrace"); report("progress"); } }); }
     public void seekVideo(int seconds) { main.post(() -> { if (player != null) { player.seekTo(Math.max(0,player.getCurrentPosition()+seconds*1000L)); report("seekGrace"); report("progress"); } }); }
     public void seekTo(double seconds) { main.post(() -> { if (player != null) { player.seekTo(Math.max(0,(long)(seconds*1000))); report("seekGrace"); report("progress"); } }); }
+    public float speed() { return speed; }
+    public void setSpeed(float value) { main.post(() -> {
+        speed = value;
+        if (player != null) { player.setPlaybackSpeed(value); report("seekGrace"); }
+    }); }
     public JSONObject skipSuggestion() { return skipSuggestion; }
     public void skipSegment() {
         JSONObject suggestion=skipSuggestion;
