@@ -473,6 +473,11 @@ struct FilmPlayerView: View {
                           onHold: { holdChrome(Self.scrubHold, $0) })
             }
         }
+        // The title over the window's top-left corner, with the controls.
+        .ornament(visibility: chromeVisible ? .visible : .hidden,
+                  attachmentAnchor: .scene(.topLeading), contentAlignment: .topLeading) {
+            titleButton.padding(20)
+        }
         .animation(.easeInOut(duration: 0.2), value: chromeVisible)
         .onAppear { revealChrome() }
         .onChange(of: player.isPlaying) { _, playing in
@@ -495,6 +500,10 @@ struct FilmPlayerView: View {
                     .padding(.trailing, 90)
                     .padding(.bottom, 60)
             }
+        }
+        // Up from the controls; its details open as a sheet.
+        .overlay(alignment: .topLeading) {
+            titleButton.padding(.leading, 90).padding(.top, 60)
         }
         .onPlayPauseCommand { player.isPlaying ? player.pause() : player.play() }
         #else
@@ -519,6 +528,9 @@ struct FilmPlayerView: View {
                     .padding(.bottom, 140)
             }
         }
+        .overlay(alignment: .topLeading) {
+            titleButton.padding(16)
+        }
         .onAppear { if session.headTracking { HeadphoneHeadTracker.shared.start() } }
         .onDisappear { HeadphoneHeadTracker.shared.stop() }
         .onChange(of: session.headTracking) { _, enabled in
@@ -528,6 +540,21 @@ struct FilmPlayerView: View {
         .onChange(of: player.isPlaying) { _, playing in
             if playing { HeadphoneHeadTracker.shared.recenter() }
         }
+        #endif
+    }
+
+    /// The film's title, and behind it the details (`PlayerDetails`): a
+    /// Library title's from the server, a disc or a search result its name.
+    private var titleButton: some View {
+        let item = session.loadedItem
+        var fallback = PlayerDetails(title: item?.name ?? "Film")
+        if let year = item?.productionYear { fallback.facts = [String(year)] }
+        let source: PlayerDetailsSource = FilmSession.isServerItem(item?.id) ? .library(itemId: item?.id ?? "") : .none
+        #if os(visionOS)
+        return PlayerTitleButton(source: source, fallback: fallback, dismissal: menuDismissals,
+                                 onOpenChanged: { holdChrome(Self.detailsHold, $0) })
+        #else
+        return PlayerTitleButton(source: source, fallback: fallback)
         #endif
     }
 
@@ -576,9 +603,11 @@ struct FilmPlayerView: View {
     }
 
     private static let scrubHold = "Scrub"
-    /// The holds that are popovers (More, with the volume popover, and
-    /// Cinema): they keep the gaze with the picture still tappable.
-    private static let popoverHolds: Set<String> = ["More", "Cinema"]
+    private static let detailsHold = "Details"
+    /// The holds that are popovers (More, with the volume popover, Cinema
+    /// and the title's details): they keep the gaze with the picture still
+    /// tappable.
+    private static let popoverHolds: Set<String> = ["More", "Cinema", detailsHold]
 
     /// A menu, popover or sheet is open over the picture, which dims for it.
     private var chromeOpen: Bool { !chromeHolds.subtracting([Self.scrubHold]).isEmpty }

@@ -57,7 +57,11 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   or stops a slideshow timer, Menu (`.onExitCommand`) dismisses. None of
   `PhotoDisplayView`'s rendering tiers, adjustments or 3D modes are reused.
 - **`TVVideoPlayerView`** — `AVPlayerViewController` via
-  `UIViewControllerRepresentable`. **There is no WebKit fallback on tvOS** —
+  `UIViewControllerRepresentable`. Its Info panel (a swipe down while it
+  plays) shows the title's details through `AVPlayerItem.externalMetadata`
+  (`PlayerDetails.externalMetadata`: title, subtitle, overview with the
+  details' rows, genre, year, art), set on the template item and a looper's
+  copies when the details arrive. **There is no WebKit fallback on tvOS** —
   WebKit doesn't exist there at all — but it still follows the same two
   moves every other AVFoundation path in the app makes before opening a URL:
   a `photos-asset:///` identity resolves through `PhotosAssetStore` first;

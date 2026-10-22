@@ -450,20 +450,23 @@ struct VideoWindowView: View {
 
         }
         #if os(iOS)
-        // The cover's way out besides the controls' Gallery button, shown and
-        // hidden with the rest of the chrome.
+        // The cover's way out besides the controls' Gallery button, and the
+        // title, shown and hidden with the rest of the chrome.
         .overlay(alignment: .topLeading) {
             if !windowModel.isUIHidden, !appModel.allWindowsHidden {
-                Button {
-                    dismissWindow()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.title3.weight(.semibold))
-                        .frame(width: 44, height: 44)
+                HStack(spacing: 12) {
+                    Button {
+                        dismissWindow()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.title3.weight(.semibold))
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .accessibilityLabel("Close")
+                    titleButton
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .accessibilityLabel("Close")
                 .padding(16)
                 .transition(.opacity)
             }
@@ -498,6 +501,14 @@ struct VideoWindowView: View {
         }
         .onChange(of: ornamentBottomPadding) { old, new in
             resizeWindowHeight(by: new - old)
+        }
+        // The title over the window's top-left corner, with the controls.
+        .ornament(
+            visibility: !windowModel.isUIHidden && !appModel.allWindowsHidden ? .visible : .hidden,
+            attachmentAnchor: .scene(.topLeading),
+            contentAlignment: .topLeading
+        ) {
+            titleButton.padding(20)
         }
         #else
         .ornament(
@@ -688,6 +699,15 @@ struct VideoWindowView: View {
             try? await Task.sleep(for: .milliseconds(250))
             if Task.isCancelled { return }
         }
+    }
+
+    // MARK: - Title
+
+    /// The title, and behind it the details (`PlayerDetails`).
+    private var titleButton: some View {
+        PlayerTitleButton(source: PlayerDetailsSource(video: video), fallback: PlayerDetails(video: video),
+                          video: video, dismissal: windowModel.menuDismissals,
+                          onOpenChanged: { windowModel.ornamentMenu("Details", opened: $0) })
     }
 
     // MARK: - Load Status

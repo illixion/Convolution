@@ -73,10 +73,24 @@ struct TVVideoPlayerView: View {
     /// continue to the next). The player's Loop menu item changes it per run.
     var loops = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppModel.self) private var appModel
     @State private var resolvedURL: URL?
     @State private var failureMessage: String?
     @State private var skipper = MediaSegmentSkipper()
     @State private var subtitles = SubtitleController()
+    /// What the player's Info panel shows (a swipe down while it plays).
+    @State private var details: PlayerDetailsLoader
+    @State private var artwork: UIImage?
+
+    init(video: GalleryVideo, onProgress: @escaping (Double, Double, Bool) -> Void = { _, _, _ in },
+         startSeconds: Double? = nil, onPlayedToEnd: (() -> Void)? = nil, loops: Bool = false) {
+        self.video = video
+        self.onProgress = onProgress
+        self.startSeconds = startSeconds
+        self.onPlayedToEnd = onPlayedToEnd
+        self.loops = loops
+        _details = State(initialValue: PlayerDetailsLoader(fallback: PlayerDetails(video: video)))
+    }
 
     var body: some View {
         Group {
@@ -84,6 +98,7 @@ struct TVVideoPlayerView: View {
                 TVAVPlayerViewControllerRepresentable(url: resolvedURL, startSeconds: startSeconds, loops: loops,
                                                       maximumResolution: maximumResolution,
                                                       segments: skipper.segments,
+                                                      details: details.details, artwork: artwork,
                                                       subtitles: subtitles,
                                                       subtitleSource: { SubtitleSource.forVideo(video) },
                                                       onProgress: onProgress, onPlayedToEnd: onPlayedToEnd) {
@@ -116,6 +131,23 @@ struct TVVideoPlayerView: View {
         .task {
             await skipper.load(videoIdentity: video.identity)
         }
+        .task(id: video.identity) {
+            await details.load(PlayerDetailsSource(video: video), fallback: PlayerDetails(video: video),
+                               video: video, stash: appModel.apiClient)
+            artwork = await Self.artwork(for: details.details)
+        }
+    }
+
+    /// The Info panel's picture: a Library title's still or poster, else
+    /// the video's thumbnail.
+    private static func artwork(for details: PlayerDetails) async -> UIImage? {
+        var url = details.artworkURL
+        if let item = details.libraryItem, let library = LibraryService.current() {
+            url = library.imageURL(item: item, kind: item.kind == .episode ? .primary : .thumb, size: .poster)
+                ?? library.imageURL(item: item, kind: .primary, size: .poster)
+        }
+        guard let url else { return nil }
+        return try? await ImageLoader.shared.loadImage(from: url)
     }
 
     private func resolve() async {
@@ -158,6 +190,9 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
     /// Offered as the player's own contextual action (Skip Intro) while
     /// the playhead is in one.
     var segments: [LibraryMediaSegment] = []
+    /// What the Info panel shows (`AVPlayerItem.externalMetadata`).
+    var details: PlayerDetails?
+    var artwork: UIImage?
     let subtitles: SubtitleController
     /// Where the video's subtitle tracks come from; read once, when the
     /// player is made.
@@ -186,6 +221,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         let coordinator = context.coordinator
         coordinator.loops = loops
         coordinator.controller = controller
+        coordinator.item = item
         coordinator.subtitles = subtitles
         // A resume point needs the item's own readiness (below), so only a
         // from-the-start clip takes the gapless looper.
@@ -334,6 +370,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         context.coordinator.onProgress = onProgress
         context.coordinator.onPlayedToEnd = onPlayedToEnd
         context.coordinator.segments = segments
+        context.coordinator.showInfo(details, artwork: artwork, on: uiViewController.player)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -390,6 +427,22 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         var subtitles: SubtitleController?
         var picture: TVPlayerPicture?
         var pictureObservation: NSKeyValueObservation?
+        /// The item the player was made with; a looper plays copies of it.
+        var item: AVPlayerItem?
+        private var shownInfo: PlayerDetails?
+        private var shownArtwork: UIImage?
+
+        /// The Info panel's title, subtitle, description and art, on every
+        /// item the player has (a looper's copies included), when they change.
+        @MainActor func showInfo(_ details: PlayerDetails?, artwork: UIImage?, on player: AVPlayer?) {
+            guard let details, details != shownInfo || artwork !== shownArtwork else { return }
+            shownInfo = details
+            shownArtwork = artwork
+            let metadata = details.externalMetadata(artwork: artwork)
+            var items = (player as? AVQueuePlayer)?.items() ?? []
+            if let item, !items.contains(item) { items.append(item) }
+            for item in items { item.externalMetadata = metadata }
+        }
 
         init(onPlaybackFailed: @escaping () -> Void, onProgress: @escaping (Double, Double, Bool) -> Void) {
             self.onPlaybackFailed = onPlaybackFailed
@@ -466,6 +519,42 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
                 item.select(nil, in: group)
             }
         }
+    }
+}
+
+extension PlayerDetails {
+    /// AVKit's Info panel: the title (an episode's series), a subtitle
+    /// ("S1 E3 · Title", a studio), the overview with the details' rows under
+    /// it, genres, year and art.
+    func externalMetadata(artwork: UIImage?) -> [AVMetadataItem] {
+        func entry(_ identifier: AVMetadataIdentifier, _ value: NSCopying & NSObjectProtocol,
+                   dataType: String? = nil) -> AVMetadataItem {
+            let item = AVMutableMetadataItem()
+            item.identifier = identifier
+            item.value = value
+            item.extendedLanguageTag = "und"
+            if let dataType { item.dataType = dataType }
+            return item
+        }
+        var items = [entry(.commonIdentifierTitle, cornerTitle as NSString)]
+        let subtitleLine = [cornerSubtitle ?? context ?? subtitle].compactMap { $0 } + facts
+        if !subtitleLine.isEmpty {
+            items.append(entry(.iTunesMetadataTrackSubTitle, subtitleLine.joined(separator: " · ") as NSString))
+        }
+        let rowLines = rows.filter { $0.label != "Genres" }.map { "\($0.label): \($0.value)" }
+        let description = ([overview].compactMap { $0 } + (rowLines.isEmpty ? [] : [rowLines.joined(separator: "\n")]))
+            .joined(separator: "\n\n")
+        if !description.isEmpty { items.append(entry(.commonIdentifierDescription, description as NSString)) }
+        if let genres = libraryItem?.genres, !genres.isEmpty {
+            items.append(entry(.quickTimeMetadataGenre, genres.joined(separator: ", ") as NSString))
+        }
+        if let year = libraryItem?.year {
+            items.append(entry(.commonIdentifierCreationDate, String(year) as NSString))
+        }
+        if let data = artwork?.jpegData(compressionQuality: 0.85) {
+            items.append(entry(.commonIdentifierArtwork, data as NSData, dataType: kCMMetadataBaseDataType_JPEG as String))
+        }
+        return items
     }
 }
 

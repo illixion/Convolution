@@ -281,8 +281,8 @@ final class VideoWindowModel {
 
     /// The ornament "menus" that are popovers: the control bar's More,
     /// More Options nested in it (on the bar, More Options is a real Menu
-    /// and reports as "More Options"), and Cinema.
-    static let popoverMenuNames: Set<String> = ["More", "More Options popover", "Cinema"]
+    /// and reports as "More Options"), Cinema, and the title's Details.
+    static let popoverMenuNames: Set<String> = ["More", "More Options popover", "Cinema", "Details"]
 
     /// Only popovers are open: they keep the gaze even with the stereo
     /// picture tappable, so a tap on the picture can close them. A real menu

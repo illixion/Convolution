@@ -6,7 +6,8 @@
  independent. Styled to match PhotoOrnamentView.
 
  Bar layout: [Gallery] | [< N/M >] | [ViewMode: icon + 2D/3D/AI 3D v] [Subtitles v] [Quality v] [A-B] |
- [Info] [Share] | [... More v] | [Title]
+ [Info] [Share] | [... More v]. The title is the window's own, in its top-left
+ corner (`PlayerTitleButton`, VideoWindowView).
  Playback and feature actions share RAVEUI's player controls in one ornament
  in both 2D and fake-3D. The immersive scene owns its own transport.
  The More menu holds Flip, All Adjustments (the standalone video-adjustments
@@ -53,11 +54,10 @@ struct VideoOrnamentsView: View {
     private var bar: some View {
         if windowModel.usesImmersiveStereo {
             // Immersive playback owns its own transport in the immersive scene.
-            HStack(spacing: RAVEChromeMetrics.spacing) { ornamentItems(showsTitle: true) }
+            HStack(spacing: RAVEChromeMetrics.spacing) { ornamentItems(isImmersive: true) }
                 .padding(12).glassBackgroundEffect()
         } else {
-            // The title is the window's own; the one-row bar has no room for it.
-            VideoControlBar(windowModel: windowModel, pinned: cinemaButton) { ornamentItems(showsTitle: false) }
+            VideoControlBar(windowModel: windowModel, pinned: cinemaButton) { ornamentItems(isImmersive: false) }
         }
     }
 
@@ -75,9 +75,9 @@ struct VideoOrnamentsView: View {
 
     /// The window's feature buttons: inline on the bar, or grouped rows in
     /// the compact bar's "More" popover when they don't fit.
-    private func ornamentItems(showsTitle: Bool) -> some View {
+    private func ornamentItems(isImmersive: Bool) -> some View {
         PlayerAccessoryLayout {
-            barItems(showsTitle: showsTitle)
+            barItems(isImmersive: isImmersive)
         } menu: {
             menuSections
         }
@@ -85,7 +85,7 @@ struct VideoOrnamentsView: View {
 
     /// On the bar: icons, the quickest choices first.
     @ViewBuilder
-    private func barItems(showsTitle: Bool) -> some View {
+    private func barItems(isImmersive: Bool) -> some View {
             galleryButton
 
             // Prev/next only browse something: a lone video (a Library film)
@@ -106,7 +106,7 @@ struct VideoOrnamentsView: View {
             qualityMenu
             speedMenu
             // The immersive scene has its own transport, loop included.
-            if !showsTitle {
+            if !isImmersive {
                 LoopControls(windowModel: windowModel)
             }
 
@@ -127,16 +127,6 @@ struct VideoOrnamentsView: View {
                 .frame(height: 24)
 
             moreMenu
-
-            // Video title if available
-            if showsTitle, let title = video.title, !title.isEmpty {
-                Divider()
-                    .frame(height: 24)
-                Text(title)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-            }
 
             // Depth-conversion status for THIS video — visible at a glance
             // without keeping the ViewMode menu open. Isolated in its own view
