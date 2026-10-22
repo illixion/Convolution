@@ -151,6 +151,10 @@ struct WebVideoPlayerView: UIViewRepresentable {
             playbackModel.setVolumeCommand = { [weak webView] v in
                 webView?.evaluateJavaScript("{ const p = document.getElementById('player'); if (p) p.volume = \(v); }")
             }
+            // The default rate too: a source swap (`load()`) resets the rate to it.
+            playbackModel.setSpeedCommand = { [weak webView] r in
+                webView?.evaluateJavaScript("{ const p = document.getElementById('player'); if (p) { p.defaultPlaybackRate = \(r); p.playbackRate = \(r); } }")
+            }
         }
 
         // Only reload the page when the video URL changes
@@ -517,6 +521,10 @@ struct WebVideoPlayerView: UIViewRepresentable {
             <script>
                 const video = document.getElementById('player');
                 video.volume = \(min(max(playbackModel?.volume ?? 1, 0), 1));
+                // The window's speed, kept across a source swap (`load()` resets
+                // the rate to the default); WebKit keeps the pitch.
+                video.defaultPlaybackRate = \(playbackModel?.playbackSpeed ?? 1);
+                video.playbackRate = \(playbackModel?.playbackSpeed ?? 1);
                 const sharpenCanvas = document.getElementById('sharpen-canvas');
                 const originalSrc = video.src;
                 const fallbackSrc = \(Self.javascriptStringLiteral(fallbackVideoSrc ?? ""));

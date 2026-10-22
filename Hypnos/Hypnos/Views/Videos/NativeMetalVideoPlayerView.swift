@@ -156,6 +156,7 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         coordinator.onPlaybackError = onPlaybackError
         coordinator.startMuted = startMuted
         coordinator.startVolume = Float(playbackModel?.volume ?? 1)
+        coordinator.speed = Float(playbackModel?.playbackSpeed ?? 1)
         coordinator.loops = loops
         coordinator.maximumResolution = playbackModel?.maximumPictureResolution ?? .zero
 
@@ -183,6 +184,9 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             }
             playbackModel.setVolumeCommand = { [weak coordinator] volume in
                 coordinator?.setVolume(Float(volume))
+            }
+            playbackModel.setSpeedCommand = { [weak coordinator] speed in
+                coordinator?.setSpeed(Float(speed))
             }
             coordinator.onPlayerChanged = { [weak playbackModel] player in
                 playbackModel?.noteNativePlayer(player)
@@ -248,6 +252,8 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         var onPlaybackError: (() -> Void)?
         var startMuted = true
         var startVolume: Float = 1
+        /// Playback speed, the default rate every `play()` starts at.
+        var speed: Float = 1
         var loops = true
 
         private var player: AVPlayer?
@@ -328,6 +334,7 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             player.applySpatialAudioPolicy(for: asset)
             player.isMuted = startMuted
             player.volume = startVolume
+            player.defaultRate = speed
 
             self.player = player
             self.playerItem = item
@@ -469,6 +476,15 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         func setVolume(_ volume: Float) {
             startVolume = volume
             player?.volume = volume
+        }
+
+        /// Now if playing, and from every later `play()` (the default rate);
+        /// the item's time-pitch keeps the voice at its pitch.
+        func setSpeed(_ speed: Float) {
+            self.speed = speed
+            guard let player else { return }
+            player.defaultRate = speed
+            if player.rate != 0 { player.rate = speed }
         }
 
         func setLoopBounds(a: Double?, b: Double?) {

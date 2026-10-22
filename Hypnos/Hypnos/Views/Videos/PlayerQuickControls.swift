@@ -31,6 +31,41 @@ struct StreamQualityMenu: View {
     }
 }
 
+/// The playback speeds every player offers, and how they read.
+enum PlaybackSpeed {
+    static let choices: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
+
+    /// "1×", "1.25×", "0.5×".
+    static func label(_ speed: Double) -> String {
+        speed.formatted(.number.precision(.fractionLength(0 ... 2))) + "×"
+    }
+}
+
+/// Playback speed: the bar shows the speed in force as its badge, filled
+/// when it isn't 1×, so a sped-up film never goes unnoticed.
+struct PlaybackSpeedMenu: View {
+    let speed: Double
+    var onOpenChanged: (Bool) -> Void = { _ in }
+    let onSelect: (Double) -> Void
+
+    var body: some View {
+        PlayerChoiceMenu(title: "Speed", systemImage: "gauge.open.with.lines.needle.33percent.and.arrowtriangle",
+                         badge: PlaybackSpeed.label(speed), badgeIsActive: speed != 1,
+                         help: "Playback speed: \(PlaybackSpeed.label(speed))",
+                         onOpenChanged: onOpenChanged) { close in
+            ForEach(PlaybackSpeed.choices, id: \.self) { choice in
+                Button {
+                    close()
+                    onSelect(choice)
+                } label: {
+                    PlayerChoiceRow(choice == 1 ? "Normal (1×)" : PlaybackSpeed.label(choice), isChecked: choice == speed)
+                }
+            }
+        }
+        .accessibilityIdentifier("player.speed")
+    }
+}
+
 /// One level: its title, what it means for the two original-quality
 /// choices, and a checkmark on the chosen one.
 struct StreamQualityRow: View {

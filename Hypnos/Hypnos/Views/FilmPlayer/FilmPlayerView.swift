@@ -129,6 +129,8 @@ struct FilmPlayerView: View {
                 guard session.activePlayerView == viewID else { return }
                 session.activePlayerView = nil
                 player.pause()
+                // The speed lasts the sitting (the next episode too); the next film opens at 1×.
+                player.setSpeed(1)
                 session.isPlayerOpen = false
                 session.saveSound()
                 #if os(visionOS)
@@ -171,6 +173,7 @@ struct FilmPlayerView: View {
                 session.activePlayerView = nil
                 session.isPlayerOpen = false
                 player.pause()
+                player.setSpeed(1)
                 session.saveSound()
                 closeCinema()
             }
@@ -268,7 +271,8 @@ struct FilmPlayerView: View {
     /// 20 s pass before the next reports count; otherwise the viewer is told
     /// once per film.
     private func noteStereoPerformance(_ sample: StereoPerformance) {
-        guard player.isPlaying, !chromeOpen, !player.video.isChangingPictureTier,
+        // Faster than 1× more frames pass than the eyes can show; no tier cures that.
+        guard player.isPlaying, !chromeOpen, !player.video.isChangingPictureTier, player.speed <= 1,
               Date.now >= stereoLoadGraceUntil, sample.isOverloaded else {
             stereoLoadStrikes = 0
             return
@@ -971,6 +975,9 @@ struct FilmTransport: View {
         }
         if !session.subtitles.tracks.isEmpty {
             SubtitleMenu(controller: session.subtitles, onOpenChanged: { menuChanged("Subtitles", $0) })
+        }
+        PlaybackSpeedMenu(speed: player.speed, onOpenChanged: { menuChanged("Speed", $0) }) { speed in
+            player.setSpeed(speed)
         }
         #if os(iOS) || os(macOS)
         if session.headTracking, HeadphoneHeadTracker.shared.isTracking {

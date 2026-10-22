@@ -94,6 +94,8 @@ struct ImmersiveVideoView: View {
             // Start playback
             player.replaceCurrentItem(with: playerItem)
             player.applySpatialAudioPolicy(for: asset)
+            // The owning window's speed; `play()` (and the loop's) starts at it.
+            player.defaultRate = Float(appModel.immersiveVideoOwner?.playbackSpeed ?? 1)
             player.play()
             isLoaded = true
 
@@ -126,6 +128,10 @@ struct ImmersiveVideoView: View {
             player.replaceCurrentItem(with: nil)
             videoMaterial = nil
             videoEntity = nil
+        }
+        .onChange(of: appModel.immersiveVideoOwner?.playbackSpeed) { _, speed in
+            player.defaultRate = Float(speed ?? 1)
+            if player.rate != 0 { player.rate = player.defaultRate }
         }
         .onChange(of: appModel.immersiveVideoOwner?.stereoscopicOverride) { _, newValue in
             // Update viewing mode dynamically when user changes it

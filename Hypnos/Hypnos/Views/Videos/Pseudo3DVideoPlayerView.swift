@@ -97,6 +97,7 @@ struct Pseudo3DVideoPlayerView: View {
                 engine.onPerformance = { [weak playbackModel] in playbackModel?.noteStereoPerformance($0) }
                 engine.startMuted = startMuted
                 engine.startVolume = Float(playbackModel?.volume ?? 1)
+                engine.startRate = Float(playbackModel?.playbackSpeed ?? 1)
                 engine.loops = loops
                 engine.preferredMaximumResolution = playbackModel?.maximumPictureResolution ?? .zero
                 engine.setContentOpacity(contentOpacity)
@@ -172,6 +173,7 @@ struct Pseudo3DVideoPlayerView: View {
             playbackModel?.stereoPictureStarted()
             engine.startMuted = startMuted
             engine.startVolume = Float(playbackModel?.volume ?? 1)
+            engine.startRate = Float(playbackModel?.playbackSpeed ?? 1)
             engine.loops = loops
             engine.onDurationKnown = onDurationKnown
             engine.bindCommands(loopController: loopController, playbackModel: playbackModel)
@@ -235,6 +237,7 @@ extension Pseudo3DStereoEngine {
             playbackModel.seekCommand = { [weak self] t in self?.seek(to: t) }
             playbackModel.setMutedCommand = { [weak self] m in self?.setMuted(m) }
             playbackModel.setVolumeCommand = { [weak self] v in self?.setVolume(Float(v)) }
+            playbackModel.setSpeedCommand = { [weak self] r in self?.setRate(Float(r)) }
             onPlaybackUpdate = { [weak playbackModel] state in
                 playbackModel?.applyPlaybackState(
                     currentTime: state.currentTime,

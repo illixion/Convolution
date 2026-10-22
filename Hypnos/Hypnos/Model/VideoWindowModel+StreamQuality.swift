@@ -190,7 +190,10 @@ extension VideoWindowModel {
     /// cost follows the picture's size; otherwise the viewer is told once
     /// what would help.
     func noteStereoPerformance(_ sample: StereoPerformance) {
-        guard showsStereoPicture, !isPaused, !isScrubbing, !isChangingQuality,
+        // Faster than 1× the source passes more frames than the eyes can
+        // show (a 60 fps video at 2× is 120 a second), which reads as an
+        // overload that a lower quality wouldn't cure.
+        guard showsStereoPicture, !isPaused, !isScrubbing, !isChangingQuality, playbackSpeed <= 1,
               Date.now >= stereoLoadGraceUntil, sample.isOverloaded,
               !isRealtimeAI3DSharingWithConversion else {
             stereoLoadStrikes = 0

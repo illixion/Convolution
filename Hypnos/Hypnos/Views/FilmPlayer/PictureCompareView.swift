@@ -122,8 +122,8 @@ final class PictureCompare {
         status = "Closed"
     }
 
-    /// Keeps the comparison near the film player: same play state, re-seeked
-    /// when more than a quarter second apart.
+    /// Keeps the comparison near the film player: same play state and speed,
+    /// re-seeked when more than a quarter second apart.
     private func follow() {
         followTask?.cancel()
         followTask = Task { [weak self] in
@@ -134,11 +134,12 @@ final class PictureCompare {
                 let drift = player.currentTime().seconds - target
                 if !drift.isFinite || abs(drift) > 0.25 {
                     // Aimed a little ahead: the seek itself takes time.
-                    let lead = film.isPlaying ? 0.3 : 0
+                    let lead = film.isPlaying ? 0.3 * film.speed : 0
                     await player.seek(to: CMTime(seconds: target + lead, preferredTimescale: 600),
                                       toleranceBefore: .zero, toleranceAfter: .zero)
                 }
-                if film.isPlaying, player.rate == 0 { player.play() }
+                player.defaultRate = Float(film.speed)
+                if film.isPlaying, player.rate != player.defaultRate { player.play() }
                 if !film.isPlaying, player.rate != 0 { player.pause() }
                 try? await Task.sleep(for: .seconds(1))
             }

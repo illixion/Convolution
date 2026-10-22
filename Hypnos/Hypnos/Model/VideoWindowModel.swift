@@ -139,6 +139,10 @@ final class VideoWindowModel {
     var volume: Double = PlayerVolume.saved
     /// End of the last buffered range (seconds).
     var bufferedEnd: Double = 0
+    /// Playback speed (1 is normal), chosen from the bar's Speed menu. Kept
+    /// for this window, through every renderer change and the next video;
+    /// a new window starts at 1×.
+    private(set) var playbackSpeed: Double = 1
     /// True while the user is dragging the scrubber — suppresses incoming
     /// timeupdate writes so the thumb doesn't fight the drag.
     var isScrubbing: Bool = false {
@@ -187,6 +191,7 @@ final class VideoWindowModel {
     @ObservationIgnored var seekCommand: (@MainActor (Double) -> Void)?
     @ObservationIgnored var setMutedCommand: (@MainActor (Bool) -> Void)?
     @ObservationIgnored var setVolumeCommand: (@MainActor (Double) -> Void)?
+    @ObservationIgnored var setSpeedCommand: (@MainActor (Double) -> Void)?
 
     // MARK: - A-B Loop
 
@@ -540,6 +545,7 @@ final class VideoWindowModel {
         seekCommand = nil
         setMutedCommand = nil
         setVolumeCommand = nil
+        setSpeedCommand = nil
         // Release the standalone Adjustments window's ref to us (also makes that
         // window dismiss itself), so this closed window's model isn't retained.
         if appModel.videoAdjustmentsTarget === self {
@@ -1367,6 +1373,18 @@ final class VideoWindowModel {
         volume = min(max(value, 0), 1)
         PlayerVolume.saved = volume
         setVolumeCommand?(volume)
+    }
+
+    /// The active renderer changes speed now; every renderer made later
+    /// starts at it (they read `playbackSpeed` as they load).
+    func setPlaybackSpeed(_ speed: Double) {
+        guard speed != playbackSpeed else { return }
+        playbackSpeed = speed
+        AppLogger.videoWindow.info("Playback speed \(speed, format: .fixed(precision: 2), privacy: .public)x")
+        setSpeedCommand?(speed)
+        // A player changing rate may wait to refill, as after a resume; a
+        // link too slow for the new speed still shows up after the grace.
+        stallMonitor.restartGrace(at: .now)
     }
 
     // MARK: - Position carry-over

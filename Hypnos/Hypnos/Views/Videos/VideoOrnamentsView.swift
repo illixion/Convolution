@@ -104,6 +104,7 @@ struct VideoOrnamentsView: View {
             viewModeMenu
             subtitleMenu
             qualityMenu
+            speedMenu
             // The immersive scene has its own transport, loop included.
             if !showsTitle {
                 LoopControls(windowModel: windowModel)
@@ -155,6 +156,7 @@ struct VideoOrnamentsView: View {
         viewModeMenu
         subtitleMenu
         qualityMenu
+        speedMenu
         LoopControls(windowModel: windowModel)
         ConversionStatusRow(videoIdentity: video.identity)
 
@@ -253,6 +255,12 @@ struct VideoOrnamentsView: View {
             }
         }
         #endif
+    }
+
+    private var speedMenu: some View {
+        PlaybackSpeedMenu(speed: windowModel.playbackSpeed, onOpenChanged: { chromeMenu("Speed", opened: $0) }) { speed in
+            windowModel.setPlaybackSpeed(speed)
+        }
     }
 
     private var flipButton: some View {
