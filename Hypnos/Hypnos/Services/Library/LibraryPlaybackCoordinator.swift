@@ -23,6 +23,12 @@ import Foundation
 enum LibraryPlaybackCoordinator {
     private static let identityPrefix = "jellyfin:"
 
+    /// The video identity a Jellyfin item plays under (depth caches and
+    /// window state are keyed by it).
+    static func videoIdentity(jellyfinItemId itemId: String) -> String {
+        identityPrefix + itemId
+    }
+
     static func jellyfinItemId(fromVideoIdentity identity: String) -> String? {
         guard identity.hasPrefix(identityPrefix) else { return nil }
         return String(identity.dropFirst(identityPrefix.count))
@@ -37,7 +43,7 @@ enum LibraryPlaybackCoordinator {
             ?? library.imageURL(item: item, kind: .thumb, size: .thumbnail)
             ?? plan.streamURL
         return GalleryVideo(
-            identity: identityPrefix + item.id,
+            identity: videoIdentity(jellyfinItemId: item.id),
             thumbnailURL: thumbnail,
             streamURL: plan.streamURL,
             transcodeStreamURL: plan.transcodeURL,

@@ -434,14 +434,28 @@ final class VideoWindowModel {
     /// does (`LibraryPlayback.playNextEpisode`). A film, the last episode, or
     /// a next episode that needs the object-audio player stays on its last
     /// frame; the progress reporter has already told Jellyfin it was watched.
+    /// The next episode carries on as this one ended (`EpisodeCarryOver`).
     private func playNextEpisode() async {
         guard let itemId = libraryItemId, let library = LibraryService.current() else { return }
+        var carry = episodeCarryOver
         do {
             let finished = try await library.item(id: itemId)
             guard finished.kind == .episode, let next = try await library.episode(after: finished) else { return }
-            guard case .genericPlayer(let plan) = try await library.playbackRoute(for: next) else {
+            // No depth to show it with: 2D, and not at the 1080p only AI 3D asked for.
+            if carry.ai3D, Self.depthMode(forVideoIdentity: LibraryPlaybackCoordinator.videoIdentity(jellyfinItemId: next.id)) == nil {
+                carry.ai3D = false
+                if carry.ai3DCappedLevel { carry.streamLevel = nil }
+                carry.ai3DCappedLevel = false
+            }
+            guard case .genericPlayer(var plan) = try await library.playbackRoute(for: next) else {
                 AppLogger.videoWindow.info("Next episode needs the object-audio player; not autoplaying it here")
                 return
+            }
+            // A download plays its file whatever the level.
+            if let level = carry.streamLevel, !plan.streamURL.isFileURL {
+                plan = try await library.streamPlan(itemId: next.id, quality: level,
+                                                    resumeSeconds: next.userData.resumeSeconds,
+                                                    forAI3D: carry.ai3D)
             }
             // The user moved on, or back into this one, while it resolved.
             guard !Task.isCancelled, libraryItemId == itemId, endHandled else { return }
@@ -450,9 +464,55 @@ final class VideoWindowModel {
             currentIndex = 0
             hasMorePages = false
             switchToVideo(nextVideo)
+            carryOn(carry)
         } catch {
             AppLogger.videoWindow.error("Next episode failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
         }
+    }
+
+    /// What an episode hands the one that autoplays after it, so a series
+    /// plays on as it was being watched: in AI 3D if it was, at the level
+    /// Auto had settled on (the 1080p AI 3D starts at, or a step down for a
+    /// stalling connection), and without telling the viewer again that 3D
+    /// can't keep up. A video picked by hand starts afresh.
+    struct EpisodeCarryOver {
+        var ai3D = false
+        /// Auto's level; nil plays what the preference asks for.
+        var streamLevel: LibraryStreamQuality?
+        var ai3DCappedLevel = false
+        var advised = false
+    }
+
+    private var episodeCarryOver: EpisodeCarryOver {
+        var carry = EpisodeCarryOver()
+        carry.ai3D = shouldUsePseudo3D && !holdsBigScreen
+        if offersQualityChoice, qualityPreference == .auto {
+            carry.streamLevel = streamLevel
+            carry.ai3DCappedLevel = ai3DAutoCappedLibrary
+        }
+        carry.advised = stereoLoadAdvisedIdentity == video.identity
+        return carry
+    }
+
+    /// How AI 3D would play a video: its conversion when it has one, else
+    /// real-time when a model is installed; nil when neither.
+    private static func depthMode(forVideoIdentity identity: String) -> Pseudo3DDepthMode? {
+        if DepthCacheStore.engageEntry(videoIdentity: identity) != nil { return .cached(videoIdentity: identity) }
+        return CoreMLDepthProvider.hasAvailableModel(role: .realtime) ? .realtime : nil
+    }
+
+    private func carryOn(_ carry: EpisodeCarryOver) {
+        if carry.advised { stereoLoadAdvisedIdentity = video.identity }
+        // Leaving AI 3D goes back to the original, as it did for the first.
+        if carry.ai3DCappedLevel, streamLevel == carry.streamLevel { ai3DAutoCappedLibrary = true }
+        guard carry.ai3D, let mode = Self.depthMode(forVideoIdentity: video.identity) else { return }
+        pseudo3DDepthMode = mode
+        AppLogger.videoWindow.info("Next episode carries on in AI 3D at \(self.streamLevel?.rawValue ?? "original", privacy: .public)")
+        // Engaged before the renderer resolves, as a restored window is;
+        // `resolvePlaybackRenderer` finishes it (a transcode for WebM, the
+        // 1080p tier when the level didn't carry).
+        stereoscopicOverride = false
+        pseudo3DEnabled = true
     }
 
     /// Browsing autoplay follows Settings (muted by default). A Library title

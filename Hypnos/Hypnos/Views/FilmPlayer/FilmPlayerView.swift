@@ -271,8 +271,7 @@ struct FilmPlayerView: View {
     /// 20 s pass before the next reports count; otherwise the viewer is told
     /// once per film.
     private func noteStereoPerformance(_ sample: StereoPerformance) {
-        // Faster than 1× more frames pass than the eyes can show; no tier cures that.
-        guard player.isPlaying, !chromeOpen, !player.video.isChangingPictureTier, player.speed <= 1,
+        guard player.isPlaying, !chromeOpen, !player.video.isChangingPictureTier,
               Date.now >= stereoLoadGraceUntil, sample.isOverloaded else {
             stereoLoadStrikes = 0
             return
