@@ -50,6 +50,22 @@ struct GenericPlaybackPlan: Sendable {
     var transcodeURL: URL? = nil
 }
 
+/// A Library title's own picture, as the server describes its file.
+struct LibrarySourcePicture: Sendable, Equatable {
+    var width: Int?
+    var height: Int?
+    var frameRate: Double?
+    var bitrate: Int?
+
+    /// "1080p", "4K": the picture's class (a 1920×800 film is 1080p), nil
+    /// when the server didn't say.
+    var classLabel: String? {
+        guard let width, let height, width > 0, height > 0 else { return nil }
+        let picture = LibraryStreamQuality.pictureClass(width: width, height: height)
+        return picture == 2160 ? "4K" : "\(picture)p"
+    }
+}
+
 /// start/progress/stop calls a player makes as it plays an item, so the
 /// server's watch-progress state (and, in turn, Continue Watching / Next
 /// Up) stays in sync. Both FilmPlayer and the generic player report through

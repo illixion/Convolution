@@ -197,7 +197,10 @@ private struct JFPlaybackInfo: Decodable {
         struct Stream: Decodable {
             let `Type`: String?
             let Codec: String?
+            let Width: Int?
             let Height: Int?
+            let RealFrameRate: Double?
+            let AverageFrameRate: Double?
             let Index: Int?
             let Language: String?
             let Title: String?
@@ -652,12 +655,22 @@ actor JellyfinLibrary: MediaServerLibrary {
 
     /// The file's own bitrate, for choosing the first step down from it.
     func sourceBitrate(itemId: String) async -> Int? {
+        await sourcePicture(itemId: itemId)?.bitrate
+    }
+
+    /// The file's own picture and bitrate: what a player's Quality menu
+    /// offers levels below (`LibraryStreamQuality.offered`).
+    func sourcePicture(itemId: String) async -> LibrarySourcePicture? {
         guard let userId = try? await resolveUserId(),
               let info: JFPlaybackInfo = try? await get("Items/\(itemId)/PlaybackInfo", query: [
                   .init(name: "userId", value: userId),
               ])
         else { return nil }
-        return info.MediaSources?.first?.Bitrate
+        let source = info.MediaSources?.first
+        let video = source?.MediaStreams?.first { $0.Type == "Video" }
+        return LibrarySourcePicture(width: video?.Width, height: video?.Height,
+                                    frameRate: video?.RealFrameRate ?? video?.AverageFrameRate,
+                                    bitrate: source?.Bitrate)
     }
 
     /// The generic player's stream for `itemId` at `quality`: the original

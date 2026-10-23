@@ -120,7 +120,11 @@ enum YouTubeResolver {
     /// it plays: a loopback master from an earlier launch, or a YouTube URL
     /// within 15 minutes of its `expire` stamp. Backend URLs don't expire.
     static func needsRefresh(_ url: URL) -> Bool {
-        if url.host == "127.0.0.1" { return !LoopbackPlaylistServer.shared.isLive(url) }
+        // A copy cut to one rendition is as stale as the master it came from.
+        if url.host == "127.0.0.1" {
+            guard LoopbackPlaylistServer.shared.isLive(url) else { return true }
+            return YouTubeRenditions.source(of: url).map(needsRefresh) ?? false
+        }
         guard url.host?.hasSuffix("googlevideo.com") == true else { return false }
         // `…/expire/1791556239/…` in the path, or `expire=` in the query.
         let components = url.pathComponents
@@ -133,7 +137,11 @@ enum YouTubeResolver {
         return Date(timeIntervalSince1970: expiry).timeIntervalSinceNow < 15 * 60
     }
 
-    static func isSurroundStream(_ url: URL) -> Bool { url.host == "127.0.0.1" }
+    /// The surround master, or a copy of it cut to one rendition; a copy of
+    /// YouTube's own master is served on loopback too, and isn't.
+    static func isSurroundStream(_ url: URL) -> Bool {
+        (YouTubeRenditions.source(of: url) ?? url).host == "127.0.0.1"
+    }
 }
 
 #endif

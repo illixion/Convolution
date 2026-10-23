@@ -1,20 +1,23 @@
 /*
  Hypnos - Video Ornaments View
 
- Controls for the video player including navigation, format toggle, and back button.
- All per-window state is read from VideoWindowModel so multiple video windows are
- independent. Styled to match PhotoOrnamentView.
+ The video window's feature buttons, for RAVEUI's control strip (previous,
+ transport and next, volume and the picture's size and frame rate are the
+ strip's own). Every per-window state is read from VideoWindowModel so
+ multiple video windows are independent.
 
- Bar layout: [Gallery] | [< N/M >] | [ViewMode: icon + 2D/3D/AI 3D v] [Subtitles v] [Quality v] [A-B] |
- [Info] [Share] | [... More v]. The title is the window's own, in its top-left
+ On the strip, by priority (0 stays longest as the strip narrows):
+ 0  View Mode (2D / 3D / AI 3D, a badge), Quality (a badge)
+ 1  Subtitles, Speed, this video's AI 3D conversion progress
+ 2  A-B loop, Info (Stash)
+ 3  Share, Gallery
+ and pinned at the end the Cinema button, then More. More holds what the
+ strip had no room for, then what is only ever there: flip, convergence and
+ subtitle timing nudged in place, All Adjustments, Slideshow, Pop Out (pushed
+ only) and Open in Safari. The title is the window's own, in its top-left
  corner (`PlayerTitleButton`, VideoWindowView).
- Playback and feature actions share RAVEUI's player controls in one ornament
- in both 2D and fake-3D. The immersive scene owns its own transport.
- The More menu holds Flip, All Adjustments (the standalone video-adjustments
- window), Slideshow, and Pop Out (pushed only).
- When the bar is too narrow, the compact bar's own More popover shows the
- same accessories as grouped rows instead (`menuSections`): Playback,
- Picture (flip, convergence and subtitle timing nudged in place), Window.
+ The immersive scene owns its own transport; under it the window keeps a
+ plain bar of these buttons with a More Options menu.
  */
 
 import RAVEMedia
@@ -39,6 +42,8 @@ struct VideoOrnamentsView: View {
     @Environment(\.ornamentIsScrolling) private var ornamentIsScrolling
     #endif
 
+    /// The strip's width (the window's, within limits); nil leaves it to the strip.
+    var stripWidth: CGFloat? = nil
     /// Action to show the main gallery window
     var onGalleryButtonTap: () -> Void
     /// Custom pop-out action (used by pushed windows to open a new window and dismiss self)
@@ -57,7 +62,9 @@ struct VideoOrnamentsView: View {
             HStack(spacing: RAVEChromeMetrics.spacing) { ornamentItems(isImmersive: true) }
                 .padding(12).glassBackgroundEffect()
         } else {
-            VideoControlBar(windowModel: windowModel, pinned: cinemaButton) { ornamentItems(isImmersive: false) }
+            VideoControlBar(windowModel: windowModel, pinned: cinemaButton, width: stripWidth) {
+                ornamentItems(isImmersive: false)
+            }
         }
     }
 
@@ -73,61 +80,32 @@ struct VideoOrnamentsView: View {
         #endif
     }
 
-    /// The window's feature buttons: inline on the bar, or grouped rows in
-    /// the compact bar's "More" popover when they don't fit.
+    /// The window's feature buttons: on the strip as far as it has room, and
+    /// the rest as grouped rows in its More popover.
     private func ornamentItems(isImmersive: Bool) -> some View {
-        PlayerAccessoryLayout {
-            barItems(isImmersive: isImmersive)
-        } menu: {
-            menuSections
+        PlayerAccessoryLayout { room in
+            barItems(room: room, isImmersive: isImmersive)
+        } menu: { room in
+            menuSections(room: room)
         }
     }
 
-    /// On the bar: icons, the quickest choices first.
+    /// On the strip: the choices that say what the picture is doing first,
+    /// up to the priority the strip has room for (see the file comment).
+    /// `room` is `Int.max` on the immersive bar, which has no More of its
+    /// own and keeps prev/next and a More Options menu instead.
     @ViewBuilder
-    private func barItems(isImmersive: Bool) -> some View {
-            galleryButton
-
-            // Prev/next only browse something: a lone video (a Library film)
-            // has nowhere to go.
-            if windowModel.videoCount > 1 {
-                Divider()
-                    .frame(height: 24)
-                previousButton
-                videoCounter
-                nextButton
-            }
-
-            Divider()
-                .frame(height: 24)
-
-            viewModeMenu
+    private func barItems(room: Int, isImmersive: Bool) -> some View {
+        if room == .max, windowModel.videoCount > 1 {
+            previousButton
+            videoCounter
+            nextButton
+        }
+        viewModeMenu
+        qualityMenu
+        if room >= 1 {
             subtitleMenu
-            qualityMenu
             speedMenu
-            // The immersive scene has its own transport, loop included.
-            if !isImmersive {
-                LoopControls(windowModel: windowModel)
-            }
-
-            // Info button (rating & metadata). Stash-only: the sheet fetches
-            // scene detail by id and edits it through GraphQL, so there is
-            // nothing for it to show for a local file or a stream. The photo
-            // ornament already gates its Info button the same way on
-            // `image.stashId != nil`.
-            Divider()
-                .frame(height: 24)
-            if video.stashId != nil {
-                infoButton
-            }
-            shareButton
-
-            // More menu (flip, adjustments, slideshow, pop out)
-            Divider()
-                .frame(height: 24)
-
-            moreMenu
-
             // Depth-conversion status for THIS video — visible at a glance
             // without keeping the ViewMode menu open. Isolated in its own view
             // so its continuous observation of DepthConversionManager doesn't
@@ -135,22 +113,45 @@ struct VideoOrnamentsView: View {
             // the manager recreates the Menu ~30-60×/sec, refreshing the open
             // dropdown and dropping taps.
             ConversionStatusRow(videoIdentity: video.identity)
+        }
+        if room >= 2 {
+            // The immersive scene has its own transport, loop included.
+            if !isImmersive {
+                LoopControls(windowModel: windowModel)
+            }
+            // Info (rating & metadata) is Stash-only: the sheet fetches
+            // scene detail by id and edits it through GraphQL, so there is
+            // nothing for it to show for a local file or a stream.
+            if video.stashId != nil {
+                infoButton
+            }
+        }
+        if room >= 3 {
+            shareButton
+            galleryButton
+        }
+        if room == .max {
+            moreMenu
+        }
     }
 
-    /// In the More popover: one level of grouped rows, with the settings
-    /// people reach for mid-film (flip, convergence, subtitle timing) right
-    /// here rather than in the Adjustments window.
+    /// In the More popover: what the strip had no room for, then what is
+    /// only ever here, as grouped rows; the settings people reach for
+    /// mid-film (flip, convergence, subtitle timing) right here rather than
+    /// in the Adjustments window.
     @ViewBuilder
-    private var menuSections: some View {
-        PlayerPopoverSectionHeader("Playback")
-        viewModeMenu
-        subtitleMenu
-        qualityMenu
-        speedMenu
-        LoopControls(windowModel: windowModel)
-        ConversionStatusRow(videoIdentity: video.identity)
+    private func menuSections(room: Int) -> some View {
+        if room < 2 {
+            PlayerPopoverSectionHeader("Playback")
+            if room < 1 {
+                subtitleMenu
+                speedMenu
+                ConversionStatusRow(videoIdentity: video.identity)
+            }
+            LoopControls(windowModel: windowModel)
+            Divider()
+        }
 
-        Divider()
         PlayerPopoverSectionHeader("Picture")
         flipButton
         if windowModel.shouldUsePseudo3D {
@@ -169,18 +170,15 @@ struct VideoOrnamentsView: View {
 
         Divider()
         PlayerPopoverSectionHeader("Window")
-        if windowModel.videoCount > 1 {
-            HStack(spacing: 4) {
-                previousButton
-                videoCounter
-                nextButton
-            }
+        if room < 3 {
+            galleryButton
         }
-        galleryButton
-        if video.stashId != nil {
+        if room < 2, video.stashId != nil {
             infoButton
         }
-        shareButton
+        if room < 3 {
+            shareButton
+        }
         windowItems(close: {})
     }
 
@@ -188,7 +186,7 @@ struct VideoOrnamentsView: View {
         Button(action: onGalleryButtonTap) {
             OrnamentGlyph(title: windowModel.wasPushed ? "Videos" : "Gallery", systemImage: "square.grid.2x2")
         }
-        .raveChromeButtonStyle()
+        .modifier(OrnamentButtonStyle())
         .help(windowModel.wasPushed ? "Videos" : "Show Gallery")
     }
 
@@ -198,7 +196,7 @@ struct VideoOrnamentsView: View {
         } label: {
             OrnamentGlyph(title: "Previous Video", systemImage: "chevron.left")
         }
-        .raveChromeButtonStyle()
+        .modifier(OrnamentButtonStyle())
         .disabled(!windowModel.hasPreviousVideo)
     }
 
@@ -208,7 +206,7 @@ struct VideoOrnamentsView: View {
         } label: {
             OrnamentGlyph(title: "Next Video", systemImage: "chevron.right")
         }
-        .raveChromeButtonStyle()
+        .modifier(OrnamentButtonStyle())
         .disabled(!windowModel.hasNextVideo)
     }
 
@@ -229,7 +227,8 @@ struct VideoOrnamentsView: View {
     @ViewBuilder
     private var qualityMenu: some View {
         if windowModel.offersQualityChoice {
-            StreamQualityMenu(selected: windowModel.qualityPreference, label: windowModel.qualityLabel,
+            StreamQualityMenu(selected: windowModel.checkedQuality, offered: windowModel.offeredQualities,
+                              sourceLabel: windowModel.librarySourceLabel, label: windowModel.qualityLabel,
                               badge: windowModel.qualityBadge,
                               isChanging: windowModel.isChangingQuality,
                               onOpenChanged: { chromeMenu("Quality", opened: $0) }) { quality in
@@ -237,11 +236,12 @@ struct VideoOrnamentsView: View {
             }
         }
         #if HYPNOS_YOUTUBE
-        if windowModel.youTubeID != nil {
-            YouTubeQualityMenu(selected: windowModel.youTubeQuality, label: windowModel.youTubeQualityLabel,
-                               badge: windowModel.youTubeQualityBadge,
-                               onOpenChanged: { chromeMenu("Quality", opened: $0) }) { quality in
-                windowModel.setYouTubeQuality(quality)
+        // Only once the video's renditions are known (a backend stream has none).
+        if windowModel.youTubeID != nil, !windowModel.youTubeRenditions.isEmpty {
+            YouTubeQualityMenu(selected: windowModel.youTubeChosenHeight, renditions: windowModel.youTubeRenditions,
+                               label: windowModel.youTubeQualityLabel, badge: windowModel.youTubeQualityBadge,
+                               onOpenChanged: { chromeMenu("Quality", opened: $0) }) { height in
+                windowModel.setYouTubeQuality(height: height)
             }
         }
         #endif
@@ -309,7 +309,7 @@ struct VideoOrnamentsView: View {
             OrnamentGlyph(title: "Info", systemImage: video.rating100 != nil ? "info.circle.fill" : "info.circle")
                 .foregroundColor(video.rating100 != nil ? .yellow : nil)
         }
-        .raveChromeButtonStyle()
+        .modifier(OrnamentButtonStyle())
         .help("Info")
         .sheet(isPresented: $windowModel.showMediaInfo) {
             MediaDetailSheet(
@@ -356,9 +356,8 @@ struct VideoOrnamentsView: View {
                     OrnamentGlyph(title: "Share", systemImage: "square.and.arrow.up")
                 }
             }
-            .font(.title3)
         }
-        .raveChromeButtonStyle()
+        .modifier(OrnamentButtonStyle())
         .disabled(windowModel.isPreparingShare)
         .help("Share")
         .sheet(isPresented: Binding(
@@ -386,22 +385,24 @@ struct VideoOrnamentsView: View {
 
     // MARK: - More Menu
 
+    /// The immersive bar's More Options: what the strip keeps in its More.
     private var moreMenu: some View {
-        MoreOptionsControl(highlighted: moreMenuHighlighted,
-                           onOpenChanged: { opened, asPopover in
-                               chromeMenu(asPopover ? "More Options popover" : "More Options", opened: opened)
-                           }) { close in
-            Button {
-                close()
-                withAnimation(.easeInOut(duration: 0.3)) { windowModel.toggleFlip() }
-            } label: {
-                Label(windowModel.isFlipped ? "Unflip" : "Flip Horizontally",
-                      systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+        Menu {
+            Group {
+                flipButton
+                adjustmentsButton(close: {})
+                Divider()
+                windowItems(close: {})
             }
-            adjustmentsButton(close: close)
-            Divider()
-            windowItems(close: close)
+            .ravePlayerMenuReporting { chromeMenu("More Options", opened: $0) }
+        } label: {
+            OrnamentGlyph(title: "More Options", systemImage: "ellipsis.circle")
+                .padding(6)
+                .background(moreMenuHighlighted ? .white.opacity(0.3) : .clear, in: .rect(cornerRadius: 8))
         }
+        .menuStyle(.button)
+        .raveChromeButtonStyle()
+        .help("More")
     }
 
     /// Opens the standalone Adjustments window (repositionable, never
@@ -773,69 +774,6 @@ private struct ConversionMenuStatus: View {
     }
 }
 
-/// "More Options": a menu on the bar, a nested popover inside the compact
-/// bar's "More" popover.
-///
-/// A Menu inside that popover was rebuilt with every playhead update (the bar
-/// reads the current time, and the popover's content is the bar's
-/// accessories), so its dropdown refreshed every frame and lost its gaze
-/// hover. A popover's own content updates only with what it reads.
-private struct MoreOptionsControl<Items: View>: View {
-    let highlighted: Bool
-    /// Opened or closed, and whether as the popover (which leaves the
-    /// stereo picture tappable) or the menu.
-    let onOpenChanged: (_ opened: Bool, _ asPopover: Bool) -> Void
-    /// The items; each calls the passed closure to close the popover first.
-    @ViewBuilder let items: (_ close: @escaping () -> Void) -> Items
-
-    @Environment(\.ravePlayerControlsInMenu) private var inMenu
-    @State private var showsPopover = false
-
-    var body: some View {
-        #if os(tvOS)
-        // tvOS has no popovers; its "More" is still a Menu.
-        menu
-        #else
-        if inMenu {
-            Button { showsPopover.toggle() } label: {
-                Label("More Options", systemImage: "ellipsis.circle")
-            }
-            .popover(isPresented: $showsPopover, arrowEdge: .trailing) {
-                VStack(alignment: .leading, spacing: 4) {
-                    items { showsPopover = false }
-                }
-                .buttonStyle(PlayerPopoverRowStyle())
-                .padding(12)
-                .frame(minWidth: 220)
-            }
-            .onChange(of: showsPopover) { _, open in onOpenChanged(open, true) }
-            .onDisappear {
-                if showsPopover { onOpenChanged(false, true) }
-                showsPopover = false
-            }
-        } else {
-            menu
-        }
-        #endif
-    }
-
-    private var menu: some View {
-            Menu {
-                Group { items {} }
-                    .ravePlayerMenuReporting { onOpenChanged($0, false) }
-            } label: {
-                OrnamentGlyph(title: "More Options", systemImage: "ellipsis.circle")
-                    .padding(6)
-                    .background(highlighted ? .white.opacity(0.3) : .clear, in: .rect(cornerRadius: 8))
-            }
-            .menuStyle(.button)
-            .raveChromeButtonStyle()
-            .help("More")
-    }
-}
-
-/// A feature button's icon: the glyph on the bar, title and glyph inside the
-/// compact bar's "More" popover.
 /// The View Mode button: the mode's icon and name on the bar, so what the
 /// picture is doing reads at a glance; a labelled row in the More popover.
 private struct ViewModeGlyph: View {
@@ -851,6 +789,18 @@ private struct ViewModeGlyph: View {
             PlayerBadge(text: mode, isActive: isActive)
                 .accessibilityLabel("View Mode: \(mode)")
         }
+    }
+}
+
+/// A feature button's icon: the glyph on the bar, title and glyph inside the
+/// strip's "More" popover.
+/// The bar's chrome button style; none inside More, whose popover styles its
+/// rows as a menu's.
+private struct OrnamentButtonStyle: ViewModifier {
+    @Environment(\.ravePlayerControlsInMenu) private var inMenu
+
+    func body(content: Content) -> some View {
+        if inMenu { content } else { content.raveChromeButtonStyle() }
     }
 }
 

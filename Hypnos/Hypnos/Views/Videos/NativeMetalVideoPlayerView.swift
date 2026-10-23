@@ -191,6 +191,9 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             coordinator.onPlayerChanged = { [weak playbackModel] player in
                 playbackModel?.noteNativePlayer(player)
             }
+            coordinator.onFrameRateKnown = { [weak playbackModel] rate in
+                playbackModel?.notePictureFrameRate(rate)
+            }
             coordinator.onPlaybackUpdate = { [weak playbackModel] state in
                 playbackModel?.applyPlaybackState(
                     currentTime: state.currentTime,
@@ -245,7 +248,10 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         private var firstHDRFrameFormat: CMVideoFormatDescription?
         private var presentationSizeObservation: NSKeyValueObservation?
         private var criteriaTask: Task<Void, Never>?
+        private var frameRateTask: Task<Void, Never>?
         var onVideoSizeKnown: ((CGSize) -> Void)?
+        /// The picture's frame rate, for the control strip's readout.
+        var onFrameRateKnown: ((Double) -> Void)?
         var onPlaybackUpdate: ((PlaybackState) -> Void)?
         /// The AVPlayer, as each load makes one and teardown drops it.
         var onPlayerChanged: ((AVPlayer?) -> Void)?
@@ -345,6 +351,8 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
 
             // The Metal path learns the size from the frames it pulls; while
             // the system layer shows, nothing is pulled.
+            measureFrameRate(of: item, player: player)
+
             presentationSizeObservation = item.observe(\.presentationSize, options: [.new]) { [weak self] observed, _ in
                 let size = observed.presentationSize
                 Task { @MainActor [weak self] in
@@ -520,8 +528,38 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             renderer = nil
             mtkView = nil
             onVideoSizeKnown = nil
+            onFrameRateKnown = nil
             onPlaybackUpdate = nil
             onPlaybackError = nil
+        }
+
+        /// The picture's frame rate: the video track's own where the asset has
+        /// one (a file), else what the player measures of the variant playing
+        /// (HLS has no asset track), read at normal speed only, where that is
+        /// the content's rate. Polled, since an adaptive stream can change
+        /// variant, and reported on a change.
+        private func measureFrameRate(of item: AVPlayerItem, player: AVPlayer) {
+            frameRateTask?.cancel()
+            frameRateTask = Task { @MainActor [weak self, weak item, weak player] in
+                var reported: Double?
+                while !Task.isCancelled {
+                    guard let self, let item, let player, self.playerItem === item else { return }
+                    var rate: Double = 0
+                    if let track = item.tracks.first(where: { $0.assetTrack?.mediaType == .video }) {
+                        if let assetTrack = track.assetTrack,
+                           let nominal = try? await assetTrack.load(.nominalFrameRate), nominal > 0 {
+                            rate = Double(nominal)
+                        } else if player.rate == 1, player.timeControlStatus == .playing {
+                            rate = Double(track.currentVideoFrameRate)
+                        }
+                    }
+                    if rate > 0, rate != reported {
+                        reported = rate
+                        self.onFrameRateKnown?(rate)
+                    }
+                    try? await Task.sleep(for: .seconds(2))
+                }
+            }
         }
 
         private func cleanupPlayer() {
@@ -535,6 +573,8 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             if let failureObserver {
                 NotificationCenter.default.removeObserver(failureObserver)
             }
+            frameRateTask?.cancel()
+            frameRateTask = nil
             statusObservation?.invalidate()
             statusObservation = nil
             presentationSizeObservation?.invalidate()

@@ -528,7 +528,9 @@ before touching progress reporting again:**
 - **Skip Intro / Credits** come from `GET /MediaSegments/{id}` (Jellyfin
   10.10+, empty without a provider plugin such as Intro Skipper), falling
   back to chapters named like an intro/recap/credits. `MediaSegmentSkipper`
-  drives every player; tvOS uses `AVPlayerViewController.contextualActions`.
+  drives every player; tvOS uses `AVPlayerViewController.contextualActions`,
+  which after a skip offers "Undo Skip …" for 10 s (a segment undone isn't
+  offered again).
   The dev seed's `Nebula Drift S01E04` ("Cold Open", 40 s) carries Recap /
   Intro / Chapter 3 / End Credits chapters, and the 3D `Twin Horizon` has
   Intro (0-8 s) / End Credits (22-30 s), for checking the button under a

@@ -1,12 +1,15 @@
 /*
  Hypnos - YouTube picture quality (sideload builds only: `HYPNOS_YOUTUBE`)
 
- YouTube's master playlist offers every rendition up to 2160p and the player
- picks by bandwidth, so on a fast link it plays 4K even when that is more
- than AI 3D can convert in time. A cap goes on the player item
- (`preferredMaximumResolution`), which the player honours from its next
- variant switch, without a reload. `auto` leaves it to the player, and the
- video window lowers the cap when 3D can't keep up.
+ The saved preference, for every video. YouTube's master playlist offers
+ every rendition the video has and the player picks by bandwidth, so on a
+ fast link it plays 4K even when that is more than AI 3D can convert in time.
+
+ The video window lists the renditions the video actually has and plays the
+ one picked (`YouTubeRenditions`); a video opens at the highest it has at or
+ below the preference. tvOS and the Mac's system players cap the player item
+ at it instead (`preferredMaximumResolution`). `auto` leaves it to the
+ player, and the video window lowers a cap when 3D can't keep up.
  */
 
 #if HYPNOS_YOUTUBE
@@ -15,7 +18,7 @@ import CoreGraphics
 import Foundation
 
 enum YouTubeQuality: String, CaseIterable, Identifiable, Sendable {
-    case auto, p2160, p1440, p1080, p720, p480
+    case auto, p2160, p1440, p1080, p720, p480, p360, p240, p144
 
     static let defaultsKey = "youtube.quality"
 
@@ -35,6 +38,9 @@ enum YouTubeQuality: String, CaseIterable, Identifiable, Sendable {
         case .p1080: 1080
         case .p720: 720
         case .p480: 480
+        case .p360: 360
+        case .p240: 240
+        case .p144: 144
         }
     }
 
@@ -61,7 +67,7 @@ enum YouTubeQuality: String, CaseIterable, Identifiable, Sendable {
 
     /// The level for a picture `height` high (the closest at or below it).
     static func level(height: Int) -> YouTubeQuality {
-        allCases.first { ($0.height ?? .max) <= height } ?? .p480
+        allCases.first { ($0.height ?? .max) <= height } ?? .p144
     }
 }
 

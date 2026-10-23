@@ -123,6 +123,11 @@ final class VideoWindowModel {
     /// size is known. Used to aspect-fit the native Metal player so it never
     /// stretches when the window can't match the video's aspect (tall videos).
     var videoAspectRatio: CGFloat?
+    /// The decoded picture's size and frame rate, from whichever renderer
+    /// draws it, for the control strip's readout. Written only on a change
+    /// (the strip reads them); cleared with each new video.
+    private(set) var pictureSize: CGSize?
+    private(set) var pictureFrameRate: Double?
 
     // MARK: - Playback State (driven by the WebVideoPlayerView JS bridge)
 
@@ -226,6 +231,10 @@ final class VideoWindowModel {
     @ObservationIgnored var startupQualityTask: Task<Void, Never>?
     /// The current title's own bitrate, once asked.
     @ObservationIgnored var sourceBitrate: (itemId: String, bitrate: Int?)?
+    /// The current title's own picture (size, bitrate), for which levels the
+    /// Quality menu offers; nil until the server answers.
+    var librarySource: LibrarySourcePicture?
+    @ObservationIgnored var librarySourceItemId: String?
     /// Consecutive stereo-pump reports of frames being dropped (see
     /// `noteStereoPerformance`).
     @ObservationIgnored var stereoLoadStrikes = 0
@@ -279,10 +288,10 @@ final class VideoWindowModel {
             || showPseudo3DModePrompt || showDepthModelSetup
     }
 
-    /// The ornament "menus" that are popovers: the control bar's More,
-    /// More Options nested in it (on the bar, More Options is a real Menu
-    /// and reports as "More Options"), Cinema, and the title's Details.
-    static let popoverMenuNames: Set<String> = ["More", "More Options popover", "Cinema", "Details"]
+    /// The ornament "menus" that are popovers: the control strip's More,
+    /// Cinema, and the title's Details. (The immersive bar's More Options is
+    /// a real Menu.)
+    static let popoverMenuNames: Set<String> = ["More", "Cinema", "Details"]
 
     /// Only popovers are open: they keep the gaze even with the stereo
     /// picture tappable, so a tap on the picture can close them. A real menu
@@ -313,14 +322,25 @@ final class VideoWindowModel {
     @ObservationIgnored private var photosResolveTask: Task<Void, Never>?
     @ObservationIgnored private var playbackRendererTask: Task<Void, Never>?
     #if HYPNOS_YOUTUBE
-    /// The YouTube quality chosen for this window (starts at the saved one).
-    var youTubeQuality: YouTubeQuality = .preferred
+    /// The YouTube rendition chosen for this window, by its size class (1080
+    /// for 1080p); nil is Auto. Starts at the saved preference and becomes
+    /// what the video has once its renditions are read.
+    var youTubeChosenHeight: Int? = YouTubeQuality.preferred.height
+    /// The renditions this video's master offers, highest first; empty
+    /// until read, or for a stream that isn't a master (the backend's).
+    var youTubeRenditions: [YouTubeRendition] = []
+    /// The full master they were read from: what Auto plays, and what a
+    /// chosen rendition is cut from.
+    @ObservationIgnored var youTubeMaster: (url: URL, text: String)?
     /// Under Auto, the picture height 3D load has lowered the cap to.
     var youTubeAutoHeight: Int?
     #endif
     #if HYPNOS_YOUTUBE
-    /// Resolving a YouTube video again (`VideoWindowModel+YouTube`).
+    /// Resolving a YouTube video again, reading its renditions, and
+    /// swapping one in (`VideoWindowModel+YouTube`).
     @ObservationIgnored var youTubeRefreshTask: Task<Void, Never>?
+    @ObservationIgnored var youTubeRenditionTask: Task<Void, Never>?
+    @ObservationIgnored var youTubeSwapTask: Task<Void, Never>?
     #endif
 
     // MARK: - Initialization (side-effect-free)
@@ -377,7 +397,7 @@ final class VideoWindowModel {
             pseudo3DDepthMode = .cached(videoIdentity: video.identity)
         }
         #if HYPNOS_YOUTUBE
-        if !refreshYouTubeStreamIfNeeded() { resolvePlaybackRenderer() }
+        if !prepareYouTubeStream() { resolvePlaybackRenderer() }
         #else
         resolvePlaybackRenderer()
         #endif
@@ -525,6 +545,29 @@ final class VideoWindowModel {
         return appModel.videoAutoplayMuted
     }
 
+    // MARK: - Picture readout
+
+    /// "1920×1080 · 23.976 fps", once a renderer has said.
+    var pictureDetails: String? {
+        guard let size = pictureSize else { return nil }
+        return VideoPictureFormat(width: Int(size.width.rounded()), height: Int(size.height.rounded()),
+                                  framesPerSecond: pictureFrameRate).summary
+    }
+
+    func notePictureSize(_ size: CGSize) {
+        guard size.width > 0, size.height > 0, size != pictureSize else { return }
+        pictureSize = size
+    }
+
+    /// A measured rate, kept as the standard rate it is; a measurement that
+    /// reads the same is no change.
+    func notePictureFrameRate(_ measured: Double) {
+        guard measured.isFinite, measured >= 1 else { return }
+        let rate = VideoPictureFormat.snapped(measured)
+        guard VideoPictureFormat.rateLabel(rate) != pictureFrameRate.flatMap(VideoPictureFormat.rateLabel) else { return }
+        pictureFrameRate = rate
+    }
+
     // MARK: - Load Status
 
     /// Called when the player reports the video's size (its first frame).
@@ -598,6 +641,11 @@ final class VideoWindowModel {
         cancelStreamQualityTasks()
         photosResolveTask?.cancel()
         photosResolveTask = nil
+        #if HYPNOS_YOUTUBE
+        youTubeRefreshTask?.cancel()
+        youTubeRenditionTask?.cancel()
+        youTubeSwapTask?.cancel()
+        #endif
         loopController.reset()
         subtitles.reset()
         playCommand = nil
@@ -650,6 +698,8 @@ final class VideoWindowModel {
         video = newVideo
         subtitles.load(SubtitleSource.forVideo(newVideo))
         endHandled = false
+        pictureSize = nil
+        pictureFrameRate = nil
 
         // Reset per-window viewing state (2D on the big screen)
         stereoscopicOverride = holdsBigScreen ? false : nil
@@ -1419,9 +1469,20 @@ final class VideoWindowModel {
 
     /// Jumps past `segment`. Credits that run to the end land just short
     /// of it, so the title ends on its own and the next episode follows.
-    func skip(_ segment: LibraryMediaSegment) {
+    /// The skip can be undone for a few seconds (`undoSkip`). `name` says
+    /// what was skipped, for a SponsorBlock category ("Sponsor").
+    func skip(_ segment: LibraryMediaSegment, name: String? = nil) {
         AppLogger.videoWindow.info("Skipping \(segment.kind.rawValue, privacy: .public)")
+        segmentSkipper.noteSkipped(segment, from: currentTime, name: name)
         endScrub(at: MediaSegmentSkipper.target(for: segment, duration: duration))
+    }
+
+    /// Back to where the last skip left from, its segment no longer offered.
+    func undoSkip() {
+        guard let returnTo = segmentSkipper.takeUndo() else { return }
+        AppLogger.videoWindow.info("Undoing a skip, back to \(returnTo, format: .fixed(precision: 1))s")
+        endScrub(at: returnTo)
+        refreshOfferedSegment()
     }
 
     func toggleMute() {

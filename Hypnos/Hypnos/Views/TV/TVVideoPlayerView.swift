@@ -322,15 +322,22 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         }
 
         // Skip Intro / Skip Credits: the system player's contextual action,
-        // the button the Apple TV app shows for the same thing.
+        // the button the Apple TV app shows for the same thing. After a skip
+        // the action is "Undo Skip" for a few seconds; a segment undone isn't
+        // offered again.
         coordinator.segmentObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600),
             queue: .main
         ) { [weak coordinator, weak controller, weak player] time in
             guard let coordinator, let controller, let player else { return }
-            let segment = coordinator.segments.first {
-                time.seconds >= $0.startSeconds - 0.25 && time.seconds < $0.endSeconds - 1
+            if let until = coordinator.undoUntil {
+                guard Date.now >= until else { return }
+                coordinator.undoUntil = nil
+                coordinator.offeredSegment = nil
+                controller.contextualActions = []
             }
+            let segment = LibrarySegmentSkipPolicy.segment(
+                at: time.seconds, in: coordinator.segments.filter { !coordinator.declinedSegments.contains($0) })
             guard segment != coordinator.offeredSegment else { return }
             coordinator.offeredSegment = segment
             guard let segment else {
@@ -339,10 +346,14 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
             }
             let duration = player.currentItem?.duration.seconds ?? 0
             controller.contextualActions = [
-                UIAction(title: segment.skipTitle, image: UIImage(systemName: "forward.end.fill")) { [weak player] _ in
+                UIAction(title: segment.skipTitle, image: UIImage(systemName: "forward.end.fill")) {
+                    [weak player, weak coordinator, weak controller] _ in
+                    guard let player else { return }
+                    let returnTo = player.currentTime().seconds
                     let target = MediaSegmentSkipper.target(for: segment, duration: duration.isFinite ? duration : 0)
-                    player?.seek(to: CMTime(seconds: target, preferredTimescale: 600),
-                                 toleranceBefore: .zero, toleranceAfter: .zero)
+                    player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
+                                toleranceBefore: .zero, toleranceAfter: .zero)
+                    coordinator?.offerUndo(of: segment, returnTo: returnTo, player: player, controller: controller)
                 },
             ]
         }
@@ -423,6 +434,29 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         var segmentObserver: Any?
         var segments: [LibraryMediaSegment] = []
         var offeredSegment: LibraryMediaSegment?
+        /// While set, the contextual action is the undo for the last skip.
+        var undoUntil: Date?
+        /// Segments the viewer went back into: not offered again.
+        var declinedSegments: Set<LibraryMediaSegment> = []
+
+        /// After a skip: "Undo Skip" for `LibrarySegmentSkipPolicy.undoSeconds`,
+        /// back to where it left from.
+        @MainActor func offerUndo(of segment: LibraryMediaSegment, returnTo: Double, player: AVPlayer,
+                                  controller: AVPlayerViewController?) {
+            undoUntil = .now.addingTimeInterval(LibrarySegmentSkipPolicy.undoSeconds)
+            controller?.contextualActions = [
+                UIAction(title: "Undo Skip \(segment.name)", image: UIImage(systemName: "arrow.uturn.backward")) {
+                    [weak self, weak player, weak controller] _ in
+                    guard let self, let player else { return }
+                    self.declinedSegments.insert(segment)
+                    self.undoUntil = nil
+                    self.offeredSegment = nil
+                    controller?.contextualActions = []
+                    player.seek(to: CMTime(seconds: returnTo, preferredTimescale: 600),
+                                toleranceBefore: .zero, toleranceAfter: .zero)
+                },
+            ]
+        }
         weak var controller: AVPlayerViewController?
         var subtitles: SubtitleController?
         var picture: TVPlayerPicture?

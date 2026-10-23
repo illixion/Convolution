@@ -49,9 +49,14 @@ final class LoopbackPlaylistServer: Sendable {
     }
 
     func isLive(_ url: URL) -> Bool {
-        guard url.host == "127.0.0.1" else { return false }
+        playlist(at: url) != nil
+    }
+
+    /// The playlist served at `url`, if this launch published it.
+    func playlist(at url: URL) -> String? {
+        guard url.host == "127.0.0.1" else { return nil }
         let name = url.deletingPathExtension().lastPathComponent
-        return state.withLock { $0.port == UInt16(url.port ?? 0) && $0.playlists[name] != nil }
+        return state.withLock { $0.port == UInt16(url.port ?? 0) ? $0.playlists[name] : nil }
     }
 
     private func startIfNeeded() async -> UInt16? {

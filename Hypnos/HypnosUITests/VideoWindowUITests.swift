@@ -1,15 +1,17 @@
 /*
- Hypnos UI tests - the video window's player ornament
+ Hypnos UI tests - the video window's control strip
 
  Needs the disposable dev Stash (`scripts/dev-stash.sh up`, port 9998); the
  test skips when it isn't running. The visionOS simulator can't reliably play
  network video, but the transport renders as soon as a duration is known,
  which is all the layout under test needs.
 
- The ornament is RAVEUI's `RAVEPlayerControls` with the app's button row as
- its accessories. An ornament proposes no width, so the control has to size
- itself; when it didn't, the whole bar collapsed to ~237 points, mute sat on
- top of the forward button and Info/Share/More were scrolled out of sight.
+ The strip is RAVEUI's `RAVEPlayerControls` (`.strip`) with the app's buttons
+ as its accessories: the timeline across the top, then the transport, volume
+ and the buttons in one row, the least needed of them in More when the strip
+ is too narrow for all. An ornament proposes no width; when the control
+ didn't size itself, the whole bar collapsed to ~237 points, mute sat on top
+ of the forward button and buttons were scrolled out of sight.
  */
 
 import RAVEUI
@@ -24,7 +26,7 @@ final class VideoWindowUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    func testPlayerOrnamentShowsTheWholeTransportAndButtonRow() throws {
+    func testControlStripKeepsItsEssentialsOnOneRowAndTheRestInMore() throws {
         try XCTSkipUnless(Self.devStashIsUp(), "Dev Stash isn't running: scripts/dev-stash.sh up")
 
         let app = AppLauncher.launch(
@@ -38,23 +40,27 @@ final class VideoWindowUITests: XCTestCase {
 
         let slider = app.sliders["Playback position"].require("The timeline", timeout: 20)
         let forward = app.buttons["Forward 10 seconds"].require("Forward 10 seconds")
-        let mute = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'speaker.'")).firstMatch
-            .require("The mute button")
+        let volume = app.buttons["Volume"].require("The volume button")
+        let viewMode = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'View Mode'")).firstMatch
+            .require("The View Mode badge, kept on the strip at any width")
+        let more = app.buttons["More"].require("More")
 
-        XCTAssertGreaterThanOrEqual(slider.frame.width, 400, "The timeline collapsed: \(slider.frame)")
-        XCTAssertFalse(mute.frame.intersects(forward.frame),
-                       "Mute \(mute.frame) overlaps Forward \(forward.frame)")
-
-        // Every app button must be laid out in the bar rather than scrolled
-        // past either end of it: the bar's padding starts at 0, and mute sits
-        // at its trailing edge.
-        for label in ["Grid View", "Info", "Share", "More"] {
-            let button = app.buttons[label].require("The \(label) button")
+        // The timeline has a row of its own, as wide as the strip.
+        XCTAssertGreaterThanOrEqual(slider.frame.width, 500, "The timeline collapsed: \(slider.frame)")
+        XCTAssertFalse(volume.frame.intersects(forward.frame),
+                       "Volume \(volume.frame) overlaps Forward \(forward.frame)")
+        for (label, button) in [("Forward", forward), ("Volume", volume), ("View Mode", viewMode), ("More", more)] {
             XCTAssertTrue(button.isHittable, "\(label) isn't reachable")
-            XCTAssertGreaterThanOrEqual(button.frame.minX, 0, "\(label) \(button.frame) is scrolled off the leading edge")
-            XCTAssertLessThanOrEqual(button.frame.maxX, mute.frame.maxX + 1,
-                                     "\(label) \(button.frame) is past the bar's trailing edge \(mute.frame.maxX)")
+            XCTAssertGreaterThan(button.frame.midY, slider.frame.maxY, "\(label) \(button.frame) isn't below the timeline")
+            XCTAssertGreaterThanOrEqual(button.frame.minX, slider.frame.minX - 80,
+                                        "\(label) \(button.frame) is past the strip's leading edge")
+            XCTAssertLessThanOrEqual(button.frame.maxX, slider.frame.maxX + 120,
+                                     "\(label) \(button.frame) is past the strip's trailing edge")
         }
+
+        // Share is on the strip when it has room, else in More; never lost.
+        more.tap()
+        app.buttons["Share"].require("Share, on the strip or in More")
     }
 
     private static func devStashIsUp() -> Bool {

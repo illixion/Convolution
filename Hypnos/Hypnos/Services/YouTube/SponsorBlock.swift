@@ -47,6 +47,20 @@ enum SponsorBlockCategory: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Short, for "Skipped …" under the window.
+    var shortName: String {
+        switch self {
+        case .sponsor: "Sponsor"
+        case .selfpromo: "Self-Promotion"
+        case .interaction: "Reminder"
+        case .intro: "Intro"
+        case .outro: "Endcards"
+        case .preview: "Preview"
+        case .musicOfftopic: "Non-Music"
+        case .filler: "Filler"
+        }
+    }
+
     private var defaultsKey: String { "youtube.sponsorblock.\(rawValue)" }
 
     /// Off, offered as a skip button, or skipped by itself.

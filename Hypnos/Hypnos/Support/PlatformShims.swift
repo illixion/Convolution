@@ -274,15 +274,36 @@ extension View {
         // iOS bar belongs at the screen's edge, not at the edge of whatever
         // the content happened to size itself to (a letterboxed photo would
         // otherwise float the bar across the middle of the display).
+        let shown = visibility != .hidden
         return frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(alignment: attachmentAnchor.alignment) {
-                if visibility != .hidden {
-                    IOSOrnamentContainer(edgeAlignment: attachmentAnchor.alignment) {
-                        bar
+                // Slides in from its edge and back out, as the visionOS
+                // players' chrome rises and sinks (`PlayerChromeAnimation`).
+                ZStack {
+                    if shown {
+                        IOSOrnamentContainer(edgeAlignment: attachmentAnchor.alignment) {
+                            bar
+                        }
+                        .transition(Self.ornamentTransition(attachmentAnchor.alignment))
                     }
-                    .transition(.opacity)
                 }
+                .animation(shown ? PlayerChromeAnimation.reveal : PlayerChromeAnimation.hide, value: shown)
             }
+    }
+
+    private static func ornamentTransition(_ alignment: Alignment) -> AnyTransition {
+        let edge: Edge? = switch alignment.vertical {
+        case .top: .top
+        case .bottom: .bottom
+        default:
+            switch alignment.horizontal {
+            case .leading: .leading
+            case .trailing: .trailing
+            default: nil
+            }
+        }
+        guard let edge else { return .opacity }
+        return .move(edge: edge).combined(with: .opacity)
     }
 }
 

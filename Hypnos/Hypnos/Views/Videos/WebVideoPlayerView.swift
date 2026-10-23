@@ -133,6 +133,13 @@ struct WebVideoPlayerView: UIViewRepresentable {
                     muted: (body["muted"] as? Bool) ?? false,
                     buffered: (body["buffered"] as? Double) ?? 0
                 )
+                // The picture as it plays now: an adaptive stream changes size.
+                if let width = body["width"] as? Double, let height = body["height"] as? Double, width > 0, height > 0 {
+                    playbackModel.notePictureSize(CGSize(width: width, height: height))
+                }
+                if let rate = body["frameRate"] as? Double, rate > 0 {
+                    playbackModel.notePictureFrameRate(rate)
+                }
             }
             playbackModel.playCommand = { [weak webView] in
                 webView?.evaluateJavaScript("var p = document.getElementById('player'); if (p) p.play().catch(function(){});")
@@ -935,9 +942,54 @@ struct WebVideoPlayerView: UIViewRepresentable {
                         duration: isFinite(video.duration) ? video.duration : 0,
                         paused: video.paused,
                         muted: video.muted,
-                        buffered: b
+                        buffered: b,
+                        width: video.videoWidth || 0,
+                        height: video.videoHeight || 0,
+                        frameRate: frameRate
                     });
                 }
+
+                // ----- Frame rate -----
+                // The picture's own rate, for the control strip's readout: the
+                // median gap between the media times of presented frames
+                // (requestVideoFrameCallback), so a dropped frame doesn't skew
+                // it. Sampled for a few seconds after each load and seek.
+                var frameRate = 0; // var: postPlayback (above) reads it
+                let frameGaps = [];
+                let lastFrameMediaTime = null;
+                let sampledFrames = 0;
+                let samplingFrameRate = false;
+                const frameRateSamples = 90;
+                function sampleFrameRate(now, metadata) {
+                    if (lastFrameMediaTime !== null) {
+                        const gap = metadata.mediaTime - lastFrameMediaTime;
+                        if (gap > 0.004 && gap < 0.25) frameGaps.push(gap);
+                    }
+                    lastFrameMediaTime = metadata.mediaTime;
+                    sampledFrames += 1;
+                    if (frameGaps.length >= 12) {
+                        const sorted = frameGaps.slice().sort(function(a, b) { return a - b; });
+                        frameRate = 1 / sorted[sorted.length >> 1];
+                    }
+                    if (sampledFrames < frameRateSamples) {
+                        video.requestVideoFrameCallback(sampleFrameRate);
+                    } else {
+                        samplingFrameRate = false;
+                        postPlayback();
+                    }
+                }
+                function restartFrameRateSampling() {
+                    if (typeof video.requestVideoFrameCallback !== 'function') return;
+                    frameGaps = [];
+                    lastFrameMediaTime = null;
+                    sampledFrames = 0;
+                    if (!samplingFrameRate) {
+                        samplingFrameRate = true;
+                        video.requestVideoFrameCallback(sampleFrameRate);
+                    }
+                }
+                video.addEventListener('loadedmetadata', restartFrameRateSampling);
+                video.addEventListener('seeked', restartFrameRateSampling);
                 video.addEventListener('timeupdate', postPlayback);
                 video.addEventListener('play', postPlayback);
                 video.addEventListener('pause', postPlayback);

@@ -38,6 +38,9 @@ struct VideoWindowView: View {
     /// this window's live geometry. Debounced because a resize drag emits a
     /// geometry change per frame and each write hits UserDefaults.
     @State private var sizeWritebackTask: Task<Void, Never>?
+    /// The window's width, in 20 pt steps (a resize drag reports every
+    /// frame), for the control strip's width.
+    @State private var windowWidth: CGFloat = 0
     /// Whether the Library resume seek has run (see `applyStartPositionIfNeeded`).
     @State private var appliedStartPosition = false
 
@@ -68,6 +71,19 @@ struct VideoWindowView: View {
     /// picture, which reads as nearer than its edge and crowded the bar at
     /// the 12 pt the flat picture uses (device, 2026-10-07).
     static let stereoControlsGap: CGFloat = 44
+
+    /// The control strip as wide as the window, within the strip's limits:
+    /// no narrower than its essentials, no wider than RAVEUI's cap. visionOS
+    /// only; iOS lays it over the foot of the screen at the screen's width.
+    private var stripWidth: CGFloat? {
+        #if os(visionOS)
+        windowWidth > 0 ? min(max(windowWidth, Self.minimumStripWidth), 1180) : nil
+        #else
+        nil
+        #endif
+    }
+
+    static let minimumStripWidth: CGFloat = 760
 
     #if os(visionOS)
     @AppStorage(StereoSubtitleStyle.key) private var stereoSubtitleStyle = StereoSubtitleStyle.inPicture
@@ -382,6 +398,7 @@ struct VideoWindowView: View {
                     .padding(.bottom, overlayBottomInset)
                 }
                 .animation(.easeInOut(duration: 0.2), value: windowModel.offeredSegment)
+                .animation(.easeInOut(duration: 0.2), value: windowModel.segmentSkipper.undo)
                 .animation(.easeInOut(duration: 0.2), value: windowModel.qualityNotice)
             }
             #endif
@@ -468,32 +485,35 @@ struct VideoWindowView: View {
                     titleButton
                 }
                 .padding(16)
-                .transition(.opacity)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         #endif
-        .animation(.easeInOut(duration: 0.2), value: windowModel.isUIHidden)
+        .animation(windowModel.isUIHidden ? PlayerChromeAnimation.hide : PlayerChromeAnimation.reveal,
+                   value: windowModel.isUIHidden)
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
         } action: { newSize in
             recordWindowSize(newSize)
+            let width = (newSize.width / 20).rounded() * 20
+            if width != windowWidth { windowWidth = width }
         }
         .persistentSystemOverlays(windowModel.isWindowControlsHidden ? .hidden : .visible)
         .hidesStatusBar(windowModel.isUIHidden)
         #if os(visionOS)
         // Hung under the window, outside it: the window holds only the
         // picture, and the system moves the window bar below the ornament.
-        // Both auto-hide together (`isUIHidden` / `isWindowControlsHidden`).
-        .ornament(
-            visibility: PlayerOrnamentStack<EmptyView>.isVisible(
-                subtitles: bandSubtitles, controlsVisible: !windowModel.isUIHidden,
-                hasPrompt: ornamentPrompt != nil
-            ) && !appModel.allWindowsHidden ? .visible : .hidden,
+        // Both auto-hide together (`isUIHidden` / `isWindowControlsHidden`);
+        // the strip rises into place and sinks away (`playerChromeOrnament`).
+        .playerChromeOrnament(
+            isPresented: !windowModel.isUIHidden && !appModel.allWindowsHidden,
+            keepsMounted: !appModel.allWindowsHidden && PlayerOrnamentStack<EmptyView>.keepsMounted(
+                subtitles: bandSubtitles, hasPrompt: ornamentPrompt != nil),
             attachmentAnchor: .scene(.bottom),
             contentAlignment: .top
-        ) {
+        ) { shown in
             PlayerOrnamentStack(
-                subtitles: bandSubtitles, controlsVisible: !windowModel.isUIHidden,
+                subtitles: bandSubtitles, controlsVisible: shown,
                 prompt: ornamentPrompt,
                 gap: windowModel.showsStereoPicture ? Self.stereoControlsGap : 12,
                 filmTime: { windowModel.currentTime }
@@ -503,12 +523,13 @@ struct VideoWindowView: View {
             resizeWindowHeight(by: new - old)
         }
         // The title over the window's top-left corner, with the controls.
-        .ornament(
-            visibility: !windowModel.isUIHidden && !appModel.allWindowsHidden ? .visible : .hidden,
+        .playerChromeOrnament(
+            isPresented: !windowModel.isUIHidden && !appModel.allWindowsHidden,
             attachmentAnchor: .scene(.topLeading),
             contentAlignment: .topLeading
-        ) {
+        ) { shown in
             titleButton.padding(20)
+                .modifier(PlayerChromeReveal(shown: shown, edge: .top))
         }
         #else
         .ornament(
@@ -621,6 +642,9 @@ struct VideoWindowView: View {
             windowModel.refreshOfferedSegment()
         }
         .task(id: video.identity) {
+            await windowModel.loadLibrarySource()
+        }
+        .task(id: video.identity) {
             let reported = video
             await applyStartPositionIfNeeded()
             await LibraryPlaybackCoordinator.reportGenericPlaybackProgress(
@@ -655,16 +679,24 @@ struct VideoWindowView: View {
         return SkipSegmentButton(segment: segment) { windowModel.skip(segment) }
     }
 
+    /// Undo for the skip just made (a SponsorBlock auto-skip too).
+    private var undoSkipButton: UndoSkipButton? {
+        guard let undo = windowModel.segmentSkipper.undo else { return nil }
+        return UndoSkipButton(undo: undo) { windowModel.undoSkip() }
+    }
+
     /// What hangs under the window outside the controls: Auto's quality
-    /// notice and the skip button, side by side. Outside the window on
-    /// visionOS because SwiftUI drawn over a stereo picture never shows.
+    /// notice, and the skip button or the undo for the last skip, side by
+    /// side. Outside the window on visionOS because SwiftUI drawn over a
+    /// stereo picture never shows.
     private var ornamentPrompt: AnyView? {
         let notice = windowModel.qualityNotice
         let skip = skipSegmentButton
-        guard notice != nil || skip != nil else { return nil }
+        let undo = undoSkipButton
+        guard notice != nil || skip != nil || undo != nil else { return nil }
         return AnyView(HStack(spacing: 12) {
             notice.map { StreamQualityNotice(text: $0) }
-            skip
+            if let skip { skip } else { undo }
         })
     }
 
@@ -751,6 +783,7 @@ struct VideoWindowView: View {
     private var videoOrnament: some View {
         VideoOrnamentsView(
             windowModel: windowModel,
+            stripWidth: stripWidth,
             onGalleryButtonTap: {
                 appModel.showMainWindow(openWindow: openWindow)
             },
@@ -798,6 +831,7 @@ struct VideoWindowView: View {
 
         let videoAspectRatio = videoSize.width / videoSize.height
         windowModel.videoAspectRatio = videoAspectRatio
+        windowModel.notePictureSize(videoSize)
         windowModel.markVideoPresented()
 
         // The letterbox above is all a fixed-size window needs; the rest of

@@ -347,12 +347,13 @@ struct SubtitleBand: View {
 /// What hangs under a player window: the subtitle band if there is one,
 /// then the controls. The ornament stays up for the subtitles while the
 /// controls auto-hide, so they fade in place rather than the band jumping;
-/// a hidden bar takes no input.
+/// a hidden bar takes no input. `controlsVisible` is the animated value from
+/// `playerChromeOrnament`, so the bar rises into place and sinks away.
 ///
-/// A `prompt` (Skip Intro) takes the bar's place while it is hidden and
-/// hangs under it while it shows, so the bar never moves for it. Under the
-/// window rather than over the picture: SwiftUI drawn over a stereo picture
-/// never shows in front of it.
+/// A `prompt` (Skip Intro, Undo) takes the bar's place while it is hidden
+/// and hangs under it while it shows, sliding between the two with the bar,
+/// so the bar never moves for it. Under the window rather than over the
+/// picture: SwiftUI drawn over a stereo picture never shows in front of it.
 struct PlayerOrnamentStack<Controls: View>: View {
     var subtitles: SubtitleController? = nil
     let controlsVisible: Bool
@@ -365,10 +366,11 @@ struct PlayerOrnamentStack<Controls: View>: View {
     @ViewBuilder let controls: Controls
 
     @AppStorage(SubtitleBandGap.key) private var bandGap = SubtitleBandGap.defaultPoints
+    @State private var controlsHeight: CGFloat = 0
 
-    /// Whether the ornament has anything to show at all.
-    static func isVisible(subtitles: SubtitleController?, controlsVisible: Bool, hasPrompt: Bool = false) -> Bool {
-        controlsVisible || subtitles != nil || hasPrompt
+    /// Whether the ornament has anything besides the controls to show.
+    static func keepsMounted(subtitles: SubtitleController?, hasPrompt: Bool) -> Bool {
+        subtitles != nil || hasPrompt
     }
 
     var body: some View {
@@ -376,13 +378,16 @@ struct PlayerOrnamentStack<Controls: View>: View {
             if let subtitles {
                 SubtitleBand(controller: subtitles, filmTime: filmTime)
             }
-            ZStack(alignment: .top) {
-                controls
-                    .opacity(controlsVisible ? 1 : 0)
-                    .allowsHitTesting(controlsVisible)
-                if let prompt, !controlsVisible { prompt }
+            controls
+                .modifier(PlayerChromeReveal(shown: controlsVisible))
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlsHeight = $0 }
+            if let prompt {
+                prompt
+                    .padding(.top, 12)
+                    // In the bar's place while it is hidden. One view that
+                    // moves, not two, so a countdown in it carries on.
+                    .offset(y: controlsVisible ? 0 : -(controlsHeight + 12))
             }
-            if let prompt, controlsVisible { prompt.padding(.top, 12) }
         }
         .padding(.top, subtitles != nil ? bandGap : gap)
         .animation(.easeInOut(duration: 0.2), value: prompt == nil)

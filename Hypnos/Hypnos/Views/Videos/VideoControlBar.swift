@@ -7,12 +7,17 @@ import SwiftUI
 struct VideoControlBar<Accessories: View>: View {
     @Bindable var windowModel: VideoWindowModel
     private let pinned: AnyView?
+    /// The strip's width on visionOS (the window's, within limits); nil
+    /// leaves it to the strip.
+    private let width: CGFloat?
     private let accessories: Accessories
 
-    /// - Parameter pinned: stays on the bar when the accessories collapse into "More".
-    init(windowModel: VideoWindowModel, pinned: AnyView? = nil, @ViewBuilder accessories: () -> Accessories) {
+    /// - Parameter pinned: stays on the strip whatever moves into its More.
+    init(windowModel: VideoWindowModel, pinned: AnyView? = nil, width: CGFloat? = nil,
+         @ViewBuilder accessories: () -> Accessories) {
         self.windowModel = windowModel
         self.pinned = pinned
+        self.width = width
         self.accessories = accessories()
     }
 
@@ -28,7 +33,21 @@ struct VideoControlBar<Accessories: View>: View {
             currentTime: windowModel.currentTime, duration: windowModel.duration,
             bufferedUntil: windowModel.bufferedEnd, isPlaying: !windowModel.isPaused,
             isMuted: windowModel.isMuted, volume: windowModel.volume,
-            markers: [windowModel.loopController.pointA, windowModel.loopController.pointB].compactMap { $0 }
+            markers: [windowModel.loopController.pointA, windowModel.loopController.pointB].compactMap { $0 },
+            details: windowModel.pictureDetails,
+            markedRanges: windowModel.segmentSkipper.markedRanges
+        )
+    }
+
+    /// Previous and next video beside the transport, when the window browses
+    /// a list (a lone Library film has nowhere to go).
+    private var navigation: RAVEPlayerNavigation? {
+        guard windowModel.videoCount > 1 else { return nil }
+        let position = "\(windowModel.currentVideoPosition) of \(windowModel.videoCount)"
+        return RAVEPlayerNavigation(
+            previous: windowModel.hasPreviousVideo ? { windowModel.previousVideo() } : nil,
+            next: windowModel.hasNextVideo ? { windowModel.nextVideo() } : nil,
+            previousTitle: "Previous Video (\(position))", nextTitle: "Next Video (\(position))"
         )
     }
 
@@ -43,26 +62,20 @@ struct VideoControlBar<Accessories: View>: View {
                 if editing { windowModel.beginScrub() }
                 else { windowModel.isScrubbing = false; windowModel.startAutoHideTimer() }
             },
-            // visionOS hangs the bar under the window, one row high; iOS
-            // keeps the stacked bar its edge overlay was laid out for.
-            layout: Self.layout,
+            layout: .strip,
             onMenuChanged: { open in windowModel.ornamentMenu("More", opened: open) },
             setVolume: { windowModel.setVolume($0) },
             menuDismissal: windowModel.menuDismissals,
+            navigation: navigation,
             pinned: pinned
         ) {
             accessories
         }
+        .frame(width: width)
         .onChange(of: windowModel.openOrnamentMenuCount > 0) { _, open in
             frozenState = open ? liveState : nil
         }
     }
-
-    #if os(visionOS)
-    private static var layout: RAVEPlayerControlsLayout { .compact }
-    #else
-    private static var layout: RAVEPlayerControlsLayout { .stacked }
-    #endif
 }
 
 /// The A-B loop: set A, set B (engages), clear. One of the window's

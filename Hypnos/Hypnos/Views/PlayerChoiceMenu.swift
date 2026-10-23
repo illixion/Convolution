@@ -2,7 +2,7 @@ import RAVEUI
 import SwiftUI
 
 /// A choice in a player's control bar (subtitles, audio track): a Menu on
-/// the bar itself, and inside the compact bar's More popover a button that
+/// the bar itself, and inside the control strip's More popover a button that
 /// opens its own popover of rows.
 ///
 /// A Menu opened from inside the More popover is a second-level dropdown,

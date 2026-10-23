@@ -97,7 +97,7 @@ struct YouTubeSettingsSection: View {
         } header: {
             Text("YouTube")
         } footer: {
-            Text("Videos play from YouTube directly on this device. A web-yt-dlp backend is optional: it adds 5.1 surround sound where YouTube has it, and plays videos the device can't, such as ones made for kids. Picture Quality caps what YouTube sends; Auto takes the best the connection allows and lowers it if 3D can't keep up.")
+            Text("Videos play from YouTube directly on this device. A web-yt-dlp backend is optional: it adds 5.1 surround sound where YouTube has it, and plays videos the device can't, such as ones made for kids. Picture Quality is what a video opens at, or the nearest below it the video has; the player's Quality menu lists each video's own. Auto takes the best the connection allows and lowers it if 3D can't keep up.")
         }
 
         Section {

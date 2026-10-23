@@ -72,6 +72,8 @@ struct FilmPlayerView: View {
     @State private var showsDepthSetup = false
     @State private var menuDismissals = 0
     @State private var chromeVisible = true
+    /// The window's width, in 20 pt steps, for the control strip's.
+    @State private var windowWidth: CGFloat = 0
     /// What holds the chrome up, by name: menus, popovers, the sound sheet,
     /// a scrub. Named rather than counted, so a close reported twice counts
     /// once and one never reported can't leave a count behind: a lost Cinema
@@ -323,17 +325,18 @@ struct FilmPlayerView: View {
         #endif
     }
 
-    /// What hangs beside the controls: the audio and picture notices and the
-    /// skip button.
+    /// What hangs beside the controls: the audio and picture notices, and
+    /// the skip button or the undo for the last skip.
     private func prompt(controlsVisible: Bool) -> AnyView? {
         let skip = skipButton(controlsVisible: controlsVisible)
-        guard audioNotice != nil || hasPictureNotice || skip != nil else { return nil }
+        let undo = undoSkipButton
+        guard audioNotice != nil || hasPictureNotice || skip != nil || undo != nil else { return nil }
         return AnyView(HStack(spacing: 12) {
             audioNotice.map { StreamQualityNotice(text: $0, systemImage: "waveform") }
             #if os(visionOS)
             pictureNotice.map { StreamQualityNotice(text: $0, systemImage: "gauge.with.dots.needle.33percent") }
             #endif
-            skip
+            if let skip { skip } else { undo }
         })
     }
 
@@ -343,7 +346,18 @@ struct FilmPlayerView: View {
         guard let segment = skipper.offered(at: player.currentTime, controlsVisible: controlsVisible) else { return nil }
         return SkipSegmentButton(segment: segment) {
             AppLogger.filmPlayer.info("Skipping \(segment.kind.rawValue, privacy: .public)")
+            skipper.noteSkipped(segment, from: player.currentTime)
             player.seek(to: MediaSegmentSkipper.target(for: segment, duration: player.duration))
+        }
+    }
+
+    /// Undo for the skip just made: back to where it left from.
+    private var undoSkipButton: UndoSkipButton? {
+        guard let undo = skipper.undo else { return nil }
+        return UndoSkipButton(undo: undo) {
+            guard let returnTo = skipper.takeUndo() else { return }
+            AppLogger.filmPlayer.info("Undoing a skip, back to \(returnTo, format: .fixed(precision: 1))s")
+            player.seek(to: returnTo)
         }
     }
 
@@ -454,19 +468,29 @@ struct FilmPlayerView: View {
         }
         // The controls hang under the window, so the window is all picture;
         // they and the window bar hide together while the film plays.
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+            let rounded = (width / 20).rounded() * 20
+            if rounded != windowWidth { windowWidth = rounded }
+        }
         .persistentSystemOverlays(chromeVisible ? .visible : .hidden)
-        .ornament(visibility: PlayerOrnamentStack<EmptyView>.isVisible(
-                      subtitles: bandSubtitles, controlsVisible: chromeVisible,
-                      hasPrompt: prompt(controlsVisible: chromeVisible) != nil) ? .visible : .hidden,
-                  attachmentAnchor: .scene(.bottom), contentAlignment: .top) {
+        // The strip rises into place and sinks away (`playerChromeOrnament`).
+        .playerChromeOrnament(
+            isPresented: chromeVisible,
+            keepsMounted: PlayerOrnamentStack<EmptyView>.keepsMounted(
+                subtitles: bandSubtitles, hasPrompt: prompt(controlsVisible: chromeVisible) != nil),
+            attachmentAnchor: .scene(.bottom), contentAlignment: .top
+        ) { shown in
             PlayerOrnamentStack(
-                subtitles: bandSubtitles, controlsVisible: chromeVisible,
+                subtitles: bandSubtitles, controlsVisible: shown,
                 prompt: prompt(controlsVisible: chromeVisible),
                 gap: stereoSource == nil ? 12 : VideoWindowView.stereoControlsGap,
                 filmTime: { player.currentTime }
             ) {
             FilmTransport(player: player, stereoEnabled: stereoSource != nil,
                           onToggle3D: cinema.mode(for: .film) == .bigScreen ? nil : { stereoSource == nil ? startStereo() : stopStereo() },
+                          markedRanges: skipper.markedRanges,
+                          width: windowWidth > 0
+                              ? min(max(windowWidth, VideoWindowView.minimumStripWidth), 1180) : nil,
                           onModalChanged: { name, open in holdChrome(name, open) },
                           menuDismissal: menuDismissals,
                           onInteraction: { revealChrome() },
@@ -474,11 +498,11 @@ struct FilmPlayerView: View {
             }
         }
         // The title over the window's top-left corner, with the controls.
-        .ornament(visibility: chromeVisible ? .visible : .hidden,
-                  attachmentAnchor: .scene(.topLeading), contentAlignment: .topLeading) {
+        .playerChromeOrnament(isPresented: chromeVisible,
+                              attachmentAnchor: .scene(.topLeading), contentAlignment: .topLeading) { shown in
             titleButton.padding(20)
+                .modifier(PlayerChromeReveal(shown: shown, edge: .top))
         }
-        .animation(.easeInOut(duration: 0.2), value: chromeVisible)
         .onAppear { revealChrome() }
         .onChange(of: player.isPlaying) { _, playing in
             if playing { scheduleChromeHide() } else { revealChrome() }
@@ -492,7 +516,7 @@ struct FilmPlayerView: View {
                                        recenterRequest: session.recenterRequest)
                 }
                 .overlay { subtitleOverlay }
-            FilmTransport(player: player).frame(width: 820).padding(.bottom, 40)
+            FilmTransport(player: player, markedRanges: skipper.markedRanges).frame(width: 820).padding(.bottom, 40)
         }
         .overlay(alignment: .bottomTrailing) {
             if let prompt = prompt(controlsVisible: true) {
@@ -519,7 +543,7 @@ struct FilmPlayerView: View {
                 // picture against the top of the screen.
                 .aspectRatio(pictureAspect, contentMode: .fit)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            FilmTransport(player: player).padding(16)
+            FilmTransport(player: player, markedRanges: skipper.markedRanges).padding(16)
         }
         .overlay(alignment: .bottomTrailing) {
             if let prompt = prompt(controlsVisible: true) {
@@ -863,10 +887,21 @@ struct TVFilmSoundSettings: View {
 
 /// The FilmPlayer adapter for the same controls used by general videos and
 /// Raven. It samples the timebase; a scrub preview lives in the SDK controls.
+///
+/// On the strip, by priority (0 stays longest as it narrows): 0 View Mode
+/// and Picture Quality, 1 Audio, Audio Quality, Subtitles and Speed, 2
+/// Recenter Audio; then the pinned Cinema button and More, which holds what
+/// the strip had no room for, convergence and subtitle timing nudged in
+/// place, and Sound and Picture. tvOS keeps the stacked bar, all of it on
+/// the bar.
 struct FilmTransport: View {
     let player: FilmPlayer
     var stereoEnabled = false
     var onToggle3D: (() -> Void)?
+    /// Skippable stretches, marked under the scrubber.
+    var markedRanges: [ClosedRange<Double>] = []
+    /// The strip's width on visionOS (the window's, within limits).
+    var width: CGFloat?
     /// A menu, popover or sheet opened or closed, by name ("More", "Cinema").
     var onModalChanged: (String, Bool) -> Void = { _, _ in }
     /// Bumped by the host to close the More popover.
@@ -894,7 +929,7 @@ struct FilmTransport: View {
             // the buffered position updates twice a second too.
             state: RAVEPlayerControlState(currentTime: now, duration: player.duration,
                 bufferedUntil: menuOpen ? now : player.video.bufferedUntil, isPlaying: player.isPlaying, isMuted: player.isMuted,
-                volume: Double(player.volume)),
+                volume: Double(player.volume), details: pictureDetails, markedRanges: markedRanges),
             togglePlayback: { player.isPlaying ? player.pause() : player.play() },
             seek: { player.seek(to: $0) }, toggleMute: { player.isMuted.toggle() },
             onInteraction: onInteraction,
@@ -908,13 +943,16 @@ struct FilmTransport: View {
             menuDismissal: menuDismissal,
             pinned: cinemaButton
         ) {
-            PlayerAccessoryLayout {
-                playbackItems
-                soundAndPictureButton
-            } menu: {
-                PlayerPopoverSectionHeader("Playback")
-                playbackItems
-                Divider()
+            PlayerAccessoryLayout { room in
+                playbackItems(onBar: true, room: room)
+                // A bar with no More (tvOS) keeps it on the bar.
+                if room == .max { soundAndPictureButton }
+            } menu: { room in
+                if room < 2, hasPlaybackItems(above: room) {
+                    PlayerPopoverSectionHeader("Playback")
+                    playbackItems(onBar: false, room: room)
+                    Divider()
+                }
                 PlayerPopoverSectionHeader("Sound and Picture")
                 #if os(visionOS)
                 if stereoEnabled {
@@ -933,6 +971,7 @@ struct FilmTransport: View {
                 soundAndPictureButton
             }
         }
+        .frame(width: width)
         .sheet(isPresented: $showsSound) {
             #if os(tvOS)
             TVFilmSoundSettings()
@@ -988,34 +1027,72 @@ struct FilmTransport: View {
         .accessibilityIdentifier("player.viewMode")
     }
 
-    @ViewBuilder private var playbackItems: some View {
-        if let onToggle3D {
-            viewModeMenu(toggle: onToggle3D)
+    /// "1920×1080 · 23.976 fps" for the picture tier playing.
+    private var pictureDetails: String? {
+        guard let format = player.video.format else { return nil }
+        let size = CMVideoFormatDescriptionGetDimensions(format)
+        guard size.width > 0, size.height > 0 else { return nil }
+        return VideoPictureFormat(width: Int(size.width), height: Int(size.height),
+                                  framesPerSecond: player.video.frameRate).summary
+    }
+
+    /// The playback choices, each at its priority: on the bar (`onBar`) the
+    /// ones up to `room`, in More the ones above it.
+    @ViewBuilder private func playbackItems(onBar: Bool, room: Int) -> some View {
+        let shows = { (priority: Int) in onBar ? priority <= room : priority > room }
+        if shows(0) {
+            if let onToggle3D {
+                viewModeMenu(toggle: onToggle3D)
+            }
+            if !player.video.offeredPictureHeights.isEmpty {
+                FilmPictureQualityMenu(player: player.video, onOpenChanged: { menuChanged("Picture Quality", $0) })
+            }
         }
-        if player.audioTracks.count > 1 {
-            FilmAudioTrackMenu(player: player, onOpenChanged: { menuChanged("Audio", $0) })
+        if shows(1) {
+            if player.audioTracks.count > 1 {
+                FilmAudioTrackMenu(player: player, onOpenChanged: { menuChanged("Audio", $0) })
+            }
+            if player.audioEncoding != nil {
+                ObjectAudioQualityMenu(player: player, onOpenChanged: { menuChanged("Audio Quality", $0) })
+            }
+            if !session.subtitles.tracks.isEmpty {
+                SubtitleMenu(controller: session.subtitles, onOpenChanged: { menuChanged("Subtitles", $0) })
+            }
+            PlaybackSpeedMenu(speed: player.speed, onOpenChanged: { menuChanged("Speed", $0) }) { speed in
+                player.setSpeed(speed)
+            }
         }
-        if player.audioEncoding != nil {
-            ObjectAudioQualityMenu(player: player, onOpenChanged: { menuChanged("Audio Quality", $0) })
+        if shows(2) {
+            recenterButton
         }
-        if !player.video.offeredPictureHeights.isEmpty {
-            FilmPictureQualityMenu(player: player.video, onOpenChanged: { menuChanged("Picture Quality", $0) })
-        }
-        if !session.subtitles.tracks.isEmpty {
-            SubtitleMenu(controller: session.subtitles, onOpenChanged: { menuChanged("Subtitles", $0) })
-        }
-        PlaybackSpeedMenu(speed: player.speed, onOpenChanged: { menuChanged("Speed", $0) }) { speed in
-            player.setSpeed(speed)
-        }
+    }
+
+    /// Whether More has any playback choice the strip had no room for.
+    private func hasPlaybackItems(above room: Int) -> Bool {
+        // Speed (1) is always there; Recenter (2) only while tracking.
+        room < 1 || (room < 2 && canRecenter)
+    }
+
+    private var canRecenter: Bool {
         #if os(iOS) || os(macOS)
-        if session.headTracking, HeadphoneHeadTracker.shared.isTracking {
+        session.headTracking && HeadphoneHeadTracker.shared.isTracking
+        #elseif os(tvOS)
+        session.headTracking && player.audio != nil
+        #else
+        false
+        #endif
+    }
+
+    @ViewBuilder private var recenterButton: some View {
+        #if os(iOS) || os(macOS)
+        if canRecenter {
             Button { HeadphoneHeadTracker.shared.recenter() } label: {
                 Label("Recenter Audio", systemImage: "scope").ravePlayerAccessoryLabel()
             }
             .help("Recenter audio while facing the picture")
         }
         #elseif os(tvOS)
-        if session.headTracking, player.audio != nil {
+        if canRecenter {
             Button { session.recenterRequest += 1 } label: {
                 Label("Recenter Audio", systemImage: "scope").ravePlayerAccessoryLabel()
             }
@@ -1047,12 +1124,10 @@ struct FilmTransport: View {
         onModalChanged(name, open)
     }
 
-    #if os(visionOS)
-    /// One row under the window: every row of height is window the film
-    /// doesn't get.
-    private static var layout: RAVEPlayerControlsLayout { .compact }
-    #else
+    #if os(tvOS)
     private static var layout: RAVEPlayerControlsLayout { .stacked }
+    #else
+    private static var layout: RAVEPlayerControlsLayout { .strip }
     #endif
 }
 

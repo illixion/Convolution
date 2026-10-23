@@ -59,13 +59,18 @@ struct MacVideoPlayerWindow: View {
                 MacAVPlayerView(player: player)
                     // Above AVPlayerView's floating controls.
                     .overlay(alignment: .bottomTrailing) {
-                        if let segment = skipper.segment(at: playhead) {
-                            SkipSegmentButton(segment: segment) { skip(segment, player: player) }
-                                .padding(.trailing, 24)
-                                .padding(.bottom, 90)
+                        Group {
+                            if let segment = skipper.segment(at: playhead) {
+                                SkipSegmentButton(segment: segment) { skip(segment, player: player) }
+                            } else if let undo = skipper.undo {
+                                UndoSkipButton(undo: undo) { undoSkip(player: player) }
+                            }
                         }
+                        .padding(.trailing, 24)
+                        .padding(.bottom, 90)
                     }
                     .animation(.easeInOut(duration: 0.2), value: skipper.segment(at: playhead))
+                    .animation(.easeInOut(duration: 0.2), value: skipper.undo)
                     .task { await startPlayback(player) }
                     .onDisappear {
                         player.pause()
@@ -148,7 +153,14 @@ struct MacVideoPlayerWindow: View {
     private func skip(_ segment: LibraryMediaSegment, player: AVPlayer) {
         let duration = player.currentItem?.duration.seconds ?? 0
         let target = MediaSegmentSkipper.target(for: segment, duration: duration.isFinite ? duration : 0)
+        skipper.noteSkipped(segment, from: player.currentTime().seconds)
         player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    /// Back to where the last skip left from.
+    private func undoSkip(player: AVPlayer) {
+        guard let returnTo = skipper.takeUndo() else { return }
+        player.seek(to: CMTime(seconds: returnTo, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
     private func resolve() async {

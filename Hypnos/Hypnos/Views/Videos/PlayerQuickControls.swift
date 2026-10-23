@@ -2,9 +2,15 @@ import RAVEUI
 import SwiftUI
 
 /// The streaming quality choice for a Library title: a menu on the bar, a
-/// popover of rows inside the compact bar's More (see `PlayerChoiceMenu`).
+/// popover of rows inside the control strip's More (see `PlayerChoiceMenu`).
+/// It lists what this title can actually be streamed at
+/// (`LibraryStreamQuality.offered`), not every level there is.
 struct StreamQualityMenu: View {
     let selected: LibraryStreamQuality
+    /// The levels this title offers.
+    let offered: [LibraryStreamQuality]
+    /// The title's own picture ("1080p"), for the Auto and Original rows.
+    var sourceLabel: String?
     /// What is in force, e.g. "Auto · 720p".
     let label: String
     /// The same, short, for the bar's badge ("720p").
@@ -18,12 +24,12 @@ struct StreamQualityMenu: View {
                          badge: isChanging ? "…" : badge,
                          help: isChanging ? "Changing quality…" : "Streaming quality: \(label)",
                          onOpenChanged: onOpenChanged) { close in
-            ForEach(LibraryStreamQuality.allCases, id: \.self) { quality in
+            ForEach(offered, id: \.self) { quality in
                 Button {
                     close()
                     onSelect(quality)
                 } label: {
-                    StreamQualityRow(quality: quality, isSelected: quality == selected)
+                    StreamQualityRow(quality: quality, isSelected: quality == selected, sourceLabel: sourceLabel)
                 }
             }
         }
@@ -67,16 +73,28 @@ struct PlaybackSpeedMenu: View {
 }
 
 /// One level: its title, what it means for the two original-quality
-/// choices, and a checkmark on the chosen one.
+/// choices (naming the title's own picture when known), and a checkmark on
+/// the chosen one.
 struct StreamQualityRow: View {
     let quality: LibraryStreamQuality
     let isSelected: Bool
+    /// The title's own picture ("1080p").
+    var sourceLabel: String?
+
+    private var detail: String? {
+        guard let sourceLabel else { return quality.detail }
+        switch quality {
+        case .auto: return "Original \(sourceLabel), lowered if the stream can't keep up"
+        case .original: return "Original \(sourceLabel), never lowered"
+        default: return quality.detail
+        }
+    }
 
     var body: some View {
         Label {
             VStack(alignment: .leading, spacing: 2) {
                 Text(quality.title)
-                if let detail = quality.detail {
+                if let detail {
                     Text(detail).font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -86,7 +104,7 @@ struct StreamQualityRow: View {
     }
 }
 
-/// A heading between groups of rows in the compact bar's More popover.
+/// A heading between groups of rows in the control strip's More popover.
 struct PlayerPopoverSectionHeader: View {
     let title: String
 
@@ -143,15 +161,19 @@ struct PlayerStepRow: View {
     }
 }
 
-/// Shows `bar` on the control bar and `menu` inside its More popover, where
-/// the same accessories can be grouped and labelled.
+/// Shows `bar` on the control strip and `menu` inside its More popover,
+/// where the same accessories can be grouped and labelled. Each is given the
+/// highest priority the strip has room for (`ravePlayerAccessoryRoom`): the
+/// bar shows its accessories up to it, the menu the ones above it. A bar
+/// with no More (the stacked bar, a plain HStack) is given `Int.max`.
 struct PlayerAccessoryLayout<Bar: View, MenuContent: View>: View {
-    @ViewBuilder let bar: Bar
-    @ViewBuilder let menu: MenuContent
+    @ViewBuilder let bar: (_ room: Int) -> Bar
+    @ViewBuilder let menu: (_ room: Int) -> MenuContent
     @Environment(\.ravePlayerControlsInMenu) private var inMenu
+    @Environment(\.ravePlayerAccessoryRoom) private var room
 
     var body: some View {
-        if inMenu { menu } else { bar }
+        if inMenu { menu(room) } else { bar(room) }
     }
 }
 

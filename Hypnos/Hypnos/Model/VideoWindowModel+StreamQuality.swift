@@ -26,21 +26,61 @@ extension VideoWindowModel {
         LibraryStreamQuality.level(ofStream: video.streamURL)
     }
 
-    /// What the quality control reads: the choice, and under Auto the level
-    /// it has stepped down to.
-    var qualityLabel: String {
-        if qualityPreference == .auto, let level = streamLevel {
-            return "Auto · \(level.shortTitle)"
-        }
-        return qualityPreference.shortTitle
+    /// The levels the Quality menu lists for this title: none above its own
+    /// picture, none its own bitrate is already under
+    /// (`LibraryStreamQuality.offered`). Every level until the server says.
+    var offeredQualities: [LibraryStreamQuality] {
+        LibraryStreamQuality.offered(sourceWidth: librarySource?.width, sourceHeight: librarySource?.height,
+                                     sourceBitrate: librarySource?.bitrate)
     }
 
-    /// What is in force, short, for the bar's badge: the level playing
-    /// ("720p"; "1080p" for either 1080p cap), or the choice when that is
-    /// the original.
-    var qualityBadge: String {
-        let shown = streamLevel ?? qualityPreference
-        return shown.maxHeight == 1080 ? "1080p" : shown.shortTitle
+    /// The choice the menu checks: the preference, or the original when the
+    /// preference is a level this title doesn't offer, since it then plays
+    /// the original (a "4K" preference on a 1080p film).
+    var checkedQuality: LibraryStreamQuality {
+        offeredQualities.contains(qualityPreference) ? qualityPreference : .original
+    }
+
+    /// What is playing, short: the capped level ("720p"; "1080p" for either
+    /// 1080p cap), else the original's own picture ("1080p"), else the
+    /// choice.
+    private var playingQualityShortTitle: String {
+        if let level = streamLevel { return level.maxHeight == 1080 ? "1080p" : level.shortTitle }
+        if let picture = librarySource?.classLabel { return picture }
+        return checkedQuality.shortTitle
+    }
+
+    /// What the quality control reads: the choice, and what plays under it
+    /// ("Auto · 720p", "Original · 1080p").
+    var qualityLabel: String {
+        switch checkedQuality {
+        case .auto, .original: "\(checkedQuality.shortTitle) · \(playingQualityShortTitle)"
+        default: checkedQuality.title
+        }
+    }
+
+    /// The bar's badge: what is playing ("720p", "1080p", "4K").
+    var qualityBadge: String { playingQualityShortTitle }
+
+    /// The title's own picture for the menu's Auto and Original rows.
+    var librarySourceLabel: String? { librarySource?.classLabel }
+
+    /// Asks the server for this title's own picture, once per title.
+    func loadLibrarySource() async {
+        guard offersQualityChoice, let itemId = libraryItemId else {
+            librarySourceItemId = nil
+            if librarySource != nil { librarySource = nil }
+            return
+        }
+        guard itemId != librarySourceItemId else { return }
+        librarySourceItemId = itemId
+        librarySource = nil
+        guard let library = LibraryService.current(),
+              let picture = await library.sourcePicture(itemId: itemId),
+              libraryItemId == itemId else { return }
+        librarySource = picture
+        sourceBitrate = (itemId, picture.bitrate)
+        AppLogger.videoWindow.info("Source picture \(picture.width ?? 0, privacy: .public)×\(picture.height ?? 0, privacy: .public), \((picture.bitrate ?? 0) / 1000, privacy: .public) kbps; offering \(self.offeredQualities.map(\.rawValue).joined(separator: ", "), privacy: .public)")
     }
 
     /// The viewer picked `quality`: remember it for every title, and swap
@@ -190,6 +230,11 @@ extension VideoWindowModel {
     /// cost follows the picture's size; otherwise the viewer is told once
     /// what would help.
     func noteStereoPerformance(_ sample: StereoPerformance) {
+        // The pump measures the source's own rate from its frame times; the
+        // readout's, since the stereo picture has no other renderer to ask.
+        if showsStereoPicture, sample.sourceFramesPerSecond > 0 {
+            notePictureFrameRate(sample.sourceFramesPerSecond)
+        }
         // Faster than 1× the pump measures against the video's 1× frame
         // rate (all real-time AI 3D shows then), so this holds at any speed.
         guard showsStereoPicture, !isPaused, !isScrubbing, !isChangingQuality,
@@ -278,18 +323,21 @@ extension VideoWindowModel {
         qualityNotice = nil
         stallMonitor = StreamStallMonitor()
         #if HYPNOS_YOUTUBE
-        youTubeQuality = .preferred
+        youTubeChosenHeight = YouTubeQuality.preferred.height
+        youTubeRenditions = []
+        youTubeMaster = nil
         youTubeAutoHeight = nil
         #endif
         updatePictureResolutionCap()
     }
 
-    /// The cap the players apply: YouTube's level, else none.
+    /// The cap the players apply: under YouTube's Auto, the one 3D load
+    /// set; else none (a chosen rendition is the only one the player gets).
     func updatePictureResolutionCap() {
         var cap = CGSize.zero
         #if HYPNOS_YOUTUBE
-        if youTubeID != nil {
-            cap = YouTubeQuality.maximumResolution(height: youTubeQuality.height ?? youTubeAutoHeight)
+        if youTubeID != nil, youTubeChosenHeight == nil {
+            cap = YouTubeQuality.maximumResolution(height: youTubeAutoHeight)
         }
         #endif
         if cap != maximumPictureResolution { maximumPictureResolution = cap }
