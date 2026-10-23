@@ -46,15 +46,34 @@ private struct PlayerChromeOrnament<OrnamentContent: View>: ViewModifier {
     @State private var mounted = false
     @State private var shown = false
     @State private var transition: Task<Void, Never>?
+    /// `keepsMounted`, let go of only after what it held (a prompt) has
+    /// played its way out: acting on `keepsMounted` itself would take the
+    /// ornament down in the same pass that removes the prompt.
+    @State private var heldMounted = false
+    @State private var lingerTask: Task<Void, Never>?
 
     func body(content: Content) -> some View {
-        let visibility: Visibility = mounted || keepsMounted ? .visible : .hidden
+        let visibility: Visibility = mounted || keepsMounted || heldMounted ? .visible : .hidden
         let shown = shown
         return content
             .ornament(visibility: visibility, attachmentAnchor: attachmentAnchor,
                       contentAlignment: contentAlignment, ornament: { makeOrnament(shown) })
             .onChange(of: isPresented, initial: true) { _, presented in update(presented) }
-            .onDisappear { transition?.cancel() }
+            .onChange(of: keepsMounted, initial: true) { _, kept in lingerIfLetGo(kept) }
+            .onDisappear { transition?.cancel(); lingerTask?.cancel() }
+    }
+
+    private func lingerIfLetGo(_ kept: Bool) {
+        lingerTask?.cancel()
+        if kept {
+            heldMounted = true
+            return
+        }
+        lingerTask = Task { @MainActor in
+            try? await Task.sleep(for: PlayerChromeAnimation.hideDuration)
+            guard !Task.isCancelled else { return }
+            heldMounted = false
+        }
     }
 
     private func update(_ presented: Bool) {

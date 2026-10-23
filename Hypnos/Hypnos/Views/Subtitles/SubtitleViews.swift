@@ -362,6 +362,11 @@ struct PlayerOrnamentStack<Controls: View>: View {
 
     @AppStorage(SubtitleBandGap.key) private var bandGap = SubtitleBandGap.defaultPoints
     @State private var controlsHeight: CGFloat = 0
+    /// The last prompt, kept in the tree while it fades out: a removal
+    /// transition inside an ornament cut it in a single frame (measured on
+    /// the simulator), so the exit is driven by opacity instead.
+    @State private var heldPrompt: AnyView?
+    @State private var releasePrompt: Task<Void, Never>?
 
     /// Whether the ornament has anything besides the controls to show.
     static func keepsMounted(subtitles: SubtitleController?, hasPrompt: Bool) -> Bool {
@@ -373,19 +378,38 @@ struct PlayerOrnamentStack<Controls: View>: View {
             if let subtitles {
                 SubtitleBand(controller: subtitles, filmTime: filmTime)
             }
+            // The bar's room goes with it as it hides, so a prompt that
+            // takes its place sits right under the window rather than a bar's
+            // height below it. Measured at its own height, as a collapsed
+            // frame would otherwise squeeze it into another layout.
             controls
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if $0 > 0 { controlsHeight = $0 } }
                 .modifier(PlayerChromeReveal(shown: controlsVisible))
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlsHeight = $0 }
-            if let prompt {
-                prompt
-                    .padding(.top, 12)
-                    // In the bar's place while it is hidden. One view that
-                    // moves, not two, so a countdown in it carries on.
-                    .offset(y: controlsVisible ? 0 : -(controlsHeight + 12))
+                .frame(height: controlsVisible ? (controlsHeight > 0 ? controlsHeight : nil) : 0, alignment: .top)
+            if let shownPrompt = prompt ?? heldPrompt {
+                shownPrompt
+                    .padding(.top, controlsVisible ? 12 : 0)
+                    .opacity(prompt != nil ? 1 : 0)
+                    .scaleEffect(prompt != nil ? 1 : 0.92, anchor: .top)
+                    .allowsHitTesting(prompt != nil)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .top)))
             }
         }
         .padding(.top, subtitles != nil ? bandGap : gap)
         .animation(.easeInOut(duration: 0.2), value: prompt == nil)
+        .onChange(of: prompt == nil, initial: true) { _, gone in
+            releasePrompt?.cancel()
+            if !gone {
+                heldPrompt = prompt
+            } else {
+                releasePrompt = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(220))
+                    guard !Task.isCancelled else { return }
+                    heldPrompt = nil
+                }
+            }
+        }
     }
 }
 #endif

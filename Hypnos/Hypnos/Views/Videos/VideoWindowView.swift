@@ -387,20 +387,26 @@ struct VideoWindowView: View {
             #if !os(visionOS)
             // Skip Intro, over the picture above the controls (visionOS hangs
             // it under the window with them).
-            if !appModel.allWindowsHidden, let prompt = ornamentPrompt {
-                VStack {
-                    Spacer()
-                    HStack {
+            // The animations sit outside the condition: inside it they leave
+            // with the prompt, and it would vanish without playing its exit.
+            Group {
+                if !appModel.allWindowsHidden, let prompt = ornamentPrompt {
+                    VStack {
                         Spacer()
-                        prompt
+                        HStack {
+                            Spacer()
+                            prompt
+                        }
+                        .padding(.trailing, 24)
+                        .padding(.bottom, overlayBottomInset)
                     }
-                    .padding(.trailing, 24)
-                    .padding(.bottom, overlayBottomInset)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
-                .animation(.easeInOut(duration: 0.2), value: windowModel.offeredSegment)
-                .animation(.easeInOut(duration: 0.2), value: windowModel.segmentSkipper.undo)
-                .animation(.easeInOut(duration: 0.2), value: windowModel.qualityNotice)
             }
+            .animation(.easeInOut(duration: 0.2), value: ornamentPrompt == nil)
+            .animation(.easeInOut(duration: 0.2), value: windowModel.offeredSegment)
+            .animation(.easeInOut(duration: 0.2), value: windowModel.segmentSkipper.undo)
+            .animation(.easeInOut(duration: 0.2), value: windowModel.qualityNotice)
             #endif
 
             // Toast notification (A-B loop feedback)

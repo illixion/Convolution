@@ -520,11 +520,16 @@ struct FilmPlayerView: View {
             FilmTransport(player: player, markedRanges: skipper.markedRanges).frame(width: 820).padding(.bottom, 40)
         }
         .overlay(alignment: .bottomTrailing) {
-            if let prompt = prompt(controlsVisible: true) {
-                prompt
-                    .padding(.trailing, 90)
-                    .padding(.bottom, 60)
+            // The animation sits outside the condition, so the prompt plays its exit.
+            Group {
+                if let prompt = prompt(controlsVisible: true) {
+                    prompt
+                        .padding(.trailing, 90)
+                        .padding(.bottom, 60)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
             }
+            .animation(.easeInOut(duration: 0.2), value: prompt(controlsVisible: true) == nil)
         }
         // Up from the controls; its details open as a sheet.
         .overlay(alignment: .topLeading) {
@@ -547,11 +552,16 @@ struct FilmPlayerView: View {
             FilmTransport(player: player, markedRanges: skipper.markedRanges).padding(16)
         }
         .overlay(alignment: .bottomTrailing) {
-            if let prompt = prompt(controlsVisible: true) {
-                prompt
-                    .padding(.trailing, 24)
-                    .padding(.bottom, 140)
+            // The animation sits outside the condition, so the prompt plays its exit.
+            Group {
+                if let prompt = prompt(controlsVisible: true) {
+                    prompt
+                        .padding(.trailing, 24)
+                        .padding(.bottom, 140)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
             }
+            .animation(.easeInOut(duration: 0.2), value: prompt(controlsVisible: true) == nil)
         }
         .overlay(alignment: .topLeading) {
             titleButton.padding(16)
