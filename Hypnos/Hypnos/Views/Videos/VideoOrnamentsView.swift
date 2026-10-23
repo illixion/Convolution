@@ -53,6 +53,7 @@ struct VideoOrnamentsView: View {
 
     var body: some View {
         chromeObservers(bar)
+            .environment(\.playerChoiceDismissal, windowModel.menuDismissals)
     }
 
     @ViewBuilder
@@ -476,17 +477,22 @@ struct VideoOrnamentsView: View {
 
     // MARK: - View Mode Menu
 
-    @ViewBuilder
+    /// A popover of rows, not a Menu: it reports exactly when it closes (see
+    /// `PlayerChoiceMenu`), where a Menu's content did not, which held the
+    /// chrome open and left a stereo picture dimmed.
     private var viewModeMenu: some View {
-        Menu {
-            // Pause auto-hide + flag chrome open (recedes fake-3D so this menu
-            // isn't occluded), same pattern as the More menu.
-            Group {
+        PlayerChoiceMenu(title: "View Mode", systemImage: currentViewMode.systemImage,
+                         // A badge naming the mode in force ("2D", "AI 3D"),
+                         // filled while a 3D mode is on.
+                         badge: currentViewMode.badge,
+                         badgeIsActive: windowModel.shouldUse3DMode || windowModel.shouldUsePseudo3D,
+                         help: "View Mode",
+                         onOpenChanged: { chromeMenu("View Mode", opened: $0) }) { close in
             // The three modes behave like a radio group: exactly one carries
             // the checkmark, selecting another switches directly (each engage
             // path turns the other modes off), and re-selecting the active
             // one is a no-op — leaving a mode means picking a different one.
-            modeButton("2D", mode: .flat) {
+            modeButton("2D", mode: .flat, close: close) {
                 windowModel.set2DMode()
             }
 
@@ -495,11 +501,11 @@ struct VideoOrnamentsView: View {
 
                 // A stereo video plays live in the window; Immersive 3D
                 // downloads and converts it first for the immersive screen.
-                modeButton(ViewMode.stereoscopic.title, mode: .stereoscopic) {
+                modeButton(ViewMode.stereoscopic.title, mode: .stereoscopic, close: close) {
                     Task { await windowModel.enable3DMode() }
                 }
 
-                modeButton(ViewMode.immersive.title, mode: .immersive) {
+                modeButton(ViewMode.immersive.title, mode: .immersive, close: close) {
                     Task { await windowModel.enable3DMode(immersive: true) }
                 }
 
@@ -507,6 +513,7 @@ struct VideoOrnamentsView: View {
                     Divider()
 
                     Button {
+                        close()
                         windowModel.showVideo3DSettingsSheet = true
                     } label: {
                         Label("Edit 3D Settings", systemImage: "slider.horizontal.3")
@@ -529,24 +536,23 @@ struct VideoOrnamentsView: View {
                 // runs and the window switches over at the safe point.
                 modeButton(ViewMode.ai3DRealtime.title, subtitle: windowModel.pseudo3DAvailable
                            ? "Starts instantly" : "Not available for this video",
-                           mode: .ai3DRealtime) {
+                           mode: .ai3DRealtime, close: close) {
                     windowModel.requestRealtimePseudo3D()
                 }
                 .disabled(!windowModel.pseudo3DAvailable)
 
                 modeButton(ViewMode.ai3DPreprocessed.title, subtitle: windowModel.pseudo3DAvailable
                            ? "Analyzes the video first, then plays smoother" : nil,
-                           mode: .ai3DPreprocessed) {
+                           mode: .ai3DPreprocessed, close: close) {
                     windowModel.requestPreprocessedPseudo3D()
                 }
                 .disabled(!windowModel.pseudo3DAvailable)
 
                 // Background depth conversion for THIS video: status + cancel.
                 // Isolated in its own view so its observation of the (continuously
-                // updating) DepthConversionManager doesn't re-run this menu's body
-                // — that recreates the whole Menu and makes the open dropdown drop
-                // taps. The subview shows the phase *kind* only (no live %) so even
-                // its own updates don't reflow the menu items.
+                // updating) DepthConversionManager doesn't re-run this menu's body.
+                // The subview shows the phase *kind* only (no live %) so even
+                // its own updates don't reflow the rows.
                 ConversionMenuStatus(videoIdentity: video.identity)
 
                 // (No depth-strength presets: strength is fixed at the Subtle
@@ -559,32 +565,17 @@ struct VideoOrnamentsView: View {
                 // flow's cache lookup) use — changing it here means the next
                 // Convert to 3D offers a fresh conversion with that model.
                 if windowModel.pseudo3DAvailable {
-                    depthModelMenu(
+                    depthModelRows(
                         "Depth Model (Real-Time)",
-                        preference: appModel.realtimeDepthModelName
+                        preference: appModel.realtimeDepthModelName, close: close
                     ) { appModel.realtimeDepthModelName = $0 }
-                    depthModelMenu(
+                    depthModelRows(
                         "Depth Model (Pre-Process)",
-                        preference: appModel.preprocessDepthModelName
+                        preference: appModel.preprocessDepthModelName, close: close
                     ) { appModel.preprocessDepthModelName = $0 }
                 }
             }
-            }
-            // Silent inside the bar's More menu, which reports for it.
-            .ravePlayerMenuReporting { chromeMenu("View Mode", opened: $0) }
-        } label: {
-            // A badge naming the mode in force ("2D", "AI 3D"), filled
-            // while a 3D mode is on.
-            ViewModeGlyph(mode: currentViewMode.badge, systemImage: currentViewMode.systemImage,
-                          isActive: windowModel.shouldUse3DMode || windowModel.shouldUsePseudo3D)
         }
-        // Match the other borderless ornament buttons: the default Menu style
-        // renders a raised glass capsule that reads as "always highlighted"
-        // (with a tiny disclosure glyph) even in 2D. Borderless keeps it flat,
-        // so the only highlight comes from the active-mode background above.
-        .menuStyle(.button)
-        .raveChromeButtonStyle()
-        .help("View Mode")
     }
 
     /// The three window viewing modes, mutually exclusive by construction
@@ -640,19 +631,18 @@ struct VideoOrnamentsView: View {
     /// open popover would start dimmed and flat, and its follow-up prompt
     /// (Real-Time or Pre-Process) would open over the popover.
     private func modeButton(_ title: String, subtitle: String? = nil, mode: ViewMode,
+                            close: @escaping () -> Void,
                             action: @escaping () -> Void) -> some View {
         Button {
+            close()
             guard currentViewMode != mode else { return }
             windowModel.closeOrnamentMenus(reason: "view mode chosen")
             action()
         } label: {
-            // A menu item reads its first Text as the title, the second as
-            // the subtitle under it.
-            HStack {
-                Text(title)
-                if let subtitle { Text(subtitle) }
-                if currentViewMode == mode {
-                    Image(systemName: "checkmark")
+            PlayerChoiceRow(isChecked: currentViewMode == mode) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                    if let subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary) }
                 }
             }
         }
@@ -666,45 +656,39 @@ struct VideoOrnamentsView: View {
         return depthModels.installedNames.first ?? ""
     }
 
-    /// Depth-model submenu for one role: pick among installed models, and
+    /// Depth-model rows for one role: pick among installed models, and
     /// download any offered variant that isn't installed yet.
     @ViewBuilder
-    private func depthModelMenu(
+    private func depthModelRows(
         _ title: String,
         preference: String,
+        close: @escaping () -> Void,
         onSelect: @escaping (String) -> Void
     ) -> some View {
-        Menu(title) {
-            ForEach(depthModels.installedNames, id: \.self) { name in
-                Button {
-                    onSelect(name)
-                } label: {
-                    HStack {
-                        Text(DepthModelManager.displayName(for: name))
-                        if effectiveDepthModelName(preference: preference) == name {
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
+        Divider()
+        PlayerPopoverSectionHeader(title)
+        ForEach(depthModels.installedNames, id: \.self) { name in
+            Button {
+                close()
+                onSelect(name)
+            } label: {
+                PlayerChoiceRow(DepthModelManager.displayName(for: name),
+                                isChecked: effectiveDepthModelName(preference: preference) == name)
             }
+        }
 
-            let downloadable = DepthModelManager.variants.filter { !depthModels.isInstalled($0) }
-            if !downloadable.isEmpty {
-                Divider()
-                ForEach(downloadable) { variant in
-                    Button {
-                        Task { await depthModels.download(variant) }
-                    } label: {
-                        Label(
-                            depthModels.isDownloading(variant)
-                                ? "Downloading \(variant.displayName)…"
-                                : "Download \(variant.displayName)",
-                            systemImage: "arrow.down.circle"
-                        )
-                    }
-                    .disabled(depthModels.isDownloading(variant))
-                }
+        ForEach(DepthModelManager.variants.filter { !depthModels.isInstalled($0) }) { variant in
+            Button {
+                Task { await depthModels.download(variant) }
+            } label: {
+                Label(
+                    depthModels.isDownloading(variant)
+                        ? "Downloading \(variant.displayName)…"
+                        : "Download \(variant.displayName)",
+                    systemImage: "arrow.down.circle"
+                )
             }
+            .disabled(depthModels.isDownloading(variant))
         }
     }
 }
@@ -770,24 +754,6 @@ private struct ConversionMenuStatus: View {
             } label: {
                 Label("Cancel Conversion", systemImage: "xmark.circle")
             }
-        }
-    }
-}
-
-/// The View Mode button: the mode's icon and name on the bar, so what the
-/// picture is doing reads at a glance; a labelled row in the More popover.
-private struct ViewModeGlyph: View {
-    let mode: String
-    let systemImage: String
-    var isActive = false
-    @Environment(\.ravePlayerControlsInMenu) private var inMenu
-
-    var body: some View {
-        if inMenu {
-            Label("View Mode: \(mode)", systemImage: systemImage)
-        } else {
-            PlayerBadge(text: mode, isActive: isActive)
-                .accessibilityLabel("View Mode: \(mode)")
         }
     }
 }

@@ -495,6 +495,7 @@ struct FilmPlayerView: View {
                           menuDismissal: menuDismissals,
                           onInteraction: { revealChrome() },
                           onHold: { holdChrome(Self.scrubHold, $0) })
+            .environment(\.playerChoiceDismissal, menuDismissals)
             }
         }
         // The title over the window's top-left corner, with the controls.
@@ -631,7 +632,9 @@ struct FilmPlayerView: View {
     /// The holds that are popovers (More, with the volume popover, Cinema
     /// and the title's details): they keep the gaze with the picture still
     /// tappable.
-    private static let popoverHolds: Set<String> = ["More", "Cinema", detailsHold]
+    private static let popoverHolds: Set<String> = [
+        "More", "Cinema", detailsHold, "View Mode", "Picture Quality", "Audio", "Audio Quality", "Subtitles", "Speed",
+    ]
 
     /// A menu, popover or sheet is open over the picture, which dims for it.
     private var chromeOpen: Bool { !chromeHolds.subtracting([Self.scrubHold]).isEmpty }

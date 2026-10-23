@@ -38,13 +38,8 @@ struct SubtitleMenu: View {
         return controller.selected.map { "Subtitles: \($0.title)" } ?? "Subtitles"
     }
 
-    @ViewBuilder
     private func item(_ title: String, isSelected: Bool) -> some View {
-        if isSelected {
-            Label(title, systemImage: "checkmark")
-        } else {
-            Text(title)
-        }
+        PlayerChoiceRow(title, isChecked: isSelected)
     }
 }
 

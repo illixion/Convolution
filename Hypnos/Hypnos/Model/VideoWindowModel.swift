@@ -289,9 +289,10 @@ final class VideoWindowModel {
     }
 
     /// The ornament "menus" that are popovers: the control strip's More,
-    /// Cinema, and the title's Details. (The immersive bar's More Options is
-    /// a real Menu.)
-    static let popoverMenuNames: Set<String> = ["More", "Cinema", "Details"]
+    /// Cinema, the title's Details and the bar's choices (view mode,
+    /// quality, subtitles, speed). (The immersive bar's More Options is a
+    /// real Menu.)
+    static let popoverMenuNames: Set<String> = ["More", "Cinema", "Details", "View Mode", "Quality", "Subtitles", "Speed"]
 
     /// Only popovers are open: they keep the gaze even with the stereo
     /// picture tappable, so a tap on the picture can close them. A real menu

@@ -668,7 +668,7 @@ struct CinemaButton: View {
         PlayerChoiceMenu(title: "Cinema", systemImage: "sparkles.tv", badge: badge,
                          badgeIsActive: cinema.mode(for: owner) != .window,
                          help: "Big screen and how the sound is placed",
-                         asPopover: true, dismissal: dismissal,
+                         dismissal: dismissal,
                          onOpenChanged: onOpenChanged) { close in
             ForEach(owner.modes) { mode in
                 Button {

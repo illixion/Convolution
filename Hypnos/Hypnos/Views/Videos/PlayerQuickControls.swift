@@ -91,15 +91,13 @@ struct StreamQualityRow: View {
     }
 
     var body: some View {
-        Label {
+        PlayerChoiceRow(isChecked: isSelected) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(quality.title)
                 if let detail {
                     Text(detail).font(.caption).foregroundStyle(.secondary)
                 }
             }
-        } icon: {
-            Image(systemName: "checkmark").opacity(isSelected ? 1 : 0)
         }
     }
 }

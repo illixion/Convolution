@@ -1,37 +1,35 @@
 import RAVEUI
 import SwiftUI
 
-/// A choice in a player's control bar (subtitles, audio track): a Menu on
-/// the bar itself, and inside the control strip's More popover a button that
-/// opens its own popover of rows.
+/// A choice in a player's control bar (subtitles, audio track, quality,
+/// speed, view mode): a button that opens a popover of rows, on the bar and
+/// inside the control strip's More popover alike. tvOS has no popovers, so
+/// there it is a Menu.
 ///
-/// A Menu opened from inside the More popover is a second-level dropdown,
-/// which a tap on the picture can't close (device, 2026-10-08); a popover
-/// nested in More closes with it when the tap closes More. The nested
-/// popover doesn't report itself through `onOpenChanged`: More, open
+/// It is a popover, not a Menu, because a Menu's content doesn't reliably
+/// report closing: tapping its button a second time to dismiss it never
+/// reported, which held the chrome open and left a stereo picture dimmed
+/// (device, 2026-10-23; the same bug that made More a popover). A popover is
+/// reported exactly, from its binding, through `onOpenChanged`, and closed
+/// when `dismissal` (or the host's `playerChoiceDismissal`) changes, so a tap
+/// on the picture can close it.
+///
+/// Inside More the nested popover doesn't report itself: More, open
 /// underneath it, already holds the chrome, and a reported "menu" would take
 /// the stereo picture's input away (see `VideoWindowModel.pictureTakesInputWithChrome`).
-///
-/// `asPopover` makes it a popover on the bar too, reported exactly through
-/// `onOpenChanged` from its binding and closed when `dismissal` changes:
-/// like the bar's More, a tap on the picture can then close it. Cinema is
-/// one, since a Menu whose choice opens or closes an immersive space didn't
-/// report closing (device, 2026-10-20).
 ///
 /// With a `badge`, the bar shows the value in force ("1080p", "AI 3D") in
 /// place of the icon, so it reads without opening the menu.
 ///
-/// A choice in a Menu reports it closed itself, in case its content's
-/// disappear never comes (the same Cinema bug): a host still counting a real
-/// menu open keeps a 3D picture receded and deaf to the tap that would clear it.
+/// A choice in a tvOS Menu reports it closed itself, in case its content's
+/// disappear never comes.
 struct PlayerChoiceMenu<Items: View>: View {
     let title: String
     let systemImage: String
     var badge: String?
     var badgeIsActive = false
     var help: String?
-    var asPopover = false
-    /// Bumped by the host to close an `asPopover` popover.
+    /// Bumped by the host to close the popover.
     var dismissal = 0
     var onOpenChanged: (Bool) -> Void = { _ in }
     /// The rows; each calls the passed closure first, which closes the
@@ -39,6 +37,7 @@ struct PlayerChoiceMenu<Items: View>: View {
     @ViewBuilder let items: (_ close: @escaping () -> Void) -> Items
 
     @Environment(\.ravePlayerControlsInMenu) private var inMenu
+    @Environment(\.playerChoiceDismissal) private var hostDismissal
     @State private var showsPopover = false
 
     var body: some View {
@@ -53,36 +52,37 @@ struct PlayerChoiceMenu<Items: View>: View {
             .popover(isPresented: $showsPopover, arrowEdge: .trailing) { popoverRows }
             .onDisappear { showsPopover = false }
             .help(help ?? title)
-        } else if asPopover {
+        } else {
             Button { showsPopover.toggle() } label: { barLabel }
                 .popover(isPresented: $showsPopover, arrowEdge: .bottom) {
                     popoverRows
-                        // Rows read as in More's popover (checkmarks aligned).
-                        .environment(\.ravePlayerControlsInMenu, true)
                         // Taps reach the window, so one on the picture closes it.
                         .presentationBackgroundInteraction(.enabled)
                 }
                 .onChange(of: showsPopover) { _, shown in onOpenChanged(shown) }
-                .onChange(of: dismissal) { showsPopover = false }
+                .onChange(of: dismissal + hostDismissal) { showsPopover = false }
                 .onDisappear {
                     if showsPopover { onOpenChanged(false) }
                     showsPopover = false
                 }
                 .help(help ?? title)
-        } else {
-            menu
         }
         #endif
     }
 
+    #if !os(tvOS)
     private var popoverRows: some View {
         VStack(alignment: .leading, spacing: 4) {
             items { showsPopover = false }
         }
+        // Rows read as in More's popover (checkmarks aligned).
+        .environment(\.ravePlayerControlsInMenu, true)
         .buttonStyle(PlayerPopoverRowStyle())
         .padding(12)
         .frame(minWidth: 220)
+        .presentationCompactAdaptation(.popover)
     }
+    #endif
 
     @ViewBuilder private var barLabel: some View {
         if let badge {
@@ -105,17 +105,24 @@ struct PlayerChoiceMenu<Items: View>: View {
     }
 }
 
+extension EnvironmentValues {
+    /// Bumped by the player hosting the bar to close an open choice popover
+    /// (a tap on the picture); see `PlayerChoiceMenu`.
+    @Entry var playerChoiceDismissal = 0
+}
+
 /// A choice with a checkmark when it is the one in force. A system menu
 /// draws whatever icon a label has, a hidden one included, so in a menu the
 /// row has an icon only when checked (the menu aligns the titles itself); in
 /// a popover the checkmark is hidden instead, keeping the titles aligned.
-struct PlayerChoiceRow: View {
-    let title: String
+/// Every choice row goes through this, so none draws a checkmark of its own.
+struct PlayerChoiceRow<Content: View>: View {
     let isChecked: Bool
+    @ViewBuilder let content: Content
 
-    init(_ title: String, isChecked: Bool) {
-        self.title = title
+    init(isChecked: Bool, @ViewBuilder content: () -> Content) {
         self.isChecked = isChecked
+        self.content = content()
     }
 
     @Environment(\.ravePlayerControlsInMenu) private var inMenu
@@ -128,12 +135,19 @@ struct PlayerChoiceRow: View {
         let inPopover = inMenu
         #endif
         if inPopover {
-            Label { Text(title) } icon: { Image(systemName: "checkmark").opacity(isChecked ? 1 : 0) }
+            // `hidden` keeps the icon's room and drops it from the accessibility tree.
+            Label { content } icon: { Image(systemName: "checkmark").hidden(!isChecked) }
         } else if isChecked {
-            Label(title, systemImage: "checkmark")
+            Label { content } icon: { Image(systemName: "checkmark") }
         } else {
-            Text(title)
+            content
         }
+    }
+}
+
+extension PlayerChoiceRow where Content == Text {
+    init(_ title: String, isChecked: Bool) {
+        self.init(isChecked: isChecked) { Text(title) }
     }
 }
 
@@ -183,5 +197,12 @@ struct PlayerPopoverRowStyle: ButtonStyle {
                 .foregroundStyle(isEnabled ? .primary : .tertiary)
                 .opacity(configuration.isPressed ? 0.6 : 1)
         }
+    }
+}
+
+private extension View {
+    /// Hidden but laid out, or as is.
+    @ViewBuilder func hidden(_ hidden: Bool) -> some View {
+        if hidden { self.hidden() } else { self }
     }
 }

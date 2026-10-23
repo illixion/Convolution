@@ -63,6 +63,42 @@ final class VideoWindowUITests: XCTestCase {
         app.buttons["Share"].require("Share, on the strip or in More")
     }
 
+    /// A choice on the bar (Speed here, like Quality, Subtitles and View Mode)
+    /// is a popover: one row carries the checkmark, and a pick applies,
+    /// closes it and shows on the badge. As a Menu, tapping its button again
+    /// to dismiss it never reported closing and left the picture dimmed, and
+    /// every row drew a checkmark. (The open popover hides the bar from the
+    /// accessibility tree, so the second tap itself can't be driven here.)
+    func testBarChoiceOpensClosesAndPicks() throws {
+        try XCTSkipUnless(Self.devStashIsUp(), "Dev Stash isn't running: scripts/dev-stash.sh up")
+
+        let app = AppLauncher.launch(
+            welcome: .dismissed,
+            defaults: ["stashServerURL": Self.devStash, "librarySource": "stash", "autoHideDelay": "0"]
+        )
+        app.buttons[RAVEA11y.tab("videos")].require("The Videos tab").tap()
+        app.images.matching(identifier: "play.circle.fill").firstMatch
+            .require("A video thumbnail", timeout: 20).tap()
+        _ = app.sliders["Playback position"].require("The timeline", timeout: 20)
+
+        let speed = app.buttons["Speed: 1×"].require("The Speed badge")
+        let normal = app.buttons["Normal (1×)"]
+        // The simulator may write the decimal with a comma.
+        let faster = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "1[,.]5×")).firstMatch
+
+        speed.tap()
+        _ = normal.require("The Speed rows")
+        XCTAssertEqual(app.images.matching(identifier: "checkmark").count, 1,
+                       "Only the speed in force carries a checkmark")
+
+        faster.tap()
+        XCTAssertTrue(faster.waitForNonExistence(timeout: 3), "A pick closes the popover")
+        _ = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "Speed: 1[,.]5×")).firstMatch
+            .require("The badge shows the pick").tap()
+        app.buttons["Normal (1×)"].require("The Speed rows reopen").tap()
+        _ = app.buttons["Speed: 1×"].require("Back to normal speed")
+    }
+
     private static func devStashIsUp() -> Bool {
         var request = URLRequest(url: URL(string: "\(devStash)/graphql")!, timeoutInterval: 2)
         request.httpMethod = "POST"
