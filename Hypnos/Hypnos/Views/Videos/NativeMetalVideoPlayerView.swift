@@ -639,6 +639,14 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
             intermediate = nil
+            // A cleared frame at the new size keeps the hit region whole
+            // (see showSystemLayer); the drawable has the size next turn.
+            if usesSystemLayer {
+                Task { @MainActor [weak self, weak view] in
+                    guard let self, let view, self.usesSystemLayer else { return }
+                    self.presentClearedFrame(in: view)
+                }
+            }
         }
 
         func draw(in view: MTKView) {
@@ -799,12 +807,30 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             }
         }
 
+        /// The Metal view stays in the window under the system layer, with
+        /// one cleared frame. visionOS hit-tests what reaches the render
+        /// server, and a video layer doesn't count: with the Metal view
+        /// hidden, a tap on an HDR picture went through the window to the
+        /// one behind it (device, 2026-10-25). A presented, all-zero drawable
+        /// counts and draws nothing (LambdaVision's mouse catcher found the
+        /// same).
         private func showSystemLayer(_ show: Bool) {
             guard let host else { return }
             host.systemView.playerLayer.player = show ? player : nil
             host.systemView.isHidden = !show
-            host.metalView.isHidden = show
             host.metalView.isPaused = show
+            if show { presentClearedFrame(in: host.metalView) }
+        }
+
+        private func presentClearedFrame(in view: MTKView) {
+            guard let renderer, let drawable = view.currentDrawable,
+                  let pass = view.currentRenderPassDescriptor,
+                  let commandBuffer = renderer.commandQueue.makeCommandBuffer() else { return }
+            pass.colorAttachments[0].loadAction = .clear
+            pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+            commandBuffer.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+            commandBuffer.present(drawable)
+            commandBuffer.commit()
         }
 
         /// The drawable and the layer's colour space for the picture Metal
