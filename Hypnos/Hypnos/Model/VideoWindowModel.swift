@@ -187,6 +187,26 @@ final class VideoWindowModel {
         nativePlayer = player
         nativePlayerGeneration += 1
         Self.withNativePlayers.add(self)
+        // A restored window can be disconnected before its player exists.
+        if sceneDisconnected { Self.silence(player) }
+    }
+
+    @ObservationIgnored private var sceneDisconnected = false
+
+    /// The window's scene is gone, whether or not SwiftUI says so: nothing
+    /// of it may play on (see `SceneDelegate.onDisconnect`).
+    func sceneDidDisconnect() {
+        guard !sceneDisconnected else { return }
+        sceneDisconnected = true
+        Self.silence(nativePlayer)
+        pauseCommand?()
+        cleanup()
+    }
+
+    /// No item, so nothing resumes it: the renderer plays again on ready.
+    private static func silence(_ player: AVPlayer?) {
+        player?.pause()
+        player?.replaceCurrentItem(with: nil)
     }
 
     /// Windows that have had a native player, for the `videoAudio` debug

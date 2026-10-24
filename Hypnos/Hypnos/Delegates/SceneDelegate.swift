@@ -20,10 +20,24 @@ import SwiftUI
 #if os(macOS)
 @Observable class SceneDelegate: NSObject {
     weak var windowScene: PlatformWindowScene?
+
+    func onDisconnect(_ handler: @escaping @MainActor () -> Void) {}
 }
 #else
 @Observable class SceneDelegate: NSObject, UIWindowSceneDelegate {
     weak var windowScene: UIWindowScene?
+
+    @ObservationIgnored private var disconnectHandlers: [@MainActor () -> Void] = []
+    @ObservationIgnored private var isDisconnected = false
+
+    /// Runs `handler` once, when the system disconnects this scene. SwiftUI
+    /// doesn't always tear a disconnected scene's views down: a video window
+    /// disconnected by a summon or at restore got no `onDisappear` and no
+    /// dismantle, and its player played on with no window (device,
+    /// 2026-10-25).
+    func onDisconnect(_ handler: @escaping @MainActor () -> Void) {
+        if isDisconnected { handler() } else { disconnectHandlers.append(handler) }
+    }
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else {
@@ -67,6 +81,10 @@ import SwiftUI
 
     func sceneDidDisconnect(_ scene: UIScene) {
         logScene("didDisconnect", scene: scene)
+        isDisconnected = true
+        let handlers = disconnectHandlers
+        disconnectHandlers = []
+        handlers.forEach { $0() }
     }
 
     private func logScene(_ event: String, scene: UIScene) {
