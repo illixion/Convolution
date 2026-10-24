@@ -400,9 +400,15 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             statusObservation = item.observe(\.status, options: [.new]) { [weak self] observedItem, _ in
                 guard observedItem.status == .failed else { return }
                 let message = observedItem.error?.localizedDescription ?? "unknown error"
+                // Domain and code (and the underlying one, which says why) are
+                // public: the private message alone left a failure unreadable.
+                let code = observedItem.error.map { error in
+                    let underlying = (error as NSError).userInfo[NSUnderlyingErrorKey] as? Error
+                    return error.logCode + (underlying.map { " (\($0.logCode))" } ?? "")
+                } ?? "-"
                 Task { @MainActor [weak self] in
                     guard let self, self.playerItem === observedItem else { return }
-                    AppLogger.videoWindow.error("Native player item failed for \(self.loadedURL?.loggableDescription ?? "?"): \(message)")
+                    AppLogger.videoWindow.error("Native player item failed for \(self.loadedURL?.loggableDescription ?? "?"): \(message) [\(code, privacy: .public)]")
                     self.onPlaybackError?()
                 }
             }

@@ -25,6 +25,7 @@ struct YouTubeSettingsSection: View {
     @State private var account = YouTubeAccount.shared
     @State private var browser: YouTubeBrowserPurpose?
     @AppStorage(YouTubeConsent.defaultsKey) private var consentGranted = false
+    @State private var surround = YouTubeSurround.isEnabled
 
     var body: some View {
         if consentGranted {
@@ -72,8 +73,8 @@ struct YouTubeSettingsSection: View {
             } else if backend.hasToken {
                 Button("Remove Token", role: .destructive) { backend.token = "" }
             }
-            Toggle("Surround Sound from Backend", isOn: $backend.prefersSurround)
-                .disabled(!backend.isConfigured)
+            Toggle("Surround Sound", isOn: $surround)
+                .onChange(of: surround) { _, on in YouTubeSurround.isEnabled = on }
             #if os(tvOS)
             // tvOS: checkmarked rows, never a Picker (see TVSettingsView).
             ForEach(YouTubeQuality.allCases) { level in
@@ -97,7 +98,7 @@ struct YouTubeSettingsSection: View {
         } header: {
             Text("YouTube")
         } footer: {
-            Text("Videos play from YouTube directly on this device. A web-yt-dlp backend is optional: it adds 5.1 surround sound where YouTube has it, and plays videos the device can't, such as ones made for kids. Picture Quality is what a video opens at, or the nearest below it the video has; the player's Quality menu lists each video's own. Auto takes the best the connection allows and lowers it if 3D can't keep up.")
+            Text("Videos play from YouTube directly on this device. Surround Sound switches a video to its 5.1 track where YouTube has one, a few seconds after it starts. A web-yt-dlp backend is optional: it plays videos the device can't, such as ones made for kids or age-restricted, and keeps your watch history. Picture Quality is what a video opens at, or the nearest below it the video has; the player's Quality menu lists each video's own. Auto takes the best the connection allows and lowers it if 3D can't keep up.")
         }
 
         Section {

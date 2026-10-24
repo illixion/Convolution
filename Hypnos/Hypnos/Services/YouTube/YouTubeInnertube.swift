@@ -1,7 +1,7 @@
 /*
  Hypnos - YouTube's own API, called from the device
 
- Three calls, all unauthenticated:
+ Four calls, all unauthenticated:
 
  - **player**, asked as YouTube's visionOS app (the values yt-dlp 2026.08.19
    sends for its `visionos` client). It answers with an HLS master playlist up
@@ -10,10 +10,16 @@
    reach the depth pipeline (spike: `TVLab/FilmLabTV/YouTubeLab.swift`,
    measured 4K60 HDR10 on an Apple TV). The one extra step is a visitor id
    from a watch page; without it the API answers "Sign in to confirm you're
-   not a bot". Its audio is stereo AAC only: YouTube lists surround tracks to
-   signed-in web clients alone, which is what the optional backend is for
-   (`YouTubeBackend`). Made-for-kids videos and live streams come back
-   unplayable from this client and fall through to the backend.
+   not a bot". Its audio is stereo AAC only. Made-for-kids videos and live
+   streams come back unplayable from this client and fall through to the
+   backend.
+ - **player** again, as a Samsung TV's YouTube app (TVHTML5, yt-dlp's
+   `tv_samsung`), for **surround**: of the clients measured signed out on
+   2026-10-25, the TV one lists the 5.1 EC-3 and AC-3 tracks (itags 328, 380)
+   as plain stream URLs with no SABR; the visionOS, iOS and Android VR
+   clients list stereo only. Those URLs need the player script's challenge
+   solved and the pre-roll ad's time to pass (`YouTubeSurround`), and the
+   call itself needs the script's `signatureTimestamp`.
  - **search**, as the web client. Only `videoRenderer`s are kept (Shorts and
    channel cards are dropped); a continuation token pages further.
  - **player** again, as the web client, for the day a video was published
@@ -43,6 +49,57 @@ struct YouTubePlayerInfo: Sendable {
     var reason: String?
 
     var isPlayable: Bool { status == "OK" && hlsURL != nil && !isLive }
+}
+
+/// The TV client's audio formats for one video (`YouTubeInnertube.tvAudioFormats`).
+struct YouTubeTVAudio: Sendable {
+    struct Format: Sendable {
+        var itag: Int
+        /// "ec-3", "ac-3", "mp4a.40.2", "opus", …
+        var codecs: String
+        var channels: Int
+        var bitrate: Int?
+        /// A plain stream URL, or nil when the format comes as a cipher.
+        var url: String?
+        var signatureCipher: String?
+        var initRange: ClosedRange<Int>?
+        var indexRange: ClosedRange<Int>?
+        var language: String?
+        /// The video's own track among dubbed ones (absent: the only one).
+        var isDefaultTrack: Bool
+        /// A loudness-compressed (DRC) copy of another format.
+        var isDRC: Bool
+
+        init?(_ json: [String: Any]) {
+            guard let itag = json["itag"] as? Int, let mime = json["mimeType"] as? String,
+                  mime.hasPrefix("audio/"),
+                  let codecs = mime.firstMatch(of: #/codecs="([^"]+)"/#).map({ String($0.1) }) else { return nil }
+            func range(_ key: String) -> ClosedRange<Int>? {
+                guard let object = json[key] as? [String: Any],
+                      let start = (object["start"] as? String).flatMap(Int.init),
+                      let end = (object["end"] as? String).flatMap(Int.init), start <= end else { return nil }
+                return start...end
+            }
+            let track = json["audioTrack"] as? [String: Any]
+            self.itag = itag
+            self.codecs = codecs
+            channels = json["audioChannels"] as? Int ?? 2
+            bitrate = json["bitrate"] as? Int
+            url = json["url"] as? String
+            signatureCipher = json["signatureCipher"] as? String
+            initRange = range("initRange")
+            indexRange = range("indexRange")
+            language = (track?["id"] as? String)?.split(separator: ".").first.map(String.init)
+            isDefaultTrack = track.map { $0["audioIsDefault"] as? Bool ?? false } ?? true
+            isDRC = json["isDrc"] as? Bool ?? false
+        }
+    }
+
+    /// `OK`, `UNPLAYABLE`, `LOGIN_REQUIRED`, …
+    var status: String
+    var formats: [Format]
+    /// When the pre-roll has run out and the URLs work.
+    var availableAt: Date
 }
 
 /// One search result.
@@ -91,6 +148,9 @@ actor YouTubeInnertube {
         "osName": "visionOS", "osVersion": "26.5.23O471", "hl": "en", "gl": "US",
     ]
     private static let webClientVersion = "2.20260708.00.00"
+    // A Samsung TV's app, as yt-dlp 2026.10.21 presents its `tv_samsung` client.
+    private static let tvAgent = "Mozilla/5.0 (SMART-TV; Linux; Tizen 2.4.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/2.4.0 TV Safari/538.1"
+    private static let tvClientVersion = "5.20260707"
 
     private let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
@@ -138,6 +198,77 @@ actor YouTubeInnertube {
             status: playability?["status"] as? String ?? "ERROR",
             reason: playability?["reason"] as? String
         )
+    }
+
+    /// The video's audio-only formats as the TV client lists them, and how
+    /// long its pre-roll keeps their URLs locked.
+    func tvAudioFormats(_ id: YouTubeVideoID, signatureTimestamp: Int) async throws -> YouTubeTVAudio {
+        let visitor = try? await visitorID(for: id)
+        var context: [String: Any] = [
+            "clientName": "TVHTML5", "clientVersion": Self.tvClientVersion, "deviceMake": "Samsung",
+            "deviceModel": "SmartTV", "clientScreen": "WATCH", "hl": "en", "gl": "US",
+        ]
+        if let visitor { context["visitorData"] = visitor }
+        var headers = [
+            "User-Agent": Self.tvAgent,
+            "X-YouTube-Client-Name": "7",
+            "X-YouTube-Client-Version": Self.tvClientVersion,
+        ]
+        if let visitor { headers["X-Goog-Visitor-Id"] = visitor }
+        let json = try await post("player", body: [
+            "context": ["client": context],
+            "videoId": id.rawValue,
+            "contentCheckOk": true,
+            "racyCheckOk": true,
+            "playbackContext": ["contentPlaybackContext": [
+                "html5Preference": "HTML5_PREF_WANTS", "signatureTimestamp": signatureTimestamp,
+            ]],
+        ], headers: headers)
+        let answeredAt = Date()
+        let status = (json["playabilityStatus"] as? [String: Any])?["status"] as? String ?? "ERROR"
+        let adaptive = ((json["streamingData"] as? [String: Any])?["adaptiveFormats"] as? [[String: Any]]) ?? []
+        let formats = adaptive.compactMap(YouTubeTVAudio.Format.init)
+        return YouTubeTVAudio(status: status, formats: formats,
+                              availableAt: answeredAt.addingTimeInterval(Self.preRollSeconds(json)))
+    }
+
+    /// How long the pre-roll ads hold the stream URLs back: each ad shown
+    /// before the video, for its skip offset when it has one, else its
+    /// length. googlevideo answers 403 until then (yt-dlp's
+    /// `_get_available_at_timestamp`).
+    private static func preRollSeconds(_ json: [String: Any]) -> TimeInterval {
+        var renderers: [[String: Any]] = []
+        for placement in (json["adPlacements"] as? [[String: Any]]) ?? [] {
+            guard let renderer = placement["adPlacementRenderer"] as? [String: Any],
+                  let config = (renderer["config"] as? [String: Any])?["adPlacementConfig"] as? [String: Any],
+                  config["kind"] as? String == "AD_PLACEMENT_KIND_START",
+                  let ad = (renderer["renderer"] as? [String: Any])?["instreamVideoAdRenderer"] as? [String: Any]
+            else { continue }
+            renderers.append(ad)
+        }
+        for slot in (json["adSlots"] as? [[String: Any]]) ?? [] {
+            guard let renderer = slot["adSlotRenderer"] as? [String: Any],
+                  (renderer["adSlotMetadata"] as? [String: Any])?["triggerEvent"] as? String == "SLOT_TRIGGER_EVENT_BEFORE_CONTENT",
+                  let content = (((renderer["fulfillmentContent"] as? [String: Any])?["fulfilledLayout"] as? [String: Any])?[
+                      "playerBytesAdLayoutRenderer"] as? [String: Any])?["renderingContent"] as? [String: Any]
+            else { continue }
+            if let ad = content["instreamVideoAdRenderer"] as? [String: Any] { renderers.append(ad) }
+            let layouts = (content["playerBytesSequentialLayoutRenderer"] as? [String: Any])?["sequentialLayouts"] as? [[String: Any]] ?? []
+            for layout in layouts {
+                if let ad = (((layout["playerBytesAdLayoutRenderer"] as? [String: Any])?["renderingContent"] as? [String: Any])?[
+                    "instreamVideoAdRenderer"] as? [String: Any]) {
+                    renderers.append(ad)
+                }
+            }
+        }
+        return renderers.reduce(0) { total, ad in
+            if let skip = ad["skipOffsetMilliseconds"] as? Double { return total + skip / 1000 }
+            if let vars = ad["playerVars"] as? String,
+               let length = vars.firstMatch(of: #/(?:^|&)length_seconds=(\d+)/#).flatMap({ Double($0.1) }) {
+                return total + length
+            }
+            return total
+        }
     }
 
     private func visitorID(for id: YouTubeVideoID) async throws -> String? {

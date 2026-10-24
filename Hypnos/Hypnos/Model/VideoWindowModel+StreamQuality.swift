@@ -327,6 +327,9 @@ extension VideoWindowModel {
         youTubeRenditions = []
         youTubeMaster = nil
         youTubeAutoHeight = nil
+        youTubeSurroundTask?.cancel()
+        youTubeSurroundTask = nil
+        youTubeSurroundRefused = false
         #endif
         updatePictureResolutionCap()
     }

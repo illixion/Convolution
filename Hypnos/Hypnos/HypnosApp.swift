@@ -16,9 +16,7 @@ import DebugTraceUI
 import RAVEUI
 import SwiftUI
 
-#if os(tvOS) || os(macOS)
 import VideoToolbox
-#endif
 
 @main
 struct HypnosApp: App {
@@ -41,6 +39,7 @@ struct HypnosApp: App {
         DebugTrace.configure(.init(subsystems: subsystems.reduce(into: []) { if !$0.contains($1) { $0.append($1) } }))
         DebugTraceServer.startIfRequested()
         FilmDebugEndpoints.register()
+        VideoPlayerDebugEndpoints.register()
         #if DEBUG
         UITestingConfiguration.applyIfNeeded()
         DevJellyfinSignIn.performIfRequested()
@@ -54,15 +53,17 @@ struct HypnosApp: App {
         #if DEBUG && os(macOS)
         LibraryDownloadHarness.runIfRequested()
         #endif
-        #if os(tvOS) || os(macOS)
         // AVFoundation only decodes VP9/AV1 once the app opts in to the
         // supplemental decoders, and Stash/Jellyfin sources are commonly
         // WebM/VP9 (the original file, or a server transcode). Once, at
-        // launch, matching TVLab/FilmLabTV/YouTubeLab.swift's spike.
-        if #available(tvOS 26.2, macOS 26.0, *) {
+        // launch, matching TVLab/FilmLabTV/YouTubeLab.swift's spike. On every
+        // platform: YouTube's HLS master is VP9 above 1080p and for all of
+        // its HDR, and without this visionOS refused those variants
+        // (AVFoundation -11848), so a 1440p pick fell through to WebKit
+        // (2026-10-25; it used to be registered on tvOS and macOS only).
+        if #available(tvOS 26.2, macOS 26.0, iOS 26.2, visionOS 26.2, *) {
             VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9)
         }
-        #endif
     }
 
     var body: some Scene {

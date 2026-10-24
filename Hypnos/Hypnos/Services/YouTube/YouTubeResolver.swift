@@ -8,12 +8,9 @@
     `AVPlayer` decodes once the supplemental VP9/AV1 decoders are registered
     (`HypnosApp.init`). Because the app owns the player, frames reach the
     depth pipeline (fake 3D), and there are no ads: those are separate
-    entries in the player response, which nothing here plays.
-    - With a backend that offers the video's **surround** track, that track
-      is spliced in as the audio rendition (`YouTubeManifestComposer`) and
-      the master served from loopback (`LoopbackPlaylistServer`). Asked
-      concurrently with the player call, so it costs no start-up time beyond
-      the backend's own answer (capped at 6 s).
+    entries in the player response, which nothing here plays. Its audio is
+    stereo; the video window adds the 5.1 track once YouTube lets it play
+    (`YouTubeSurround`), so nothing here waits for it.
  2. **The backend's `/stream`** for what the visionOS client refuses
     (made-for-kids, live, some age-gated videos).
  3. Otherwise the player API's own reason, shown to the viewer.
@@ -30,7 +27,6 @@ import Foundation
 struct YouTubeResolution: Sendable {
     enum Source: String, Sendable {
         case device
-        case deviceWithSurround
         case backend
     }
 
@@ -50,15 +46,12 @@ enum YouTubeResolveError: LocalizedError {
 
 @MainActor
 enum YouTubeResolver {
-    /// Resolves `id` down the chain. `allowSurround: false` skips the backend's
-    /// surround track (the retry after a surround playlist failed to play).
-    static func resolve(_ id: YouTubeVideoID, allowSurround: Bool = true) async throws -> YouTubeResolution {
+    /// Resolves `id` down the chain.
+    static func resolve(_ id: YouTubeVideoID) async throws -> YouTubeResolution {
         // Before the backend fallback too, so a refused device call doesn't
         // turn into a request elsewhere.
         try YouTubeConsent.require()
         let backend = YouTubeBackend.shared
-        let wantsSurround = allowSurround && backend.isConfigured
-        async let surroundLookup: YouTubeSurroundAudio? = wantsSurround ? backend.surroundAudio(for: id) : nil
 
         let info: YouTubePlayerInfo?
         do {
@@ -69,10 +62,6 @@ enum YouTubeResolver {
         }
 
         if let info, info.isPlayable, let hls = info.hlsURL {
-            if let surround = await surroundLookup, let composed = await surroundMaster(hls: hls, surround: surround) {
-                AppLogger.youtube.info("Resolved on device with \(surround.channels, privacy: .public)-channel \(surround.codecs, privacy: .public) from the backend")
-                return YouTubeResolution(video: makeVideo(id: id, info: info, streamURL: composed), source: .deviceWithSurround)
-            }
             AppLogger.youtube.info("Resolved on device")
             return YouTubeResolution(video: makeVideo(id: id, info: info, streamURL: hls), source: .device)
         }
@@ -89,20 +78,6 @@ enum YouTubeResolver {
         throw YouTubeResolveError.unplayable(
             info?.reason ?? "YouTube didn't offer a stream this device can play. Set up a YouTube backend in Settings to play more videos."
         )
-    }
-
-    /// YouTube's master with the surround track spliced in, on loopback.
-    private static func surroundMaster(hls: URL, surround: YouTubeSurroundAudio) async -> URL? {
-        do {
-            let (data, _) = try await URLSession.shared.data(from: hls)
-            guard let composed = YouTubeManifestComposer.compose(
-                master: String(decoding: data, as: UTF8.self), surround: surround
-            ) else { return nil }
-            return await LoopbackPlaylistServer.shared.publish(composed)
-        } catch {
-            AppLogger.youtube.error("Couldn't fetch the HLS master to add surround: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
-            return nil
-        }
     }
 
     static func makeVideo(id: YouTubeVideoID, info: YouTubePlayerInfo?, streamURL: URL) -> GalleryVideo {

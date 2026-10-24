@@ -14,11 +14,24 @@
  one this launch can return to Auto, and an expired source is still seen
  as expired.
 
+ **HDR.** An HDR upload's master lists every size three times: H.264 SDR,
+ VP9 SDR and VP9 Profile 2 PQ (`VIDEO-RANGE=PQ`). Given the choice, AVPlayer
+ took an SDR one, so where the device plays HDR (`prefersHDR`) a size that
+ has HDR variants keeps only those, and Auto plays a copy cut the same way.
+ Its menu entry says "HDR", as YouTube's own player does. Every HDR
+ variant is VP9, which AVFoundation plays only once the app has registered
+ the supplemental VP9 decoder (`HypnosApp.init`); without it visionOS refused
+ them, like every VP9 variant (AVFoundation -11848, CoreMedia -15812,
+ 2026-10-25). A device whose player still refuses HDR (`noteHDRRefused`, also
+ what a non-HDR display does) gets no HDR cut until the OS changes, and the
+ window replays its rendition in SDR.
+
  Pure text in, text out, apart from that registry.
  */
 
 #if HYPNOS_YOUTUBE
 
+import AVFoundation
 import Foundation
 
 /// One picture size a video's master offers.
@@ -28,11 +41,13 @@ struct YouTubeRendition: Hashable, Sendable {
     let height: Int
     /// The highest frame rate any of its variants has.
     let framesPerSecond: Double?
+    /// It plays in HDR (PQ or HLG).
+    var isHDR = false
 
-    /// "1080p60", "2160p (4K)", "720p".
+    /// "1080p60", "2160p60 HDR (4K)", "720p".
     var title: String {
         let rate = framesPerSecond.map { $0 >= 48 ? String(Int($0.rounded())) : "" } ?? ""
-        return Self.label(height) + rate + (Self.nickname(height).map { " (\($0))" } ?? "")
+        return Self.label(height) + rate + (isHDR ? " HDR" : "") + (Self.nickname(height).map { " (\($0))" } ?? "")
     }
 
     /// "1080p", or "4K" for the bar's badge where it's shorter.
@@ -64,34 +79,84 @@ enum YouTubeRenditions {
         return classes.min { abs(Double($0) - measure) < abs(Double($1) - measure) } ?? Int(short)
     }
 
-    /// The renditions `master` offers, highest first; empty for a playlist
-    /// that isn't a master (or names no sizes).
-    static func parse(master: String) -> [YouTubeRendition] {
-        // The highest frame rate per class, 0 where no variant says.
-        var rates: [Int: Double] = [:]
-        for line in master.components(separatedBy: .newlines) where line.hasPrefix("#EXT-X-STREAM-INF:") {
-            let attributes = YouTubeManifestComposer.parseAttributes(String(line.dropFirst("#EXT-X-STREAM-INF:".count)))
-            guard let size = attributes.value(for: "RESOLUTION").flatMap(resolution) else { continue }
-            let height = sizeClass(width: size.width, height: size.height)
-            let rate = attributes.value(for: "FRAME-RATE").flatMap(Double.init) ?? 0
-            rates[height] = max(rates[height] ?? 0, rate)
+    /// This device shows HDR and its player hasn't refused YouTube's HDR
+    /// variants on this OS, so an HDR variant is worth choosing over SDR.
+    static var prefersHDR: Bool {
+        AVPlayer.eligibleForHDRPlayback
+            && UserDefaults.standard.string(forKey: hdrRefusedKey) != osVersion
+    }
+
+    /// The player couldn't open an HDR cut: SDR from now until the OS changes.
+    static func noteHDRRefused() {
+        UserDefaults.standard.set(osVersion, forKey: hdrRefusedKey)
+    }
+
+    // Renamed when visionOS's refusals turned out to be the VP9 decoder not
+    // being registered there, so those don't count.
+    private static let hdrRefusedKey = "youtube.hdrRefusedOnOSVersion"
+    private static var osVersion: String { ProcessInfo.processInfo.operatingSystemVersionString }
+
+    /// One `#EXT-X-STREAM-INF` (or I-frame) line's size class, frame rate
+    /// and dynamic range; nil when it names no size.
+    private struct Variant {
+        let height: Int
+        let framesPerSecond: Double
+        let isHDR: Bool
+
+        init?(_ attributeText: Substring) {
+            let attributes = YouTubeManifestComposer.parseAttributes(String(attributeText))
+            guard let size = attributes.value(for: "RESOLUTION").flatMap(YouTubeRenditions.resolution) else { return nil }
+            height = YouTubeRenditions.sizeClass(width: size.width, height: size.height)
+            framesPerSecond = attributes.value(for: "FRAME-RATE").flatMap(Double.init) ?? 0
+            let range = attributes.value(for: "VIDEO-RANGE")?.uppercased()
+            isHDR = range == "PQ" || range == "HLG"
         }
-        return rates.map { YouTubeRendition(height: $0.key, framesPerSecond: $0.value > 0 ? $0.value : nil) }
-            .sorted { $0.height > $1.height }
+    }
+
+    private static func variants(of master: String) -> [Variant] {
+        master.components(separatedBy: .newlines)
+            .filter { $0.hasPrefix("#EXT-X-STREAM-INF:") }
+            .compactMap { Variant($0.dropFirst("#EXT-X-STREAM-INF:".count)) }
+    }
+
+    /// The renditions `master` offers, highest first; empty for a playlist
+    /// that isn't a master (or names no sizes). With `preferringHDR` a size
+    /// that has HDR variants is its HDR rendition.
+    static func parse(master: String, preferringHDR: Bool = prefersHDR) -> [YouTubeRendition] {
+        let all = variants(of: master)
+        let hdrClasses = preferringHDR ? Set(all.filter(\.isHDR).map(\.height)) : []
+        // The highest frame rate per class among the variants that play, 0 where none says.
+        var rates: [Int: Double] = [:]
+        for variant in all where !hdrClasses.contains(variant.height) || variant.isHDR {
+            rates[variant.height] = max(rates[variant.height] ?? 0, variant.framesPerSecond)
+        }
+        return rates.map {
+            YouTubeRendition(height: $0.key, framesPerSecond: $0.value > 0 ? $0.value : nil,
+                             isHDR: hdrClasses.contains($0.key))
+        }
+        .sorted { $0.height > $1.height }
+    }
+
+    /// True when `master` would play differently cut for HDR: it has HDR
+    /// variants and the device prefers them.
+    static func offersHDR(_ master: String, preferringHDR: Bool = prefersHDR) -> Bool {
+        preferringHDR && variants(of: master).contains(where: \.isHDR)
     }
 
     /// `master` keeping only the variants (and I-frame playlists) of the
-    /// `height` class, everything else (audio renditions, tags) as it is.
-    /// Nil when it has none.
-    static func master(_ master: String, keepingHeight height: Int) -> String? {
+    /// `height` class (nil: every class), everything else (audio
+    /// renditions, tags) as it is. With `preferringHDR` a class that has HDR
+    /// variants keeps only those. Nil when nothing is left.
+    static func master(_ master: String, keepingHeight height: Int?, preferringHDR: Bool = prefersHDR) -> String? {
         let lines = master.components(separatedBy: .newlines)
+        let hdrClasses = preferringHDR ? Set(variants(of: master).filter(\.isHDR).map(\.height)) : []
         var output: [String] = []
         var kept = 0
         var index = 0
         func matches(_ attributeText: Substring) -> Bool {
-            let attributes = YouTubeManifestComposer.parseAttributes(String(attributeText))
-            guard let size = attributes.value(for: "RESOLUTION").flatMap(resolution) else { return false }
-            return sizeClass(width: size.width, height: size.height) == height
+            guard let variant = Variant(attributeText) else { return false }
+            guard height == nil || variant.height == height else { return false }
+            return !hdrClasses.contains(variant.height) || variant.isHDR
         }
         while index < lines.count {
             let line = lines[index]
@@ -115,7 +180,7 @@ enum YouTubeRenditions {
         return kept > 0 ? output.joined(separator: "\n") : nil
     }
 
-    private static func resolution(_ value: String) -> (width: Int, height: Int)? {
+    fileprivate static func resolution(_ value: String) -> (width: Int, height: Int)? {
         let parts = value.lowercased().split(separator: "x")
         guard parts.count == 2, let width = Int(parts[0]), let height = Int(parts[1]), width > 0, height > 0 else {
             return nil
@@ -127,11 +192,12 @@ enum YouTubeRenditions {
 
     @MainActor private static var sources: [URL: URL] = [:]
 
-    /// Serves `master` cut to the `height` class; nil when it has none or
-    /// the loopback server can't start.
+    /// Serves `master` cut to the `height` class (nil: every class, cut only
+    /// for HDR); nil when it has none or the loopback server can't start.
     @MainActor
-    static func publish(_ master: String, from source: URL, keepingHeight height: Int) async -> URL? {
-        guard let text = self.master(master, keepingHeight: height),
+    static func publish(_ master: String, from source: URL, keepingHeight height: Int?,
+                        preferringHDR: Bool = prefersHDR) async -> URL? {
+        guard let text = self.master(master, keepingHeight: height, preferringHDR: preferringHDR),
               let url = await LoopbackPlaylistServer.shared.publish(text) else { return nil }
         sources[url] = source
         return url

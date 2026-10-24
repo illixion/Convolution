@@ -186,7 +186,12 @@ final class VideoWindowModel {
         guard nativePlayer !== player else { return }
         nativePlayer = player
         nativePlayerGeneration += 1
+        Self.withNativePlayers.add(self)
     }
+
+    /// Windows that have had a native player, for the `videoAudio` debug
+    /// endpoint.
+    @ObservationIgnored static let withNativePlayers = NSHashTable<VideoWindowModel>.weakObjects()
 
     /// Command hooks bound by WebVideoPlayerView.updateUIView (only when this
     /// model is passed as the player's `playbackModel`). They evaluate JS on
@@ -342,6 +347,10 @@ final class VideoWindowModel {
     @ObservationIgnored var youTubeRefreshTask: Task<Void, Never>?
     @ObservationIgnored var youTubeRenditionTask: Task<Void, Never>?
     @ObservationIgnored var youTubeSwapTask: Task<Void, Never>?
+    /// Finding the 5.1 track and switching to it (`YouTubeSurround`).
+    @ObservationIgnored var youTubeSurroundTask: Task<Void, Never>?
+    /// The surround stream failed to play: this video stays stereo.
+    @ObservationIgnored var youTubeSurroundRefused = false
     #endif
 
     // MARK: - Initialization (side-effect-free)
@@ -646,6 +655,7 @@ final class VideoWindowModel {
         youTubeRefreshTask?.cancel()
         youTubeRenditionTask?.cancel()
         youTubeSwapTask?.cancel()
+        youTubeSurroundTask?.cancel()
         #endif
         loopController.reset()
         subtitles.reset()
@@ -1268,6 +1278,7 @@ final class VideoWindowModel {
     func forceWebKitPlayback() {
         playbackRendererTask?.cancel()
         #if HYPNOS_YOUTUBE
+        if dropYouTubeHDR(reason: "the native player couldn't play the HDR variants") { return }
         if dropYouTubeSurround(reason: "the native player couldn't play the surround stream") { return }
         #endif
         playbackRenderer = .webKit
@@ -1336,6 +1347,7 @@ final class VideoWindowModel {
             await MainActor.run {
                 guard let self, self.authenticatedStreamURL == url else { return }
                 #if HYPNOS_YOUTUBE
+                if !isPlayable, self.dropYouTubeHDR(reason: "the HDR variants aren't decodable") { return }
                 if !isPlayable, self.dropYouTubeSurround(reason: "the surround stream isn't decodable") { return }
                 #endif
                 // The big screen needs AVFoundation; don't mount WebKit (and

@@ -918,6 +918,13 @@ struct WebVideoPlayerView: UIViewRepresentable {
                 // real value only on a later durationchange. Swift dedupes, so
                 // re-reporting is harmless.
                 video.addEventListener('durationchange', reportMetadata);
+                // An HLS source can reach loadedmetadata before its first
+                // variant says how big the picture is (videoWidth still 0),
+                // so the size is reported again once frames exist. Without it
+                // a playing video read as "no picture" and the window offered
+                // a reload over it.
+                video.addEventListener('loadeddata', reportMetadata);
+                video.addEventListener('resize', reportMetadata);
 
                 // Reset retry count on successful playback
                 video.addEventListener('playing', function() {
