@@ -573,6 +573,7 @@ struct VideoOrnamentsView: View {
                         "Depth Model (Pre-Process)",
                         preference: appModel.preprocessDepthModelName, close: close
                     ) { appModel.preprocessDepthModelName = $0 }
+                    depthModelDownloadRows
                 }
             }
         }
@@ -656,8 +657,7 @@ struct VideoOrnamentsView: View {
         return depthModels.installedNames.first ?? ""
     }
 
-    /// Depth-model rows for one role: pick among installed models, and
-    /// download any offered variant that isn't installed yet.
+    /// Depth-model rows for one role: pick among the installed models.
     @ViewBuilder
     private func depthModelRows(
         _ title: String,
@@ -676,8 +676,18 @@ struct VideoOrnamentsView: View {
                                 isChecked: effectiveDepthModelName(preference: preference) == name)
             }
         }
+    }
 
-        ForEach(DepthModelManager.variants.filter { !depthModels.isInstalled($0) }) { variant in
+    /// The offered variants not installed yet, once for both roles (each
+    /// role's section used to list them all again).
+    @ViewBuilder
+    private var depthModelDownloadRows: some View {
+        let missing = DepthModelManager.variants.filter { !depthModels.isInstalled($0) }
+        if !missing.isEmpty {
+            Divider()
+            PlayerPopoverSectionHeader("More Depth Models")
+        }
+        ForEach(missing) { variant in
             Button {
                 Task { await depthModels.download(variant) }
             } label: {

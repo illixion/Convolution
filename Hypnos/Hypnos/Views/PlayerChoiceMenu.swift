@@ -71,15 +71,23 @@ struct PlayerChoiceMenu<Items: View>: View {
     }
 
     #if !os(tvOS)
+    /// Past this a popover scrolls: it opens above the bar, so a taller one
+    /// put its first rows out of view (View Mode with its depth models).
+    private static var maxPopoverHeight: CGFloat { 460 }
+
     private var popoverRows: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            items { showsPopover = false }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 4) {
+                items { showsPopover = false }
+            }
+            .padding(12)
+            .frame(minWidth: 220, alignment: .leading)
         }
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(maxHeight: Self.maxPopoverHeight)
         // Rows read as in More's popover (checkmarks aligned).
         .environment(\.ravePlayerControlsInMenu, true)
         .buttonStyle(PlayerPopoverRowStyle())
-        .padding(12)
-        .frame(minWidth: 220)
         .presentationCompactAdaptation(.popover)
     }
     #endif
