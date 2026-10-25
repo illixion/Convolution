@@ -254,51 +254,15 @@ struct TVSlideshowView: View {
     /// The same profile and content the `remote-viewer` window would get
     /// for this request (`RemoteViewerWindowView.setupModel`).
     private func setUpModel() {
-        guard model == nil else { return }
-        guard let config = appModel.remoteViewerConfig(id: windowValue.configId) else {
-            AppLogger.remoteViewer.error("[tvOS] No config found for id \(windowValue.configId.uuidString, privacy: .public)")
-            return
-        }
-        let model = RemoteViewerModel(config: config)
-        model.globalAdjustments = appModel.globalVisualAdjustments
-        model.reduceMotion = appModel.effectiveReduceMotion
-        // A TV shows 4K at most.
-        let resolution = min(config.maxImageResolution2D ?? appModel.slideshowMaxImageResolution2D, 3840)
-        model.maxImageResolution = resolution
-        model.maxImageResolution3D = resolution
-        model.slideshow3DMode = .off
-        model.updateWindowAspectRatio(screenSize.width > 0 ? screenSize : CGSize(width: 1920, height: 1080))
-
-        if let videoOverride = appModel.pendingVideoSlideshowSource, appModel.videoSlideshowConfig?.id == config.id {
-            appModel.pendingVideoSlideshowSource = nil
-            model.contentProvider = VideoSlideshowContentProvider(videoSource: videoOverride.videoSource,
-                                                                  filter: videoOverride.filter)
-        } else if let override = appModel.pendingGallerySlideshowSource {
-            appModel.pendingGallerySlideshowSource = nil
-            model.contentProvider = GalleryContentProvider(imageSource: override.imageSource, filter: override.filter)
-        } else {
-            model.contentProvider = GalleryContentProvider(imageSource: appModel.imageSource,
-                                                           filter: appModel.currentFilter)
-        }
-
-        model.onConfigChanged = { [appModel] updated in
-            // Only the viewer-owned display fields, merged onto the profile
-            // as it is now (another device's window may have changed it).
-            guard var current = appModel.remoteViewerConfig(id: updated.id) else {
-                appModel.persistRemoteViewerConfig(updated)
-                return
-            }
-            current.applyViewerDisplaySettings(from: updated)
-            appModel.persistRemoteViewerConfig(current)
-        }
-        model.windowValue = windowValue
+        guard model == nil,
+              // A TV shows 4K at most, and plays every profile flat.
+              let model = RemoteViewerModel.open(
+                  for: windowValue, appModel: appModel,
+                  windowSize: screenSize.width > 0 ? screenSize : CGSize(width: 1920, height: 1080),
+                  resolutionCap: 3840, allows3D: false)
+        else { return }
         self.model = model
-        appModel.registerRemoteViewerWindow(configId: config.id, windowValue: windowValue)
-        appModel.registerRemoteViewerModel(model)
-        model.useRAVESlideshowForLocalContent(mode3D: .off, maxImageResolution2D: resolution,
-                                              maxImageResolution3D: resolution)
-        model.start()
-        AppLogger.remoteViewer.info("[tvOS] Slideshow started: \(config.delay, privacy: .public) s per picture")
+        AppLogger.remoteViewer.info("[tvOS] Slideshow started: \(model.delay, privacy: .public) s per picture")
     }
 
     // MARK: Ken Burns

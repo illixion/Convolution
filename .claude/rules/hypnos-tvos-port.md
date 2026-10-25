@@ -182,9 +182,9 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   Burns, interval; saved to the profile through the model's `display*`
   setters), Menu closes those, then the slideshow. DEBUG
   `-UITestDefault tvAutoStartSlideshow=1` starts the Pictures slideshow on
-  launch. `RemoteViewerWindowView.setupModel` and
-  `TVSlideshowView.setUpModel` build the model the same way and should stay
-  in step.
+  launch. Both it and `RemoteViewerWindowView` build the model with
+  `RemoteViewerModel.open` (`Views/Remote/RemoteViewerModel+Opening.swift`);
+  tvOS passes a 4K cap and no 3D.
 - **`TVAlbumsTabView`** — the same `MediaContainer` grid and
   `AppModel.applyContainer(_:isVideo:)` the visionOS/iOS Albums tab uses;
   switches the tab selection to Pictures/Videos afterward instead of a

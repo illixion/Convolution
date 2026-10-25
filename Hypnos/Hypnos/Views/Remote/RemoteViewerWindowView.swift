@@ -813,74 +813,10 @@ struct RemoteViewerWindowView: View {
     }
 
     private func setupModel() {
-        guard viewerModel == nil else { return }
-
-        // The gallery or video slideshow profile this window was opened for.
-        guard let config = appModel.remoteViewerConfig(id: windowValue.configId) else {
-            AppLogger.remoteViewer.error("No config found for id \(windowValue.configId.uuidString, privacy: .public)")
-            return
-        }
-
-        let model = RemoteViewerModel(config: config)
-        model.globalAdjustments = appModel.globalVisualAdjustments
-        // Per-profile slideshow resolution caps fall back to the slideshow
-        // defaults, which themselves default to 4096px.
-        let resolved2D = config.maxImageResolution2D ?? appModel.slideshowMaxImageResolution2D
-        let resolved3D = config.maxImageResolution3D ?? appModel.slideshowMaxImageResolution3D
-        model.maxImageResolution = resolved2D
-        model.maxImageResolution3D = resolved3D
-        model.slideshow3DMode = config.slideshow3DMode
-        model.updateWindowAspectRatio(windowSize)
-
-        // The play button parks the live source in a transient override right
-        // before opening the window.
-        if let videoOverride = appModel.pendingVideoSlideshowSource,
-           appModel.videoSlideshowConfig?.id == config.id {
-            appModel.pendingVideoSlideshowSource = nil
-            model.contentProvider = VideoSlideshowContentProvider(
-                videoSource: videoOverride.videoSource,
-                filter: videoOverride.filter
-            )
-        } else if let override = appModel.pendingGallerySlideshowSource {
-            appModel.pendingGallerySlideshowSource = nil
-            model.contentProvider = GalleryContentProvider(
-                imageSource: override.imageSource,
-                filter: override.filter
-            )
-        } else {
-            // No override: a window group restored this slideshow at
-            // launch, long after the source that started it was handed
-            // over. The app-wide source and filter is the closest thing to
-            // what it was showing.
-            model.contentProvider = GalleryContentProvider(
-                imageSource: appModel.imageSource,
-                filter: appModel.currentFilter
-            )
-        }
-
-        model.onConfigChanged = { [appModel] updatedConfig in
-            // `updatedConfig` is this window's snapshot from when it opened
-            // plus whatever the ornament just changed. Merge the viewer-owned
-            // display fields onto whatever the profile looks like now, so two
-            // windows of one profile don't revert each other's changes.
-            guard var current = appModel.remoteViewerConfig(id: updatedConfig.id) else {
-                appModel.persistRemoteViewerConfig(updatedConfig)
-                return
-            }
-            current.applyViewerDisplaySettings(from: updatedConfig)
-            appModel.persistRemoteViewerConfig(current)
-        }
-
-        model.windowValue = windowValue
-        self.viewerModel = model
-        appModel.registerRemoteViewerWindow(configId: config.id, windowValue: windowValue)
-        appModel.registerRemoteViewerModel(model)
-        model.useRAVESlideshowForLocalContent(
-            mode3D: config.slideshow3DMode.raveMode,
-            maxImageResolution2D: resolved2D,
-            maxImageResolution3D: resolved3D
-        )
-        model.start()
+        guard viewerModel == nil,
+              let model = RemoteViewerModel.open(for: windowValue, appModel: appModel, windowSize: windowSize)
+        else { return }
+        viewerModel = model
     }
 
     private func startKenBurnsAnimation(model: RemoteViewerModel) {
