@@ -157,6 +157,9 @@ struct PhotoWindowView: View {
             if !isRestored {
                 windowModel.startAutoHideTimer()
             }
+            // A scene the system disconnects can keep its views (and this
+            // model) alive with no onDisappear: give its textures back.
+            sceneDelegate?.onDisconnect { [weak windowModel] in windowModel?.cleanup() }
         }
         .onDisappear {
             renderRecoveryTask?.cancel()

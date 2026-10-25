@@ -687,6 +687,10 @@ class PhotoWindowModel {
 
     /// Whether start() has been called (guards against duplicate onAppear calls)
     private var didStart = false
+    /// `cleanup()` has given back what `start()` took (a window count, a
+    /// registration): it can run twice, at a scene's disconnect and again
+    /// should SwiftUI tear the view down after all.
+    private var releasedWindow = false
 
     init(image: GalleryImage, appModel: AppModel, popOutWindowValue: PhotoWindowValue? = nil, useRealityKitDisplay: Bool = false) {
         self.image = image
@@ -1435,7 +1439,8 @@ class PhotoWindowModel {
             appModel.unregisterPopOutWindow(imageURL: imageURL, windowValueId: windowValue.id)
         }
 
-        if didStart {
+        if didStart, !releasedWindow {
+            releasedWindow = true
             appModel.unregisterWindowModel(self)
             appModel.openPhotoWindowCount -= 1
         }

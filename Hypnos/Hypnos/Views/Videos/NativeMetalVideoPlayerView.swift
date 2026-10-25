@@ -103,6 +103,22 @@ final class NativeVideoHostView: NativePlayerPlatformView {
     #endif
 }
 
+extension MTKView {
+    /// One presented, all-zero frame: draws nothing, but makes the view
+    /// count where visionOS hit-tests what reaches the render server, which a
+    /// video layer over it doesn't (see the coordinator's `showSystemLayer`).
+    @MainActor
+    func presentClearedFrame(commandQueue: MTLCommandQueue) {
+        guard let drawable = currentDrawable, let pass = currentRenderPassDescriptor,
+              let commandBuffer = commandQueue.makeCommandBuffer() else { return }
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        commandBuffer.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+        commandBuffer.present(drawable)
+        commandBuffer.commit()
+    }
+}
+
 final class SystemVideoLayerView: NativePlayerPlatformView {
     #if os(macOS)
     let playerLayer = AVPlayerLayer()
@@ -687,8 +703,8 @@ struct NativeMetalVideoPlayerView {
             // (see showSystemLayer); the drawable has the size next turn.
             if usesSystemLayer {
                 Task { @MainActor [weak self, weak view] in
-                    guard let self, let view, self.usesSystemLayer else { return }
-                    self.presentClearedFrame(in: view)
+                    guard let self, let view, self.usesSystemLayer, let renderer = self.renderer else { return }
+                    view.presentClearedFrame(commandQueue: renderer.commandQueue)
                 }
             }
         }
@@ -863,18 +879,7 @@ struct NativeMetalVideoPlayerView {
             host.systemView.playerLayer.player = show ? player : nil
             host.systemView.isHidden = !show
             host.metalView.isPaused = show
-            if show { presentClearedFrame(in: host.metalView) }
-        }
-
-        private func presentClearedFrame(in view: MTKView) {
-            guard let renderer, let drawable = view.currentDrawable,
-                  let pass = view.currentRenderPassDescriptor,
-                  let commandBuffer = renderer.commandQueue.makeCommandBuffer() else { return }
-            pass.colorAttachments[0].loadAction = .clear
-            pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
-            commandBuffer.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
-            commandBuffer.present(drawable)
-            commandBuffer.commit()
+            if show, let renderer { host.metalView.presentClearedFrame(commandQueue: renderer.commandQueue) }
         }
 
         /// The drawable and the layer's colour space for the picture Metal

@@ -188,9 +188,18 @@ private struct CompareLayerView: UIViewRepresentable {
     let player: AVPlayer
     let criteria: AVDisplayCriteria?
 
+    func makeCoordinator() -> ClearedHitTarget { ClearedHitTarget() }
+
     func makeUIView(context: Context) -> NativeVideoHostView {
-        let host = NativeVideoHostView(metalView: MTKViewPlaceholder.make())
-        host.metalView.isHidden = true
+        // The Metal view stays, holding a cleared frame: with only the video
+        // layer showing, a tap on the picture went to the window behind, as
+        // in the video window (`NativeMetalVideoPlayerView.showSystemLayer`).
+        let metalView = MTKView(frame: .zero, device: MetalImageRenderer.shared?.device)
+        metalView.isOpaque = false
+        metalView.isPaused = true
+        metalView.enableSetNeedsDisplay = false
+        metalView.delegate = context.coordinator
+        let host = NativeVideoHostView(metalView: metalView)
         host.systemView.isHidden = false
         host.systemView.playerLayer.player = player
         host.backgroundColor = .black
@@ -203,7 +212,7 @@ private struct CompareLayerView: UIViewRepresentable {
         host.displayCriteria = criteria
     }
 
-    static func dismantleUIView(_ host: NativeVideoHostView, coordinator: ()) {
+    static func dismantleUIView(_ host: NativeVideoHostView, coordinator: ClearedHitTarget) {
         host.systemView.playerLayer.player = nil
         host.displayCriteria = nil
     }
@@ -264,9 +273,17 @@ private struct CompareRealityView: View {
     }
 }
 
-/// The host view wants a Metal view; the comparison never draws into it.
-private enum MTKViewPlaceholder {
-    static func make() -> MTKView { MTKView(frame: .zero, device: nil) }
+/// Keeps a cleared frame in the comparison's Metal view at every size.
+final class ClearedHitTarget: NSObject, MTKViewDelegate {
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        // The drawable has the new size on the next turn.
+        Task { @MainActor [weak view] in
+            guard let view, let queue = MetalImageRenderer.shared?.commandQueue else { return }
+            view.presentClearedFrame(commandQueue: queue)
+        }
+    }
+
+    func draw(in view: MTKView) {}
 }
 
 /// Opens the comparison window when `PictureCompare` asks.

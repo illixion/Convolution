@@ -173,20 +173,11 @@ struct RemoteViewerWindowView: View {
             // archive. visionOS restores wall-snapped windows at the scene
             // `.defaultSize` (1400×900), so reassert the persisted size here.
             setupSizePersistence()
+            // A scene the system disconnects can keep its views with no
+            // onDisappear, and the slideshow would run on unseen.
+            sceneDelegate?.onDisconnect { [self] in tearDown() }
         }
-        .onDisappear {
-            if let model = viewerModel {
-                appModel.unregisterRemoteViewerModel(model)
-            }
-            // Unregister unconditionally. Gating this on the model meant a
-            // window whose config never resolved could never be unregistered,
-            // so the registry kept claiming it was open forever.
-            appModel.unregisterRemoteViewerWindow(configId: windowValue.configId, windowValueId: windowValue.id)
-            viewerModel?.stop()
-            autoHideTimer?.cancel()
-            renderRecoveryTask?.cancel()
-            sizePersistence?.cancel()
-        }
+        .onDisappear { tearDown() }
         .onChange(of: viewerModel?.isTransitioning) { _, isTransitioning in
             // Refresh IPC's off-axis blur calibration mid-crossfade so
             // the window's 1pt size flicker is masked by the fade
@@ -940,6 +931,22 @@ struct RemoteViewerWindowView: View {
 
     /// Create the size-persistence helper for this window and re-assert the
     /// user's custom size. The mechanics live in `WindowSizePersistence`.
+    /// Stops the slideshow and gives the window up. Runs at onDisappear, or
+    /// at the scene's disconnect, which may come instead; twice is harmless.
+    private func tearDown() {
+        if let model = viewerModel {
+            appModel.unregisterRemoteViewerModel(model)
+        }
+        // Unregister unconditionally. Gating this on the model meant a
+        // window whose config never resolved could never be unregistered,
+        // so the registry kept claiming it was open forever.
+        appModel.unregisterRemoteViewerWindow(configId: windowValue.configId, windowValueId: windowValue.id)
+        viewerModel?.stop()
+        autoHideTimer?.cancel()
+        renderRecoveryTask?.cancel()
+        sizePersistence?.cancel()
+    }
+
     private func setupSizePersistence() {
         let persistence = WindowSizePersistence(
             windowId: windowValue.id,

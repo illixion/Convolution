@@ -13,6 +13,7 @@ struct SharedPhotoWindowView: View {
     let item: SharedMediaItem
     @State private var windowModel: PhotoWindowModel
     @Environment(AppModel.self) private var appModel
+    @Environment(SceneDelegate.self) private var sceneDelegate: SceneDelegate?
     @OpenWindowProxy private var openWindow
 
     @State private var isSaving = false
@@ -62,6 +63,8 @@ struct SharedPhotoWindowView: View {
         .onAppear {
             windowModel.start()
             windowModel.startAutoHideTimer()
+            // See PhotoWindowView: a disconnected scene keeps its views.
+            sceneDelegate?.onDisconnect { [weak windowModel] in windowModel?.cleanup() }
         }
         .onDisappear {
             windowModel.cleanup()

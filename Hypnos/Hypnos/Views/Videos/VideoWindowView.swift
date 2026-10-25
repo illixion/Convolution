@@ -623,7 +623,7 @@ struct VideoWindowView: View {
                 windowModel.startAutoHideTimer()
             }
             windowModel.start()
-            sceneDelegate?.onDisconnect { [windowModel] in windowModel.sceneDidDisconnect() }
+            sceneDelegate?.onDisconnect { [weak windowModel] in windowModel?.sceneDidDisconnect() }
         }
         .onDisappear {
             aspectRelockTask?.cancel()
