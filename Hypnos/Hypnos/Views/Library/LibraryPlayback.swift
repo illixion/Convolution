@@ -54,6 +54,12 @@ final class LibraryPlayback {
 
     private(set) var progressReporter: GenericProgressReporter?
 
+    #if os(tvOS)
+    /// The generic player's speed, carried to the next episode as a window
+    /// carries it to the next video elsewhere; a new Play starts at 1×.
+    var speed: Double = 1
+    #endif
+
     var isResolving: Bool { resolvingItemId != nil }
 
     /// Plays `item`: a movie or episode directly, a series via its Next Up
@@ -62,6 +68,9 @@ final class LibraryPlayback {
         guard let library = LibraryService.current(), !isResolving else { return }
         resolvingItemId = item.id
         error = nil
+        #if os(tvOS)
+        speed = 1
+        #endif
         defer { resolvingItemId = nil }
         do {
             // A stop report for the last watch may still be on its way.
@@ -187,7 +196,9 @@ private struct LibraryPlaybackPresenter: ViewModifier {
                     startSeconds: presentation.startSeconds,
                     onPlayedToEnd: presentation.item.kind == .episode
                         ? { Task { await playback.playNextEpisode() } }
-                        : nil
+                        : nil,
+                    initialSpeed: playback.speed,
+                    onSpeedChange: { playback.speed = $0 }
                 )
                 // A new episode is a new player, not an update of this one.
                 .id(presentation.id)

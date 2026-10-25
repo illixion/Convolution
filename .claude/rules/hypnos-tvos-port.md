@@ -89,8 +89,19 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   from a Subtitles transport-bar menu; see `hypnos-library-jellyfin.md` →
   Subtitles. Verified in the simulator on the dev seed's `Subtitle Window`
   (streamed embedded SRT over an HLS remux) and `Twin Horizon` (direct-play
-  MP4); the menu itself is unverified, since the simulator takes no remote
-  presses.
+  MP4).
+  **Speed** is AVKit's own transport-bar menu (`speeds`), given the other
+  players' choices (`PlaybackSpeed.choices`, 0.5-2×). It sets the player's
+  `defaultRate`, which every `play()` starts at, so a loop, a looper's next
+  copy and a swapped-in stream (YouTube surround, a quality change) keep the
+  speed; the coordinator re-applies it before each of those anyway. The
+  Library carries it to the next episode (`LibraryPlayback.speed`, reset by a
+  new Play). **A swap holds the playhead** (`pendingSwap`) until the seek
+  into the new item has landed: progress reports and subtitles read
+  `playhead(of:)` meanwhile, because the new item starts at zero and a zero
+  sent to Jellyfin is a reset of the viewer's place. Verified in the
+  simulator: 2× measured off the dev Stash clip's burned-in timecode, before
+  and after a loop.
 - **`TVAlbumsTabView`** — the same `MediaContainer` grid and
   `AppModel.applyContainer(_:isVideo:)` the visionOS/iOS Albums tab uses;
   switches the tab selection to Pictures/Videos afterward instead of a

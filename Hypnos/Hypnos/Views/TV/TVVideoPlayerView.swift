@@ -77,6 +77,10 @@ struct TVVideoPlayerView: View {
     /// for YouTube and Library titles, which play once (and, for episodes,
     /// continue to the next). The player's Loop menu item changes it per run.
     var loops = false
+    /// The speed playback starts at (the Library carries the last one to the
+    /// next episode), and what is told when the viewer picks another.
+    var initialSpeed: Double = 1
+    var onSpeedChange: (Double) -> Void = { _ in }
     @Environment(\.dismiss) private var dismiss
     @Environment(AppModel.self) private var appModel
     @State private var resolvedURL: URL?
@@ -95,12 +99,15 @@ struct TVVideoPlayerView: View {
     @State private var artwork: UIImage?
 
     init(video: GalleryVideo, onProgress: @escaping (Double, Double, Bool) -> Void = { _, _, _ in },
-         startSeconds: Double? = nil, onPlayedToEnd: (() -> Void)? = nil, loops: Bool = false) {
+         startSeconds: Double? = nil, onPlayedToEnd: (() -> Void)? = nil, loops: Bool = false,
+         initialSpeed: Double = 1, onSpeedChange: @escaping (Double) -> Void = { _ in }) {
         self.video = video
         self.onProgress = onProgress
         self.startSeconds = startSeconds
         self.onPlayedToEnd = onPlayedToEnd
         self.loops = loops
+        self.initialSpeed = initialSpeed
+        self.onSpeedChange = onSpeedChange
         _details = State(initialValue: PlayerDetailsLoader(fallback: PlayerDetails(video: video)))
     }
 
@@ -108,6 +115,7 @@ struct TVVideoPlayerView: View {
         Group {
             if let resolvedURL {
                 TVAVPlayerViewControllerRepresentable(url: resolvedURL, startSeconds: startSeconds, loops: loops,
+                                                      initialSpeed: initialSpeed, onSpeedChange: onSpeedChange,
                                                       maximumResolution: maximumResolution,
                                                       segments: skipper.segments,
                                                       details: details.details, artwork: artwork,
@@ -238,6 +246,8 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
     let url: URL
     var startSeconds: Double?
     var loops = false
+    var initialSpeed: Double = 1
+    var onSpeedChange: (Double) -> Void = { _ in }
     /// The largest picture an adaptive stream may pick (zero: no cap).
     var maximumResolution: CGSize = .zero
     /// Offered as the player's own contextual action (Skip Intro) while
@@ -272,6 +282,22 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         // no transport UI popping up at the loop point.
         let player = AVQueuePlayer()
         controller.player = player
+        // The transport bar's speed menu, with the same choices as the
+        // other players. It sets the player's `defaultRate`, which `play()`
+        // starts at: a loop, a looper's next copy and a swapped-in stream
+        // keep the speed because each starts through `play()`.
+        controller.speeds = PlaybackSpeed.choices.map { speed in
+            AVPlaybackSpeed(rate: Float(speed), localizedName: speed == 1 ? "Normal (1×)" : PlaybackSpeed.label(speed))
+        }
+        player.defaultRate = Float(initialSpeed)
+        coordinator.speed = initialSpeed
+        coordinator.onSpeedChange = onSpeedChange
+        coordinator.speedObservation = player.observe(\.defaultRate, options: [.new]) { [weak coordinator] player, _ in
+            let rate = Double(player.defaultRate)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { coordinator?.speedChanged(to: rate) }
+            }
+        }
 
         coordinator.loops = loops
         coordinator.controller = controller
@@ -307,10 +333,12 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
             // Until the resume seek is issued the player is still at zero,
             // and a streamed track should start where playback will.
             guard let coordinator, let player, coordinator.didStart else { return startSeconds }
-            return player.currentTime().seconds
+            return coordinator.playhead(of: player)
         }
-        let overlay = UIHostingController(rootView: TVSubtitleLayer(controller: subtitles, picture: picture) { [weak player] in
-            player?.currentTime().seconds ?? 0
+        let overlay = UIHostingController(rootView: TVSubtitleLayer(controller: subtitles, picture: picture) {
+            [weak player, weak coordinator] in
+            guard let player else { return 0 }
+            return coordinator?.playhead(of: player) ?? player.currentTime().seconds
         })
         overlay.safeAreaRegions = []
         overlay.view.backgroundColor = .clear
@@ -339,10 +367,15 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         coordinator.timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 5, preferredTimescale: 1),
             queue: .main
-        ) { [weak coordinator, weak player] time in
+        ) { [weak coordinator, weak player] _ in
             guard let coordinator, let player else { return }
-            let duration = player.currentItem?.duration.seconds ?? 0
-            coordinator.onProgress(time.seconds, duration.isFinite ? duration : 0, player.rate == 0)
+            MainActor.assumeIsolated {
+                // The swap's playhead while a new stream gets ready: its
+                // item starts at zero, which must never reach the server.
+                let duration = player.currentItem?.duration.seconds ?? 0
+                coordinator.onProgress(coordinator.playhead(of: player), duration.isFinite ? duration : 0,
+                                       player.rate == 0)
+            }
         }
 
         // Skip Intro / Skip Credits: the system player's contextual action,
@@ -389,6 +422,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         context.coordinator.onPlaybackFailed = onPlaybackFailed
         context.coordinator.onProgress = onProgress
         context.coordinator.onPlayedToEnd = onPlayedToEnd
+        context.coordinator.onSpeedChange = onSpeedChange
         context.coordinator.segments = segments
         context.coordinator.showInfo(details, artwork: artwork, on: uiViewController.player)
         if context.coordinator.url != url, let player = uiViewController.player as? AVQueuePlayer {
@@ -405,6 +439,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
     static func dismantleUIViewController(_ uiViewController: AVPlayerViewController, coordinator: Coordinator) {
         coordinator.statusObservation?.invalidate()
         coordinator.pictureObservation?.invalidate()
+        coordinator.speedObservation?.invalidate()
         // A streamed track keeps the server reading the file until stopped.
         coordinator.subtitles?.reset()
         coordinator.looperObservation?.invalidate()
@@ -441,8 +476,16 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         var startSeconds: Double = 0
         var maximumResolution: CGSize = .zero
         /// Where a swapped-in item starts, and whether it plays, once ready.
+        /// Held until the seek there has landed, so what is reported and
+        /// shown meanwhile is that playhead, never the new item's zero: a
+        /// zero sent as progress would reset the viewer's place on the server.
         private var pendingSwap: (time: CMTime, plays: Bool)?
+        private var swapSeekIssued = false
         var loops = false
+        /// The speed chosen in the transport bar (the player's `defaultRate`).
+        var speed: Double = 1
+        var onSpeedChange: (Double) -> Void = { _ in }
+        var speedObservation: NSKeyValueObservation?
         var looper: AVPlayerLooper?
         var looperObservation: NSKeyValueObservation?
         var failureObserver: NSObjectProtocol?
@@ -502,11 +545,27 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
             if didStart {
                 // A swap whose item never got ready still holds the playhead.
                 pendingSwap = pendingSwap ?? (player.currentTime(), player.timeControlStatus != .paused)
+                swapSeekIssued = false
             }
             let item = makeItem(url)
             self.item = item
             observe(item, in: player)
             player.replaceCurrentItem(with: item)
+        }
+
+        /// The playhead to report and draw subtitles at: while a swapped-in
+        /// stream is getting ready, where it will start.
+        @MainActor func playhead(of player: AVPlayer) -> Double {
+            if let pendingSwap { return pendingSwap.time.seconds }
+            return player.currentTime().seconds
+        }
+
+        /// The viewer picked a speed in the transport bar.
+        @MainActor func speedChanged(to rate: Double) {
+            guard rate > 0, rate != speed else { return }
+            speed = rate
+            AppLogger.videoWindow.info("[tvOS] Playback speed \(rate, format: .fixed(precision: 2), privacy: .public)x")
+            onSpeedChange(rate)
         }
 
         /// Failure, readiness and the end of `item`, replacing the
@@ -545,6 +604,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
             ) { [weak self, weak player] _ in
                 guard let self else { return }
                 if self.loops, let player {
+                    player.defaultRate = Float(self.speed)
                     player.seek(to: .zero) { _ in player.play() }
                 } else {
                     // actionAtItemEnd is .none, so end the way the player would have.
@@ -559,10 +619,21 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         /// so a resume waits for readiness, and playback starts after it so
         /// the resume point is the first frame shown.
         @MainActor private func itemIsReady(in player: AVQueuePlayer) {
+            player.defaultRate = Float(speed)
             if let swap = pendingSwap {
-                pendingSwap = nil
-                player.seek(to: swap.time, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
-                    if swap.plays { player.play() }
+                guard !swapSeekIssued else { return }
+                swapSeekIssued = true
+                let item = player.currentItem
+                player.seek(to: swap.time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self, weak player] _ in
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated {
+                            // A newer swap holds its own playhead.
+                            guard let self, let player, player.currentItem === item else { return }
+                            self.pendingSwap = nil
+                            self.swapSeekIssued = false
+                            if swap.plays { player.play() }
+                        }
+                    }
                 }
                 return
             }
