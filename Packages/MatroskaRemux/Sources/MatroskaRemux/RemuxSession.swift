@@ -108,6 +108,9 @@ public struct RemuxSummary: Sendable {
 public actor RemuxSession {
     public nonisolated let summary: RemuxSummary
     public nonisolated let masterPlaylist: String
+    /// The master's audio renditions, in its order (for an app's own audio
+    /// menu; the players' come from the playlist).
+    public nonisolated let audioRenditions: [AudioRendition]
 
     nonisolated let source: any ByteSource
     nonisolated let header: MatroskaHeader
@@ -190,7 +193,9 @@ public actor RemuxSession {
         self.video = video
         self.audio = audio
         self.options = options
-        let names = Playlists.renditionNames(audio)
+        let renditions = Playlists.renditions(audio)
+        audioRenditions = renditions
+        let names = Dictionary(uniqueKeysWithValues: renditions.map { ($0.trackNumber, $0.name) })
         let prefixes = ["video", "muxed"] + audio.map { "audio-\($0.track.number)" }
         if index.isComplete {
             fixedPlaylists = Dictionary(uniqueKeysWithValues: prefixes.map {
@@ -211,7 +216,8 @@ public actor RemuxSession {
         videoInit = Data(FragmentWriter.initSegment(
             handler: .video(width: video.displayWidth, height: video.displayHeight), timescale: video.timescale,
             language: "und", sampleEntry: video.sampleEntry))
-        masterPlaylist = Playlists.master(index: index, header: header, video: video, audio: audio, names: names)
+        masterPlaylist = Playlists.master(index: index, header: header, video: video, audio: audio,
+                                          renditions: renditions)
         muxedAudio = Playlists.defaultAudio(audio)
         var muxedTracks = [FragmentWriter.TrackHeader(handler: .video(width: video.displayWidth, height: video.displayHeight),
                                                       timescale: video.timescale, language: "und",

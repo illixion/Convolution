@@ -3,8 +3,26 @@
 
  One video variant, and each kept audio track as its own
  `EXT-X-MEDIA TYPE=AUDIO` rendition in one group, so the player's audio menu
- lists the file's tracks by name and language and switching is the
- player's own. Segments are demuxed, as Apple's authoring spec prefers.
+ lists the file's tracks and switching is the player's own. Segments are
+ demuxed, as Apple's authoring spec prefers.
+
+ What the audio menus show. AVKit's menus (tvOS AVPlayerViewController,
+ macOS AVPlayerView) list each option's `displayName`, which AVFoundation
+ makes from LANGUAGE alone (measured on macOS 27 against a loopback
+ master): the language's name in the user's locale ("English", "Anglais"),
+ plus "AD" and the like for CHARACTERISTICS. NAME never shows; it is only
+ the option's common title metadata (`m3u8/NAME`). Without LANGUAGE the
+ option is "Unknown"; "und" reads "Unknown language", "mul" "Multiple
+ languages", "zxx" "No linguistic content", and the valid tags that name no
+ language read as code ("qaa", "x-surround", "Root (Private-Use:
+ surround)"). A LANGUAGE value AVFoundation can't read as a language is
+ shown as it is. So a rendition whose track has a language keeps it (the
+ player then also selects it by the user's preferred languages), and one
+ without carries its NAME there: the track's name, else codec and layout
+ ("AC-3 5.1"), never a language the file doesn't state. Where tracks share
+ a language, the default one (else the first) keeps the tag and the others
+ show their NAME, so the menu doesn't list "English" twice. A NAME that
+ would itself read as a language code ("de") gets its layout added.
 
  The variant says what a player needs to choose and present it right:
  CODECS for every format in it, RESOLUTION, FRAME-RATE when the video is
@@ -74,34 +92,45 @@ enum Playlists {
         audio.first { $0.track.isDefault } ?? audio.first
     }
 
-    /// Each audio track's NAME, unique within the group: the track's own
-    /// name, else its language's, else a number; tracks that would share one
-    /// are told apart by their channels, then by number.
-    static func renditionNames(_ audio: [AudioPlan]) -> [UInt64: String] {
-        func layout(_ channels: Int) -> String {
-            switch channels {
-            case 1: "Mono"
-            case 2: "Stereo"
-            case 6: "5.1"
-            case 8: "7.1"
-            default: "\(channels) channels"
-            }
+    static func layout(_ channels: Int) -> String {
+        switch channels {
+        case 1: "Mono"
+        case 2: "Stereo"
+        case 6: "5.1"
+        case 8: "7.1"
+        default: "\(channels) channels"
+        }
+    }
+
+    /// The audio renditions in the master's order: each track's NAME,
+    /// unique within the group (the track's own name, else its language's,
+    /// else codec and layout; tracks that would share one told apart by
+    /// layout, then by number), and the LANGUAGE that makes the player show
+    /// something sensible (see the top of this file).
+    static func renditions(_ audio: [AudioPlan]) -> [AudioRendition] {
+        let defaultTrack = defaultAudio(audio)?.track.number
+        func describe(_ plan: AudioPlan) -> String {
+            let objects = if case .eac3(let info) = plan.codec, info.objectComplexity != nil { " with object audio" } else { "" }
+            return "\(plan.codecName) \(layout(plan.channels))\(objects)"
         }
         var base: [UInt64: String] = [:]
-        for (i, plan) in audio.enumerated() {
+        var described: Set<UInt64> = []
+        for plan in audio {
             if let name = plan.track.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
                 base[plan.track.number] = name
             } else if let language = plan.track.bcp47Language,
                       let display = Locale.current.localizedString(forLanguageCode: language) {
                 base[plan.track.number] = display.prefix(1).uppercased() + display.dropFirst()
             } else {
-                base[plan.track.number] = audio.count == 1 ? layout(plan.channels) : "Track \(i + 1)"
+                base[plan.track.number] = describe(plan)
+                described.insert(plan.track.number)
             }
         }
         var names = base
-        let counts = Dictionary(grouping: audio, by: { base[$0.track.number]! })
-        for (name, plans) in counts where plans.count > 1 {
-            for plan in plans { names[plan.track.number] = "\(name) (\(layout(plan.channels)))" }
+        for (name, plans) in Dictionary(grouping: audio, by: { base[$0.track.number]! }) where plans.count > 1 {
+            for plan in plans where !described.contains(plan.track.number) {
+                names[plan.track.number] = "\(name) (\(layout(plan.channels)))"
+            }
         }
         var seen: [String: Int] = [:]
         for plan in audio {
@@ -109,20 +138,41 @@ enum Playlists {
             seen[name, default: 0] += 1
             if seen[name]! > 1 { names[plan.track.number] = "\(name) \(seen[name]!)" }
         }
-        return names
+
+        // LANGUAGE: the track's, for the default first; else what to show.
+        var tagged: Set<String> = []
+        var languages: [UInt64: String] = [:]
+        for plan in audio.sorted(by: { ($0.track.number == defaultTrack ? 0 : 1) < ($1.track.number == defaultTrack ? 0 : 1) }) {
+            let name = names[plan.track.number]!
+            if let language = plan.track.bcp47Language, tagged.insert(language.lowercased()).inserted {
+                languages[plan.track.number] = language
+            } else if Locale.current.localizedString(forLanguageCode: name) != nil {
+                languages[plan.track.number] = "\(name) (\(layout(plan.channels)))"
+            } else {
+                languages[plan.track.number] = name
+            }
+        }
+        return audio.map { plan in
+            var objects = false
+            if case .eac3(let info) = plan.codec { objects = info.objectComplexity != nil }
+            return AudioRendition(trackNumber: plan.track.number, name: names[plan.track.number]!,
+                                  language: plan.track.bcp47Language, playlistLanguage: languages[plan.track.number]!,
+                                  codec: plan.codecName, codecs: plan.codecs, channels: plan.channels,
+                                  layout: layout(plan.channels), hasObjectAudio: objects,
+                                  isDefault: plan.track.number == defaultTrack, uri: "audio-\(plan.track.number).m3u8")
+        }
     }
 
     static func master(index: SegmentIndex, header: MatroskaHeader, video: VideoPlan, audio: [AudioPlan],
-                       names: [UInt64: String]) -> String {
+                       renditions: [AudioRendition]) -> String {
         var lines = ["#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-INDEPENDENT-SEGMENTS"]
-        let defaultTrack = defaultAudio(audio)?.track.number
-        for plan in audio {
-            var attributes = ["TYPE=AUDIO", "GROUP-ID=\"audio\"", "NAME=\"\(quoted(names[plan.track.number] ?? "Audio"))\""]
-            if let language = plan.track.bcp47Language { attributes.append("LANGUAGE=\"\(quoted(language))\"") }
-            attributes.append("DEFAULT=\(plan.track.number == defaultTrack ? "YES" : "NO")")
+        for (plan, rendition) in zip(audio, renditions) {
+            var attributes = ["TYPE=AUDIO", "GROUP-ID=\"audio\"", "NAME=\"\(quoted(rendition.name))\""]
+            attributes.append("LANGUAGE=\"\(quoted(rendition.playlistLanguage))\"")
+            attributes.append("DEFAULT=\(rendition.isDefault ? "YES" : "NO")")
             attributes.append("AUTOSELECT=YES")
             attributes.append("CHANNELS=\"\(plan.hlsChannels)\"")
-            attributes.append("URI=\"audio-\(plan.track.number).m3u8\"")
+            attributes.append("URI=\"\(rendition.uri)\"")
             lines.append("#EXT-X-MEDIA:" + attributes.joined(separator: ","))
         }
 
@@ -166,4 +216,33 @@ enum Playlists {
         value.replacingOccurrences(of: "\"", with: "'")
             .components(separatedBy: .newlines).joined(separator: " ")
     }
+}
+
+/// One audio rendition of a session's master playlist: what an app needs to
+/// build its own audio menu. `name` is the rendition's NAME, unique in the
+/// group, and comes back from AVFoundation as the `AVMediaSelectionOption`'s
+/// common title metadata, which is how to tell which option is which.
+public struct AudioRendition: Sendable, Equatable {
+    public var trackNumber: UInt64
+    public var name: String
+    /// The track's language as the file states it (BCP 47); nil when it
+    /// states none (or "und").
+    public var language: String?
+    /// The playlist's LANGUAGE: `language`, or what the player should show
+    /// in its place (see `Playlists`), which is what AVFoundation's
+    /// `displayName` reads back.
+    public var playlistLanguage: String
+    /// "AC-3", "HE-AAC", "Opus".
+    public var codec: String
+    /// Its CODECS string.
+    public var codecs: String
+    public var channels: Int
+    /// "Mono", "Stereo", "5.1", "7.1", "N channels".
+    public var layout: String
+    /// E-AC-3 with object audio (HLS CHANNELS "16/JOC").
+    public var hasObjectAudio: Bool
+    /// The rendition the player starts with (DEFAULT=YES).
+    public var isDefault: Bool
+    /// The rendition's media playlist, relative to the master.
+    public var uri: String
 }
