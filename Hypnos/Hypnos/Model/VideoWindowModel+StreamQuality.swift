@@ -178,7 +178,8 @@ extension VideoWindowModel {
             defer { self?.isChangingQuality = false }
             do {
                 let plan = try await library.streamPlan(
-                    itemId: itemId, quality: level ?? .original, forAI3D: forAI3D)
+                    itemId: itemId, quality: level ?? .original, forAI3D: forAI3D,
+                    audioStreamIndex: self?.chosenLibraryAudioStream(itemId: itemId))
                 guard !Task.isCancelled, let self, self.libraryItemId == itemId else { return }
                 self.sourceBitrate = (itemId, plan.sourceBitrate)
                 guard plan.streamURL != self.video.streamURL else {

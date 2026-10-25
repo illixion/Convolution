@@ -50,6 +50,42 @@ struct GenericPlaybackPlan: Sendable {
     var transcodeURL: URL? = nil
 }
 
+/// One audio stream of a Library title's file.
+struct LibraryAudioTrack: Sendable, Hashable, Identifiable {
+    /// The stream's index in the file, as the server numbers it.
+    var index: Int
+    var language: String?
+    var title: String?
+    /// The server's own description ("English - Dolby Digital - 5.1 - Default").
+    var displayTitle: String?
+    var codec: String?
+    var channels: Int?
+    var isDefault: Bool
+
+    var id: Int { index }
+
+    /// "English · 5.1", "Commentary", "Track 3": the language, else the
+    /// stream's title, with the channel layout.
+    var menuTitle: String {
+        let language = language.flatMap { code in
+            Locale.current.localizedString(forLanguageCode: code)
+        }
+        let titled = title.flatMap { $0.isEmpty || $0 == language ? nil : $0 }
+        let named = [language, titled].compactMap { $0 }.joined(separator: ", ")
+        let name = !named.isEmpty ? named
+            : displayTitle?.split(separator: " - ").first.map(String.init) ?? "Track \(index)"
+        let layout: String? = switch channels {
+        case 1: "Mono"
+        case 2: "Stereo"
+        case 6: "5.1"
+        case 8: "7.1"
+        case let count?: "\(count) channels"
+        case nil: nil
+        }
+        return [name, layout].compactMap { $0 }.joined(separator: " · ")
+    }
+}
+
 /// A Library title's own picture, as the server describes its file.
 struct LibrarySourcePicture: Sendable, Equatable {
     var width: Int?

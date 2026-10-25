@@ -209,6 +209,8 @@ private struct JFPlaybackInfo: Decodable {
             let IsHearingImpaired: Bool?
             let IsTextSubtitleStream: Bool?
             let IsExternal: Bool?
+            let Channels: Int?
+            let DisplayTitle: String?
         }
         let Id: String?
         /// "mkv", or ffprobe's list for the MP4 family ("mov,mp4,m4a,3gp,3g2,mj2").
@@ -680,7 +682,8 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// quality: the same item, a new plan.
     func streamPlan(itemId: String, quality: LibraryStreamQuality,
                     resumeSeconds: Double? = nil,
-                    forAI3D: Bool = false) async throws -> GenericPlaybackPlan {
+                    forAI3D: Bool = false,
+                    audioStreamIndex: Int? = nil) async throws -> GenericPlaybackPlan {
         // Header-authenticated, so a token the server no longer accepts
         // fails here, under the Play button, rather than as a player window
         // that never shows a frame (every stream URL below authenticates by
@@ -726,7 +729,7 @@ actor JellyfinLibrary: MediaServerLibrary {
             let capped = Self.hlsStreamURL(
                 baseURL: baseURL, itemId: itemId, mediaSourceId: mediaSourceId,
                 sourceVideoCodec: sourceVideoCodec, playSessionId: playSessionId,
-                token: authHeaderToken, quality: quality)
+                token: authHeaderToken, quality: quality, audioStreamIndex: audioStreamIndex)
             return GenericPlaybackPlan(method: .transcode, streamURL: capped, resumeSeconds: resumeSeconds,
                                        quality: quality, sourceBitrate: sourceBitrate)
         }
@@ -759,7 +762,7 @@ actor JellyfinLibrary: MediaServerLibrary {
             let reserve = Self.hlsStreamURL(
                 baseURL: baseURL, itemId: itemId, mediaSourceId: mediaSourceId,
                 sourceVideoCodec: sourceVideoCodec, playSessionId: playSessionId,
-                token: authHeaderToken)
+                token: authHeaderToken, audioStreamIndex: audioStreamIndex)
             return GenericPlaybackPlan(method: .direct, streamURL: directURL, resumeSeconds: resumeSeconds,
                                        sourceBitrate: sourceBitrate, transcodeURL: reserve)
         }
@@ -767,9 +770,41 @@ actor JellyfinLibrary: MediaServerLibrary {
         let transcodeURL = Self.hlsStreamURL(
             baseURL: baseURL, itemId: itemId, mediaSourceId: mediaSourceId,
             sourceVideoCodec: sourceVideoCodec, playSessionId: playSessionId,
-            token: authHeaderToken)
+            token: authHeaderToken, audioStreamIndex: audioStreamIndex)
         return GenericPlaybackPlan(method: .transcode, streamURL: transcodeURL, resumeSeconds: resumeSeconds,
                                    sourceBitrate: sourceBitrate)
+    }
+
+    // MARK: - Audio tracks
+
+    /// The audio streams `itemId`'s file has, in its order. A remux or
+    /// transcode carries one of them (`AudioStreamIndex`, else the server's
+    /// default); a file played directly carries them all.
+    func audioTracks(itemId: String) async -> [LibraryAudioTrack] {
+        guard LibraryOfflineStore.shared.record(for: itemId) == nil,
+              let userId = try? await resolveUserId(),
+              let info: JFPlaybackInfo = try? await get("Items/\(itemId)/PlaybackInfo", query: [
+                  .init(name: "userId", value: userId),
+              ])
+        else { return [] }
+        return (info.MediaSources?.first?.MediaStreams ?? []).compactMap { stream in
+            guard stream.Type == "Audio", let index = stream.Index else { return nil }
+            return LibraryAudioTrack(index: index, language: stream.Language, title: stream.Title,
+                                     displayTitle: stream.DisplayTitle, codec: stream.Codec,
+                                     channels: stream.Channels, isDefault: stream.IsDefault ?? false)
+        }
+    }
+
+    /// The audio stream a remux or transcode URL asks for, if it names one.
+    static func audioStreamIndex(ofStream url: URL) -> Int? {
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+            .first { $0.name == "AudioStreamIndex" }?.value.flatMap(Int.init)
+    }
+
+    /// The URL is a stream the server remuxes or transcodes (one audio
+    /// stream), not the file itself.
+    static func isServerStream(_ url: URL) -> Bool {
+        url.lastPathComponent == "main.m3u8" || url.lastPathComponent == "master.m3u8"
     }
 
     // MARK: - Subtitles
@@ -983,7 +1018,8 @@ actor JellyfinLibrary: MediaServerLibrary {
 
     static func hlsStreamURL(baseURL: URL, itemId: String, mediaSourceId: String,
                              sourceVideoCodec: String?, playSessionId: String,
-                             token: String, quality: LibraryStreamQuality = .original) -> URL {
+                             token: String, quality: LibraryStreamQuality = .original,
+                             audioStreamIndex: Int? = nil) -> URL {
         let sourceCodec = switch sourceVideoCodec {
         case "hevc", "h265": "hevc"
         default: "h264"
@@ -1010,6 +1046,9 @@ actor JellyfinLibrary: MediaServerLibrary {
         }
         if sourceCodec == "hevc" {
             query.append(.init(name: "hevc-rangetype", value: hevcRangeTypes))
+        }
+        if let audioStreamIndex {
+            query.append(.init(name: "AudioStreamIndex", value: String(audioStreamIndex)))
         }
         return baseURL.appending(path: "Videos/\(itemId)/main.m3u8").appending(queryItems: query)
     }

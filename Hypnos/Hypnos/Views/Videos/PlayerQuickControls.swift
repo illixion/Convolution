@@ -72,6 +72,31 @@ struct PlaybackSpeedMenu: View {
     }
 }
 
+/// The video's audio tracks, when it has more than one
+/// (`VideoWindowModel+AudioTracks`).
+struct VideoAudioTrackMenu: View {
+    let tracks: [VideoAudioTrack]
+    let selected: VideoAudioTrack.ID?
+    var onOpenChanged: (Bool) -> Void = { _ in }
+    let onSelect: (VideoAudioTrack) -> Void
+
+    var body: some View {
+        PlayerChoiceMenu(title: "Audio", systemImage: "speaker.wave.2",
+                         help: tracks.first { $0.id == selected }.map { "Audio: \($0.title)" } ?? "Audio",
+                         onOpenChanged: onOpenChanged) { close in
+            ForEach(tracks) { track in
+                Button {
+                    close()
+                    onSelect(track)
+                } label: {
+                    PlayerChoiceRow(track.title, isChecked: track.id == selected)
+                }
+            }
+        }
+        .accessibilityIdentifier("player.audio")
+    }
+}
+
 /// One level: its title, what it means for the two original-quality
 /// choices (naming the title's own picture when known), and a checkmark on
 /// the chosen one.

@@ -8,7 +8,9 @@
  spatial-audio policy (`applySpatialAudioPolicy(for:)` in RAVEMedia) decides
  from probes that can miss a stream; this is what to compare it against.
  Nothing personal: no titles, URLs or hosts, only whether the source is
- loopback.
+ loopback. The Audio menu is described by where each entry came from and
+ what labels it (language, the stream's own name, or only its number), not
+ by its text; `videoAudioTrack` picks one, as the menu would.
  */
 
 import AVFoundation
@@ -29,6 +31,17 @@ enum VideoPlayerDebugEndpoints {
                    + "For checking that a surround stream is surround and spatialized.") { _ in
                 await reply()
             },
+            .command("videoAudioTrack", "Picks an entry of the first video window's Audio menu, as a tap would: "
+                     + "position counts from 0 in menu order. Returns the windows' state after it.",
+                     parameters: [.integer("position", "the entry's position in the Audio menu", required: true,
+                                           range: 0 ... 64)]) { args in
+                guard let model = VideoWindowModel.withNativePlayers.allObjects.first(where: { !$0.audioTracks.isEmpty }),
+                      let position = args.int("position"),
+                      model.audioTracks.indices.contains(position) else { return await reply() }
+                model.selectAudioTrack(model.audioTracks[position])
+                try? await Task.sleep(for: .seconds(1))
+                return await reply()
+            },
         ])
     }
 
@@ -45,6 +58,18 @@ enum VideoPlayerDebugEndpoints {
         var spatialAudio: String
         var allowedSpatialization: String
         var playing: Bool
+        /// The Audio menu: each entry's source and what labels it.
+        var audioMenu: [MenuEntry]
+        var audioMenuSelected: Int?
+    }
+
+    struct MenuEntry: Encodable {
+        /// "player" (a media-selection option) or "server" (a Library
+        /// file's audio stream).
+        var source: String
+        /// "number" ("Track 2"), "two parts" ("English, Commentary") or
+        /// "one part" (a language or a name).
+        var labeledBy: String
     }
 
     struct Track: Encodable {
@@ -92,10 +117,22 @@ enum VideoPlayerDebugEndpoints {
                 audibleOption: audible,
                 spatialAudio: experience,
                 allowedSpatialization: allowed,
-                playing: player.timeControlStatus == .playing
+                playing: player.timeControlStatus == .playing,
+                audioMenu: model.audioTracks.map(menuEntry),
+                audioMenuSelected: model.audioTracks.firstIndex { $0.id == model.selectedAudioTrack }
             ))
         }
         return Reply(windows: windows)
+    }
+
+    private static func menuEntry(_ track: VideoAudioTrack) -> MenuEntry {
+        let source = switch track.id {
+        case .player: "player"
+        case .server: "server"
+        }
+        let label = track.title.components(separatedBy: " · ")[0]
+        let labeledBy = label.hasPrefix("Track ") ? "number" : label.contains(", ") ? "two parts" : "one part"
+        return MenuEntry(source: source, labeledBy: labeledBy)
     }
 
     private static func fourCC(_ code: FourCharCode) -> String {

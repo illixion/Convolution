@@ -106,6 +106,7 @@ struct VideoOrnamentsView: View {
         qualityMenu
         if room >= 1 {
             subtitleMenu
+            audioMenu
             speedMenu
             // Depth-conversion status for THIS video — visible at a glance
             // without keeping the ViewMode menu open. Isolated in its own view
@@ -146,6 +147,7 @@ struct VideoOrnamentsView: View {
             PlayerPopoverSectionHeader("Playback")
             if room < 1 {
                 subtitleMenu
+                audioMenu
                 speedMenu
                 ConversionStatusRow(videoIdentity: video.identity)
             }
@@ -222,6 +224,16 @@ struct VideoOrnamentsView: View {
     private var subtitleMenu: some View {
         if !windowModel.subtitles.tracks.isEmpty {
             SubtitleMenu(controller: windowModel.subtitles, onOpenChanged: { chromeMenu("Subtitles", opened: $0) })
+        }
+    }
+
+    @ViewBuilder
+    private var audioMenu: some View {
+        if !windowModel.audioTracks.isEmpty {
+            VideoAudioTrackMenu(tracks: windowModel.audioTracks, selected: windowModel.selectedAudioTrack,
+                                onOpenChanged: { chromeMenu("Audio", opened: $0) }) { track in
+                windowModel.selectAudioTrack(track)
+            }
         }
     }
 

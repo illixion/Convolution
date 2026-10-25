@@ -144,6 +144,16 @@ final class VideoWindowModel {
     var volume: Double = PlayerVolume.saved
     /// End of the last buffered range (seconds).
     var bufferedEnd: Double = 0
+    /// The Audio menu's tracks and the one playing (see
+    /// `VideoWindowModel+AudioTracks`).
+    var audioTracks: [VideoAudioTrack] = []
+    var selectedAudioTrack: VideoAudioTrack.ID?
+    /// The Library title's audio stream the viewer picked, kept through
+    /// quality changes; nil follows the server's default.
+    @ObservationIgnored var libraryAudioStreamIndex: (itemId: String, index: Int)?
+    @ObservationIgnored var libraryAudioTracks: (itemId: String, tracks: [LibraryAudioTrack])?
+    @ObservationIgnored var audioTracksTask: Task<Void, Never>?
+
     /// Playback speed (1 is normal), chosen from the bar's Speed menu. Kept
     /// for this window, through every renderer change and the next video;
     /// a new window starts at 1×.
@@ -189,6 +199,7 @@ final class VideoWindowModel {
         Self.withNativePlayers.add(self)
         // A restored window can be disconnected before its player exists.
         if sceneDisconnected { Self.silence(player) }
+        refreshAudioTracks()
     }
 
     @ObservationIgnored private var sceneDisconnected = false
@@ -317,7 +328,7 @@ final class VideoWindowModel {
     /// Cinema, the title's Details and the bar's choices (view mode,
     /// quality, subtitles, speed). (The immersive bar's More Options is a
     /// real Menu.)
-    static let popoverMenuNames: Set<String> = ["More", "Cinema", "Details", "View Mode", "Quality", "Subtitles", "Speed"]
+    static let popoverMenuNames: Set<String> = ["More", "Cinema", "Details", "View Mode", "Quality", "Subtitles", "Audio", "Speed"]
 
     /// Only popovers are open: they keep the gaze even with the stereo
     /// picture tappable, so a tap on the picture can close them. A real menu
@@ -669,6 +680,7 @@ final class VideoWindowModel {
     /// Call from onDisappear.
     func cleanup() {
         nextEpisodeTask?.cancel()
+        audioTracksTask?.cancel()
         if popOutWindowValue != nil {
             appModel.unregisterVideoWindow(video: video, windowValueId: windowValueId)
         }
