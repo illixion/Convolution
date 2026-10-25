@@ -44,6 +44,7 @@ final class TVPlayerQuality {
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
 
     init(video: GalleryVideo) {
+        fileName = video.fileName
         if let itemId = LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity),
            !video.streamURL.isFileURL {
             libraryItemId = itemId
@@ -66,6 +67,8 @@ final class TVPlayerQuality {
 
     /// The Jellyfin item, for a server stream (a download plays as it is).
     private(set) var libraryItemId: String?
+    /// The file's name, for the on-device remux of an original MKV.
+    private let fileName: String?
     private(set) var preference: LibraryStreamQuality = .preferred
     private(set) var source: LibrarySourcePicture?
     @ObservationIgnored private var sourceBitrate: Int?
@@ -147,12 +150,20 @@ final class TVPlayerQuality {
                 guard !Task.isCancelled, let self else { return }
                 self.sourceBitrate = plan.sourceBitrate ?? self.sourceBitrate
                 var url = plan.streamURL
-                // A WebM original only WebKit plays: there is no WebKit here,
-                // so its full-quality transcode, as the player's first open does.
-                if let reserve = plan.transcodeURL,
-                   !(await NativeVideoDecodeProbe.canPlayNatively(url: MediaAuthorization.shared.authorizedURL(url),
-                                                                  timeout: 5)) {
-                    url = reserve
+                // An original the player can't open (a WebM, or an MKV with
+                // Play MKV Files on This Device): remuxed on the device, else
+                // its full-quality transcode, as the player's first open does.
+                let isFile = JellyfinLibrary.isFileStream(url)
+                if plan.transcodeURL != nil || isFile {
+                    let original = MediaAuthorization.shared.authorizedURL(url)
+                    if !(await NativeVideoDecodeProbe.canPlayNatively(url: original, timeout: 5)) {
+                        if isFile, let remuxed = await MatroskaRemuxService.shared.playlistURL(
+                            for: original, fileName: self.fileName) {
+                            url = remuxed
+                        } else if let reserve = plan.transcodeURL {
+                            url = reserve
+                        }
+                    }
                 }
                 guard !Task.isCancelled, url != self.streamURL else { return }
                 AppLogger.videoWindow.info("[tvOS] Switching to \(target?.rawValue ?? "original", privacy: .public) quality (\(reason, privacy: .public))")

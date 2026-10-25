@@ -106,8 +106,9 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   *container*). An original it refuses is next offered to the on-device
   Matroska remux (`MatroskaRemuxService`: MKV/WebM to fMP4 HLS on loopback,
   lossless; see "Matroska remux" in `hypnos-video-window.md`), so a WebM or
-  MKV plays natively with no server involved; Library titles are left to
-  Jellyfin's own streams. Only then does it fall back to Stash's HLS
+  MKV plays natively with no server involved; a Library title only when it
+  plays the file itself (Settings → Jellyfin → Play MKV Files on This
+  Device), not a stream Jellyfin made. Only then does it fall back to Stash's HLS
   transcode (`GalleryVideo.transcodeStreamURL`), the last tier here (no
   WebKit); a source with none of these reports it can't play rather than
   showing a stuck black screen. On an SDR TV an HDR remux is served as one
@@ -150,7 +151,9 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   the master first, and a size's HDR copy the player refuses drops to SDR).
   A pick swaps the stream at the playhead; Jellyfin's `streamPlan` renews the
   item's play session and ends the old transcode, and progress keeps going
-  to the same item. Auto watches AVPlayer itself: `timeControlStatus`
+  to the same item. A pick that lands on a file the player can't open (a
+  WebM, or an MKV played on the device) is remuxed on the device first, as
+  the first open does, and only then takes the plan's reserve transcode. Auto watches AVPlayer itself: `timeControlStatus`
   waiting for data feeds `StreamStallMonitor`, a time jump or a resume from
   pause restarts its grace, and no frame (`isReadyForDisplay`) within
   `startupTimeout` steps down; the notice shows over the picture. Verified
