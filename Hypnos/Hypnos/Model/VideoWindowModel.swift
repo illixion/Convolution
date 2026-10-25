@@ -1296,8 +1296,12 @@ final class VideoWindowModel {
     /// (Jellyfin serves its own HLS), and only while the original itself is
     /// what plays (no transcode or AI 3D tier in its place).
     private var canTryRemux: Bool {
+        // A Library title only when it plays the file itself (a WebM, or an
+        // MKV with Play MKV Files on This Device), not a stream Jellyfin
+        // made for it.
         guard !remuxRefused, remuxedStreamURL == nil, !usingTranscodedStream, !ai3DUsesStashTier,
-              !PhotosAssetURL.isPhotosAsset(video.streamURL), libraryItemId == nil else { return false }
+              !PhotosAssetURL.isPhotosAsset(video.streamURL),
+              libraryItemId == nil || JellyfinLibrary.isFileStream(video.streamURL) else { return false }
         #if HYPNOS_YOUTUBE
         if youTubeID != nil { return false }
         #endif

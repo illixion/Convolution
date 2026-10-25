@@ -200,9 +200,10 @@ struct TVVideoPlayerView: View {
         }
 
         // An MKV/WebM the player can't open, remuxed to HLS on the device
-        // (lossless, ahead of the server's transcode). Library titles keep
-        // Jellyfin's own streams.
-        if LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity) == nil,
+        // (lossless, ahead of the server's transcode). A Library title only
+        // when it plays the file itself, not a stream Jellyfin made for it.
+        if LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity) == nil
+            || JellyfinLibrary.isFileStream(source),
            let remuxed = await MatroskaRemuxService.shared.playlistURL(for: authenticated, fileName: video.fileName) {
             AppLogger.videoWindow.info("[tvOS] playing the original remuxed to HLS")
             remuxSource = authenticated

@@ -89,6 +89,7 @@ struct JellyfinServerSection: View {
         }
 
         SkipMarkersSection()
+        LibraryFilePlaybackSection()
     }
 
     private func signIn() async {
@@ -96,6 +97,22 @@ struct JellyfinServerSection: View {
         await auth.signIn(serverURL: url, username: username, password: password)
         if auth.session != nil {
             password = ""
+        }
+    }
+}
+
+/// How a title's MKV file plays: through Jellyfin's remux, or read and
+/// repackaged on the device (`JellyfinLibrary.remuxesOnDevice`).
+struct LibraryFilePlaybackSection: View {
+    @AppStorage(JellyfinLibrary.remuxesOnDeviceKey) private var remuxesOnDevice = false
+
+    var body: some View {
+        if LibraryService.isAvailable {
+            Section {
+                Toggle("Play MKV Files on This Device", isOn: $remuxesOnDevice)
+            } footer: {
+                Text("Reads a title's MKV file from the server in pieces and repackages it here, losslessly, instead of having Jellyfin remux it: every audio track, the original sound, and nothing for the server to do. A file this device can't repackage still plays through the server.")
+            }
         }
     }
 }

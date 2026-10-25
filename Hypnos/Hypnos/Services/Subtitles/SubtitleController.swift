@@ -54,6 +54,15 @@ struct SubtitleSource: Sendable {
     var live: (@Sendable (LibrarySubtitleTrack, @escaping @MainActor @Sendable () -> Double)
         -> AsyncStream<RAVESubtitleTrack>?)? = nil
 
+    /// The same source without the tracks inside the video file.
+    func excludingEmbedded() -> SubtitleSource {
+        var source = self
+        let tracks = self.tracks
+        source.id += ":external"
+        source.tracks = { try await tracks().filter { !$0.isEmbedded } }
+        return source
+    }
+
     /// A Jellyfin item's streams, or nil when no server is configured.
     @MainActor
     static func jellyfin(itemId: String) -> SubtitleSource? {
@@ -136,7 +145,11 @@ struct SubtitleSource: Sendable {
         }
         guard let remuxSource, let session = MatroskaRemuxService.shared.session(for: remuxSource),
               !session.subtitleTracks.isEmpty else { return base }
-        return .matroska(session, identity: video.identity, adding: base)
+        // A Library title's embedded tracks come from the file the device
+        // reads anyway; the server keeps its sidecar files.
+        let others = LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity) != nil
+            ? base?.excludingEmbedded() : base
+        return .matroska(session, identity: video.identity, adding: others)
     }
 }
 

@@ -749,6 +749,20 @@ actor JellyfinLibrary: MediaServerLibrary {
                                        sourceBitrate: sourceBitrate)
         }
 
+        // Settings → Jellyfin → Play MKV Files on This Device: the file
+        // itself, read in pieces and remuxed on the device as a Stash or
+        // local MKV is (`MatroskaRemuxService`), which keeps every audio
+        // track and the original sound and spares the server. The server's
+        // remux stays in reserve for a file the device can't remux.
+        if Self.remuxesOnDevice, sourceContainer?.split(separator: ",").contains(where: { $0 == "mkv" || $0 == "matroska" }) == true {
+            let reserve = Self.hlsStreamURL(
+                baseURL: baseURL, itemId: itemId, mediaSourceId: mediaSourceId,
+                sourceVideoCodec: sourceVideoCodec, playSessionId: playSessionId,
+                token: authHeaderToken, audioStreamIndex: audioStreamIndex)
+            return GenericPlaybackPlan(method: .direct, streamURL: directURL, resumeSeconds: resumeSeconds,
+                                       sourceBitrate: sourceBitrate, transcodeURL: reserve)
+        }
+
         // WebKit can play Jellyfin's WebM files on Apple platforms even when
         // AVFoundation cannot. Keep the original file URL so they follow the
         // same direct/WebKit route as Stash instead of asking Jellyfin to
@@ -773,6 +787,20 @@ actor JellyfinLibrary: MediaServerLibrary {
             token: authHeaderToken, audioStreamIndex: audioStreamIndex)
         return GenericPlaybackPlan(method: .transcode, streamURL: transcodeURL, resumeSeconds: resumeSeconds,
                                    sourceBitrate: sourceBitrate)
+    }
+
+    /// Settings → Jellyfin → Play MKV Files on This Device (off unless
+    /// chosen): see `streamPlan`.
+    static let remuxesOnDeviceKey = "library.remuxOnDevice"
+    static var remuxesOnDevice: Bool { UserDefaults.standard.bool(forKey: remuxesOnDeviceKey) }
+
+    /// The URL is the title's file itself (`Videos/{id}/stream?static=true`),
+    /// which a player reads as a server's file rather than a stream made
+    /// for it.
+    static func isFileStream(_ url: URL) -> Bool {
+        url.lastPathComponent == "stream" && url.pathComponents.dropLast(2).last == "Videos"
+            && URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                .contains { $0.name == "static" && $0.value == "true" } == true
     }
 
     // MARK: - Audio tracks
