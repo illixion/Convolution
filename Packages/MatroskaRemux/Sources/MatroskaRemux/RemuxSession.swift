@@ -706,8 +706,9 @@ public actor RemuxSession {
     /// streams plays through (measured, and the same with ffmpeg's HLS). So
     /// a gap is bridged by lengthening the sample before it (the decoder
     /// still outputs one frame; the player keeps time across the rest), and
-    /// a stretch with no frames at all gets one placeholder sample (the
-    /// track's first frame, usually silence) as long as the stretch.
+    /// a stretch with no frames at all gets one placeholder sample as long as
+    /// the stretch: a frame of silence (`SilentFrame`; it used to be the
+    /// track's first frame, audible as a blip of the soundtrack).
     private func audioFragments(_ plan: AudioPlan, _ k: Int, from segment: ParsedSegment) async throws -> [Fragment] {
         let number = plan.track.number
         let index = self.index

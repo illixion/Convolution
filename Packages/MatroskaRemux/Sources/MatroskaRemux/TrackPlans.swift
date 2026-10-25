@@ -218,9 +218,12 @@ struct AudioPlan: Sendable {
     }
     /// The track's first block time, in samples: the grid's origin.
     let originSamples: Int64
-    /// The track's first frame: what fills a stretch of a segment the track
-    /// has no frames for (see `RemuxSession.audioFragments`).
+    /// What fills a stretch of a segment the track has no frames for (see
+    /// `RemuxSession.audioFragments`): a frame of silence made for the
+    /// track's configuration (`SilentFrame`), or, for a codec setup none can
+    /// safely be made for, the track's first frame.
     let placeholder: [UInt8]
+    let placeholderIsSilent: Bool
     let timestampScale: Int64
     let offsetNanoseconds: Int64
 
@@ -367,11 +370,12 @@ struct AudioPlan: Sendable {
 
         let firstNanoseconds = firstTicks * timestampScale - Int64(clamping: track.codecDelay) + offsetNanoseconds
         let rawOrigin = Double(firstNanoseconds) * Double(sampleRate) / 1e9
+        let silence = SilentFrame.make(codec: codec, firstFrame: firstFrame)
         return .success(AudioPlan(track: track, codec: codec, codecName: codecName, sampleRate: sampleRate,
                                   channels: max(1, channels), sampleEntry: entry, codecs: codecs,
                                   averageBitrate: bitrate, originSamples: Int64(rawOrigin.rounded()),
-                                  placeholder: firstFrame, timestampScale: timestampScale,
-                                  offsetNanoseconds: offsetNanoseconds))
+                                  placeholder: silence ?? firstFrame, placeholderIsSilent: silence != nil,
+                                  timestampScale: timestampScale, offsetNanoseconds: offsetNanoseconds))
     }
 }
 
