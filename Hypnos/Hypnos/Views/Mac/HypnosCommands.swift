@@ -2,16 +2,13 @@
  Hypnos - macOS menu bar commands
 
  The `.commands` this app's macOS scene attaches to the main-window
- `WindowGroup`. `View → <tab>` and the Play/Pause space go through
- `NotificationCenter` rather than a shared `@State` selection, because
- `.commands` closures have no access to a specific window's view state (they
- belong to the app, not one scene instance) — the same reason macOS apps
- generally route menu actions to whichever window is key via notifications or
- first-responder `@objc` actions. Every `MacRootView`/`MacVideoPlayerWindow`
- instance listens and only the one that matters (key window in practice) acts
- on it; with more than one main or video window open, all of them do, which is
- an acceptable simplification for a first pass (see `Hypnos/CLAUDE.md`
- "macOS").
+ `WindowGroup`. The Library menu's tab items go through `NotificationCenter`
+ rather than a shared `@State` selection, because `.commands` closures have no
+ access to a specific window's view state (they belong to the app, not one
+ scene instance): every gallery window (`ContentView`) follows them. Play/Pause
+ acts on the video window that is key, through its focused scene value. Its keys
+ (space, the arrows) are the video window's own (`VideoWindowView`): as menu
+ shortcuts they would also take keys typed into a text field.
  */
 
 #if os(macOS)
@@ -20,12 +17,17 @@ import SwiftUI
 
 extension Notification.Name {
     static let hypnosSelectTab = Notification.Name("Hypnos.selectTab")
-    static let hypnosTogglePlayPause = Notification.Name("Hypnos.togglePlayPause")
+}
+
+extension FocusedValues {
+    /// The key video window's player.
+    @Entry var videoWindowModel: VideoWindowModel?
 }
 
 struct HypnosCommands: Commands {
     let appModel: AppModel
     @Environment(\.openWindow) private var openWindow
+    @FocusedValue(\.videoWindowModel) private var video
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -36,18 +38,35 @@ struct HypnosCommands: Commands {
         }
 
         CommandMenu("Library") {
-            ForEach(MacTab.allCases) { tab in
+            ForEach(MainTabCatalog.visibleTabs(appModel: appModel)) { tab in
                 Button(tab.rawValue) {
                     NotificationCenter.default.post(name: .hypnosSelectTab, object: tab)
                 }
             }
+        }
+
+        CommandMenu("Playback") {
+            Button(video?.isPaused == false ? "Pause" : "Play") {
+                video?.togglePlayPause()
+            }
+            .disabled(video == nil)
+
+            Button("Back 10 Seconds") {
+                video?.seek(by: -10)
+            }
+            .disabled(video == nil)
+
+            Button("Forward 10 Seconds") {
+                video?.seek(by: 10)
+            }
+            .disabled(video == nil)
 
             Divider()
 
-            Button("Play/Pause") {
-                NotificationCenter.default.post(name: .hypnosTogglePlayPause, object: nil)
+            Button(video?.isMuted == true ? "Unmute" : "Mute") {
+                video?.toggleMute()
             }
-            .keyboardShortcut(.space, modifiers: [])
+            .disabled(video == nil)
         }
     }
 }

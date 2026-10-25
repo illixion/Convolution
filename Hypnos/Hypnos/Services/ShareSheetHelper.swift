@@ -10,9 +10,74 @@ import SwiftUI
 // UIActivityViewController (the share sheet) doesn't exist on tvOS — there's
 // no AirDrop/Files/Messages target for a Siri Remote UX to hand a file to.
 // The Share button is hidden from the tvOS ornaments at each call site.
-// macOS has its own share sheet (NSSharingServicePicker), but nothing in the
-// macOS UI (Views/Mac/) currently offers a Share button, so this is a known
-// gap rather than a port yet — see Hypnos/CLAUDE.md "macOS".
+// macOS shares through `NSSharingServicePicker`, shown from the button.
+
+extension View {
+    /// The system's share options for `url` while it is set; cleared, and
+    /// `onDismiss` called, once they close. A sheet with the activity view on
+    /// iOS and visionOS, the sharing picker next to this view on macOS.
+    func shareSheet(url: Binding<URL?>, onDismiss: @escaping () -> Void = {}) -> some View {
+        #if os(macOS)
+        background(SharingPickerAnchor(url: url, onDismiss: onDismiss))
+        #elseif os(tvOS)
+        self
+        #else
+        sheet(isPresented: Binding(
+            get: { url.wrappedValue != nil },
+            set: { if !$0 { url.wrappedValue = nil } }
+        ), onDismiss: onDismiss) {
+            if let shared = url.wrappedValue {
+                ActivityViewController(
+                    activityItems: [shared],
+                    isPresented: Binding(
+                        get: { url.wrappedValue != nil },
+                        set: { if !$0 { url.wrappedValue = nil } }
+                    )
+                )
+            }
+        }
+        #endif
+    }
+}
+
+#if os(macOS)
+/// Shows the sharing picker below the view it backs whenever `url` is set.
+private struct SharingPickerAnchor: NSViewRepresentable {
+    @Binding var url: URL?
+    let onDismiss: () -> Void
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.close = {
+            url = nil
+            onDismiss()
+        }
+        guard let url, context.coordinator.shown != url else { return }
+        context.coordinator.shown = url
+        // After this update: the picker runs its own event loop.
+        DispatchQueue.main.async {
+            let picker = NSSharingServicePicker(items: [url])
+            picker.delegate = context.coordinator
+            picker.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, NSSharingServicePickerDelegate {
+        var shown: URL?
+        var close: () -> Void = {}
+
+        /// Called with nil when the picker closes without a choice too.
+        func sharingServicePicker(_ picker: NSSharingServicePicker, didChoose service: NSSharingService?) {
+            shown = nil
+            close()
+        }
+    }
+}
+#endif
+
 #if !os(tvOS) && !os(macOS)
 struct ActivityViewController: UIViewControllerRepresentable {
     let activityItems: [Any]

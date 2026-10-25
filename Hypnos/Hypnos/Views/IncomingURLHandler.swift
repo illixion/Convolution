@@ -38,6 +38,14 @@ struct IncomingURLHandler: ViewModifier {
                 for url in SceneDelegate.drainPendingURLs() {
                     await handle(url)
                 }
+                #if DEBUG
+                // `-UITestDefault debugOpenURL=<url>`: handled as if the
+                // system had opened it (read once).
+                if let raw = UserDefaults.standard.string(forKey: "debugOpenURL"), let url = URL(string: raw) {
+                    UserDefaults.standard.removeObject(forKey: "debugOpenURL")
+                    await handle(url)
+                }
+                #endif
             }
     }
 

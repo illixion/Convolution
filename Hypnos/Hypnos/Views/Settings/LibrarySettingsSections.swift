@@ -138,32 +138,18 @@ struct LocalFilesSection: View {
         Section {
             #if os(macOS)
             Text("Browse and convert files placed in this app's Documents folder: pictures in its Photos folder, videos in Videos.")
+            Button("Show in Finder") {
+                for folder in [LocalMediaSource.photosDirectory, LocalMediaSource.videosDirectory] {
+                    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                }
+                NSWorkspace.shared.activateFileViewerSelecting([LocalMediaSource.photosDirectory,
+                                                                LocalMediaSource.videosDirectory])
+            }
             #else
             Text("Browse and convert files you place in this app's Documents folder — in the Files app, under \"On My \(PlatformCapabilities.deviceFamilyName)\" → Convolution. Pictures go in its Photos folder, videos in Videos.")
             #endif
         } footer: {
             Text("Always available as a library alongside Photos and any server.")
-        }
-    }
-}
-
-/// macOS only: its sidebar has no library switch, unlike the tab bar on
-/// visionOS and iOS.
-struct LibrarySourcePickerSection: View {
-    @Environment(AppModel.self) private var appModel
-
-    var body: some View {
-        Section {
-            Picker("Library", selection: Binding(
-                get: { appModel.effectiveLibrarySource },
-                set: { appModel.librarySource = $0 }
-            )) {
-                ForEach(appModel.availableLibrarySources, id: \.self) { source in
-                    Label(source.displayName, systemImage: source.symbolName).tag(source)
-                }
-            }
-        } footer: {
-            Text("What Pictures, Videos and Albums show. Stash and Nextcloud appear once their server is set up.")
         }
     }
 }

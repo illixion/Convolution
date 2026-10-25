@@ -37,8 +37,9 @@ enum MainTabCatalog {
             case .albums:
                 return appModel.effectiveLibrarySource.offersAlbums
             case .windows:
-                // A window inventory only means something with several windows.
-                return PlatformCapabilities.supportsMultipleWindows
+                // A window inventory only means something with several
+                // windows the system doesn't already list.
+                return PlatformCapabilities.supportsWindowManagement
             default:
                 return true
             }

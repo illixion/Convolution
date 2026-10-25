@@ -5,19 +5,29 @@
  not natively supported by AVPlayer.
  */
 
-// tvOS has no WebKit. macOS's WKWebView exists, but this player's transparent/
-// custom-controls setup and JS bridge (`webView.scrollView.*`, the message
-// handlers wired in `makeUIView`) need real macOS adaptation this pass didn't
-// reach — nothing in the macOS UI (Views/Mac/) mounts it; macOS's own video
-// window uses a plain AVKit `AVPlayerView` instead (`Views/Mac/`). See
-// Hypnos/CLAUDE.md "macOS" for the seam list and gaps.
-#if canImport(WebKit) && !os(macOS)
+// tvOS has no WebKit.
+#if canImport(WebKit)
 import DebugTrace
 import Foundation
 import SwiftUI
 import WebKit
 
-struct WebVideoPlayerView: UIViewRepresentable {
+#if os(macOS)
+extension WebVideoPlayerView: NSViewRepresentable {
+    func makeNSView(context: Context) -> WKWebView { makeWebView(coordinator: context.coordinator) }
+    func updateNSView(_ webView: WKWebView, context: Context) { update(webView, coordinator: context.coordinator) }
+    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) { dismantle(webView, coordinator: coordinator) }
+}
+#else
+extension WebVideoPlayerView: UIViewRepresentable {
+    func makeUIView(context: Context) -> WKWebView { makeWebView(coordinator: context.coordinator) }
+    func updateUIView(_ webView: WKWebView, context: Context) { update(webView, coordinator: context.coordinator) }
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) { dismantle(webView, coordinator: coordinator) }
+}
+#endif
+
+@MainActor
+struct WebVideoPlayerView {
     let videoURL: URL
     /// Optional second URL the *page* switches to on error, without involving
     /// Swift (the remote slideshow's raw → HLS escalation). The main video
@@ -64,14 +74,15 @@ struct WebVideoPlayerView: UIViewRepresentable {
         Coordinator()
     }
 
-    func makeUIView(context: Context) -> WKWebView {
-        let coordinator = context.coordinator
+    func makeWebView(coordinator: Coordinator) -> WKWebView {
         coordinator.onVideoSizeKnown = onVideoSizeKnown
         coordinator.onDurationKnown = onDurationKnown
         coordinator.onSourceUnplayable = onSourceUnplayable
 
         let configuration = WKWebViewConfiguration()
+        #if !os(macOS)
         configuration.allowsInlineMediaPlayback = true
+        #endif
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.userContentController.add(coordinator, name: "videoDimensions")
         configuration.userContentController.add(coordinator, name: "videoPlayback")
@@ -85,16 +96,12 @@ struct WebVideoPlayerView: UIViewRepresentable {
         // scene-phase flap, which is why a prev/next switch — no phase change —
         // stayed blank.)
         webView.navigationDelegate = coordinator
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
-        webView.scrollView.backgroundColor = .clear
-        webView.scrollView.isScrollEnabled = false
+        webView.makeTransparentAndFixed()
 
         return webView
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        let coordinator = context.coordinator
+    func update(_ webView: WKWebView, coordinator: Coordinator) {
         coordinator.onVideoSizeKnown = onVideoSizeKnown
         coordinator.onDurationKnown = onDurationKnown
         coordinator.onSourceUnplayable = onSourceUnplayable
@@ -312,7 +319,7 @@ struct WebVideoPlayerView: UIViewRepresentable {
         }
     }
 
-    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+    static func dismantle(_ webView: WKWebView, coordinator: Coordinator) {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "videoDimensions")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "videoPlayback")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "videoSourceFailed")
@@ -1078,33 +1085,6 @@ struct WebVideoPlayerView: UIViewRepresentable {
             return "\"\""
         }
         return literal
-    }
-}
-#elseif os(macOS)
-import SwiftUI
-
-/// macOS stub — see the gate comment above. Reports its source unplayable
-/// immediately so a caller chained onto `onSourceUnplayable`
-/// (`VideoWindowModel.handleSourceUnplayable`) falls forward onto Stash's
-/// server transcode instead of showing a permanently blank frame; a caller
-/// with no transcode to fall back to just stays blank, same as it would if
-/// the transcode attempt itself failed.
-struct WebVideoPlayerView: View {
-    let videoURL: URL
-    var fallbackVideoURL: URL? = nil
-    var showControls: Bool = true
-    var isRoomActive: Bool = true
-    var onVideoSizeKnown: ((CGSize) -> Void)? = nil
-    var onDurationKnown: ((Double) -> Void)? = nil
-    var loop: Bool = true
-    var visualAdjustments: VisualAdjustments? = nil
-    var loopController: VideoLoopController? = nil
-    var playbackModel: VideoWindowModel? = nil
-    var startMuted: Bool = true
-    var onSourceUnplayable: (() -> Void)? = nil
-
-    var body: some View {
-        Color.clear.onAppear { onSourceUnplayable?() }
     }
 }
 #endif

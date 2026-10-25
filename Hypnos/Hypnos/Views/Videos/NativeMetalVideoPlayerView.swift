@@ -14,16 +14,14 @@ import MetalKit
 import RAVEMedia
 import SwiftUI
 
-// A real `UIViewRepresentable` (nothing visionOS-only here), so it already
-// compiles and runs on iOS/tvOS unchanged. macOS needs `NSViewRepresentable`
-// instead — a different protocol with different required method names, even
-// though every line of AVPlayer/Metal setup below is already fully
-// cross-platform. Nothing in the macOS UI (Views/Mac/) mounts this view —
-// `Views/Mac/MacVideoPlayerView.swift` uses AVKit's `AVPlayerView` directly,
-// which is the more idiomatic Mac choice anyway — so this pass stubs it
-// rather than writing the second (small, `Coordinator`-sharing) wrapper. See
-// Hypnos/CLAUDE.md "macOS" for the seam list and gaps.
-#if !os(macOS)
+// A `UIViewRepresentable` on iOS, tvOS and visionOS and an
+// `NSViewRepresentable` on macOS, over the same host view and `Coordinator`:
+// the AVPlayer/Metal code is the same everywhere.
+#if os(macOS)
+typealias NativePlayerPlatformView = NSView
+#else
+typealias NativePlayerPlatformView = UIView
+#endif
 
 private struct VideoRCASUniforms {
     var brightness: Float
@@ -50,21 +48,33 @@ enum NativeVideoDynamicRange {
 /// The player's view: the Metal picture (SDR, or HDR while adjustments are
 /// on) and the system's own video layer (HDR and Dolby Vision as they are)
 /// over one AVPlayer, one of them showing.
-final class NativeVideoHostView: UIView {
+final class NativeVideoHostView: NativePlayerPlatformView {
     let metalView: MTKView
     let systemView = SystemVideoLayerView()
 
     init(metalView: MTKView) {
         self.metalView = metalView
         super.init(frame: .zero)
+        #if os(macOS)
+        wantsLayer = true
+        #else
         isOpaque = false
-        for view in [metalView, systemView] as [UIView] {
+        #endif
+        for view in [metalView, systemView] as [NativePlayerPlatformView] {
             view.frame = bounds
+            #if os(macOS)
+            view.autoresizingMask = [.width, .height]
+            #else
             view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            #endif
             addSubview(view)
         }
         systemView.isHidden = true
     }
+
+    #if os(macOS)
+    override var isOpaque: Bool { false }
+    #endif
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -93,7 +103,22 @@ final class NativeVideoHostView: UIView {
     #endif
 }
 
-final class SystemVideoLayerView: UIView {
+final class SystemVideoLayerView: NativePlayerPlatformView {
+    #if os(macOS)
+    let playerLayer = AVPlayerLayer()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        playerLayer.videoGravity = .resizeAspect
+        // Otherwise HDR is tone-mapped to SDR (macOS 26 defaults to .standard).
+        playerLayer.preferredDynamicRange = .high
+        layer = playerLayer
+        wantsLayer = true
+    }
+
+    /// Clicks go to the picture's tap target, not here.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    #else
     override class var layerClass: AnyClass { AVPlayerLayer.self }
     var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 
@@ -102,12 +127,32 @@ final class SystemVideoLayerView: UIView {
         playerLayer.videoGravity = .resizeAspect
         isUserInteractionEnabled = false
     }
+    #endif
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
-struct NativeMetalVideoPlayerView: UIViewRepresentable {
+#if os(macOS)
+extension NativeMetalVideoPlayerView: NSViewRepresentable {
+    func makeNSView(context: Context) -> NativeVideoHostView { makeHost(coordinator: context.coordinator) }
+
+    func updateNSView(_ view: NativeVideoHostView, context: Context) { update(coordinator: context.coordinator) }
+
+    static func dismantleNSView(_ view: NativeVideoHostView, coordinator: Coordinator) { coordinator.cleanup() }
+}
+#else
+extension NativeMetalVideoPlayerView: UIViewRepresentable {
+    func makeUIView(context: Context) -> NativeVideoHostView { makeHost(coordinator: context.coordinator) }
+
+    func updateUIView(_ view: NativeVideoHostView, context: Context) { update(coordinator: context.coordinator) }
+
+    static func dismantleUIView(_ view: NativeVideoHostView, coordinator: Coordinator) { coordinator.cleanup() }
+}
+#endif
+
+@MainActor
+struct NativeMetalVideoPlayerView {
     let videoURL: URL
     var isRoomActive: Bool = true
     var onVideoSizeKnown: ((CGSize) -> Void)? = nil
@@ -127,30 +172,33 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         Coordinator()
     }
 
-    func makeUIView(context: Context) -> NativeVideoHostView {
+    func makeHost(coordinator: Coordinator) -> NativeVideoHostView {
         guard let renderer = MetalImageRenderer.shared else {
             return NativeVideoHostView(metalView: MTKView())
         }
 
         let view = MTKView(frame: .zero, device: renderer.device)
-        view.delegate = context.coordinator
+        view.delegate = coordinator
         view.isPaused = false
         view.enableSetNeedsDisplay = false
         view.preferredFramesPerSecond = 60
         view.framebufferOnly = false
         view.colorPixelFormat = .bgra8Unorm
+        #if os(macOS)
+        view.layer?.isOpaque = false
+        #else
         view.isOpaque = false
         view.layer.isOpaque = false
+        #endif
         view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
 
         let host = NativeVideoHostView(metalView: view)
-        context.coordinator.renderer = renderer
-        context.coordinator.attach(to: host)
+        coordinator.renderer = renderer
+        coordinator.attach(to: host)
         return host
     }
 
-    func updateUIView(_ view: NativeVideoHostView, context: Context) {
-        let coordinator = context.coordinator
+    func update(coordinator: Coordinator) {
         coordinator.visualAdjustments = visualAdjustments
         coordinator.onVideoSizeKnown = onVideoSizeKnown
         coordinator.onPlaybackError = onPlaybackError
@@ -211,10 +259,6 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         }
 
         coordinator.setRoomActive(isRoomActive)
-    }
-
-    static func dismantleUIView(_ view: NativeVideoHostView, coordinator: Coordinator) {
-        coordinator.cleanup()
     }
 
     @MainActor
@@ -852,6 +896,10 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
             #if !os(tvOS)
             layer.wantsExtendedDynamicRangeContent = range.isHDR
             #endif
+            #if os(macOS)
+            // macOS 26 tone-maps a layer to SDR unless it asks for more.
+            layer.preferredDynamicRange = range.isHDR ? .high : .standard
+            #endif
         }
 
         /// Swaps the frame output for one in another pixel format.
@@ -928,24 +976,3 @@ struct NativeMetalVideoPlayerView: UIViewRepresentable {
         }
     }
 }
-
-#else
-
-/// macOS stub — see the gate comment above.
-struct NativeMetalVideoPlayerView: View {
-    let videoURL: URL
-    var isRoomActive: Bool = true
-    var onVideoSizeKnown: ((CGSize) -> Void)? = nil
-    var visualAdjustments: VisualAdjustments = VisualAdjustments()
-    var loopController: VideoLoopController? = nil
-    var playbackModel: VideoWindowModel? = nil
-    var startMuted: Bool = true
-    var loops: Bool = true
-    var onPlaybackError: (() -> Void)? = nil
-
-    var body: some View {
-        Color.clear.onAppear { onPlaybackError?() }
-    }
-}
-
-#endif

@@ -3,11 +3,12 @@
 
  The controls the visionOS tab-bar ornament carries past its divider — the
  library switch and the slideshow button — placed in a tab's navigation bar on
- iOS. What is offered comes from `MainTabCatalog`, the same source the ornament
- reads, so the two platforms agree on when each control appears.
+ iOS, and in the window's toolbar on macOS. What is offered comes from
+ `MainTabCatalog`, the same source the ornament reads, so the platforms agree
+ on when each control appears.
  */
 
-#if !os(visionOS) && !os(macOS)
+#if !os(visionOS)
 
 import SwiftUI
 
@@ -16,12 +17,12 @@ struct IOSTabToolbar: ToolbarContent {
     @Environment(AppModel.self) private var appModel
 
     var body: some ToolbarContent {
-        ToolbarItemGroup(placement: .topBarLeading) {
+        ToolbarItemGroup(placement: Self.leading) {
             if MainTabCatalog.showsLibraryToggle(appModel: appModel, selectedTab: tab) {
                 libraryMenu
             }
         }
-        ToolbarItemGroup(placement: .topBarTrailing) {
+        ToolbarItemGroup(placement: Self.trailing) {
             if let launch = MainTabCatalog.slideshowLaunch(appModel: appModel, selectedTab: tab) {
                 Button(action: launch.start) {
                     Label(launch.help, systemImage: "play.fill")
@@ -30,6 +31,14 @@ struct IOSTabToolbar: ToolbarContent {
             }
         }
     }
+
+    #if os(macOS)
+    private static let leading = ToolbarItemPlacement.navigation
+    private static let trailing = ToolbarItemPlacement.primaryAction
+    #else
+    private static let leading = ToolbarItemPlacement.topBarLeading
+    private static let trailing = ToolbarItemPlacement.topBarTrailing
+    #endif
 
     /// Which library the media tabs show. A menu of radio rows, like the
     /// ornament's popover.

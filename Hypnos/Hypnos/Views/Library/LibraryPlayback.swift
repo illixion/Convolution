@@ -209,12 +209,6 @@ private struct LibraryPlaybackPresenter: ViewModifier {
             .onChange(of: playback.pendingWindow) { _, presentation in
                 guard let presentation else { return }
                 playback.pendingWindow = nil
-                #if os(macOS)
-                // The Mac's video-detail scene takes a bare GalleryVideo
-                // (MacVideoPlayerWindow), so the start point travels beside it.
-                LibraryResumePoints.set(presentation.startSeconds, for: presentation.video.identity)
-                openWindow(id: "video-detail", value: presentation.video)
-                #else
                 let pushes = !appModel.openMediaInNewWindows
                 var value = VideoWindowValue(video: presentation.video, galleryVideos: [presentation.video],
                                              wasPushed: pushes)
@@ -224,26 +218,7 @@ private struct LibraryPlaybackPresenter: ViewModifier {
                 } else {
                     openWindow(id: "video-detail", value: value)
                 }
-                #endif
             }
         #endif
     }
 }
-
-#if os(macOS)
-/// Start positions for Library videos opened in the Mac's video-detail
-/// window, whose scene value is a plain `GalleryVideo` with no room for one.
-/// Taken (and cleared) by `MacVideoPlayerWindow` when it starts playing.
-@MainActor
-enum LibraryResumePoints {
-    private static var points: [String: Double] = [:]
-
-    static func set(_ seconds: Double?, for identity: String) {
-        points[identity] = seconds
-    }
-
-    static func take(for identity: String) -> Double? {
-        points.removeValue(forKey: identity)
-    }
-}
-#endif

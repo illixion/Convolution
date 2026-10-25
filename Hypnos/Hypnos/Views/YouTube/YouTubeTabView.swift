@@ -509,9 +509,6 @@ struct YouTubeTabView: View {
         presentedStart = start
         tvReporter = YouTubeWatchReporter(video: video)
         presentedVideo = video
-        #elseif os(macOS)
-        LibraryResumePoints.set(start, for: video.identity)
-        openWindow(id: "video-detail", value: video)
         #else
         var value = VideoWindowValue(video: video, galleryVideos: [video])
         value.startSeconds = start

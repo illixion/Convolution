@@ -1520,6 +1520,11 @@ final class VideoWindowModel {
         stallMonitor.restartGrace(at: .now)
     }
 
+    /// Moves the playhead `seconds` (back when negative), within the video.
+    func seek(by seconds: Double) {
+        endScrub(at: currentTime + seconds)
+    }
+
     func beginScrub() {
         isScrubbing = true
         cancelAutoHideTimer()
@@ -1746,8 +1751,10 @@ final class VideoWindowModel {
 
     // MARK: - Scene Phase / Room Activity
 
+    /// The title, else the file's name (Stash leaves an untitled scene's
+    /// title empty rather than unset).
     var videoDisplayName: String {
-        video.title ?? video.streamURL.lastPathComponent
+        [video.title, video.fileName].compactMap { $0 }.first { !$0.isEmpty } ?? video.streamURL.lastPathComponent
     }
 
     func handleScenePhaseChange(from oldPhase: ScenePhase, to newPhase: ScenePhase) {

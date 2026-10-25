@@ -192,6 +192,9 @@ struct PhotoWindowView: View {
         } message: {
             Text("A window for this image is already open. You can summon it or open a copy.")
         }
+        #if os(macOS)
+        .macPhotoWindow(windowModel)
+        #endif
     }
 
     private var photoRestorationStatus: String {

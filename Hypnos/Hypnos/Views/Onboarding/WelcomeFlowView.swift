@@ -87,7 +87,13 @@ struct WelcomeFlowView: View {
             }
         }
         .animation(.smooth(duration: 0.3), value: flow.page)
+        #if os(macOS)
+        // A Mac's materials and glass let the gallery behind read through
+        // the copy.
+        .background(.background, in: shape)
+        #else
         .background(.regularMaterial, in: shape)
+        #endif
         .clipShape(shape)
         .glassBackgroundEffect(in: shape)
     }

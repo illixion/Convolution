@@ -9,15 +9,12 @@
  AccessTo:) pattern WebVideoPlayerView uses for local playback.
  */
 
-// tvOS has no WebKit. macOS is excluded too: this generator renders into a
-// real offscreen UIWindow/UIWindowScene to force a WKWebView layout pass, a
-// technique with no macOS equivalent (NSWindow/WKWebView don't need it — a
-// hosted WKWebView lays out once added to a view hierarchy regardless of
-// window visibility), and nothing mounts this path on macOS. See
-// Hypnos/CLAUDE.md "macOS".
-#if canImport(WebKit) && !os(macOS)
+// tvOS has no WebKit.
+#if canImport(WebKit)
 import DebugTrace
+#if canImport(UIKit)
 import UIKit
+#endif
 import WebKit
 
 @MainActor
@@ -98,21 +95,41 @@ private final class WebMFrameCapture: NSObject, WKScriptMessageHandler {
 
     private func begin(url: URL) {
         let configuration = WKWebViewConfiguration()
+        #if os(macOS)
+        // macOS's WebKit gives each file URL an origin of its own, so the
+        // video taints the canvas and the frame can't be read back
+        // ("The operation is insecure"). This page and its video are files
+        // of ours, side by side.
+        configuration.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
+        #else
         configuration.allowsInlineMediaPlayback = true
+        #endif
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.userContentController.add(self, name: "frame")
 
         let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 64, height: 64), configuration: configuration)
+        // Not 0/hidden — WebKit suspends media rendering when fully hidden.
+        #if os(macOS)
+        webView.alphaValue = 0.01
+        #else
         webView.isOpaque = false
-        webView.alpha = 0.01 // Not 0/hidden — WebKit suspends media rendering when fully hidden.
+        webView.alpha = 0.01
         webView.isUserInteractionEnabled = false
+        #endif
         self.webView = webView
 
         // Must live in a window for WebKit to actually decode video frames.
+        #if os(macOS)
+        guard let window = Self.foregroundWindow()?.contentView else {
+            finish(nil)
+            return
+        }
+        #else
         guard let window = Self.foregroundWindow() else {
             finish(nil)
             return
         }
+        #endif
         window.addSubview(webView)
 
         // Temp HTML next to the video, referencing it by relative name, with read
@@ -179,11 +196,19 @@ private final class WebMFrameCapture: NSObject, WKScriptMessageHandler {
 
     // MARK: - Helpers
 
+    #if os(macOS)
+    /// One of the app's own windows on screen (the app may be in the
+    /// background, with no key or main window).
+    private static func foregroundWindow() -> NSWindow? {
+        NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.orderedWindows.first { $0.isVisible && $0.canBecomeMain }
+    }
+    #else
     private static func foregroundWindow() -> UIWindow? {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let active = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
         return active?.windows.first { $0.isKeyWindow } ?? active?.windows.first
     }
+    #endif
 
     private static func image(fromDataURL dataURL: String) -> UIImage? {
         guard let commaIndex = dataURL.firstIndex(of: ",") else { return nil }

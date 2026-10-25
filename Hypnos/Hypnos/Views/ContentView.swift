@@ -142,6 +142,13 @@ struct ContentView: View {
         .onChange(of: appModel.activeRemoteViewerOpenRequest?.id) { _, _ in
             handleRemoteViewerOpenIfNeeded()
         }
+        #if os(macOS)
+        // The menu bar's Library menu: every gallery window follows it.
+        .onReceive(NotificationCenter.default.publisher(for: .hypnosSelectTab)) { notification in
+            guard let tab = notification.object as? Tab else { return }
+            MainTabCatalog.select(tab, in: windowModel)
+        }
+        #endif
         #if !os(visionOS)
         // On visionOS a tag tapped in an info sheet opens a *new* main window,
         // whose onAppear adopts the seeded filter. iOS has one gallery, so the
@@ -189,9 +196,10 @@ struct ContentView: View {
         .transition(.opacity)
     }
     #else
-    /// The system tab bar. Tabs that already carry their own `NavigationStack`
-    /// (Filters, Remote, Settings) are used as-is; the rest get one so they
-    /// have a title bar for the library switch, slideshow and Select buttons.
+    /// The system tab bar (a sidebar on macOS). Tabs that already carry their
+    /// own `NavigationStack` (Filters, Remote, Settings) are used as-is; the
+    /// rest get one so they have a title bar for the library switch,
+    /// slideshow and Select buttons.
     private var tabs: some View {
         TabView(selection: tabSelection) {
             ForEach(MainTabCatalog.visibleTabs(appModel: appModel)) { tab in
@@ -223,19 +231,16 @@ struct ContentView: View {
                         #if !os(tvOS) && !os(macOS)
                         .navigationBarTitleDisplayMode(.inline)
                         #endif
-                        #if !os(macOS)
                         .toolbar {
                             IOSTabToolbar(tab: tab)
                         }
-                        #endif
                 }
             }
         }
         // Nothing behind the welcome flow is useful yet, and a visible tab
         // bar under it invites an escape into an empty gallery. Set on the
         // page, not the TabView — tab-bar visibility is a content preference.
-        // No `.tabBar` toolbar placement on macOS (this whole `#else` branch
-        // is dead code there anyway — the Mac UI uses `MacRootView` instead).
+        // No `.tabBar` toolbar placement on macOS: the tabs are a sidebar.
         #if !os(macOS)
         .toolbarVisibility(showWelcome ? .hidden : .visible, for: .tabBar)
         #endif

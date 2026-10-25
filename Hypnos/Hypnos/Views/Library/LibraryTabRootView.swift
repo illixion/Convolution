@@ -92,7 +92,8 @@ struct LibraryTabRootView: View {
 
     /// DEBUG-only counterpart to tvOS's `tvLibraryAutoOpenItemId`:
     /// `-UITestDefault libraryAutoOpenItemId=<id>` pushes that item's detail
-    /// page, for screenshots without driving taps.
+    /// page, for screenshots without driving taps; with
+    /// `-UITestDefault libraryAutoPlay=1` it plays it too (read once).
     private func openAutoOpenItemIfRequested() async {
         #if DEBUG
         guard path.isEmpty,
@@ -101,6 +102,10 @@ struct LibraryTabRootView: View {
               let item = try? await library.item(id: itemId)
         else { return }
         path.append(item)
+        if UserDefaults.standard.bool(forKey: "libraryAutoPlay") {
+            UserDefaults.standard.removeObject(forKey: "libraryAutoPlay")
+            await playback.play(item)
+        }
         #endif
     }
 }

@@ -55,11 +55,12 @@ struct VideoWindowView: View {
     /// transport and feature rows have the same footprint in 2D and fake-3D.
     ///
     /// visionOS hangs the controls below the window instead, so the window is
-    /// the picture alone. iOS draws them over the picture (the ornament shim is
-    /// an edge overlay, and they auto-hide), so reserving room only pushed the
-    /// picture up: a 16:9 episode on a landscape iPad sat against the top.
+    /// the picture alone. iOS and macOS draw them over the picture (the
+    /// ornament shim is an edge overlay, and they auto-hide), so reserving
+    /// room only pushed the picture up: a 16:9 episode on a landscape iPad sat
+    /// against the top.
     private var ornamentBottomPadding: CGFloat {
-        #if os(visionOS) || os(iOS)
+        #if os(visionOS) || os(iOS) || os(macOS)
         return 0
         #else
         if windowModel.shouldUse3DMode { return 60 }
@@ -115,7 +116,7 @@ struct VideoWindowView: View {
     private var overlayBottomInset: CGFloat {
         #if os(visionOS)
         return ornamentBottomPadding + 24
-        #elseif os(iOS)
+        #elseif os(iOS) || os(macOS)
         // Clear the overlaid controls, as the old reserved space did.
         return 160 + 96
         #else
@@ -665,6 +666,9 @@ struct VideoWindowView: View {
             await followYouTubeProgress(reported)
             #endif
         }
+        #if os(macOS)
+        .macVideoWindow(windowModel)
+        #endif
     }
 
     #if HYPNOS_YOUTUBE

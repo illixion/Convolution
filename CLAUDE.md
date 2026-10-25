@@ -118,14 +118,15 @@ generated from the same flattened 1024×1024 source as the other platforms —
 square, no rounded-square mask baked in (a cosmetic gap, same spirit as
 tvOS's "no per-layer parallax art was made").
 
-The macOS window shape (real multiple windows, `Views/Mac/`, the menu bar),
-the UIKit-gap seam files (`PlatformImage`, `PlatformPasteboard`,
-`PlatformWindowScene`, the stubbed Metal/WKWebView views), Films audio
-without head tracking, the `VideoPlayer`-crashes/`AVPlayerView`-doesn't
-finding, and the reusable cross-platform-port pattern are all documented in
-`.claude/rules/hypnos-macos-port.md` (auto-loads when touching `Views/Mac/`,
-`Mac*.swift`, `HypnosCommands.swift`, `PlatformImage.swift`, or
-`PlatformPasteboard.swift`).
+The Mac runs the same UI as visionOS and iOS (since 2026-10-25): `ContentView`'s
+tabs as a sidebar, and a real window per picture, video, slideshow and shared
+file with the shared `PhotoWindowView`/`VideoWindowView`/`RemoteViewerWindowView`.
+How (the scene list, `Support/MacViewerWindow.swift`, the Metal and WebKit
+views as `NSViewRepresentable`s, the menu bar, the UIKit-gap seam files), what
+a Mac can't have (3D, immersive spaces), and how to drive the Mac build
+without clicking are in `.claude/rules/hypnos-macos-port.md` (auto-loads when
+touching `Views/Mac/`, `Mac*.swift`, `HypnosCommands.swift`,
+`PlatformImage.swift` or `PlatformPasteboard.swift`).
 
 ## UI Tests (XCUITest)
 

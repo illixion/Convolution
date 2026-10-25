@@ -12,15 +12,8 @@ import DebugTrace
 import MetalKit
 import SwiftUI
 
-// This is a real `UIViewRepresentable`, not something visionOS-only, so it
-// already compiles and runs on iOS/tvOS unchanged. macOS needs an
-// `NSViewRepresentable` instead — a different protocol with different
-// required method names (`makeNSView`/`updateNSView`), even though `MTKView`
-// and every line of Metal setup below are already fully cross-platform.
-// Nothing in the macOS UI (Views/Mac/) mounts this view yet, so this pass
-// stubs it rather than writing that (small, mechanical, `Coordinator`-sharing)
-// second wrapper — see Hypnos/CLAUDE.md "macOS" for the seam list and gaps.
-#if !os(macOS)
+// A `UIViewRepresentable` on iOS, tvOS and visionOS and an
+// `NSViewRepresentable` on macOS, over the same `MTKView` and `Coordinator`.
 
 /// An on-demand MTKView can receive its first draw request before a restored
 /// visionOS scene has a drawable. Re-arm rendering when the view is attached or
@@ -29,6 +22,19 @@ private final class ResilientMTKView: MTKView {
     var requestRedraw: (() -> Void)?
     private var lastLayoutSize: CGSize = .zero
 
+    #if os(macOS)
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            requestRedraw?()
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        laidOut()
+    }
+    #else
     override func didMoveToWindow() {
         super.didMoveToWindow()
         if window != nil {
@@ -38,6 +44,11 @@ private final class ResilientMTKView: MTKView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        laidOut()
+    }
+    #endif
+
+    private func laidOut() {
         guard bounds.size != lastLayoutSize else { return }
         lastLayoutSize = bounds.size
         if bounds.width > 0, bounds.height > 0 {
@@ -45,6 +56,20 @@ private final class ResilientMTKView: MTKView {
         }
     }
 }
+
+#if os(macOS)
+extension MetalImageView: NSViewRepresentable {
+    func makeNSView(context: Context) -> MTKView { makeView(coordinator: context.coordinator) }
+
+    func updateNSView(_ mtkView: MTKView, context: Context) { update(mtkView, coordinator: context.coordinator) }
+}
+#else
+extension MetalImageView: UIViewRepresentable {
+    func makeUIView(context: Context) -> MTKView { makeView(coordinator: context.coordinator) }
+
+    func updateUIView(_ mtkView: MTKView, context: Context) { update(mtkView, coordinator: context.coordinator) }
+}
+#endif
 
 /// Matches `ImageUniforms` in Shaders.metal — pass-1 (RCAS) input.
 private struct ImageUniforms {
@@ -62,7 +87,8 @@ private struct AAUniforms {
     var applyResolve: Float
 }
 
-struct MetalImageView: UIViewRepresentable {
+@MainActor
+struct MetalImageView {
     @Environment(\.scenePhase) private var scenePhase
 
     let texture: MTLTexture?
@@ -78,14 +104,14 @@ struct MetalImageView: UIViewRepresentable {
         Coordinator(diagnosticLabel: diagnosticLabel)
     }
 
-    func makeUIView(context: Context) -> MTKView {
+    func makeView(coordinator: Coordinator) -> MTKView {
         guard let renderer = MetalImageRenderer.shared else {
             return MTKView()
         }
 
         let mtkView = ResilientMTKView(frame: .zero, device: renderer.device)
-        mtkView.delegate = context.coordinator
-        mtkView.requestRedraw = { [weak mtkView, weak coordinator = context.coordinator] in
+        mtkView.delegate = coordinator
+        mtkView.requestRedraw = { [weak mtkView, weak coordinator] in
             guard let mtkView, let coordinator else { return }
             coordinator.requestRedraw(in: mtkView)
         }
@@ -95,8 +121,12 @@ struct MetalImageView: UIViewRepresentable {
         mtkView.enableSetNeedsDisplay = true
 
         // Transparent background so SwiftUI background shows through
+        #if os(macOS)
+        mtkView.layer?.isOpaque = false
+        #else
         mtkView.isOpaque = false
         mtkView.layer.isOpaque = false
+        #endif
         mtkView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
 
         // Pick framebuffer format based on texture depth
@@ -104,24 +134,23 @@ struct MetalImageView: UIViewRepresentable {
         mtkView.colorPixelFormat = is16Bit ? .rgba16Float : .bgra8Unorm
 
         // Store current state in coordinator
-        context.coordinator.renderer = renderer
-        context.coordinator.texture = texture
-        context.coordinator.brightness = brightness
-        context.coordinator.contrast = contrast
-        context.coordinator.saturation = saturation
-        context.coordinator.sharpen = sharpen
-        context.coordinator.scenePhase = scenePhase
-        context.coordinator.onFramePresented = onFramePresented
-        context.coordinator.onRenderStalled = onRenderStalled
+        coordinator.renderer = renderer
+        coordinator.texture = texture
+        coordinator.brightness = brightness
+        coordinator.contrast = contrast
+        coordinator.saturation = saturation
+        coordinator.sharpen = sharpen
+        coordinator.scenePhase = scenePhase
+        coordinator.onFramePresented = onFramePresented
+        coordinator.onRenderStalled = onRenderStalled
 
-        context.coordinator.logViewCreated(mtkView)
+        coordinator.logViewCreated(mtkView)
 
-        context.coordinator.requestRedraw(in: mtkView)
+        coordinator.requestRedraw(in: mtkView)
         return mtkView
     }
 
-    func updateUIView(_ mtkView: MTKView, context: Context) {
-        let coordinator = context.coordinator
+    func update(_ mtkView: MTKView, coordinator: Coordinator) {
         var needsRedraw = false
 
         if coordinator.scenePhase != scenePhase {
@@ -286,7 +315,11 @@ struct MetalImageView: UIViewRepresentable {
             // delegate immediately when the layer can still produce a frame.
             view.draw()
             if !hasPresentedFrame {
+                #if os(macOS)
+                view.needsDisplay = true
+                #else
                 view.setNeedsDisplay()
+                #endif
             }
         }
 
@@ -427,23 +460,3 @@ struct MetalImageView: UIViewRepresentable {
         }
     }
 }
-
-#else
-
-/// macOS stub — see the gate comment above.
-struct MetalImageView: View {
-    let texture: MTLTexture?
-    let brightness: Float
-    let contrast: Float
-    let saturation: Float
-    let sharpen: Float
-    var diagnosticLabel: String? = nil
-    var onFramePresented: (() -> Void)? = nil
-    var onRenderStalled: (() -> Void)? = nil
-
-    var body: some View {
-        Color.clear
-    }
-}
-
-#endif

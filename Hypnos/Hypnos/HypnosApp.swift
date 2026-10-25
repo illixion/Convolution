@@ -325,70 +325,128 @@ struct HypnosApp: App {
     // MARK: - macOS
 
     #if os(macOS)
-    /// Real multiple windows, like visionOS — not the iOS/tvOS single-scene
-    /// router (`WindowActions.swift` routes `openWindow`/`dismissWindow`
-    /// straight to SwiftUI's own actions here, the same as visionOS).
+    /// Real multiple windows, like visionOS, with the same window content:
+    /// the gallery (`ContentView`, its tabs in a sidebar), a window per
+    /// picture, video and slideshow, the shared-media viewer and the tool
+    /// windows. No immersive spaces and no window manager: the Window menu
+    /// and Mission Control do that job on a Mac.
     ///
-    /// The shape deliberately doesn't mirror visionOS's *content* one scene at
-    /// a time: visionOS's `photo-detail`/`video-detail` windows host the full
-    /// RealityKit/fake-3D/adjustments viewer machinery, which is UIKit- and
-    /// visionOS-tuned throughout (see Hypnos/CLAUDE.md "macOS" for the full
-    /// seam/gap list) and stubbed out on macOS rather than ported this pass.
-    /// So macOS gets its own lightweight photo/video window content
-    /// (`Views/Mac/`) instead, plus the two tool windows that already have no
-    /// UIKit dependency (`ConsoleWindowView`, `GPUMemoryMonitorView`).
+    /// Only the gallery takes URLs (`hypnos://`, files opened with the app),
+    /// opening one if none is open: left to itself SwiftUI would open a new
+    /// window of whichever group it picked for each URL.
     @SceneBuilder
     private var macOSScenes: some Scene {
         WindowGroup("Convolution", id: "main") {
-            MacRootView()
+            ContentView()
                 .environment(appModel)
+                .frame(minWidth: 640, minHeight: 480)
+                .handleIncomingMediaURLs(appModel: appModel)
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
+                .debugApprovalPrompts()
         }
         .defaultSize(width: 1280, height: 820)
-        .windowResizability(.contentSize)
+        .handlesExternalEvents(matching: ["*"])
         .commands {
             HypnosCommands(appModel: appModel)
         }
 
-        WindowGroup(id: "photo-detail", for: MacPhotoWindowValue.self) { $value in
-            if let value {
-                MacPhotoViewerWindow(value: value)
-                    .environment(appModel)
+        WindowGroup("Picture", id: "photo-detail", for: PhotoWindowValue.self) { $windowValue in
+            if let windowValue {
+                PhotoWindowView(windowValue: windowValue, appModel: appModel, onSizeSettled: { size in
+                    $windowValue.wrappedValue?.restoredSize = RAVECodableSize(size)
+                })
+                .environment(appModel)
+                .viewerWindowChrome()
+            } else {
+                UnrestorableWindow()
             }
         }
+        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1000, height: 760)
+        .handlesExternalEvents(matching: [])
 
-        WindowGroup(id: "video-detail", for: GalleryVideo.self) { $video in
-            if let video, video.opensInFilmPlayer {
-                LocalDiscHandoffView(video: video)
+        WindowGroup("Video", id: "video-detail", for: VideoWindowValue.self) { $windowValue in
+            if let windowValue, windowValue.video.opensInFilmPlayer {
+                LocalDiscHandoffView(video: windowValue.video)
                     .environment(appModel)
-            } else if let video {
-                MacVideoPlayerWindow(video: video)
+            } else if let windowValue {
+                VideoWindowView(windowValue: windowValue, appModel: appModel)
                     .environment(appModel)
+                    .viewerWindowChrome()
+            } else {
+                UnrestorableWindow()
             }
         }
+        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1120, height: 700)
+        .handlesExternalEvents(matching: [])
 
-        // Film player: picture plus Atmos objects (Settings → Developer →
-        // Film Player), the same window id and content as visionOS/iOS — see
-        // FilmPlayerView's own `#elseif os(iOS) / #else` (macOS) branch.
+        WindowGroup("Shared Picture", id: "shared-photo", for: SharedMediaItem.self) { $item in
+            if let item {
+                SharedPhotoWindowView(item: item, appModel: appModel)
+                    .environment(appModel)
+                    .viewerWindowChrome()
+            } else {
+                UnrestorableWindow()
+            }
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1000, height: 760)
+        .handlesExternalEvents(matching: [])
+
+        // Slideshows of the app's own pictures or videos.
+        WindowGroup("Slideshow", id: "remote-viewer", for: RemoteViewerWindowValue.self) { $windowValue in
+            if let windowValue {
+                RemoteViewerWindowView(windowValue: windowValue, onSizeSettled: { size in
+                    $windowValue.wrappedValue?.restoredSize = RAVECodableSize(size)
+                })
+                .environment(appModel)
+                .frame(minWidth: RemoteViewerWindowView.minimumWindowSize.width,
+                       minHeight: RemoteViewerWindowView.minimumWindowSize.height)
+                .viewerWindowChrome()
+            } else {
+                UnrestorableWindow()
+            }
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1280, height: 800)
+        .handlesExternalEvents(matching: [])
+
+        // Film player: picture plus object audio (Settings → Developer →
+        // Film Player), without head tracking on a Mac.
         Window("Film Player", id: FilmPlayerView.windowID) {
             FilmPlayerView()
                 .environment(appModel)
         }
         .defaultSize(width: 900, height: 800)
         .restorationBehavior(.disabled)
+        .handlesExternalEvents(matching: [])
+
+        Window("Adjustments", id: "video-adjustments") {
+            VideoAdjustmentsWindowView()
+                .environment(appModel)
+        }
+        .defaultSize(width: 380, height: 640)
+        .windowResizability(.contentSize)
+        .handlesExternalEvents(matching: [])
 
         Window("Console", id: "console") {
             ConsoleWindowView()
                 .environment(appModel)
         }
         .defaultSize(width: 900, height: 600)
+        .handlesExternalEvents(matching: [])
 
         Window("GPU Memory", id: "gpu-memory") {
             GPUMemoryMonitorView()
                 .environment(appModel)
         }
         .defaultSize(width: 500, height: 350)
+        .handlesExternalEvents(matching: [])
+
+        // The debug server's "Allow debug access?" prompt, which the gallery
+        // opens (`debugApprovalPrompts`).
+        DebugApprovalWindow()
     }
     #endif
 }

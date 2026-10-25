@@ -5,17 +5,27 @@
  Loads the image from its direct URL to preserve browser-native animation.
  */
 
-// tvOS has no WebKit. macOS's WKWebView exists, but this view's transparent/
-// no-scroll setup (`webView.scrollView.*`) is UIKit-`WKWebView`-only API with
-// no macOS equivalent property, and nothing in the macOS UI (Views/Mac/)
-// mounts this view, so it gets a stub like a visionOS-only view gets on iOS —
-// see Hypnos/CLAUDE.md "macOS" for the seam list and the plan for a real
-// NSViewRepresentable later.
-#if canImport(WebKit) && !os(macOS)
+// tvOS has no WebKit.
+#if canImport(WebKit)
 import SwiftUI
 import WebKit
 
-struct AnimatedImageWebView: UIViewRepresentable {
+#if os(macOS)
+extension AnimatedImageWebView: NSViewRepresentable {
+    func makeNSView(context: Context) -> WKWebView { makeWebView(coordinator: context.coordinator) }
+    func updateNSView(_ webView: WKWebView, context: Context) { update(webView, coordinator: context.coordinator) }
+    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) { dismantle(webView) }
+}
+#else
+extension AnimatedImageWebView: UIViewRepresentable {
+    func makeUIView(context: Context) -> WKWebView { makeWebView(coordinator: context.coordinator) }
+    func updateUIView(_ webView: WKWebView, context: Context) { update(webView, coordinator: context.coordinator) }
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) { dismantle(webView) }
+}
+#endif
+
+@MainActor
+struct AnimatedImageWebView {
     enum ElementType: String {
         case image
         case video
@@ -40,25 +50,22 @@ struct AnimatedImageWebView: UIViewRepresentable {
         Coordinator(onError: onError)
     }
 
-    func makeUIView(context: Context) -> WKWebView {
+    func makeWebView(coordinator: Coordinator) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.userContentController.add(context.coordinator, name: "mediaError")
+        configuration.userContentController.add(coordinator, name: "mediaError")
         let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
-        webView.scrollView.backgroundColor = .clear
-        webView.scrollView.isScrollEnabled = false
+        webView.makeTransparentAndFixed()
         return webView
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        context.coordinator.onError = onError
+    func update(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.onError = onError
         let digest = imageURL.absoluteString.hashValue
             ^ elementType.rawValue.hashValue
             ^ credentialDigest
             ^ (imageData?.count ?? 0)
-        guard context.coordinator.loadedDigest != digest else { return }
-        context.coordinator.loadedDigest = digest
+        guard coordinator.loadedDigest != digest else { return }
+        coordinator.loadedDigest = digest
 
         loadMedia(webView: webView)
     }
@@ -96,7 +103,7 @@ struct AnimatedImageWebView: UIViewRepresentable {
         webView.loadHTMLString(html, baseURL: nil)
     }
 
-    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+    static func dismantle(_ webView: WKWebView) {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "mediaError")
     }
 
@@ -221,29 +228,6 @@ private extension String {
     var jsEscapedForSingleQuotedString: String {
         replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "'", with: "\\'")
-    }
-}
-#elseif os(macOS)
-import SwiftUI
-
-/// macOS stub — see the gate comment above. Reports its element unplayable
-/// immediately, the same as a real decode failure, so a caller chained onto
-/// `onError` (the slideshow's native-`<img>`-tier fall-through) falls forward
-/// onto its next tier instead of showing a permanently blank frame.
-struct AnimatedImageWebView: View {
-    enum ElementType: String {
-        case image
-        case video
-    }
-
-    let imageURL: URL
-    var elementType: ElementType = .image
-    var imageData: Data?
-    var imageDataMimeType: String = "image/webp"
-    var onError: (() -> Void)?
-
-    var body: some View {
-        Color.clear.onAppear { onError?() }
     }
 }
 #endif

@@ -11,11 +11,11 @@ import SwiftUI
 @MainActor
 @Observable
 class MainWindowModel {
-    // DEBUG-only, mirroring tvOS's `tvInitialTab`/macOS's `macInitialTab`
+    // DEBUG-only, mirroring tvOS's `tvInitialTab`
     // (`Support/UITestingConfiguration.swift`): `-UITestDefault
     // mainInitialTab=Library` opens straight to a given tab, since there's
-    // no remote-button-style shortcut into a specific visionOS/iOS tab
-    // otherwise.
+    // no remote-button-style shortcut into a specific visionOS/iOS/macOS
+    // tab otherwise.
     var selectedTab: Tab = {
         #if DEBUG
         if let raw = UserDefaults.standard.string(forKey: "mainInitialTab"), let tab = Tab(rawValue: raw) {

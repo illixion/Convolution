@@ -90,9 +90,7 @@ actor ThumbnailGenerator {
         // engine that plays it). Skip the AVAssetImageGenerator attempt entirely.
         // tvOS has no WebKit, so a WebM file there just falls through to the
         // placeholder below (AVAssetImageGenerator fails on it the same way).
-        // macOS is excluded too — WebMThumbnailGenerator's offscreen-render
-        // trick is UIWindow/UIWindowScene-specific (see its own gate).
-        #if canImport(WebKit) && !os(macOS)
+        #if canImport(WebKit)
         if url.pathExtension.lowercased() == "webm" {
             return await WebMThumbnailGenerator.shared.generateThumbnail(for: url, maxSize: maxSize)
         }

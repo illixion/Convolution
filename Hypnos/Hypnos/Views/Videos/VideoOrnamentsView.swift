@@ -361,26 +361,8 @@ struct VideoOrnamentsView: View {
         .modifier(OrnamentButtonStyle())
         .disabled(windowModel.isPreparingShare)
         .help("Share")
-        .sheet(isPresented: Binding(
-            get: { windowModel.shareFileURL != nil },
-            set: { if !$0 { windowModel.shareFileURL = nil } }
-        )) {
+        .shareSheet(url: $windowModel.shareFileURL) {
             windowModel.startAutoHideTimer()
-        } content: {
-            // No share sheet on tvOS (see PhotoOrnamentView's Share button
-            // for the same note) — this ornament isn't part of the tvOS root
-            // UI's video player anyway.
-            #if !os(tvOS) && !os(macOS)
-            if let url = windowModel.shareFileURL {
-                ActivityViewController(
-                    activityItems: [url],
-                    isPresented: Binding(
-                        get: { windowModel.shareFileURL != nil },
-                        set: { if !$0 { windowModel.shareFileURL = nil } }
-                    )
-                )
-            }
-            #endif
         }
     }
 

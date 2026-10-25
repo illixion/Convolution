@@ -1570,7 +1570,13 @@ class AppModel {
         self.thumbnailStyle = loadedThumbnailStyle
         self.galleryGridStyle = loadedGalleryGridStyle
         self.roundedCorners = loadedRoundedCorners
+        #if os(macOS)
+        // Nothing replaces a Mac window's content in place: every viewer is
+        // a window of its own.
+        self.openMediaInNewWindows = true
+        #else
         self.openMediaInNewWindows = loadedOpenMediaInNewWindows
+        #endif
         self.pinchToZoomVideos = UserDefaults.standard.bool(forKey: "pinchToZoomVideos")
         self.enableStashTranscoding = loadedEnableStashTranscoding
         self.realtimeDepthModelName = loadedRealtimeDepthModelName

@@ -43,7 +43,7 @@ struct GeneralSettingsPage: View {
             }
 
             Section {
-                if PlatformCapabilities.supportsMultipleWindows {
+                if PlatformCapabilities.supportsWindowManagement {
                     Toggle("Always Open In New Window", isOn: $appModel.openMediaInNewWindows)
                 }
                 // A window with rounded glass corners is a visionOS thing; on

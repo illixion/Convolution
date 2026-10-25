@@ -25,5 +25,23 @@ struct PicturesTabView: View {
         }
         .environment(appModel)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #if DEBUG
+        // `-UITestDefault autoStartSlideshow=1`: the toolbar's slideshow of
+        // what the tab shows, once it has loaded (read once).
+        .task(id: appModel.galleryImages.isEmpty) {
+            guard UserDefaults.standard.bool(forKey: "autoStartSlideshow"),
+                  let launch = MainTabCatalog.slideshowLaunch(appModel: appModel, selectedTab: .pictures) else { return }
+            UserDefaults.standard.removeObject(forKey: "autoStartSlideshow")
+            launch.start()
+        }
+        // `-UITestDefault autoOpenImageIndex=<n>`: that picture opens once
+        // the grid has it (read once). tvOS has `tvAutoOpenPictureIndex`.
+        .task(id: appModel.galleryImages.count) {
+            guard let index = UserDefaults.standard.object(forKey: "autoOpenImageIndex") as? Int,
+                  appModel.galleryImages.indices.contains(index) else { return }
+            UserDefaults.standard.removeObject(forKey: "autoOpenImageIndex")
+            appModel.enqueuePhotoWindowOpen(appModel.galleryImages[index])
+        }
+        #endif
     }
 }

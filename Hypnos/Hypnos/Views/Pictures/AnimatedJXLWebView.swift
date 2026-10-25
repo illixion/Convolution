@@ -23,18 +23,28 @@
  needs no file-URL read access.
 */
 
-// tvOS has no WebKit. macOS's WKWebView exists, but this view's transparent/
-// no-scroll setup (`webView.scrollView.*`) is UIKit-`WKWebView`-only API with
-// no macOS equivalent property, and nothing in the macOS UI (Views/Mac/)
-// mounts this view, so it gets the same stub-and-fail-closed treatment as a
-// visionOS-only view on iOS: see Hypnos/CLAUDE.md "macOS" for the seam list
-// and the plan to give this a real NSViewRepresentable later.
-#if canImport(WebKit) && !os(macOS)
+// tvOS has no WebKit.
+#if canImport(WebKit)
 import DebugTrace
 import SwiftUI
 import WebKit
 
-struct AnimatedJXLWebView: UIViewRepresentable {
+#if os(macOS)
+extension AnimatedJXLWebView: NSViewRepresentable {
+    func makeNSView(context: Context) -> WKWebView { makeWebView(coordinator: context.coordinator) }
+    func updateNSView(_ webView: WKWebView, context: Context) { update(webView, coordinator: context.coordinator) }
+    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) { dismantle(webView) }
+}
+#else
+extension AnimatedJXLWebView: UIViewRepresentable {
+    func makeUIView(context: Context) -> WKWebView { makeWebView(coordinator: context.coordinator) }
+    func updateUIView(_ webView: WKWebView, context: Context) { update(webView, coordinator: context.coordinator) }
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) { dismantle(webView) }
+}
+#endif
+
+@MainActor
+struct AnimatedJXLWebView {
     /// Raw JPEG XL bytes to decode and animate.
     let imageData: Data?
     /// Source URL keying the HEVC conversion built from this decode.
@@ -46,28 +56,25 @@ struct AnimatedJXLWebView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeUIView(context: Context) -> WKWebView {
+    func makeWebView(coordinator: Coordinator) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.userContentController.add(context.coordinator, name: Self.cacheMessageName)
+        configuration.userContentController.add(coordinator, name: Self.cacheMessageName)
         let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
-        webView.scrollView.backgroundColor = .clear
-        webView.scrollView.isScrollEnabled = false
+        webView.makeTransparentAndFixed()
         return webView
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        context.coordinator.sourceURL = sourceURL
+    func update(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.sourceURL = sourceURL
 
         guard let data = imageData else { return }
         let digest = Self.digest(of: data)
-        guard context.coordinator.loadedDigest != digest else { return }
-        context.coordinator.loadedDigest = digest
+        guard coordinator.loadedDigest != digest else { return }
+        coordinator.loadedDigest = digest
         webView.loadHTMLString(Self.decodeHTML(for: data), baseURL: nil)
     }
 
-    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+    static func dismantle(_ webView: WKWebView) {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: cacheMessageName)
     }
 
@@ -217,20 +224,6 @@ struct AnimatedJXLWebView: UIViewRepresentable {
         </script>
         </body></html>
         """
-    }
-}
-#elseif os(macOS)
-import SwiftUI
-
-/// macOS stub — see the gate comment above. No decode, no HEVC caching; the
-/// caller (`PhotoDisplayView`'s animated-image tier) simply shows nothing
-/// where a JXL animation would play until this gets a real implementation.
-struct AnimatedJXLWebView: View {
-    let imageData: Data?
-    var sourceURL: URL? = nil
-
-    var body: some View {
-        Color.clear
     }
 }
 #endif

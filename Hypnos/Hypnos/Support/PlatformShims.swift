@@ -65,6 +65,20 @@ enum PlatformCapabilities {
     static let supportsDiorama = true
     /// Whether the app may resize its own window (`requestGeometryUpdate`).
     static let supportsWindowResizing = true
+    /// visionOS's own window handling: the Windows tab (summon, close,
+    /// recycle), saved window groups, and viewers pushed in place of the
+    /// gallery. A Mac has its Window menu and Mission Control instead, and
+    /// opens every viewer in a window of its own.
+    static let supportsWindowManagement = true
+    #elseif os(macOS)
+    static let supportsSpatial3D = false
+    static let supportsImmersiveSpaces = false
+    /// Every viewer opens in a window of its own, as on visionOS.
+    static let supportsMultipleWindows = true
+    static let supportsStereoVideo = false
+    static let supportsDiorama = false
+    static let supportsWindowResizing = false
+    static let supportsWindowManagement = false
     #else
     static let supportsSpatial3D = false
     static let supportsImmersiveSpaces = false
@@ -72,6 +86,7 @@ enum PlatformCapabilities {
     static let supportsStereoVideo = false
     static let supportsDiorama = false
     static let supportsWindowResizing = false
+    static let supportsWindowManagement = false
     #endif
 
     /// Marketing name of the device family, for copy that names the platform.

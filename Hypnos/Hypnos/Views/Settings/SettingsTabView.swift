@@ -60,10 +60,6 @@ struct SettingsTabView: View {
     var body: some View {
         NavigationStack {
             Form {
-                #if os(macOS)
-                LibrarySourcePickerSection()
-                #endif
-
                 Section("Libraries & Servers") {
                     row(.jellyfin, "Jellyfin", systemImage: "film.stack", value: jellyfinStatus)
                     row(.stash, "Stash", systemImage: LibrarySource.stash.symbolName,
@@ -86,14 +82,13 @@ struct SettingsTabView: View {
                     Text("Send your servers and sign-ins to another device, or set this one up from another.")
                 }
 
-                #if !os(macOS)
                 Section("Viewing") {
                     row(.general, "General", systemImage: "gearshape")
                     row(.gallery, "Gallery", systemImage: "square.grid.3x3")
                     row(.photos, "Photos", systemImage: "photo")
                     row(.videos, "Videos", systemImage: "play.rectangle.on.rectangle")
                     row(.slideshows, "Slideshows", systemImage: "play.square.stack")
-                    if PlatformCapabilities.supportsMultipleWindows {
+                    if PlatformCapabilities.supportsWindowManagement {
                         row(.windowGroups, "Window Groups", systemImage: "macwindow.on.rectangle",
                             value: appModel.savedWindowGroups.isEmpty ? "" : "\(appModel.savedWindowGroups.count)")
                     }
@@ -104,26 +99,21 @@ struct SettingsTabView: View {
                         row(.ai3D, "AI 3D", systemImage: "cube", value: AI3DSettingsPage.statusLabel)
                     }
                 }
-                #endif
 
                 Section {
                     row(.cache, "Cache", systemImage: "internaldrive", value: cachePreset.label)
                     row(.backup, "Backup", systemImage: "externaldrive")
                 }
 
-                #if !os(macOS)
                 Section {
                     row(.developer, "Developer", systemImage: "hammer")
                 }
-                #endif
 
                 Section {
                     LabeledContent("Version", value: appVersionString)
-                    #if !os(macOS)
                     Button("Show Welcome Screen Again") {
                         appModel.hasCompletedWelcome = false
                     }
-                    #endif
                 }
             }
             .formStyle(.grouped)
