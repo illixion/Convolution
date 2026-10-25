@@ -83,16 +83,20 @@ actor ThumbnailGenerator {
 
     /// Generate a thumbnail from a video file using AVAssetImageGenerator.
     /// WebM is unreadable by AVFoundation, so it's routed to the WebKit-based
-    /// capture instead. Other formats AVFoundation can't open still return nil
-    /// and the UI shows a generic video icon placeholder.
+    /// capture instead. MKV and WebM that fail both get a still from the file
+    /// (`MatroskaThumbnails`); anything else AVFoundation can't open returns
+    /// nil and the UI shows a generic video icon placeholder.
     private func createVideoThumbnail(for url: URL, maxSize: CGFloat) async -> UIImage? {
         // AVFoundation can't decode WebM — capture a frame via WebKit (the same
         // engine that plays it). Skip the AVAssetImageGenerator attempt entirely.
         // tvOS has no WebKit, so a WebM file there just falls through to the
-        // placeholder below (AVAssetImageGenerator fails on it the same way).
+        // Matroska still below (AVAssetImageGenerator fails on it the same way).
         #if canImport(WebKit)
         if url.pathExtension.lowercased() == "webm" {
-            return await WebMThumbnailGenerator.shared.generateThumbnail(for: url, maxSize: maxSize)
+            if let image = await WebMThumbnailGenerator.shared.generateThumbnail(for: url, maxSize: maxSize) {
+                return image
+            }
+            return await matroskaStill(url, maxSize: maxSize)
         }
         #endif
 
@@ -111,8 +115,18 @@ actor ThumbnailGenerator {
             }
         }
 
+        // AVFoundation can't open Matroska: a still from the file instead.
+        if let image = await matroskaStill(url, maxSize: maxSize) { return image }
+
         AppLogger.imageLoader.debug("Failed to create video thumbnail for: \(url.lastPathComponent, privacy: .private)")
         return nil
+    }
+
+    /// An MKV or WebM file's thumbnail from a still of one keyframe.
+    private func matroskaStill(_ url: URL, maxSize: CGFloat) async -> UIImage? {
+        guard MatroskaThumbnails.handles(url),
+              let image = await MatroskaThumbnails.image(for: url, maxSize: maxSize) else { return nil }
+        return UIImage(cgImage: image)
     }
 
     /// Synchronous thumbnail creation using CGImageSource

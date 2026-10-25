@@ -191,8 +191,11 @@ struct VideoThumbnailView: View {
                 loadFailed = true
             }
         } else {
-            // Remote URLs: downsample + cache (stores cropped result in ThumbnailCache)
+            // Remote URLs: downsample + cache (stores cropped result in ThumbnailCache).
+            // A server's MKV or WebM without a preview: a still from the file.
             if let image = await ImageLoader.shared.loadRemoteThumbnailCached(from: video.thumbnailURL, maxSize: Self.thumbnailMaxSize, crop: Self.cropTo16x9) {
+                loadedImage = await displayReady(image)
+            } else if let image = await ImageLoader.shared.loadMatroskaThumbnail(for: video, maxSize: Self.thumbnailMaxSize, crop: Self.cropTo16x9) {
                 loadedImage = await displayReady(image)
             } else {
                 AppLogger.views.warning("Failed to load video thumbnail: \(video.thumbnailURL.lastPathComponent, privacy: .private)")

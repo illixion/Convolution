@@ -736,6 +736,23 @@ actor ImageLoader {
         return thumbnail
     }
 
+    /// The thumbnail of a server's MKV or WebM that has no usable preview
+    /// (Nextcloud renders none for Matroska without its movie preview
+    /// provider): a still from the video itself, read in a few ranges
+    /// (`MatroskaThumbnails`), cached under the thumbnail URL the way
+    /// `loadRemoteThumbnailCached` caches it. Nil for anything else; Stash
+    /// makes its own thumbnails and is left alone.
+    func loadMatroskaThumbnail(for video: GalleryVideo, maxSize: CGFloat,
+                               crop: ((UIImage) -> UIImage)? = nil) async -> UIImage? {
+        guard !Task.isCancelled, video.stashId == nil, !video.streamURL.isFileURL,
+              MatroskaThumbnails.handles(video.streamURL, fileName: video.fileName),
+              let image = await MatroskaThumbnails.image(for: video.streamURL, maxSize: maxSize) else { return nil }
+        let thumbnail = crop?(UIImage(cgImage: image)) ?? UIImage(cgImage: image)
+        await ThumbnailCache.shared.saveThumbnail(thumbnail, for: video.thumbnailURL,
+                                                  variant: crop == nil ? Self.uncroppedVariant : nil)
+        return thumbnail
+    }
+
     private nonisolated static func pixelLongEdge(of image: UIImage) -> CGFloat {
         max(image.size.width, image.size.height) * image.scale
     }

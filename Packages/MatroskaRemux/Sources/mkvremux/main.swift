@@ -3,12 +3,14 @@
 
      swift run mkvremux <file.mkv or http URL> <folder> [segments]
      swift run mkvremux --time <file.mkv or http URL>
+     swift run mkvremux --still <file.mkv or http URL> <out.mp4>
 
  `segments` limits the media segments written, e.g. `0-2` or `7`. An http
  URL is read with range requests, as the app reads a server's file.
  `--time` only opens the file and waits for its index, printing how long
  each took and what was read (for a file without Cues, which is indexed
- while it plays).
+ while it plays). `--still` writes the one-keyframe MP4 the app makes
+ thumbnails from (`VideoStill`).
 
  Writes master.m3u8, the media playlists, and every init and media segment,
  at the paths the app serves them on, then prints the summary. Serve the
@@ -60,6 +62,21 @@ func source(_ path: String) throws -> any ByteSource {
 }
 
 let arguments = CommandLine.arguments
+if arguments.count == 4, arguments[1] == "--still" {
+    do {
+        let bytes = try source(arguments[2])
+        let started = Date()
+        let still = try await VideoStill.make(source: bytes)
+        try still.mp4.write(to: URL(fileURLWithPath: arguments[3]))
+        print(String(format: "still at %.3f s, %dx%d, %d bytes, made in %.3f s from %d reads, %lld bytes",
+                     still.seconds, still.width, still.height, still.mp4.count, Date().timeIntervalSince(started),
+                     still.reads, still.bytesRead))
+    } catch {
+        print("failed: \(error)")
+        exit(1)
+    }
+    exit(0)
+}
 if arguments.count == 3, arguments[1] == "--time" {
     do {
         let bytes = try source(arguments[2])

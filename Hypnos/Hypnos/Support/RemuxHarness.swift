@@ -20,6 +20,10 @@
  audio renditions (listed, then switched to another and played), and each
  embedded subtitle track's cues near the start and near 70 %, read the way
  the players read them (`MatroskaSubtitles`).
+ Each input's grid thumbnail is made the way the app makes it: a local file
+ through `ThumbnailGenerator` (AVAssetImageGenerator, then the Matroska
+ still), a URL through `ImageLoader.loadMatroskaThumbnail` (a server's video
+ without a preview).
  `-RemuxHarnessHold` keeps the loopback server up afterwards and prints each
  URL, for decoding the served HLS with ffmpeg. `-RemuxHarnessPlay` plays
  that long instead of 3 s, before and after the seek, for measuring what a
@@ -31,6 +35,7 @@
 
 #if DEBUG && os(macOS)
 
+import AppKit
 import AVFoundation
 import CoreMedia
 import Foundation
@@ -87,6 +92,7 @@ enum RemuxHarness {
         let source = input.hasPrefix("http") ? URL(string: input)! : URL(fileURLWithPath: input)
         let name = source.lastPathComponent
         log("== \(name)")
+        await checkThumbnail(name, source: source)
         let started = ContinuousClock.now
         guard let hls = await MatroskaRemuxService.shared.playlistURL(for: source, fileName: nil, form: form) else {
             log("\(name): not remuxed (declined or unplayable)")
@@ -162,6 +168,24 @@ enum RemuxHarness {
 
         if let error = item.error as NSError? { log("\(name): FAIL item error \(error.domain) \(error.code)") }
         return hls
+    }
+
+    /// The grid thumbnail, as the app makes it for a local file or a
+    /// server's video without a preview.
+    @MainActor
+    private static func checkThumbnail(_ name: String, source: URL) async {
+        let started = ContinuousClock.now
+        let image: UIImage?
+        if source.isFileURL {
+            image = await ThumbnailGenerator.shared.generateThumbnail(for: source)
+        } else {
+            let video = GalleryVideo(identity: "harness:\(name)", stashId: nil,
+                                     thumbnailURL: URL(string: "http://127.0.0.1:9/no-preview")!, streamURL: source,
+                                     fileName: name)
+            image = await ImageLoader.shared.loadMatroskaThumbnail(for: video, maxSize: 384)
+        }
+        let size = image.map { "\(Int($0.size.width))x\(Int($0.size.height))" } ?? "none"
+        log("\(name): thumbnail \(size) in \(ContinuousClock.now - started) \(image == nil ? "FAIL" : "OK")")
     }
 
     /// Each subtitle track's first cues read near the start and near 70 %.
