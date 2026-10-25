@@ -74,7 +74,8 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   (`Views/MediaThumbnail.swift`), already gesture-free and cross-platform.
 - **`TVPhotoViewerView`** — fullscreen image. Siri Remote left/right
   (`.onMoveCommand`) move prev/next, Play/Pause (`.onPlayPauseCommand`) starts
-  or stops a slideshow timer, Menu (`.onExitCommand`) dismisses. None of
+  the app's slideshow (below) over what the viewer was opened from, Menu
+  (`.onExitCommand`) dismisses. None of
   `PhotoDisplayView`'s rendering tiers, adjustments or 3D modes are reused.
   An animated GIF, APNG, WebP or HEIF sequence plays through ImageIO
   (`TVAnimatedImageView`: `CGAnimateImageDataWithBlock` hands one decoded
@@ -150,6 +151,29 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   (15 s, not 0), and the startup step-down by pausing the server's container
   as the player opened the stream. Not seen: a mid-play rebuffer stepping
   down (the local server never stalls once playing), and YouTube at all.
+- **`TVSlideshowView`** — the app's slideshow: the same `RemoteViewerModel`
+  over `RAVESlideshowEngine`, profiles (`gallerySlideshowConfig` /
+  `videoSlideshowConfig`) and entry points (`startGallerySlideshow` /
+  `startVideoSlideshow`) as the `remote-viewer` window, which `TVRootView`
+  presents full screen when `activeRemoteViewerOpenRequest` asks for one (as
+  `IOSWindowRouter` does on iOS). Started by Play Slideshow above the
+  Pictures and Videos grids or Play/Pause on them, Play/Pause in the photo
+  viewer, a Local folder's Play Slideshow (the folder and everything under
+  it, videos too), and an Albums container's context menu
+  (`startContainerSlideshow`). A viewer that starts one closes first and the
+  slideshow starts in its `onDismiss`, since one cover can't present over
+  another from the root. Only the rendering is tvOS's own: pictures
+  crossfade and drift (Ken Burns, dynamic brightness), videos play muted in
+  an `AVPlayerLayer` (original, else Matroska remux, else the server's
+  transcode; looping when shorter than the interval), animated pictures
+  through `TVAnimatedImageView`, 3D is off. Remote: left/right previous/next,
+  Play/Pause, Select for the profile's display settings (pause, clock, Ken
+  Burns, interval; saved to the profile through the model's `display*`
+  setters), Menu closes those, then the slideshow. DEBUG
+  `-UITestDefault tvAutoStartSlideshow=1` starts the Pictures slideshow on
+  launch. `RemoteViewerWindowView.setupModel` and
+  `TVSlideshowView.setUpModel` build the model the same way and should stay
+  in step.
 - **`TVAlbumsTabView`** — the same `MediaContainer` grid and
   `AppModel.applyContainer(_:isVideo:)` the visionOS/iOS Albums tab uses;
   switches the tab selection to Pictures/Videos afterward instead of a

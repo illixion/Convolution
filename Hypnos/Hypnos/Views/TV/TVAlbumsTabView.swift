@@ -92,6 +92,11 @@ struct TVAlbumsTabView: View {
                                 }
                             }
                             .buttonStyle(.card)
+                            .contextMenu {
+                                Button("Play Slideshow", systemImage: "play") {
+                                    appModel.startContainerSlideshow(container, isVideo: isVideo)
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal, 40)

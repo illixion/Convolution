@@ -19,6 +19,9 @@ struct TVPicturesTabView: View {
     @Environment(AppModel.self) private var appModel
     @State private var presentedIndex: Int?
     @State private var quickActions = MediaQuickActions()
+    /// The viewer asked for a slideshow: started once it has closed, since
+    /// the slideshow is presented from the root.
+    @State private var slideshowAfterViewer = false
 
     private let gridSpacing: CGFloat = 40
     private let preferredCellSize: CGFloat = 280
@@ -30,7 +33,12 @@ struct TVPicturesTabView: View {
             // large title stuck over the cells as the grid scrolled.
             content
         }
-        .fullScreenCover(item: presentedImageBinding) { image in
+        .fullScreenCover(item: presentedImageBinding, onDismiss: {
+            if slideshowAfterViewer {
+                slideshowAfterViewer = false
+                startSlideshow()
+            }
+        }) { image in
             if let index = presentedIndex {
                 TVPhotoViewerView(
                     images: appModel.galleryImages,
@@ -39,6 +47,10 @@ struct TVPicturesTabView: View {
                         if appModel.hasMorePages {
                             await appModel.loadNextPage()
                         }
+                    },
+                    onSlideshow: {
+                        slideshowAfterViewer = true
+                        presentedIndex = nil
                     }
                 )
             }
@@ -52,6 +64,13 @@ struct TVPicturesTabView: View {
         }
     }
 
+    /// The app's slideshow of what the grid shows (source and filter), as the
+    /// tab bar's play button starts it elsewhere.
+    private func startSlideshow() {
+        guard !appModel.galleryImages.isEmpty else { return }
+        appModel.startGallerySlideshow(imageSource: appModel.imageSource, filter: appModel.currentFilter)
+    }
+
     /// DEBUG-only, mirroring `TVVideosTabView.autoPresentIfRequested` and
     /// `TVRootView`'s `tvInitialTab`: `tvAutoOpenPictureIndex=N` opens the
     /// Nth gallery image's fullscreen viewer immediately, since there is no
@@ -59,6 +78,10 @@ struct TVPicturesTabView: View {
     /// (auth, full-size decode) against the dev Stash instance.
     private func autoPresentIfRequested() {
         #if DEBUG
+        if UserDefaults.standard.bool(forKey: "tvAutoStartSlideshow") {
+            startSlideshow()
+            return
+        }
         guard let raw = UserDefaults.standard.string(forKey: "tvAutoOpenPictureIndex"),
               let index = Int(raw),
               appModel.galleryImages.indices.contains(index) else { return }
@@ -113,6 +136,9 @@ struct TVPicturesTabView: View {
                     spacing: gridSpacing
                 )
                 ScrollView {
+                    TVSlideshowButton(action: startSlideshow)
+                        .padding(.horizontal, 40)
+                        .padding(.top, 24)
                     LazyVGrid(columns: layout.columns, spacing: gridSpacing) {
                         ForEach(Array(appModel.galleryImages.enumerated()), id: \.element.id) { index, image in
                             Button {
@@ -139,6 +165,8 @@ struct TVPicturesTabView: View {
                     .padding(.horizontal, 40)
                     .padding(.vertical, 24)
                 }
+                // Play/Pause anywhere in the grid starts the slideshow.
+                .onPlayPauseCommand(perform: startSlideshow)
             }
         }
     }

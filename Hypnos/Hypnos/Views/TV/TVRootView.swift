@@ -26,6 +26,10 @@ struct TVRootView: View {
     @State private var selectedTab: TVTab
     /// Pictures or Videos, whichever was browsed last: what Filters edits first.
     @State private var lastContentTab: TVTab = .pictures
+    /// The slideshow showing: what `startGallerySlideshow` /
+    /// `startVideoSlideshow` ask for, which on visionOS opens a
+    /// `remote-viewer` window.
+    @State private var slideshow: RemoteViewerWindowValue?
     /// Both filters as they were when Filters opened, to reload only the
     /// grid whose filter changed.
     @State private var filtersOnOpen: (pictures: ImageFilterCriteria, videos: SceneFilterCriteria)?
@@ -79,6 +83,13 @@ struct TVRootView: View {
                 await appModel.loadInitialGallery()
             }
         }
+        .onChange(of: appModel.activeRemoteViewerOpenRequest?.id, initial: true) { _, _ in
+            presentRequestedSlideshow()
+        }
+        .fullScreenCover(item: $slideshow) { value in
+            TVSlideshowView(windowValue: value)
+                .environment(appModel)
+        }
         .onChange(of: selectedTab, initial: true) { old, new in
             if new == .pictures || new == .videos { lastContentTab = new }
             if new == .filters {
@@ -88,6 +99,15 @@ struct TVRootView: View {
                 applyFilterChanges(since: opened)
             }
         }
+    }
+
+    /// A slideshow was asked for: one at a time, full screen. Presented from
+    /// here, so a viewer that starts one closes first (see
+    /// `TVPicturesTabView`); a request while one shows replaces it.
+    private func presentRequestedSlideshow() {
+        guard let request = appModel.activeRemoteViewerOpenRequest else { return }
+        appModel.advanceRemoteViewerOpenQueue()
+        slideshow = RemoteViewerWindowValue(configId: request.configId)
     }
 
     /// Leaving Filters: reload the grids whose filter changed there.

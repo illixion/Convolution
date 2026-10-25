@@ -37,6 +37,12 @@ struct TVVideosTabView: View {
         }
     }
 
+    /// The app's video slideshow of what the grid shows.
+    private func startSlideshow() {
+        guard !appModel.galleryVideos.isEmpty else { return }
+        appModel.startVideoSlideshow(videoSource: appModel.videoSource, filter: appModel.currentVideoFilter)
+    }
+
     /// DEBUG-only, reusing the same `-UITestDefault key=value` mechanism as
     /// `tvInitialTab` (`TVRootView`): `tvAutoPlayVideoIndex=N` opens the Nth
     /// gallery video's player immediately. tvOS has no XCUITest and `simctl`
@@ -90,6 +96,9 @@ struct TVVideosTabView: View {
                 // glance from across the room.
                 let cellHeight = layout.columnWidth * 9 / 16
                 ScrollView {
+                    TVSlideshowButton(action: startSlideshow)
+                        .padding(.horizontal, 40)
+                        .padding(.top, 24)
                     LazyVGrid(columns: layout.columns, spacing: gridSpacing) {
                         ForEach(appModel.galleryVideos) { video in
                             Button {
@@ -120,6 +129,8 @@ struct TVVideosTabView: View {
                     .padding(.horizontal, 40)
                     .padding(.vertical, 24)
                 }
+                // Play/Pause anywhere in the grid starts the slideshow.
+                .onPlayPauseCommand(perform: startSlideshow)
             }
         }
     }

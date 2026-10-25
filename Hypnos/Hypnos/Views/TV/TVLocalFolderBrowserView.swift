@@ -11,7 +11,9 @@
  - a folder's subfolders come first, then its pictures and videos, each a
    `.card` button with the standard focus lift;
  - a picture opens `TVPhotoViewerView` over the folder's pictures (left and
-   right walk the folder), a video `TVVideoPlayerView`.
+   right walk the folder), a video `TVVideoPlayerView`;
+ - Play Slideshow (or Play/Pause on the grid, or in the photo viewer) runs
+   the app's slideshow over the folder and everything under it.
 
  Listing goes through `LocalMediaSource.folderContents(of:)`, the same file
  typing the Local source's own scan uses.
@@ -46,6 +48,9 @@ struct TVLocalFolderView: View {
     @State private var isLoading = true
     @State private var presentedPicture: TVLocalPicturePresentation?
     @State private var presentedVideo: GalleryVideo?
+    @Environment(AppModel.self) private var appModel
+    /// The photo viewer asked for the slideshow: started once it has closed.
+    @State private var slideshowAfterViewer = false
 
     private let gridSpacing: CGFloat = 40
     private let preferredCellSize: CGFloat = 280
@@ -58,8 +63,16 @@ struct TVLocalFolderView: View {
     var body: some View {
         content
             .task(id: folder) { await load() }
-            .fullScreenCover(item: $presentedPicture) { presentation in
-                TVPhotoViewerView(images: presentation.images, startIndex: presentation.index)
+            .fullScreenCover(item: $presentedPicture, onDismiss: {
+                if slideshowAfterViewer {
+                    slideshowAfterViewer = false
+                    startSlideshow()
+                }
+            }) { presentation in
+                TVPhotoViewerView(images: presentation.images, startIndex: presentation.index, onSlideshow: {
+                    slideshowAfterViewer = true
+                    presentedPicture = nil
+                })
             }
             .fullScreenCover(item: $presentedVideo) { video in
                 TVVideoPlayerView(video: video, loops: true)
@@ -94,6 +107,7 @@ struct TVLocalFolderView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.head)
+                        TVSlideshowButton(action: startSlideshow)
                         LazyVGrid(columns: layout.columns, spacing: gridSpacing) {
                             ForEach(subfolders, id: \.self) { name in
                                 NavigationLink(value: folder.appending(name)) {
@@ -114,7 +128,18 @@ struct TVLocalFolderView: View {
                     .padding(.horizontal, 40)
                     .padding(.vertical, 24)
                 }
+                .onPlayPauseCommand(perform: startSlideshow)
             }
+        }
+    }
+
+    /// The folder and everything under it, as the visionOS/iOS browser's
+    /// per-folder slideshow; a Videos folder runs the video slideshow.
+    private func startSlideshow() {
+        if folder.isVideo {
+            appModel.startVideoSlideshow(videoSource: LocalVideoSource(rootURL: folder.url), filter: nil)
+        } else {
+            appModel.startGallerySlideshow(imageSource: LocalImageSource(rootURL: folder.url), filter: nil)
         }
     }
 

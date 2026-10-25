@@ -3,7 +3,9 @@
 
  Siri Remote replaces the visionOS/iOS viewer's swipe and ornament: left/
  right (`.onMoveCommand`) move to the previous/next image, and Play/Pause
- (`.onPlayPauseCommand`) starts or stops a slideshow over the same list.
+ (`.onPlayPauseCommand`) starts the app's slideshow (`onSlideshow`: the
+ presenter closes the viewer and starts it over what the viewer was opened
+ from, see `TVSlideshowView`).
  There is no adjustments popover, no 3D mode, no share sheet — none of
  `PhotoDisplayView`'s machinery is reused, deliberately (see
  `Hypnos/CLAUDE.md` "tvOS"): this is a plain full-resolution image behind
@@ -33,6 +35,8 @@ struct TVPhotoViewerView: View {
     /// Requests the next page from the caller's source when navigation gets
     /// near the end of what's loaded so far — same trigger the grid uses.
     var onLoadMore: () async -> Void = {}
+    /// Play/Pause: the presenter's slideshow of what this viewer walks.
+    var onSlideshow: (() -> Void)?
 
     @State private var index: Int
     @State private var currentImage: UIImage?
@@ -45,16 +49,16 @@ struct TVPhotoViewerView: View {
     /// photo loads, so the outgoing one already leaves the matching way.
     @State private var slideEdge: Edge = .trailing
     @State private var isLoading = false
-    @State private var isSlideshow = false
-    @State private var slideshowTask: Task<Void, Never>?
     @FocusState private var hasFocus: Bool
     @State private var arrowPresses = TVArrowPressObserver()
     @Environment(\.dismiss) private var dismiss
 
-    init(images: [GalleryImage], startIndex: Int, onLoadMore: @escaping () async -> Void = {}) {
+    init(images: [GalleryImage], startIndex: Int, onLoadMore: @escaping () async -> Void = {},
+         onSlideshow: (() -> Void)? = nil) {
         self.images = images
         self.startIndex = startIndex
         self.onLoadMore = onLoadMore
+        self.onSlideshow = onSlideshow
         _index = State(initialValue: startIndex)
         _shownIndex = State(initialValue: startIndex)
     }
@@ -90,18 +94,6 @@ struct TVPhotoViewerView: View {
             } else if isLoading {
                 ProgressView()
             }
-
-            VStack {
-                Spacer()
-                if isSlideshow {
-                    Label("Slideshow", systemImage: "play.fill")
-                        .font(.caption)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .padding(.bottom, 40)
-                }
-            }
         }
         // Remote events (swipes, clickpad edges, Play/Pause) only reach a
         // focused view, and a bare ZStack never takes focus.
@@ -120,17 +112,11 @@ struct TVPhotoViewerView: View {
             }
         }
         .onPlayPauseCommand {
-            isSlideshow.toggle()
+            onSlideshow?()
         }
         .onExitCommand { dismiss() }
-        .onChange(of: isSlideshow) { _, playing in
-            playing ? startSlideshow() : stopSlideshow()
-        }
         .task(id: index) {
             await load()
-        }
-        .onDisappear {
-            stopSlideshow()
         }
     }
 
@@ -169,30 +155,6 @@ struct TVPhotoViewerView: View {
         isLoading = false
     }
 
-    private func startSlideshow() {
-        slideshowTask?.cancel()
-        slideshowTask = Task {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
-                guard !Task.isCancelled else { return }
-                if index + 1 < images.count {
-                    step(by: 1)
-                } else {
-                    await onLoadMore()
-                    if index + 1 < images.count {
-                        step(by: 1)
-                    } else {
-                        isSlideshow = false
-                    }
-                }
-            }
-        }
-    }
-
-    private func stopSlideshow() {
-        slideshowTask?.cancel()
-        slideshowTask = nil
-    }
 }
 
 /// Notes the remote's left/right arrow presses (clickpad edges, D-pads,
