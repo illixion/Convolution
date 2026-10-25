@@ -124,10 +124,17 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
 - **`TVAlbumsTabView`** — the same `MediaContainer` grid and
   `AppModel.applyContainer(_:isVideo:)` the visionOS/iOS Albums tab uses;
   switches the tab selection to Pictures/Videos afterward instead of a
-  window-model field. **Local's nested folder browser
-  (`LocalFolderBrowserView`) isn't ported** — built for pointer/touch
-  up/down-a-folder-stack taps — so Local shows a placeholder directing back
-  to Pictures/Videos instead. Known gap.
+  window-model field. While browsing Local it shows the folder tree instead
+  (`TVLocalFolderView`, `Views/TV/TVLocalFolderBrowserView.swift`): the
+  Pictures/Videos switch picks Documents/Photos or Documents/Videos, and each
+  folder is a page pushed on the tab's `NavigationStack`
+  (`TVLocalFolder` values), so Menu goes back up a level where
+  `LocalFolderBrowserView` has an Up tile and breadcrumbs. Subfolders come
+  first, then the folder's pictures and videos; a picture opens
+  `TVPhotoViewerView` over the folder's pictures, a video
+  `TVVideoPlayerView`. Listing is `LocalMediaSource.folderContents(of:)`, the
+  Local source's own file typing. Verified in the simulator with nested
+  folders seeded into the app container.
 - **`TVFilmsTabView`** — Jellyfin search over the existing `FilmSession`,
   presenting `FilmPlayerView` unchanged. `FilmPlayerView` already has a real
   `#elseif os(tvOS)` branch (added alongside the visionOS/iOS ones): the
@@ -362,8 +369,6 @@ doesn't exist there).
 
 ## Known gaps
 
-- **Local library folder browsing** (Albums tab) — not ported; Local shows a
-  placeholder on tvOS.
 - **Animated GIF/WebP/JXL** — render as a static first frame, not animated
   (no WebKit).
 - **Photos as a library source** may have little or nothing to show on a TV

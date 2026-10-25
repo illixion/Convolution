@@ -136,6 +136,18 @@ actor LocalMediaSource {
         scanDirectory(root, recursive: true).filter { $0.type == .video }
     }
 
+    /// One folder's subfolders (by name, in Finder order) and its own media
+    /// files (newest first), without descending: what a folder browser lists.
+    func folderContents(of directory: URL) -> (folders: [String], files: [LocalMediaFile]) {
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
+        let folders = entries
+            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            .map(\.lastPathComponent)
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        return (folders, scanDirectory(directory, recursive: false))
+    }
+
     /// Scan a directory for media files
     private func scanDirectory(_ directory: URL, recursive: Bool) -> [LocalMediaFile] {
         let fileManager = FileManager.default

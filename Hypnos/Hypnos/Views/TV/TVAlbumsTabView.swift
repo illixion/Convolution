@@ -9,11 +9,9 @@
  view just also switches the tab selection to Pictures/Videos afterward,
  the job the visionOS/iOS chrome does by switching `MainWindowModel`'s tab.
 
- Local's folder tree (`LocalFolderBrowserView`) isn't ported here — it's a
- real nested browser built for pointer/touch navigation (up/down a folder
- stack with taps), and porting it to remote-driven focus navigation is out
- of scope for this pass. Browsing Local on tvOS is a known gap; see
- `Hypnos/CLAUDE.md` "tvOS".
+ Local doesn't fit the container shape (a folder nests), so while browsing
+ Local the tab shows the folder tree instead (`TVLocalFolderView`), each
+ folder a page pushed on this tab's navigation stack.
  */
 
 #if os(tvOS)
@@ -46,6 +44,9 @@ struct TVAlbumsTabView: View {
             // No title on tvOS, like Pictures and Videos: the tab bar names the tab, and
             // tvOS pins a large title over the grid as it scrolls.
             .raveScreenTitle("Albums")
+            .navigationDestination(for: TVLocalFolder.self) { folder in
+                TVLocalFolderView(folder: folder)
+            }
         }
         .task(id: isVideo) {
             guard appModel.effectiveLibrarySource != .local else { return }
@@ -56,11 +57,7 @@ struct TVAlbumsTabView: View {
     @ViewBuilder
     private var content: some View {
         if appModel.effectiveLibrarySource == .local {
-            ContentUnavailableView(
-                "Browse Local Files in Pictures or Videos",
-                systemImage: "folder",
-                description: Text("The Local library's folder browser isn't available on Apple TV yet.")
-            )
+            TVLocalFolderView(folder: TVLocalFolder(isVideo: isVideo, path: []))
         } else if appModel.mediaContainers.isEmpty {
             ContentUnavailableView(
                 "No \(containerKind.pluralTitle)",
