@@ -124,6 +124,16 @@ struct VideoWindowView: View {
         #endif
     }
 
+    /// The Mac's controls lie over the foot of the picture, where subtitles
+    /// are: while they show, the subtitles move up out of their way.
+    private var subtitleLift: CGFloat {
+        #if os(macOS)
+        windowModel.isUIHidden ? 0 : 96
+        #else
+        0
+        #endif
+    }
+
     /// iOS/macOS: lift the in-window controls clear of the system window
     /// controls. Keep this consistent across 2D and fake-3D so a mode switch
     /// doesn't move the chrome.
@@ -361,6 +371,7 @@ struct VideoWindowView: View {
                        !flatSubtitlesBelow {
                         SubtitleOverlay(controller: windowModel.subtitles,
                                         pictureAspect: windowModel.videoAspectRatio) { windowModel.currentTime }
+                            .offset(y: -subtitleLift)
                     }
                 }
 
