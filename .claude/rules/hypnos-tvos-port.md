@@ -37,12 +37,32 @@ the focus engine — it shares data (`AppModel.galleryImages`/`galleryVideos`,
 almost none of their views, whose gestures and chrome are touch/gaze-shaped:
 
 - **`TVRootView`** — a plain `TabView`, which tvOS renders as the platform's
-  own top tab bar with no ornament or custom chrome needed. Five tabs:
-  Pictures, Videos, Albums, Films, Settings (`TVTab.swift`, a small tvOS-only
-  enum — not an extra case on the shared `Tab`, which is keyed to
-  `RAVEA11y`/`RAVETabItem` and the visionOS/iOS developer-tab rules). No
-  Windows tab (one scene, nothing to summon), no Filters tab. A sixth, Console (RAVEConsole's live log), appears while Settings →
-  Developer → Show Debug Console is on.
+  own top tab bar with no ornament or custom chrome needed. Tabs: Pictures,
+  Videos, Albums, Filters (only for Stash and Photos,
+  `LibrarySource.offersFilters`), Library (once Jellyfin is set up), Settings
+  (`TVTab.swift`, a small tvOS-only enum — not an extra case on the shared
+  `Tab`, which is keyed to `RAVEA11y`/`RAVETabItem` and the visionOS/iOS
+  developer-tab rules). No Windows tab (one scene, nothing to summon).
+  Console (RAVEConsole's live log) appears while Settings → Developer → Show
+  Debug Console is on.
+- **`TVFiltersTabView`** — what `FiltersTabView` offers for the library in
+  force, laid out like the Settings tab: a page of rows showing their value
+  (Saved Views, Search, Sort, then Galleries or Groups, Tags, Studios,
+  Performers, Rating, Activity for Stash; Sort, Albums, People, Kind,
+  Favorites Only, Date for Photos), each opening a page of checkmarked rows.
+  It edits `AppModel.currentFilter` / `currentVideoFilter` and the saved
+  views directly (a Pictures/Videos switch picks which, starting on the grid
+  browsed last); one generic editor serves both criteria types through
+  `TVFilterCriteria`, a protocol the two conform to in that file. No
+  `Picker` pages (see the Settings rule below), and the controls tvOS lacks
+  become rows: a rating is a row per star count, the Photos date range a row
+  per span ending today ("Last 30 Days"; a range set on another device shows
+  as its dates), activity counts a number field. A multi-select page lists
+  the chosen values first, then the rest (Stash searches the server as you
+  type). Saved views apply on Select; holding Select offers Update, Set as
+  Default and Delete. As elsewhere, changes apply when the tab is left:
+  `TVRootView` compares both filters with how they were when Filters opened
+  and reloads the grid whose filter changed.
 - **`TVPicturesTabView` / `TVVideosTabView`** — `LazyVGrid` over the same
   source/filter/pagination the visionOS/iOS grids use
   (`loadInitialGallery`/`loadNextPage`/`hasMorePages`, and the `Videos`

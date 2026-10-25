@@ -7,9 +7,9 @@
  that type is keyed to `RAVEA11y`/`RAVETabItem` and to the visionOS/iOS
  ornament's developer-tab visibility rules (Remote, Console), none of which
  tvOS needs — Settings, Console and Remote are folded into one Settings tab
- here, and there is no Filters or Windows tab at all (no multi-window
- concept on tvOS, and nothing yet to filter Photos/Stash by on a 10-foot
- remote-driven grid).
+ here, and there is no Windows tab at all (no multi-window concept on tvOS).
+ Filters shows only for the libraries that have something to filter by
+ (`LibrarySource.offersFilters`), as it does elsewhere.
  */
 
 import Foundation
@@ -18,6 +18,7 @@ enum TVTab: String, CaseIterable, Identifiable {
     case pictures = "Pictures"
     case videos = "Videos"
     case albums = "Albums"
+    case filters = "Filters"
     case library = "Library"
     #if HYPNOS_YOUTUBE
     case youtube = "YouTube"
@@ -33,6 +34,7 @@ enum TVTab: String, CaseIterable, Identifiable {
         case .pictures: return "photo.stack"
         case .videos: return "video"
         case .albums: return "rectangle.stack"
+        case .filters: return "line.3.horizontal.decrease.circle"
         case .library: return "rectangle.stack.badge.play"
         #if HYPNOS_YOUTUBE
         case .youtube: return "play.rectangle"

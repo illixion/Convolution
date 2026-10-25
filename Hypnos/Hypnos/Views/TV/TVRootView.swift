@@ -8,9 +8,12 @@
  Deliberately not a port of `ContentView`: that view's tabs, ornament and
  gestures are all touch/gaze-shaped (see `Hypnos/CLAUDE.md` "tvOS" for what's
  excluded and why). This is a fresh, small root built for a Siri Remote:
- five tabs (Pictures, Videos, Albums, Library, Settings), no developer tabs,
- no Windows tab (nothing to summon — tvOS has one scene), no Filters tab
- (nothing there to filter by yet on a remote-driven grid).
+ tabs for Pictures, Videos, Albums, Filters (Stash and Photos only),
+ Library and Settings, no developer tabs, no Windows tab (nothing to
+ summon — tvOS has one scene).
+
+ Filter changes apply as the Filters tab is left, as elsewhere: whichever
+ grid's filter changed reloads.
  */
 
 #if os(tvOS)
@@ -21,6 +24,11 @@ import SwiftUI
 struct TVRootView: View {
     let appModel: AppModel
     @State private var selectedTab: TVTab
+    /// Pictures or Videos, whichever was browsed last: what Filters edits first.
+    @State private var lastContentTab: TVTab = .pictures
+    /// Both filters as they were when Filters opened, to reload only the
+    /// grid whose filter changed.
+    @State private var filtersOnOpen: (pictures: ImageFilterCriteria, videos: SceneFilterCriteria)?
 
     init(appModel: AppModel) {
         self.appModel = appModel
@@ -50,6 +58,7 @@ struct TVRootView: View {
         TVTab.allCases.filter { tab in
             switch tab {
             case .library: LibraryService.isAvailable
+            case .filters: appModel.effectiveLibrarySource.offersFilters
             case .console: appModel.showDebugConsole
             default: true
             }
@@ -70,6 +79,26 @@ struct TVRootView: View {
                 await appModel.loadInitialGallery()
             }
         }
+        .onChange(of: selectedTab, initial: true) { old, new in
+            if new == .pictures || new == .videos { lastContentTab = new }
+            if new == .filters {
+                filtersOnOpen = (appModel.currentFilter, appModel.currentVideoFilter)
+            } else if old == .filters, let opened = filtersOnOpen {
+                filtersOnOpen = nil
+                applyFilterChanges(since: opened)
+            }
+        }
+    }
+
+    /// Leaving Filters: reload the grids whose filter changed there.
+    private func applyFilterChanges(since opened: (pictures: ImageFilterCriteria, videos: SceneFilterCriteria)) {
+        let picturesChanged = appModel.currentFilter != opened.pictures
+        let videosChanged = appModel.currentVideoFilter != opened.videos
+        guard picturesChanged || videosChanged else { return }
+        Task {
+            if picturesChanged { await appModel.loadInitialGallery() }
+            if videosChanged { await appModel.loadInitialVideos() }
+        }
     }
 
     @ViewBuilder
@@ -81,6 +110,8 @@ struct TVRootView: View {
             TVVideosTabView()
         case .albums:
             TVAlbumsTabView(selectedTab: $selectedTab)
+        case .filters:
+            TVFiltersTabView(startsWithVideos: lastContentTab == .videos)
         case .library:
             TVLibraryTabView()
         #if HYPNOS_YOUTUBE
