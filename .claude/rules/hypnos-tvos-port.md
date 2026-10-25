@@ -74,8 +74,13 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   (`Views/MediaThumbnail.swift`), already gesture-free and cross-platform.
 - **`TVPhotoViewerView`** — fullscreen image. Siri Remote left/right
   (`.onMoveCommand`) move prev/next, Play/Pause (`.onPlayPauseCommand`) starts
-  the app's slideshow (below) over what the viewer was opened from, Menu
-  (`.onExitCommand`) dismisses. None of
+  the app's slideshow (below) over what the viewer was opened from, Select
+  shows the picture's info and rating (`TVMediaInfoPanel`: the read-only
+  half of `MediaDetailSheet` — title, date, picture, format, size, studio,
+  performers, tags, galleries — for a Stash picture, and a row of five star
+  buttons that rate it through `AppModel.updateImageRating`, as the grid's
+  quick actions do), Menu (`.onExitCommand`) closes that, then dismisses.
+  None of
   `PhotoDisplayView`'s rendering tiers, adjustments or 3D modes are reused.
   An animated GIF, APNG, WebP or HEIF sequence plays through ImageIO
   (`TVAnimatedImageView`: `CGAnimateImageDataWithBlock` hands one decoded
@@ -120,6 +125,9 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   Subtitles. Verified in the simulator on the dev seed's `Subtitle Window`
   (streamed embedded SRT over an HLS remux) and `Twin Horizon` (direct-play
   MP4).
+  A Stash scene also gets a **Rating** menu in the transport bar
+  (`TVSceneRating`: No Rating or one to five stars, saved like the quick
+  actions' rating); its details are already in the Info panel.
   **Speed** is AVKit's own transport-bar menu (`speeds`), given the other
   players' choices (`PlaybackSpeed.choices`, 0.5-2×). It sets the player's
   `defaultRate`, which every `play()` starts at, so a loop, a looper's next
@@ -298,10 +306,29 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
 - A DEBUG-only launch argument opens `TVRootView` straight to a given tab —
   `-UITest -UITestDefault tvInitialTab=Videos` — reusing the existing
   `-UITestDefault key=value` mechanism (`Support/UITestingConfiguration.swift`)
-  rather than inventing a second one. This exists because there is no XCUITest
-  driving tvOS (`HypnosUITests` stays visionOS-only) and `simctl`
-  has no remote-button injection of its own, so it was the only way to get
-  every tab in front of a screenshot.
+  rather than inventing a second one. There is no XCUITest driving tvOS
+  (`HypnosUITests` stays visionOS-only) and `simctl` has no remote-button
+  injection of its own. **The Xcode MCP's device interaction does press the
+  remote** on a tvOS simulator (`DeviceInteractionStartSession`, then
+  `DeviceInteractionSynthesize` with `r up|down|left|right|select|menu|playpause`,
+  several per command, and `sender keyboard kbd <text>` into a focused text
+  field); its hierarchy marks the `Focused` element. Every feature on
+  `tvos-parity` (2026-10-25) was driven that way. Holding Select (context
+  menus) isn't available there.
+- **Remote and focus gotchas** found doing that:
+  - An `.onMoveCommand` takes the arrows of everything *inside* the view it
+    is on, even when its handler ignores them, so focus can't move between
+    buttons in a panel laid out as its descendant. Put such a panel in an
+    `.overlay` applied *after* the command modifiers (a sibling), as
+    `TVPhotoViewerView`'s info panel and `TVSlideshowView`'s settings are.
+  - A view that stops being `.focusable` while a panel opens leaves focus
+    nowhere; give the panel's first control focus explicitly (`@FocusState`
+    set on appear, one runloop later).
+  - An `.alert` attached to a page that a pushed page covers never shows:
+    attach it to the page with the button.
+  - A control off to one side of a grid is skipped by focus moving down from
+    the tab bar; wrapping its row in `.focusSection()` makes it reachable
+    from anywhere above or below (`TVSlideshowButton`).
 
 ## Auth (all platforms, found via tvOS testing)
 
@@ -433,8 +460,8 @@ doesn't exist there).
   Settings → Users and Accounts → iCloud rather than showing a bare "no
   photos" message.
 - **tvOS has no XCUITest coverage.** `HypnosUITests` stays visionOS-only;
-  the DEBUG launch-argument tab selector above is the only automated hook
-  into the tvOS UI so far.
+  the DEBUG launch arguments above and the Xcode MCP's remote presses are
+  how the tvOS UI is driven.
 
 ## Icon
 
@@ -651,9 +678,9 @@ before touching progress reporting again:**
 
 ### Library UI: driving it without a remote or taps
 
-DEBUG-only `-UITestDefault` hooks, since the tvOS simulator takes no
-remote-button injection and the Xcode device-interaction tool can't press
-tvOS buttons:
+DEBUG-only `-UITestDefault` hooks, to land on a page without walking there
+with remote presses (which the Xcode MCP's device interaction can send, see
+above):
 
 - `tvLibraryAutoOpenItemId=<id>` (tvOS) / `libraryAutoOpenItemId=<id>`
   (visionOS, iOS, macOS): push that item's detail page on launch.

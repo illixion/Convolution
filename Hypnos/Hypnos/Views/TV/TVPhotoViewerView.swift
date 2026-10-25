@@ -5,7 +5,8 @@
  right (`.onMoveCommand`) move to the previous/next image, and Play/Pause
  (`.onPlayPauseCommand`) starts the app's slideshow (`onSlideshow`: the
  presenter closes the viewer and starts it over what the viewer was opened
- from, see `TVSlideshowView`).
+ from, see `TVSlideshowView`). Select shows the picture's info and rating
+ (`TVMediaInfoPanel`); Menu closes that first.
  There is no adjustments popover, no 3D mode, no share sheet — none of
  `PhotoDisplayView`'s machinery is reused, deliberately (see
  `Hypnos/CLAUDE.md` "tvOS"): this is a plain full-resolution image behind
@@ -49,6 +50,12 @@ struct TVPhotoViewerView: View {
     /// photo loads, so the outgoing one already leaves the matching way.
     @State private var slideEdge: Edge = .trailing
     @State private var isLoading = false
+    /// The info and rating panel over the picture (Select).
+    @State private var showsInfo = false
+
+    /// A Stash picture's panel has its rating buttons to focus; any other
+    /// picture's panel is only read, and the viewer keeps the remote.
+    private var panelTakesFocus: Bool { showsInfo && image?.stashId != nil }
     @FocusState private var hasFocus: Bool
     @State private var arrowPresses = TVArrowPressObserver()
     @Environment(\.dismiss) private var dismiss
@@ -96,12 +103,15 @@ struct TVPhotoViewerView: View {
             }
         }
         // Remote events (swipes, clickpad edges, Play/Pause) only reach a
-        // focused view, and a bare ZStack never takes focus.
+        // focused view, and a bare ZStack never takes focus. While the info
+        // panel shows, focus is its rating buttons'.
         .background(TVArrowPressObserver.Host(observer: arrowPresses))
-        .focusable()
+        .focusable(!panelTakesFocus)
         .focused($hasFocus)
         .onAppear { hasFocus = true }
+        .onTapGesture { showsInfo = true }
         .onMoveCommand { direction in
+            guard !panelTakesFocus else { return }
             // A press points where to go; a swipe drags the photo, so a left
             // swipe brings the next one in, as in the Photos app.
             let forward: Int = arrowPresses.justPressed() ? 1 : -1
@@ -114,9 +124,31 @@ struct TVPhotoViewerView: View {
         .onPlayPauseCommand {
             onSlideshow?()
         }
-        .onExitCommand { dismiss() }
+        .onExitCommand(perform: exit)
+        // Over the picture, not inside it: arrows pressed in the panel must
+        // reach the focus engine, and the move command above would take them.
+        .overlay(alignment: .bottom) {
+            if showsInfo, let image {
+                TVMediaInfoPanel(image: image)
+                    .padding(.horizontal, 80)
+                    .padding(.bottom, 60)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .onExitCommand(perform: exit)
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: showsInfo)
         .task(id: index) {
             await load()
+        }
+    }
+
+    /// Menu: the info panel first, then the viewer.
+    private func exit() {
+        if showsInfo {
+            showsInfo = false
+            hasFocus = true
+        } else {
+            dismiss()
         }
     }
 

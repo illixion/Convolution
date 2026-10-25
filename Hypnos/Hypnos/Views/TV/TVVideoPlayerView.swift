@@ -98,6 +98,8 @@ struct TVVideoPlayerView: View {
     /// The transport bar's Quality menu: a Library title's levels, or a
     /// YouTube video's renditions.
     @State private var quality: TVPlayerQuality
+    /// A Stash scene's rating, for the transport bar's Rating menu.
+    @State private var rating: TVSceneRating?
     @State private var failureMessage: String?
     @State private var skipper = MediaSegmentSkipper()
     @State private var subtitles = SubtitleController()
@@ -117,6 +119,7 @@ struct TVVideoPlayerView: View {
         self.onSpeedChange = onSpeedChange
         _details = State(initialValue: PlayerDetailsLoader(fallback: PlayerDetails(video: video)))
         _quality = State(initialValue: TVPlayerQuality(video: video))
+        _rating = State(initialValue: video.stashId.map { TVSceneRating(sceneId: $0, identity: video.identity, rating100: video.rating100) })
     }
 
     var body: some View {
@@ -131,7 +134,7 @@ struct TVVideoPlayerView: View {
                                                       subtitleSource: { [remuxSource] in
                                                           SubtitleSource.forVideo(video, remuxing: remuxSource)
                                                       },
-                                                      quality: quality,
+                                                      quality: quality, rating: rating,
                                                       onProgress: onProgress, onPlayedToEnd: onPlayedToEnd) {
                     playbackFailed()
                 }
@@ -169,6 +172,7 @@ struct TVVideoPlayerView: View {
             quality.streamURL = url
         }
         .onDisappear { quality.stop() }
+        .onAppear { rating?.appModel = appModel }
         .task {
             await skipper.load(videoIdentity: video.identity)
         }
@@ -308,6 +312,8 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
     var subtitleSource: @MainActor () -> SubtitleSource? = { nil }
     /// The Quality menu's model, told how the stream is doing.
     var quality: TVPlayerQuality?
+    /// A Stash scene's rating, for the Rating menu.
+    var rating: TVSceneRating?
     var onProgress: (Double, Double, Bool) -> Void = { _, _, _ in }
     var onPlayedToEnd: (() -> Void)?
     var onPlaybackFailed: () -> Void = {}
@@ -352,6 +358,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         coordinator.item = item
         coordinator.subtitles = subtitles
         coordinator.quality = quality
+        coordinator.rating = rating
         coordinator.observePlayback(player, controller: controller)
         // A resume point needs the item's own readiness (below), so only a
         // from-the-start clip takes the gapless looper.
@@ -578,6 +585,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         weak var controller: AVPlayerViewController?
         var subtitles: SubtitleController?
         var quality: TVPlayerQuality?
+        var rating: TVSceneRating?
         var timeControlObservation: NSKeyValueObservation?
         var displayObservation: NSKeyValueObservation?
         var jumpObserver: NSObjectProtocol?
@@ -773,7 +781,8 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
 
         @MainActor private func refreshTransportBar() {
             guard let controller else { return }
-            controller.transportBarCustomMenuItems = [qualityMenu(), subtitleMenu(), loopItem()].compactMap { $0 }
+            controller.transportBarCustomMenuItems = [qualityMenu(), subtitleMenu(), ratingMenu(), loopItem()]
+                .compactMap { $0 }
             if subtitles?.selected != nil { silenceSystemSubtitles() }
         }
 
@@ -834,6 +843,22 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
             }
             let playing = checked == .auto ? "Auto · \(quality.libraryLabel)" : quality.libraryLabel
             return UIMenu(title: "Quality", subtitle: playing, image: image, children: items)
+        }
+
+        /// A Stash scene's rating: no rating or one to five stars, saved to
+        /// the server as the grid's quick actions save one.
+        @MainActor private func ratingMenu() -> UIMenu? {
+            guard let rating else { return nil }
+            let stars = rating.stars
+            var items: [UIMenuElement] = [
+                UIAction(title: "No Rating", state: stars == 0 ? .on : .off) { _ in rating.rate(0) },
+            ]
+            for count in 1 ... 5 {
+                items.append(UIAction(title: String(repeating: "★", count: count) + String(repeating: "☆", count: 5 - count),
+                                      state: stars == count ? .on : .off) { _ in rating.rate(count) })
+            }
+            return UIMenu(title: "Rating", image: UIImage(systemName: stars > 0 ? "star.fill" : "star"),
+                          children: items)
         }
 
         /// A Loop toggle, since a clip may want looping where the default
