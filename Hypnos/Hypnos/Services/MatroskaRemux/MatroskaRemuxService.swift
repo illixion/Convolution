@@ -17,7 +17,8 @@
  - the file isn't Matroska (a cheap guess from the name, then the EBML
    magic in its first bytes);
  - the remuxer declines it (VP8, Vorbis-only audio, an encrypted track, a
-   server file without Cues…, see `RemuxError`);
+   server file without Cues whose clusters have no sizes…, see
+   `RemuxError`);
  - the device has no decoder for the video (`canDecode`, which asks
    VideoToolbox with the remux's own sample entry: AV1 on a chip without
    it, VP9 before the supplemental decoder is registered);
@@ -215,7 +216,7 @@ final class MatroskaRemuxService: Sendable {
             Remuxing \(summary.docType, privacy: .public) \(summary.video.codec, privacy: .public) \
             \(summary.width, privacy: .public)x\(summary.height, privacy: .public) \(summary.videoRange, privacy: .public), \
             audio [\(audio, privacy: .public)], dropped [\(dropped, privacy: .public)], \
-            \(summary.segmentCount, privacy: .public) segments\(summary.scannedClusters ? " (scanned)" : "", privacy: .public), \
+            \(summary.segmentCount, privacy: .public) segments\(summary.scannedClusters ? " (scanned)" : summary.indexing ? " so far (indexing)" : "", privacy: .public), \
             ready in \(milliseconds, privacy: .public) ms\(probeURL.lastPathComponent == "muxed.m3u8" ? ", muxed for an SDR display" : "", privacy: .public)
             """)
         return entry

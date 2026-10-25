@@ -14,7 +14,9 @@
  Per input: whether it was remuxed and how fast, the decode probe, each
  track's format description (codec, transfer function, mastering and
  light-level metadata), 3 s of playback (time advancing, frames arriving
- from an AVPlayerItemVideoOutput), a seek to 70 % and 3 s more, the
+ from an AVPlayerItemVideoOutput), for a server's file without Cues
+ (indexed while it plays, an EVENT playlist) how long until the duration is
+ known, then a seek to 70 % and 3 s more, the
  audio renditions (listed, then switched to another and played), and each
  embedded subtitle track's cues near the start and near 70 %, read the way
  the players read them (`MatroskaSubtitles`).
@@ -108,11 +110,20 @@ enum RemuxHarness {
             return hls
         }
         log("\(name): ready, duration=\(String(format: "%.3f", item.duration.seconds))")
-        await checkSubtitles(name, source: source, duration: item.duration.seconds)
 
         player.play()
         await watch(name, label: "play", player: player, item: item, output: output, seconds: playSeconds,
                     describe: true)
+
+        // A growing index: EXT-X-ENDLIST turns the duration from indefinite
+        // to the file's.
+        if !item.duration.isNumeric {
+            let waiting = ContinuousClock.now
+            for _ in 0 ..< 1200 where !item.duration.isNumeric { try? await Task.sleep(for: .milliseconds(100)) }
+            let seekable = item.seekableTimeRanges.last.map { $0.timeRangeValue.end.seconds } ?? 0
+            log("\(name): index done, duration \(String(format: "%.3f", item.duration.seconds)) known \(ContinuousClock.now - waiting) after the first play, at \(String(format: "%.2f", item.currentTime().seconds)) s, seekable to \(String(format: "%.1f", seekable)) \(item.duration.isNumeric ? "OK" : "FAIL")")
+        }
+        await checkSubtitles(name, source: source, duration: item.duration.seconds)
 
         // Audio renditions: list, switch, play on.
         if let group = try? await asset.loadMediaSelectionGroup(for: .audible) {

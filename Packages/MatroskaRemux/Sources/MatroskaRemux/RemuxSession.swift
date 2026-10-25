@@ -4,9 +4,11 @@
  `open` reads the file's head, decides which tracks go in (`TrackPlans`),
  reads the first frames (codec details Matroska doesn't store: a VP9
  keyframe header, an AC-3 syncframe, the first timestamps) and builds the
- segment index. After that everything is on demand: playlists and init
- segments are computed once, and a media segment is muxed when the player
- asks for it, from that segment's clusters only.
+ segment index (for a server's file without Cues, starts building it:
+ `ProgressiveIndex.swift`). After that everything is on demand: playlists
+ and init segments are computed once (a growing index's media playlists on
+ each request), and a media segment is muxed when the player asks for it,
+ from that segment's clusters only.
 
  Video and audio of one segment come from the same byte range, and the
  player asks for them at nearly the same moment, so a segment's clusters
@@ -38,9 +40,18 @@
 import Foundation
 
 public struct RemuxOptions: Sendable {
-    /// Index a file without Cues by scanning its clusters. Nil: only when
-    /// the source is local.
+    /// Index a file without Cues by scanning its clusters before `open`
+    /// returns. Nil: only when the source is local; a server's file is
+    /// indexed by hopping from cluster to cluster while it plays instead.
     public var allowsClusterScan: Bool?
+    /// How long `open` waits for a hopped index to finish before handing
+    /// out a growing one (it always waits for `listedSegmentsAtOpen`).
+    public var indexWait: Double = 1.5
+    public var listedSegmentsAtOpen = 3
+    /// Hop chains a hopped index may run at once, and the clusters there
+    /// have to be per chain for another to pay.
+    public var indexChains = 4
+    public var clustersPerIndexChain: Int64 = 400
     /// How far into the file `open` reads for the first frames.
     public var probeByteLimit: Int64 = 48 << 20
     /// Parsed segments kept for the renditions still to ask for them: by
@@ -87,6 +98,11 @@ public struct RemuxSummary: Sendable {
     public var framesPerSecond: Double?
     /// The index came from scanning clusters (no Cues).
     public var scannedClusters: Bool
+    /// The index was still growing when the session opened (a server's file
+    /// without Cues): the media playlists are EVENT playlists until it is
+    /// done. `segmentCount` is what was listed then; `durationSeconds` is
+    /// Info's Duration, or what was indexed then when the file has none.
+    public var indexing: Bool
 }
 
 public actor RemuxSession {
@@ -95,11 +111,19 @@ public actor RemuxSession {
 
     nonisolated let source: any ByteSource
     nonisolated let header: MatroskaHeader
-    nonisolated let index: SegmentIndex
+    /// The segment index; it grows while a server's file without Cues is
+    /// hopped over (`ProgressiveIndex.swift`).
+    nonisolated let indexStore: SegmentIndexStore
+    nonisolated var index: SegmentIndex { indexStore.current }
+    /// The background indexing, while it runs.
+    private nonisolated let indexing: Task<Void, Never>?
     nonisolated let video: VideoPlan
     nonisolated let audio: [AudioPlan]
-    nonisolated let videoPlaylist: String
-    nonisolated let audioPlaylists: [UInt64: String]
+    /// Media playlists of an index complete at `open`, by prefix; the
+    /// growing index's are made on each request.
+    nonisolated let fixedPlaylists: [String: String]
+    /// EXT-X-TARGETDURATION of a growing index's playlists.
+    nonisolated let eventTargetDuration: Int?
     nonisolated let videoInit: Data
     nonisolated let audioInits: [UInt64: Data]
     nonisolated let options: RemuxOptions
@@ -110,7 +134,7 @@ public actor RemuxSession {
     /// master outright (AVFoundation, `eligibleForHDRPlayback` false), but
     /// plays a media playlist, tone-mapping the picture; this is that
     /// playlist. It has no audio choice.
-    public nonisolated let muxedPlaylist: String
+    public nonisolated var muxedPlaylist: String { mediaPlaylist("muxed") }
     nonisolated let muxedInit: Data
 
     private var parsed: [Int: Task<ParsedSegment, Error>] = [:]
@@ -135,10 +159,13 @@ public actor RemuxSession {
     nonisolated let subtitleSource: any ByteSource
     private var subtitleStores: [UInt64: SubtitleStore] = [:]
 
-    private init(source: any ByteSource, subtitleSource: any ByteSource, header: MatroskaHeader, index: SegmentIndex,
-                 video: VideoPlan, audio: [AudioPlan], dropped: [RemuxSummary.DroppedTrack], scanned: Bool,
-                 options: RemuxOptions) {
+    private init(source: any ByteSource, subtitleSource: any ByteSource, header: MatroskaHeader,
+                 indexStore: SegmentIndexStore, indexing: Task<Void, Never>?, video: VideoPlan, audio: [AudioPlan],
+                 dropped: [RemuxSummary.DroppedTrack], scanned: Bool, options: RemuxOptions) {
         self.source = source
+        self.indexStore = indexStore
+        self.indexing = indexing
+        let index = indexStore.publish()
         self.subtitleSource = subtitleSource
         var subtitleTracks: [MatroskaSubtitleTrack] = []
         var subtitleEntries: [UInt64: MatroskaTrack] = [:]
@@ -160,29 +187,32 @@ public actor RemuxSession {
         self.subtitleEntries = subtitleEntries
         self.subtitleCues = subtitleCues
         self.header = header
-        self.index = index
         self.video = video
         self.audio = audio
         self.options = options
         let names = Playlists.renditionNames(audio)
-        videoPlaylist = Playlists.media(index: index, timestampScale: header.timestampScale, prefix: "video")
-        var audioPlaylists: [UInt64: String] = [:]
+        let prefixes = ["video", "muxed"] + audio.map { "audio-\($0.track.number)" }
+        if index.isComplete {
+            fixedPlaylists = Dictionary(uniqueKeysWithValues: prefixes.map {
+                ($0, Playlists.media(index: index, timestampScale: header.timestampScale, prefix: $0))
+            })
+            eventTargetDuration = nil
+        } else {
+            fixedPlaylists = [:]
+            eventTargetDuration = Playlists.targetDuration(index: index, timestampScale: header.timestampScale)
+        }
         var audioInits: [UInt64: Data] = [:]
         for plan in audio {
-            audioPlaylists[plan.track.number] = Playlists.media(index: index, timestampScale: header.timestampScale,
-                                                               prefix: "audio-\(plan.track.number)")
             audioInits[plan.track.number] = Data(FragmentWriter.initSegment(
                 handler: .audio, timescale: UInt32(plan.sampleRate),
                 language: LanguageCodes.iso6392T(fromBCP47: plan.track.bcp47Language), sampleEntry: plan.sampleEntry))
         }
-        self.audioPlaylists = audioPlaylists
         self.audioInits = audioInits
         videoInit = Data(FragmentWriter.initSegment(
             handler: .video(width: video.displayWidth, height: video.displayHeight), timescale: video.timescale,
             language: "und", sampleEntry: video.sampleEntry))
         masterPlaylist = Playlists.master(index: index, header: header, video: video, audio: audio, names: names)
         muxedAudio = Playlists.defaultAudio(audio)
-        muxedPlaylist = Playlists.media(index: index, timestampScale: header.timestampScale, prefix: "muxed")
         var muxedTracks = [FragmentWriter.TrackHeader(handler: .video(width: video.displayWidth, height: video.displayHeight),
                                                       timescale: video.timescale, language: "und",
                                                       sampleEntry: video.sampleEntry)]
@@ -192,7 +222,9 @@ public actor RemuxSession {
                                      sampleEntry: plan.sampleEntry))
         }
         muxedInit = Data(FragmentWriter.initSegment(tracks: muxedTracks))
-        let duration = Double(index.endTime - (index.boundaries.first?.time ?? 0)) * Double(header.timestampScale) / 1e9
+        // Info's Duration while the index grows, else where it ends.
+        let endTicks = index.isComplete ? index.endTime : header.duration.map { Int64($0.rounded()) } ?? index.endTime
+        let duration = Double(endTicks - (index.boundaries.first?.time ?? 0)) * Double(header.timestampScale) / 1e9
         summary = RemuxSummary(
             docType: header.docType,
             video: .init(number: video.track.number, codecID: video.track.codecID, codec: video.codecName,
@@ -206,8 +238,10 @@ public actor RemuxSession {
             },
             dropped: dropped, segmentCount: index.count, durationSeconds: duration, videoRange: video.videoRange,
             width: video.displayWidth, height: video.displayHeight, framesPerSecond: video.framesPerSecond,
-            scannedClusters: scanned)
+            scannedClusters: scanned, indexing: !index.isComplete)
     }
+
+    deinit { indexing?.cancel() }
 
     // MARK: - Opening
 
@@ -287,44 +321,96 @@ public actor RemuxSession {
             throw RemuxError.declined("no playable audio")
         }
 
-        // The index: Cues, else (for a local file) a scan of the clusters.
+        // The index: Cues, else a scan of the clusters (a local file) or, for
+        // a server's file, hops from cluster to cluster while it plays.
         let videoCues = header.cues.filter { $0.track == videoTrack.number }.sorted { $0.time < $1.time }
-        var keyframes: [SegmentIndex.Boundary] = []
-        var endTime: Int64?
+        let store: SegmentIndexStore
+        var indexing: Task<Void, Never>?
         var scanned = false
-        let endPosition = header.contentEnd ?? firstCluster
-        if !videoCues.isEmpty {
-            keyframes = videoCues.map { .init(time: $0.time, clusterPosition: $0.clusterPosition) }
-            if keyframes[0].time > keyframe.blockTimestamp || keyframes[0].clusterPosition > firstCluster {
-                keyframes.insert(.init(time: keyframe.blockTimestamp, clusterPosition: firstCluster), at: 0)
+        if !videoCues.isEmpty || options.allowsClusterScan ?? source.isLocal {
+            var keyframes: [SegmentIndex.Boundary] = []
+            var endTime: Int64?
+            if !videoCues.isEmpty {
+                keyframes = videoCues.map { .init(time: $0.time, clusterPosition: $0.clusterPosition) }
+                if keyframes[0].time > keyframe.blockTimestamp || keyframes[0].clusterPosition > firstCluster {
+                    keyframes.insert(.init(time: keyframe.blockTimestamp, clusterPosition: firstCluster), at: 0)
+                }
+            } else {
+                let scan = try await scanKeyframes(source: source, start: firstCluster, limit: contentEnd,
+                                                   video: videoTrack.number)
+                keyframes = scan.keyframes
+                endTime = scan.endTime
+                scanned = true
             }
-        } else if options.allowsClusterScan ?? source.isLocal {
-            let scan = try await scanKeyframes(source: source, start: firstCluster, limit: contentEnd,
-                                               video: videoTrack.number)
-            keyframes = scan.keyframes
-            endTime = scan.endTime
-            scanned = true
+            guard !keyframes.isEmpty else { throw RemuxError.declined("no video keyframes") }
+
+            // The later of the two: Info's Duration covers every track (audio can
+            // outlast the video), a scan only the video's frames.
+            var end = [endTime, header.duration.map { Int64($0.rounded()) }].compactMap { $0 }.max()
+            if end == nil {
+                // Cues but no Duration: the last cue's segment says where it ends.
+                end = try await lastFrameTime(source: source, header: header, from: keyframes.last!.clusterPosition,
+                                              video: videoTrack)
+            }
+            let endPosition = header.contentEnd ?? keyframes.last!.clusterPosition
+            store = SegmentIndexStore(SegmentIndex.build(keyframes: keyframes, endTime: end ?? keyframes.last!.time + 1,
+                                                         endPosition: endPosition,
+                                                         timestampScale: header.timestampScale))
         } else {
-            throw RemuxError.declined("no Cues, and the source is remote")
+            store = SegmentIndexStore(SegmentIndex(boundaries: [], endTime: 0, endPosition: contentEnd,
+                                                   isComplete: false))
+            let task = ProgressiveIndexing.start(
+                store: store, source: original, header: header, firstCluster: firstCluster,
+                firstKeyframe: .init(time: keyframe.blockTimestamp, clusterPosition: firstCluster), video: videoTrack,
+                options: options)
+            indexing = task
+            do {
+                try await waitForSegments(store, options: options)
+            } catch {
+                task.cancel()
+                throw error
+            }
         }
-        guard !keyframes.isEmpty else { throw RemuxError.declined("no video keyframes") }
-
-        // The later of the two: Info's Duration covers every track (audio can
-        // outlast the video), a scan only the video's frames.
-        var end = [endTime, header.duration.map { Int64($0.rounded()) }].compactMap { $0 }.max()
-        if end == nil {
-            // Cues but no Duration: the last cue's segment says where it ends.
-            end = try await lastFrameTime(source: source, header: header, from: keyframes.last!.clusterPosition,
-                                          video: videoTrack)
+        guard store.current.count > 0 else {
+            indexing?.cancel()
+            throw RemuxError.declined("no segments")
         }
-        var endPositionValue = endPosition
-        if header.contentEnd == nil { endPositionValue = keyframes.last!.clusterPosition }
-        let index = SegmentIndex.build(keyframes: keyframes, endTime: end ?? keyframes.last!.time + 1,
-                                       endPosition: endPositionValue, timestampScale: header.timestampScale)
-        guard index.count > 0 else { throw RemuxError.declined("no segments") }
 
-        return RemuxSession(source: source, subtitleSource: original, header: header, index: index, video: video,
-                            audio: audio, dropped: dropped, scanned: scanned, options: options)
+        return RemuxSession(source: source, subtitleSource: original, header: header, indexStore: store,
+                            indexing: indexing, video: video, audio: audio, dropped: dropped, scanned: scanned,
+                            options: options)
+    }
+
+    /// Waits until a hopped index is done, or has listed its first segments
+    /// and either `indexWait` has passed or, at the rate it is going, it
+    /// won't be done by then.
+    private static func waitForSegments(_ store: SegmentIndexStore, options: RemuxOptions) async throws {
+        let clock = ContinuousClock()
+        let started = clock.now
+        let budget = Duration.seconds(options.indexWait)
+        while true {
+            if let error = store.error { throw error }
+            let index = store.current
+            if index.isComplete { return }
+            if index.count >= max(1, options.listedSegmentsAtOpen) {
+                let elapsed = clock.now - started
+                if elapsed >= budget { return }
+                let progress = store.progress
+                if elapsed >= .milliseconds(50), progress > 0, elapsed / progress > budget { return }
+            }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    /// Whether every segment is known (always, but for a server's file
+    /// without Cues still being indexed).
+    public nonisolated var isIndexComplete: Bool { index.isComplete }
+
+    /// Returns once the index is complete (at once for a file with Cues);
+    /// throws what stopped it.
+    public func waitUntilIndexed() async throws {
+        if let indexing { await indexing.value }
+        if let error = indexStore.error { throw error }
     }
 
     private struct FirstFrames {
@@ -385,7 +471,7 @@ public actor RemuxSession {
     }
 
     /// The end of the video, from the frames after the last keyframe.
-    private static func lastFrameTime(source: any ByteSource, header: MatroskaHeader, from position: Int64,
+    static func lastFrameTime(source: any ByteSource, header: MatroskaHeader, from position: Int64,
                                       video: MatroskaTrack) async throws -> Int64? {
         var reader = ClusterReader(source: source, start: position, limit: header.contentEnd ?? Int64.max,
                                    chunkSize: 1 << 20, modes: [video.number: .headers])
@@ -425,7 +511,7 @@ public actor RemuxSession {
             default:
                 guard parts[0].hasPrefix("audio-"), parts[0].hasSuffix(".m3u8"),
                       let number = UInt64(parts[0].dropFirst(6).dropLast(5)),
-                      audioPlaylists[number] != nil else { return nil }
+                      audioInits[number] != nil else { return nil }
                 return .audioPlaylist(number)
             }
         case 2:
@@ -465,8 +551,8 @@ public actor RemuxSession {
         let playlist = "application/vnd.apple.mpegurl"
         switch resource {
         case .master: return (Data(masterPlaylist.utf8), playlist)
-        case .videoPlaylist: return (Data(videoPlaylist.utf8), playlist)
-        case .audioPlaylist(let n): return audioPlaylists[n].map { (Data($0.utf8), playlist) }
+        case .videoPlaylist: return (Data(mediaPlaylist("video").utf8), playlist)
+        case .audioPlaylist(let n): return (Data(mediaPlaylist("audio-\(n)").utf8), playlist)
         case .muxedPlaylist: return (Data(muxedPlaylist.utf8), playlist)
         case .videoInit: return (videoInit, "video/mp4")
         case .audioInit(let n): return audioInits[n].map { ($0, "audio/mp4") }
@@ -477,7 +563,16 @@ public actor RemuxSession {
         }
     }
 
+    /// Segments listed (so far, while the index grows).
     public nonisolated var segmentCount: Int { index.count }
+
+    /// A media playlist: fixed for an index complete at `open`, else made
+    /// from the index as it stands.
+    nonisolated func mediaPlaylist(_ prefix: String) -> String {
+        if let fixed = fixedPlaylists[prefix] { return fixed }
+        return Playlists.media(index: index, timestampScale: header.timestampScale, prefix: prefix,
+                               eventTargetDuration: eventTargetDuration)
+    }
 
     /// The video's MP4 sample entry, for asking the platform whether it has
     /// a decoder (CoreMedia builds a format description from it as is).
@@ -573,6 +668,7 @@ public actor RemuxSession {
     }
 
     private func videoFragment(_ k: Int, from segment: ParsedSegment) throws -> Fragment {
+        let index = self.index
         let frames = segment.video
         guard !frames.isEmpty else { throw RemuxError.malformed("segment \(k) has no video") }
         let presentation = frames.map { video.time(ticks: $0.blockTimestamp, laceIndex: $0.laceIndex) }
@@ -586,8 +682,8 @@ public actor RemuxSession {
             let duration: Int64
             if i + 1 < decode.count {
                 duration = decode[i + 1] - decode[i]
-            } else if k + 1 < index.count {
-                let next = video.time(ticks: index.startTime(k + 1))
+            } else if let boundary = index.next(k) {
+                let next = video.time(ticks: boundary.time)
                 let gap = next - decode[i]
                 duration = gap > 0 && gap <= 4 * video.nominalFrameTicks ? gap : video.nominalFrameTicks
             } else {
@@ -614,8 +710,9 @@ public actor RemuxSession {
     /// track's first frame, usually silence) as long as the stretch.
     private func audioFragments(_ plan: AudioPlan, _ k: Int, from segment: ParsedSegment) async throws -> [Fragment] {
         let number = plan.track.number
+        let index = self.index
         var frames = segment.audio[number] ?? []
-        let isLast = k + 1 == index.count
+        let isLast = index.isLast(k)
         let lower = k == 0 ? Int64.min : plan.boundary(ticks: index.startTime(k))
         let upper = isLast ? Int64.max : plan.boundary(ticks: index.startTime(k + 1))
         let start = plan.boundary(ticks: index.startTime(k))
@@ -771,9 +868,10 @@ public actor RemuxSession {
     }
 
     private nonisolated func parse(_ k: Int) async throws -> ParsedSegment {
+        let index = self.index
         let start = index.boundaries[k]
-        let upperTicks: Int64? = k + 1 < index.count ? index.startTime(k + 1) : nil
-        let nominalEnd = k + 1 < index.count ? index.boundaries[k + 1].clusterPosition : index.endPosition
+        let upperTicks: Int64? = index.next(k)?.time
+        let nominalEnd = index.next(k)?.clusterPosition ?? index.endPosition
         let firstRead = Int(clamping: min(Int64(96 << 20), max(Int64(64 << 10), nominalEnd - start.clusterPosition + (256 << 10))))
         var modes: [UInt64: ClusterReader.Mode] = [video.track.number: .frames]
         var stripped: [UInt64: [UInt8]] = [video.track.number: video.track.strippedHeader]

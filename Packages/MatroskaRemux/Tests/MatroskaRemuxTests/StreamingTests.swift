@@ -68,13 +68,18 @@ struct StreamingTests {
     }
 }
 
-/// A source that isn't local, recording each range read from it.
+/// A source that isn't local, recording each range read from it, each
+/// read taking `latency` (a server's round trip).
 final class CountingSource: ByteSource, @unchecked Sendable {
     let base: any ByteSource
+    let latency: Duration
     private let lock = NSLock()
     private var log: [Range<Int64>] = []
 
-    init(_ base: any ByteSource) { self.base = base }
+    init(_ base: any ByteSource, latency: Duration = .zero) {
+        self.base = base
+        self.latency = latency
+    }
 
     var ranges: [Range<Int64>] { lock.withLock { log } }
     var isLocal: Bool { false }
@@ -82,6 +87,7 @@ final class CountingSource: ByteSource, @unchecked Sendable {
     func length() async throws -> Int64? { try await base.length() }
 
     func read(_ range: Range<Int64>) async throws -> Data {
+        if latency > .zero { try await Task.sleep(for: latency) }
         let data = try await base.read(range)
         lock.withLock { log.append(range.lowerBound ..< range.lowerBound + Int64(data.count)) }
         return data

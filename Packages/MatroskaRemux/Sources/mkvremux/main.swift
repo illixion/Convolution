@@ -1,9 +1,14 @@
 /*
  mkvremux - writes a Matroska file's HLS to a folder
 
-     swift run mkvremux <file.mkv> <folder> [segments]
+     swift run mkvremux <file.mkv or http URL> <folder> [segments]
+     swift run mkvremux --time <file.mkv or http URL>
 
- `segments` limits the media segments written, e.g. `0-2` or `7`.
+ `segments` limits the media segments written, e.g. `0-2` or `7`. An http
+ URL is read with range requests, as the app reads a server's file.
+ `--time` only opens the file and waits for its index, printing how long
+ each took and what was read (for a file without Cues, which is indexed
+ while it plays).
 
  Writes master.m3u8, the media playlists, and every init and media segment,
  at the paths the app serves them on, then prints the summary. Serve the
@@ -14,17 +19,78 @@
 import Foundation
 import MatroskaRemux
 
+/// A file over HTTP, read with range requests, counting them.
+final class HTTPByteSource: ByteSource, @unchecked Sendable {
+    let url: URL
+    private let session: URLSession
+    private let lock = NSLock()
+    private(set) var requests = 0
+    private(set) var bytes: Int64 = 0
+
+    init(url: URL) {
+        self.url = url
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        session = URLSession(configuration: configuration)
+    }
+
+    func length() async throws -> Int64? {
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        let (_, response) = try await session.data(for: request)
+        return (response as? HTTPURLResponse)?.expectedContentLength
+    }
+
+    func read(_ range: Range<Int64>) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.setValue("bytes=\(range.lowerBound)-\(range.upperBound - 1)", forHTTPHeaderField: "Range")
+        let (data, _) = try await session.data(for: request)
+        lock.withLock {
+            requests += 1
+            bytes += Int64(data.count)
+        }
+        return data
+    }
+
+    var counts: (requests: Int, bytes: Int64) { lock.withLock { (requests, bytes) } }
+}
+
+func source(_ path: String) throws -> any ByteSource {
+    path.hasPrefix("http") ? HTTPByteSource(url: URL(string: path)!) : try FileByteSource(url: URL(fileURLWithPath: path))
+}
+
 let arguments = CommandLine.arguments
+if arguments.count == 3, arguments[1] == "--time" {
+    do {
+        let bytes = try source(arguments[2])
+        let started = Date()
+        let session = try await RemuxSession.open(source: bytes)
+        let opened = Date().timeIntervalSince(started)
+        let atOpen = (bytes as? HTTPByteSource)?.counts
+        try await session.waitUntilIndexed()
+        let indexed = Date().timeIntervalSince(started)
+        let total = (bytes as? HTTPByteSource)?.counts
+        print(String(format: "opened in %.3f s (%@), %d segments listed; indexed in %.3f s, %d segments",
+                     opened, session.summary.indexing ? "growing" : "complete", session.summary.segmentCount,
+                     indexed, session.segmentCount))
+        if let atOpen, let total {
+            print("reads: \(atOpen.requests) requests / \(atOpen.bytes) bytes at open, \(total.requests) / \(total.bytes) in all")
+        }
+    } catch {
+        print("failed: \(error)")
+        exit(1)
+    }
+    exit(0)
+}
 guard arguments.count == 3 || arguments.count == 4 else {
-    print("usage: mkvremux <file.mkv> <folder> [segments]")
+    print("usage: mkvremux <file.mkv or URL> <folder> [segments] | mkvremux --time <file.mkv or URL>")
     exit(2)
 }
-let input = URL(fileURLWithPath: arguments[1])
 let output = URL(fileURLWithPath: arguments[2], isDirectory: true)
 
 do {
     let started = Date()
-    let session = try await RemuxSession.open(source: try FileByteSource(url: input))
+    let session = try await RemuxSession.open(source: try source(arguments[1]))
     let opened = Date().timeIntervalSince(started)
     let summary = session.summary
     print("opened in \(String(format: "%.3f", opened)) s: \(summary.docType) \(summary.video.codec) \(summary.width)x\(summary.height) \(summary.videoRange), \(summary.segmentCount) segments, \(String(format: "%.3f", summary.durationSeconds)) s\(summary.scannedClusters ? " (scanned)" : "")")

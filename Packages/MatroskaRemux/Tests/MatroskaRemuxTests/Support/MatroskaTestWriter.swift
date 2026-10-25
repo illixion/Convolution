@@ -35,6 +35,17 @@ struct MatroskaTestWriter {
     /// Bytes to strip from the front of every frame of a track, recorded as
     /// header-stripping compression.
     var strippedHeaders: [UInt64: [UInt8]] = [:]
+    /// Write the Cues (and the SeekHead's entry for them).
+    var writesCues = true
+    /// Clusters (and the Segment) of unknown size, as a live MediaRecorder
+    /// WebM is written.
+    var unknownSizeClusters = false
+    /// Where a cluster starts: at each video keyframe (mkvmerge), or at the
+    /// audio frames stored just ahead of each keyframe (ffmpeg's layout), plus
+    /// a cluster every `forcedClusterSeconds` that starts mid-GOP (ffmpeg's
+    /// 5 s limit).
+    var audioAheadOfKeyframes = false
+    var forcedClusterSeconds: Double?
 
     /// Reads a fixture's tracks and every frame (laces split, each frame
     /// with its block's timestamp).
@@ -79,15 +90,30 @@ struct MatroskaTestWriter {
             clusterTimes.append(clusterTime)
             current = []
         }
+        let ticksPerSecond = 1e9 / Double(timestampScale)
+        // Where clusters start: at each video keyframe, or (ffmpeg's layout)
+        // at the audio frames stored just ahead of it.
+        var keyframeClusterStarts = Set<Int>()
+        for (k, frame) in frames.enumerated() where frame.track == videoNumber && frame.isKeyframe {
+            var start = k
+            if audioAheadOfKeyframes {
+                while start > 0, frames[start - 1].track != videoNumber,
+                      frames[start - 1].timestamp >= frame.timestamp - Int64(0.15 * ticksPerSecond) { start -= 1 }
+            }
+            keyframeClusterStarts.insert(start)
+        }
         while i < frames.count {
             let frame = frames[i]
-            if frame.track == videoNumber, frame.isKeyframe || clusters.isEmpty && current.isEmpty {
+            let forced = forcedClusterSeconds.map {
+                !current.isEmpty && Double(frame.timestamp - clusterTime) / ticksPerSecond >= $0
+            } ?? false
+            if keyframeClusterStarts.contains(i) || forced {
                 flush()
                 clusterTime = frame.timestamp
-                if frame.isKeyframe { cues.append((frame.timestamp, clusters.count)) }
             } else if current.isEmpty, clusters.isEmpty {
                 clusterTime = frame.timestamp
             }
+            if frame.track == videoNumber, frame.isKeyframe { cues.append((frame.timestamp, clusters.count)) }
             let prefix = strippedHeaders[frame.track] ?? []
             func stripped(_ data: [UInt8]) -> [UInt8] {
                 precondition(data.starts(with: prefix), "frame doesn't start with the stripped header")
@@ -126,6 +152,11 @@ struct MatroskaTestWriter {
 
         let ebmlHeader = E.element(MatroskaID.ebml, E.uint(0x4286, 1) + E.uint(0x42F7, 1) + E.uint(0x42F2, 4)
             + E.uint(0x42F3, 8) + E.string(MatroskaID.docType, "matroska") + E.uint(0x4287, 4) + E.uint(0x4285, 2))
+        if unknownSizeClusters {
+            // Clusters end at the next one; the Segment at the file's end.
+            let clusterBodies = clusters.map { Array($0.dropFirst(4 + 8)) }
+            clusters = clusterBodies.map { E.idBytes(MatroskaID.cluster) + [0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF] + $0 }
+        }
         var info = E.uint(MatroskaID.timestampScale, UInt64(timestampScale))
         if let duration { info += E.float(MatroskaID.duration, duration) }
         let infoElement = E.element(MatroskaID.info, info)
@@ -133,7 +164,7 @@ struct MatroskaTestWriter {
         // SeekHead entries use fixed eight-byte positions, so its size is
         // known before the positions are.
         let seekHeadSize = E.element(MatroskaID.seekHead, Self.seek(MatroskaID.info, 0) + Self.seek(MatroskaID.tracks, 0)
-            + Self.seek(MatroskaID.cues, 0)).count
+            + (writesCues ? Self.seek(MatroskaID.cues, 0) : [])).count
         let infoPosition = UInt64(seekHeadSize)
         let tracksPosition = infoPosition + UInt64(infoElement.count)
         var clusterPositions: [UInt64] = []
@@ -151,10 +182,13 @@ struct MatroskaTestWriter {
                 + E.element(MatroskaID.cueTrackPositions, positions))
         }
         let seekHead = E.element(MatroskaID.seekHead, Self.seek(MatroskaID.info, infoPosition)
-            + Self.seek(MatroskaID.tracks, tracksPosition) + Self.seek(MatroskaID.cues, cuesPosition))
+            + Self.seek(MatroskaID.tracks, tracksPosition) + (writesCues ? Self.seek(MatroskaID.cues, cuesPosition) : []))
         var segmentBody = seekHead + infoElement + tracksElement
         for cluster in clusters { segmentBody += cluster }
-        segmentBody += E.element(MatroskaID.cues, cuePoints)
+        if writesCues { segmentBody += E.element(MatroskaID.cues, cuePoints) }
+        if unknownSizeClusters {
+            return Data(ebmlHeader + E.idBytes(MatroskaID.segment) + [0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF] + segmentBody)
+        }
         return Data(ebmlHeader + E.element(MatroskaID.segment, segmentBody))
     }
 

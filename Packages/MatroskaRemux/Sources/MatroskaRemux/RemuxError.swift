@@ -2,8 +2,8 @@
  MatroskaRemux - why a file can't be remuxed
 
  `declined` is the expected "no": a codec or feature this remuxer doesn't
- carry into MP4 (VP8, Vorbis, an encrypted track, a remote file without
- Cues). The caller keeps its existing fallback. `notMatroska` is the cheap
+ carry into MP4 (VP8, Vorbis, an encrypted track, a server's file without
+ Cues whose clusters have no sizes). The caller keeps its existing fallback. `notMatroska` is the cheap
  "not ours" from the first bytes. `malformed` is a file that claims to be
  Matroska and isn't readable as one.
 

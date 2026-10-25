@@ -15,22 +15,39 @@
 
  Audio and video playlists share the segment boundaries, so each segment
  number names the same stretch of the file in every rendition.
+
+ A file still being indexed (a server's file without Cues,
+ `ProgressiveIndex.swift`) gets EVENT media playlists listing the segments
+ known so far, with a target duration fixed when the session opened, and
+ `EXT-X-ENDLIST` once the index is done. They carry
+ `EXT-X-START:TIME-OFFSET=0`: without it AVPlayer starts an EVENT playlist
+ three target durations from its end (210 s into a 240 s one, measured),
+ with it at 0 (a playlist still that short also gets an error-log entry,
+ -16831 "START-TIME is too close to live", and plays from 0 all the same).
+ The master's BANDWIDTH is estimated from the segments known then and the
+ file's average when Info has a Duration.
  */
 
 import Foundation
 
 enum Playlists {
-    static func media(index: SegmentIndex, timestampScale: Int64, prefix: String) -> String {
+    /// A media playlist: VOD, or (with `eventTargetDuration`) EVENT, ended
+    /// once the index is complete.
+    static func media(index: SegmentIndex, timestampScale: Int64, prefix: String,
+                      eventTargetDuration: Int? = nil) -> String {
         let durations = (0 ..< index.count).map { k in
             Double(index.endTime(k) - index.startTime(k)) * Double(timestampScale) / 1e9
         }
-        let target = Int((durations.max() ?? 1).rounded(.up))
+        let target = eventTargetDuration ?? Int((durations.max() ?? 1).rounded(.up))
         var lines = [
             "#EXTM3U",
             "#EXT-X-VERSION:7",
             "#EXT-X-TARGETDURATION:\(max(1, target))",
             "#EXT-X-MEDIA-SEQUENCE:0",
-            "#EXT-X-PLAYLIST-TYPE:VOD",
+            "#EXT-X-PLAYLIST-TYPE:\(eventTargetDuration == nil ? "VOD" : "EVENT")",
+        ]
+        if eventTargetDuration != nil { lines.append("#EXT-X-START:TIME-OFFSET=0") }
+        lines += [
             "#EXT-X-INDEPENDENT-SEGMENTS",
             "#EXT-X-MAP:URI=\"\(prefix)/init.mp4\"",
         ]
@@ -38,8 +55,17 @@ enum Playlists {
             lines.append(String(format: "#EXTINF:%.6f,", max(0.001, duration)))
             lines.append("\(prefix)/\(k).m4s")
         }
-        lines.append("#EXT-X-ENDLIST")
+        if index.isComplete { lines.append("#EXT-X-ENDLIST") }
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// The target duration a growing index's playlists keep: its longest
+    /// segment so far, and no less than the longest segments are cut to.
+    static func targetDuration(index: SegmentIndex, timestampScale: Int64) -> Int {
+        let longest = (0 ..< index.count).map { k in
+            Double(index.endTime(k) - index.startTime(k)) * Double(timestampScale) / 1e9
+        }.max() ?? 0
+        return Int(max(longest, SegmentIndex.maximumSeconds).rounded(.up))
     }
 
     /// The track the group plays first: the first one flagged default,
@@ -109,7 +135,13 @@ enum Playlists {
             totalSeconds += seconds
             if seconds > 0.5 { peak = max(peak, bytes * 8 / seconds) }
         }
-        let average = totalSeconds > 0 ? totalBytes * 8 / totalSeconds : 0
+        var average = totalSeconds > 0 ? totalBytes * 8 / totalSeconds : 0
+        // A growing index: the whole file's average, where Info says how
+        // long it is.
+        if !index.isComplete, let duration = header.durationNanoseconds, duration > 0, let end = header.contentEnd,
+           let start = index.boundaries.first?.clusterPosition, end > start {
+            average = max(average, Double(end - start) * 8 / (Double(duration) / 1e9))
+        }
         peak = max(peak, average)
 
         var codecs = [video.codecs]

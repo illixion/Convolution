@@ -143,10 +143,7 @@ struct SessionTests {
         let session = try await Fixtures.open("live.webm")
         #expect(session.summary.scannedClusters)
         #expect(abs(session.summary.durationSeconds - 7) < 0.1)
-        // A remote source without Cues is declined rather than scanned.
-        await #expect(throws: RemuxError.declined("no Cues, and the source is remote")) {
-            _ = try await RemuxSession.open(source: RemoteLike(try Fixtures.source("live.webm")))
-        }
+        // A remote source without Cues is hopped instead (ProgressiveIndexTests).
     }
 
     @Test func twoAudioRenditions() async throws {
