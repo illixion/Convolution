@@ -102,6 +102,25 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   sent to Jellyfin is a reset of the viewer's place. Verified in the
   simulator: 2× measured off the dev Stash clip's burned-in timecode, before
   and after a loop.
+  **Quality** (`TVPlayerQuality`, a transport-bar menu with a `sparkles.tv`
+  icon, since AVKit's speed menu beside it is already a gauge): for a Library
+  title the video window's levels and rules (`LibraryStreamQuality.offered`
+  for the title's own picture and bitrate, the saved preference, Auto's
+  step-down), and for a YouTube video (sideload builds) Auto plus the
+  renditions its master offers, a chosen one playing a loopback copy of the
+  master holding only it, as in the video window (surround is spliced into
+  the master first, and a size's HDR copy the player refuses drops to SDR).
+  A pick swaps the stream at the playhead; Jellyfin's `streamPlan` renews the
+  item's play session and ends the old transcode, and progress keeps going
+  to the same item. Auto watches AVPlayer itself: `timeControlStatus`
+  waiting for data feeds `StreamStallMonitor`, a time jump or a resume from
+  pause restarts its grace, and no frame (`isReadyForDisplay`) within
+  `startupTimeout` steps down; the notice shows over the picture. Verified
+  against the dev Jellyfin: the menu, switching to 480p and back at the
+  playhead (also at 0.5×), the stored resume point after quitting mid-way
+  (15 s, not 0), and the startup step-down by pausing the server's container
+  as the player opened the stream. Not seen: a mid-play rebuffer stepping
+  down (the local server never stalls once playing), and YouTube at all.
 - **`TVAlbumsTabView`** — the same `MediaContainer` grid and
   `AppModel.applyContainer(_:isVideo:)` the visionOS/iOS Albums tab uses;
   switches the tab selection to Pictures/Videos afterward instead of a

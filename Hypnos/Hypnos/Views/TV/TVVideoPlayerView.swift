@@ -53,10 +53,12 @@ import SwiftUI
 struct TVVideoPlayerView: View {
     let video: GalleryVideo
 
-    /// YouTube's saved quality; other sources play whatever they offer.
+    /// A cap on what an adaptive stream may pick: YouTube's saved quality
+    /// while its renditions are unknown (once read, a chosen size plays a
+    /// copy of the master holding only it). Other sources aren't capped.
     private var maximumResolution: CGSize {
         #if HYPNOS_YOUTUBE
-        if YouTubeVideoID(videoIdentity: video.identity) != nil {
+        if quality.isYouTube, !quality.offersChoice {
             return YouTubeQuality.maximumResolution(height: YouTubeQuality.preferred.height)
         }
         #endif
@@ -87,10 +89,15 @@ struct TVVideoPlayerView: View {
     /// What the remux playing was opened from, for the file's own subtitles.
     @State private var remuxSource: URL?
     #if HYPNOS_YOUTUBE
-    /// While surround plays: YouTube's stereo master, where a failed swap
-    /// goes back to.
+    /// While surround plays: what played before it, where a failed swap
+    /// goes back to when YouTube's own master can't be cut again.
     @State private var stereoURL: URL?
+    /// A rendition's HDR copy failed once already: the next failure is real.
+    @State private var droppedHDR = false
     #endif
+    /// The transport bar's Quality menu: a Library title's levels, or a
+    /// YouTube video's renditions.
+    @State private var quality: TVPlayerQuality
     @State private var failureMessage: String?
     @State private var skipper = MediaSegmentSkipper()
     @State private var subtitles = SubtitleController()
@@ -109,6 +116,7 @@ struct TVVideoPlayerView: View {
         self.initialSpeed = initialSpeed
         self.onSpeedChange = onSpeedChange
         _details = State(initialValue: PlayerDetailsLoader(fallback: PlayerDetails(video: video)))
+        _quality = State(initialValue: TVPlayerQuality(video: video))
     }
 
     var body: some View {
@@ -123,17 +131,9 @@ struct TVVideoPlayerView: View {
                                                       subtitleSource: { [remuxSource] in
                                                           SubtitleSource.forVideo(video, remuxing: remuxSource)
                                                       },
+                                                      quality: quality,
                                                       onProgress: onProgress, onPlayedToEnd: onPlayedToEnd) {
-                    #if HYPNOS_YOUTUBE
-                    if let stereoURL {
-                        AppLogger.youtube.error("[tvOS] The surround stream failed; back to stereo")
-                        self.stereoURL = nil
-                        self.resolvedURL = stereoURL
-                        return
-                    }
-                    #endif
-                    failureMessage = "This video's format isn't supported on Apple TV."
-                    self.resolvedURL = nil
+                    playbackFailed()
                 }
                 .ignoresSafeArea()
                 // Belt-and-suspenders: `AVPlayerViewController` normally handles
@@ -158,11 +158,17 @@ struct TVVideoPlayerView: View {
             }
         }
         .task {
+            quality.onSwitch = { url in resolvedURL = url }
             await resolve()
+            await quality.start()
             #if HYPNOS_YOUTUBE
             await swapInSurround()
             #endif
         }
+        .onChange(of: resolvedURL, initial: true) { _, url in
+            quality.streamURL = url
+        }
+        .onDisappear { quality.stop() }
         .task {
             await skipper.load(videoIdentity: video.identity)
         }
@@ -203,6 +209,13 @@ struct TVVideoPlayerView: View {
         let authenticated = MediaAuthorization.shared.authorizedURL(source)
         if await NativeVideoDecodeProbe.canPlayNatively(url: authenticated) {
             AppLogger.videoWindow.info("[tvOS] playing original: \(authenticated.loggableDescription)")
+            #if HYPNOS_YOUTUBE
+            // The master's renditions, and the saved size's copy of it.
+            if quality.isYouTube {
+                resolvedURL = await quality.adoptYouTubeMaster(authenticated)
+                return
+            }
+            #endif
             resolvedURL = authenticated
             return
         }
@@ -227,16 +240,49 @@ struct TVVideoPlayerView: View {
         resolvedURL = MediaAuthorization.shared.authorizedURL(transcode)
     }
 
+    /// The stream playing failed. A YouTube surround master goes back to
+    /// stereo, and a size's HDR copy to SDR, before the viewer is told.
+    private func playbackFailed() {
+        #if HYPNOS_YOUTUBE
+        if let stereoURL {
+            AppLogger.youtube.error("[tvOS] The surround stream failed; back to stereo")
+            self.stereoURL = nil
+            Task { resolvedURL = await quality.youTubeStereoFallback() ?? stereoURL }
+            return
+        }
+        if quality.isYouTube, !droppedHDR {
+            droppedHDR = true
+            Task {
+                if let sdr = await quality.youTubeDropHDR() {
+                    resolvedURL = sdr
+                } else {
+                    showFailure()
+                }
+            }
+            return
+        }
+        #endif
+        showFailure()
+    }
+
+    private func showFailure() {
+        failureMessage = "This video's format isn't supported on Apple TV."
+        resolvedURL = nil
+    }
+
     #if HYPNOS_YOUTUBE
     /// YouTube's 5.1, once YouTube lets it play: the player swaps it in at
-    /// the playhead.
+    /// the playhead (the chosen size's copy of it, when one is chosen).
     private func swapInSurround() async {
-        guard let stereo = resolvedURL,
-              let surround = await YouTubeSurroundSwap.surroundMaster(for: video, playing: stereo),
-              !Task.isCancelled, resolvedURL == stereo else { return }
+        guard let playing = resolvedURL,
+              let master = quality.youTubeStereoMasterURL ?? (playing.host == "127.0.0.1" ? nil : playing),
+              let surround = await YouTubeSurroundSwap.surroundMaster(for: video, playing: master),
+              !Task.isCancelled else { return }
+        let target = await quality.adoptYouTubeMaster(surround, isSurround: true)
+        guard !Task.isCancelled, resolvedURL != nil else { return }
         AppLogger.youtube.info("[tvOS] Switching to surround")
-        stereoURL = stereo
-        resolvedURL = surround
+        stereoURL = resolvedURL
+        resolvedURL = target
     }
     #endif
 }
@@ -260,6 +306,8 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
     /// Where the video's subtitle tracks come from; read once, when the
     /// player is made.
     var subtitleSource: @MainActor () -> SubtitleSource? = { nil }
+    /// The Quality menu's model, told how the stream is doing.
+    var quality: TVPlayerQuality?
     var onProgress: (Double, Double, Bool) -> Void = { _, _, _ in }
     var onPlayedToEnd: (() -> Void)?
     var onPlaybackFailed: () -> Void = {}
@@ -303,6 +351,8 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         coordinator.controller = controller
         coordinator.item = item
         coordinator.subtitles = subtitles
+        coordinator.quality = quality
+        coordinator.observePlayback(player, controller: controller)
         // A resume point needs the item's own readiness (below), so only a
         // from-the-start clip takes the gapless looper.
         let useLooper = loops && startSeconds <= 0
@@ -335,7 +385,8 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
             guard let coordinator, let player, coordinator.didStart else { return startSeconds }
             return coordinator.playhead(of: player)
         }
-        let overlay = UIHostingController(rootView: TVSubtitleLayer(controller: subtitles, picture: picture) {
+        let overlay = UIHostingController(rootView: TVSubtitleLayer(controller: subtitles, picture: picture,
+                                                                    quality: quality) {
             [weak player, weak coordinator] in
             guard let player else { return 0 }
             return coordinator?.playhead(of: player) ?? player.currentTime().seconds
@@ -425,6 +476,10 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         context.coordinator.onSpeedChange = onSpeedChange
         context.coordinator.segments = segments
         context.coordinator.showInfo(details, artwork: artwork, on: uiViewController.player)
+        if context.coordinator.maximumResolution != maximumResolution {
+            context.coordinator.maximumResolution = maximumResolution
+            uiViewController.player?.currentItem?.preferredMaximumResolution = maximumResolution
+        }
         if context.coordinator.url != url, let player = uiViewController.player as? AVQueuePlayer {
             context.coordinator.swap(to: url, in: player)
         }
@@ -440,6 +495,8 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         coordinator.statusObservation?.invalidate()
         coordinator.pictureObservation?.invalidate()
         coordinator.speedObservation?.invalidate()
+        coordinator.timeControlObservation?.invalidate()
+        coordinator.displayObservation?.invalidate()
         // A streamed track keeps the server reading the file until stopped.
         coordinator.subtitles?.reset()
         coordinator.looperObservation?.invalidate()
@@ -447,7 +504,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         if let observer = coordinator.failureObserver {
             NotificationCenter.default.removeObserver(observer)
         }
-        if let observer = coordinator.endObserver {
+        for observer in [coordinator.endObserver, coordinator.jumpObserver].compactMap({ $0 }) {
             NotificationCenter.default.removeObserver(observer)
         }
         if let timeObserver = coordinator.timeObserver {
@@ -520,6 +577,11 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         }
         weak var controller: AVPlayerViewController?
         var subtitles: SubtitleController?
+        var quality: TVPlayerQuality?
+        var timeControlObservation: NSKeyValueObservation?
+        var displayObservation: NSKeyValueObservation?
+        var jumpObserver: NSObjectProtocol?
+        private var wasPaused = true
         var picture: TVPlayerPicture?
         var pictureObservation: NSKeyValueObservation?
         /// The item playing (or the one a looper plays copies of).
@@ -568,6 +630,31 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
             onSpeedChange(rate)
         }
 
+        /// How the stream is doing, for Auto quality: waiting for data while
+        /// meaning to play, resuming from a pause, and the first frame.
+        @MainActor func observePlayback(_ player: AVQueuePlayer, controller: AVPlayerViewController) {
+            timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+                let status = player.timeControlStatus
+                let waiting = status == .waitingToPlayAtSpecifiedRate && player.reasonForWaitingToPlay != .noItemToPlay
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { self?.playbackStateChanged(paused: status == .paused, waiting: waiting) }
+                }
+            }
+            displayObservation = controller.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] controller, _ in
+                guard controller.isReadyForDisplay else { return }
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { self?.quality?.notePresented() }
+                }
+            }
+        }
+
+        @MainActor private func playbackStateChanged(paused: Bool, waiting: Bool) {
+            // Refilling after a pause is expected, whatever the link.
+            if wasPaused, !paused { quality?.noteInterruption() }
+            wasPaused = paused
+            quality?.noteBuffering(waiting)
+        }
+
         /// Failure, readiness and the end of `item`, replacing the
         /// observers of the item before it.
         @MainActor func observe(_ item: AVPlayerItem, in player: AVQueuePlayer) {
@@ -597,6 +684,13 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
                     break
                 }
             }
+            if let jumpObserver { NotificationCenter.default.removeObserver(jumpObserver) }
+            // A seek: the wait for data after one is expected.
+            jumpObserver = NotificationCenter.default.addObserver(
+                forName: AVPlayerItem.timeJumpedNotification, object: item, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.quality?.noteInterruption() }
+            }
             endObserver = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime,
                 object: item,
@@ -620,6 +714,8 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         /// the resume point is the first frame shown.
         @MainActor private func itemIsReady(in player: AVQueuePlayer) {
             player.defaultRate = Float(speed)
+            // Loading the stream isn't stalling.
+            quality?.noteInterruption()
             if let swap = pendingSwap {
                 guard !swapSeekIssued else { return }
                 swapSeekIssued = true
@@ -677,7 +773,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
 
         @MainActor private func refreshTransportBar() {
             guard let controller else { return }
-            controller.transportBarCustomMenuItems = [subtitleMenu(), loopItem()].compactMap { $0 }
+            controller.transportBarCustomMenuItems = [qualityMenu(), subtitleMenu(), loopItem()].compactMap { $0 }
             if subtitles?.selected != nil { silenceSystemSubtitles() }
         }
 
@@ -706,6 +802,38 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
             return UIMenu(title: "Subtitles",
                           image: UIImage(systemName: selected == nil ? "captions.bubble" : "captions.bubble.fill"),
                           children: items)
+        }
+
+        /// Quality: a Library title's levels or a YouTube video's renditions,
+        /// what plays under the choice in the menu's subtitle. Absent for
+        /// every other stream.
+        @MainActor private func qualityMenu() -> UIMenu? {
+            guard let quality, quality.offersChoice else { return nil }
+            // Not the other players' gauge: AVKit's speed menu beside it already is one.
+            let image = UIImage(systemName: "sparkles.tv")
+            #if HYPNOS_YOUTUBE
+            if quality.isYouTube {
+                let chosen = quality.youTubeChosenHeight
+                var items: [UIMenuElement] = [
+                    UIAction(title: "Auto", subtitle: "The best the connection allows",
+                             state: chosen == nil ? .on : .off) { _ in quality.chooseYouTube(height: nil) },
+                ]
+                for rendition in quality.youTubeRenditions {
+                    items.append(UIAction(title: rendition.title, state: chosen == rendition.height ? .on : .off) { _ in
+                        quality.chooseYouTube(height: rendition.height)
+                    })
+                }
+                return UIMenu(title: "Quality", subtitle: quality.youTubeLabel, image: image, children: items)
+            }
+            #endif
+            let checked = quality.checked
+            let items = quality.offered.map { level in
+                UIAction(title: level.title, subtitle: quality.detail(of: level),
+                         attributes: quality.isChanging ? .disabled : [],
+                         state: level == checked ? .on : .off) { _ in quality.choose(level) }
+            }
+            let playing = checked == .auto ? "Auto · \(quality.libraryLabel)" : quality.libraryLabel
+            return UIMenu(title: "Quality", subtitle: playing, image: image, children: items)
         }
 
         /// A Loop toggle, since a clip may want looping where the default
@@ -780,14 +908,23 @@ private final class TVPlayerPicture {
     var aspect: CGFloat?
 }
 
-/// The subtitles hosted in the player's content overlay.
+/// The subtitles hosted in the player's content overlay, and Auto quality's
+/// notice above the picture.
 private struct TVSubtitleLayer: View {
     let controller: SubtitleController
     let picture: TVPlayerPicture
+    var quality: TVPlayerQuality?
     let time: @MainActor () -> Double
 
     var body: some View {
         SubtitleOverlay(controller: controller, pictureAspect: picture.aspect, filmTime: time)
+            .overlay(alignment: .top) {
+                if let notice = quality?.notice {
+                    StreamQualityNotice(text: notice)
+                        .padding(.top, 60)
+                }
+            }
+            .animation(.easeInOut(duration: 0.3), value: quality?.notice)
     }
 }
 
