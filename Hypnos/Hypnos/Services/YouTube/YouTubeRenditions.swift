@@ -26,12 +26,14 @@
  what a non-HDR display does) gets no HDR cut until the OS changes, and the
  window replays its rendition in SDR.
 
- Pure text in, text out, apart from that registry.
+ Pure text in, text out, apart from that registry and `playlistText`, which
+ reads a master for the video window and the TV and Mac players.
  */
 
 #if HYPNOS_YOUTUBE
 
 import AVFoundation
+import DebugTrace
 import Foundation
 
 /// One picture size a video's master offers.
@@ -201,6 +203,19 @@ enum YouTubeRenditions {
               let url = await LoopbackPlaylistServer.shared.publish(text) else { return nil }
         sources[url] = source
         return url
+    }
+
+    /// A playlist's text: from the loopback server when it's one of ours.
+    static func playlistText(at url: URL) async -> String? {
+        if let served = LoopbackPlaylistServer.shared.playlist(at: url) { return served }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard (response as? HTTPURLResponse).map({ (200 ..< 300).contains($0.statusCode) }) ?? true else { return nil }
+            return String(decoding: data, as: UTF8.self)
+        } catch {
+            AppLogger.youtube.error("Couldn't read the HLS master for its renditions: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+            return nil
+        }
     }
 
     /// The full master a served copy was cut from; nil for anything else.

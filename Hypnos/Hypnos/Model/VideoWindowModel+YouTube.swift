@@ -103,7 +103,7 @@ extension VideoWindowModel {
     private func readYouTubeRenditions(master: URL, resolvesRenderer: Bool) {
         youTubeRenditionTask?.cancel()
         youTubeRenditionTask = Task { [weak self] in
-            let text = await Self.playlistText(at: master)
+            let text = await YouTubeRenditions.playlistText(at: master)
             guard let self, !Task.isCancelled else { return }
             let renditions = text.map { YouTubeRenditions.parse(master: $0) } ?? []
             if let text, !renditions.isEmpty {
@@ -144,19 +144,6 @@ extension VideoWindowModel {
             AppLogger.youtube.info("Switching to \(surround.channels, privacy: .public)-channel \(surround.codecs, privacy: .public) at \(self.currentTime, format: .fixed(precision: 1), privacy: .public) s")
             self.youTubeMaster = (url, composed)
             await self.playChosenYouTubeRendition(swapping: true)
-        }
-    }
-
-    /// A playlist's text: from the loopback server when it's one of ours.
-    private static func playlistText(at url: URL) async -> String? {
-        if let served = LoopbackPlaylistServer.shared.playlist(at: url) { return served }
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            guard (response as? HTTPURLResponse).map({ (200 ..< 300).contains($0.statusCode) }) ?? true else { return nil }
-            return String(decoding: data, as: UTF8.self)
-        } catch {
-            AppLogger.youtube.error("Couldn't read the HLS master for its renditions: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
-            return nil
         }
     }
 

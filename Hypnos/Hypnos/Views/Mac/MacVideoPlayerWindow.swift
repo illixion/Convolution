@@ -29,6 +29,11 @@
 
  A `photos-asset:///` identity (Photos library source) resolves through
  `PhotosAssetStore` first, same as everywhere else.
+
+ A YouTube video starts in YouTube's stereo and moves to its 5.1 track at
+ the playhead when YouTube lets that play (`YouTubeSurroundSwap`), back to
+ stereo if it fails. A restored window whose YouTube URL has expired
+ resolves the video again first.
  */
 
 #if os(macOS)
@@ -46,6 +51,8 @@ struct MacVideoPlayerWindow: View {
     #if HYPNOS_YOUTUBE
     /// YouTube videos only: progress to the watch history on the backend.
     @State private var youTubeReporter: YouTubeWatchReporter?
+    /// YouTube videos only: moves the player onto the surround master.
+    @State private var surroundSwap = YouTubeItemSwap()
     #endif
     @State private var timeObserver: Any?
     /// Skip Intro / Skip Credits for a Library video.
@@ -83,6 +90,7 @@ struct MacVideoPlayerWindow: View {
                         #if HYPNOS_YOUTUBE
                         youTubeReporter?.finish()
                         youTubeReporter = nil
+                        surroundSwap.stop()
                         #endif
                     }
             } else if let failureMessage {
@@ -137,7 +145,33 @@ struct MacVideoPlayerWindow: View {
         }
         #endif
         await watchSegments(player)
+        #if HYPNOS_YOUTUBE
+        await swapInSurround(player)
+        #endif
     }
+
+    #if HYPNOS_YOUTUBE
+    /// YouTube's 5.1, swapped in at the playhead once YouTube lets it play;
+    /// back to stereo, where it was, if it won't play.
+    private func swapInSurround(_ player: AVPlayer) async {
+        guard let stereo = (player.currentItem?.asset as? AVURLAsset)?.url,
+              let surround = await YouTubeSurroundSwap.surroundMaster(for: video, playing: stereo),
+              !Task.isCancelled else { return }
+        AppLogger.youtube.info("[macOS] Switching to surround at \(player.currentTime().seconds, format: .fixed(precision: 1), privacy: .public) s")
+        let swap = surroundSwap
+        swap.swap(player, to: Self.youTubeItem(surround)) {
+            AppLogger.youtube.error("[macOS] The surround stream failed; back to stereo")
+            swap.swap(player, to: Self.youTubeItem(stereo)) {}
+        }
+    }
+
+    /// YouTube's saved quality; other sources play whatever they offer.
+    private static func youTubeItem(_ url: URL) -> AVPlayerItem {
+        let item = AVPlayerItem(asset: MediaAuthorization.shared.asset(for: url))
+        item.preferredMaximumResolution = YouTubeQuality.maximumResolution(height: YouTubeQuality.preferred.height)
+        return item
+    }
+    #endif
 
     /// Loads a Library video's skippable segments and follows the playhead
     /// while it has any.
@@ -175,17 +209,28 @@ struct MacVideoPlayerWindow: View {
             return
         }
 
+        #if HYPNOS_YOUTUBE
+        // A restored window's YouTube URL expires after ~6 h.
+        if let id = YouTubeVideoID(videoIdentity: video.identity), YouTubeResolver.needsRefresh(source) {
+            do {
+                source = try await YouTubeResolver.resolve(id).video.streamURL
+            } catch {
+                failureMessage = error.localizedDescription
+                return
+            }
+        }
+        #endif
+
         let authenticated = MediaAuthorization.shared.authorizedURL(source)
         if await NativeVideoDecodeProbe.canPlayNatively(url: authenticated) {
             AppLogger.videoWindow.info("[macOS] playing original: \(authenticated.loggableDescription)")
-            let item = AVPlayerItem(asset: MediaAuthorization.shared.asset(for: authenticated))
             #if HYPNOS_YOUTUBE
-            // YouTube's saved quality; other sources play whatever they offer.
             if YouTubeVideoID(videoIdentity: video.identity) != nil {
-                item.preferredMaximumResolution = YouTubeQuality.maximumResolution(height: YouTubeQuality.preferred.height)
+                player = AVPlayer(playerItem: Self.youTubeItem(authenticated))
+                return
             }
             #endif
-            player = AVPlayer(playerItem: item)
+            player = AVPlayer(playerItem: AVPlayerItem(asset: MediaAuthorization.shared.asset(for: authenticated)))
             return
         }
 

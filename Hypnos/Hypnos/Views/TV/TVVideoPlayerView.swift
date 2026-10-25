@@ -37,6 +37,11 @@
  transport bar, and picked from a Subtitles menu in the transport bar.
  AVKit has nothing to offer for most of these anyway: a Jellyfin remux's
  HLS carries no subtitle renditions.
+
+ A YouTube video starts in YouTube's stereo and moves to its 5.1 track when
+ YouTube lets that play (`YouTubeSurroundSwap`): the view changes the URL,
+ and the player swaps the new item in at the playhead. If it fails, the view
+ changes it back to the stereo master.
  */
 
 #if os(tvOS)
@@ -75,6 +80,11 @@ struct TVVideoPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AppModel.self) private var appModel
     @State private var resolvedURL: URL?
+    #if HYPNOS_YOUTUBE
+    /// While surround plays: YouTube's stereo master, where a failed swap
+    /// goes back to.
+    @State private var stereoURL: URL?
+    #endif
     @State private var failureMessage: String?
     @State private var skipper = MediaSegmentSkipper()
     @State private var subtitles = SubtitleController()
@@ -102,6 +112,14 @@ struct TVVideoPlayerView: View {
                                                       subtitles: subtitles,
                                                       subtitleSource: { SubtitleSource.forVideo(video) },
                                                       onProgress: onProgress, onPlayedToEnd: onPlayedToEnd) {
+                    #if HYPNOS_YOUTUBE
+                    if let stereoURL {
+                        AppLogger.youtube.error("[tvOS] The surround stream failed; back to stereo")
+                        self.stereoURL = nil
+                        self.resolvedURL = stereoURL
+                        return
+                    }
+                    #endif
                     failureMessage = "This video's format isn't supported on Apple TV."
                     self.resolvedURL = nil
                 }
@@ -127,7 +145,12 @@ struct TVVideoPlayerView: View {
                     .onExitCommand { dismiss() }
             }
         }
-        .task { await resolve() }
+        .task {
+            await resolve()
+            #if HYPNOS_YOUTUBE
+            await swapInSurround()
+            #endif
+        }
         .task {
             await skipper.load(videoIdentity: video.identity)
         }
@@ -179,9 +202,23 @@ struct TVVideoPlayerView: View {
         AppLogger.videoWindow.info("[tvOS] original undecodable — falling back to server transcode")
         resolvedURL = MediaAuthorization.shared.authorizedURL(transcode)
     }
+
+    #if HYPNOS_YOUTUBE
+    /// YouTube's 5.1, once YouTube lets it play: the player swaps it in at
+    /// the playhead.
+    private func swapInSurround() async {
+        guard let stereo = resolvedURL,
+              let surround = await YouTubeSurroundSwap.surroundMaster(for: video, playing: stereo),
+              !Task.isCancelled, resolvedURL == stereo else { return }
+        AppLogger.youtube.info("[tvOS] Switching to surround")
+        stereoURL = stereo
+        resolvedURL = surround
+    }
+    #endif
 }
 
 private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresentable {
+    /// What plays. A new one is swapped in at the playhead.
     let url: URL
     var startSeconds: Double?
     var loops = false
@@ -203,29 +240,30 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
-        let asset = MediaAuthorization.shared.asset(for: url)
-        let item = AVPlayerItem(asset: asset)
-        item.applySpatialAudioPolicy()
-        item.preferredMaximumResolution = maximumResolution
-        // An AVQueuePlayer so a looping clip can run through AVPlayerLooper,
-        // which queues the next pass ahead of the end: no pause, no gap and
-        // no transport UI popping up at the loop point.
-        let player = AVQueuePlayer()
-        controller.player = player
-
         // Both observers are queued/dispatched on `.main`, so `Coordinator`
         // (`@unchecked Sendable`, like the app's other cross-boundary bridge
         // types — `SendableAVAsset`, `SendableTexture`) really is only ever
         // touched there; that conformance is what lets it cross into these
         // `@Sendable` NotificationCenter/KVO closures at all.
         let coordinator = context.coordinator
+        let startSeconds = startSeconds ?? 0
+        coordinator.startSeconds = startSeconds
+        coordinator.maximumResolution = maximumResolution
+        coordinator.url = url
+        let item = coordinator.makeItem(url)
+        // An AVQueuePlayer so a looping clip can run through AVPlayerLooper,
+        // which queues the next pass ahead of the end: no pause, no gap and
+        // no transport UI popping up at the loop point.
+        let player = AVQueuePlayer()
+        controller.player = player
+
         coordinator.loops = loops
         coordinator.controller = controller
         coordinator.item = item
         coordinator.subtitles = subtitles
         // A resume point needs the item's own readiness (below), so only a
         // from-the-start clip takes the gapless looper.
-        let useLooper = loops && (startSeconds ?? 0) <= 0
+        let useLooper = loops && startSeconds <= 0
         if useLooper {
             let looper = AVPlayerLooper(player: player, templateItem: item)
             coordinator.looper = looper
@@ -238,42 +276,12 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         } else {
             player.insert(item, after: nil)
             // Never park at the end: a parked player shows its controls. The
-            // end handler below rewinds it when looping is on.
+            // end handler rewinds it when looping is on.
             player.actionAtItemEnd = .none
         }
         // The transport bar's own menus: Subtitles, and a Loop toggle.
         coordinator.observeTransportBar()
-        coordinator.failureObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemFailedToPlayToEndTime,
-            object: item,
-            queue: .main
-        ) { [weak coordinator] _ in
-            coordinator?.onPlaybackFailed()
-        }
-        let startSeconds = startSeconds ?? 0
-        coordinator.statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak coordinator, weak player] observedItem, _ in
-            switch observedItem.status {
-            case .failed:
-                DispatchQueue.main.async {
-                    coordinator?.onPlaybackFailed()
-                }
-            case .readyToPlay:
-                // Resume: a seek issued before the item is ready is dropped,
-                // so it waits for readiness, and playback starts after it so
-                // the resume point is the first frame shown.
-                DispatchQueue.main.async {
-                    guard let coordinator, let player, !coordinator.didStart else { return }
-                    coordinator.didStart = true
-                    guard startSeconds > 0 else { player.play(); return }
-                    player.seek(to: CMTime(seconds: startSeconds, preferredTimescale: 600),
-                                toleranceBefore: .zero, toleranceAfter: .positiveInfinity) { _ in
-                        player.play()
-                    }
-                }
-            default:
-                break
-            }
-        }
+        coordinator.observe(item, in: player)
 
         // Subtitles, drawn in the content overlay: inside the picture, and
         // under the transport bar and info panel rather than over them.
@@ -358,21 +366,6 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
             ]
         }
 
-        coordinator.endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime,
-            object: item,
-            queue: .main
-        ) { [weak coordinator, weak player] _ in
-            guard let coordinator else { return }
-            if coordinator.loops, let player {
-                player.seek(to: .zero) { _ in player.play() }
-            } else {
-                // actionAtItemEnd is .none, so end the way the player would have.
-                player?.pause()
-                coordinator.onPlayedToEnd?()
-            }
-        }
-
         return controller
     }
 
@@ -382,6 +375,9 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         context.coordinator.onPlayedToEnd = onPlayedToEnd
         context.coordinator.segments = segments
         context.coordinator.showInfo(details, artwork: artwork, on: uiViewController.player)
+        if context.coordinator.url != url, let player = uiViewController.player as? AVQueuePlayer {
+            context.coordinator.swap(to: url, in: player)
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -424,6 +420,12 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         var onPlayedToEnd: (() -> Void)?
         /// Set once the first play (after any resume seek) has been issued.
         var didStart = false
+        /// What the player plays, and how its items are set up.
+        var url: URL?
+        var startSeconds: Double = 0
+        var maximumResolution: CGSize = .zero
+        /// Where a swapped-in item starts, and whether it plays, once ready.
+        private var pendingSwap: (time: CMTime, plays: Bool)?
         var loops = false
         var looper: AVPlayerLooper?
         var looperObservation: NSKeyValueObservation?
@@ -461,10 +463,101 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         var subtitles: SubtitleController?
         var picture: TVPlayerPicture?
         var pictureObservation: NSKeyValueObservation?
-        /// The item the player was made with; a looper plays copies of it.
+        /// The item playing (or the one a looper plays copies of).
         var item: AVPlayerItem?
         private var shownInfo: PlayerDetails?
         private var shownArtwork: UIImage?
+        private var shownMetadata: [AVMetadataItem]?
+
+        /// An item for `url`, set up as every item here is.
+        @MainActor func makeItem(_ url: URL) -> AVPlayerItem {
+            let item = AVPlayerItem(asset: MediaAuthorization.shared.asset(for: url))
+            item.applySpatialAudioPolicy()
+            item.preferredMaximumResolution = maximumResolution
+            if let shownMetadata { item.externalMetadata = shownMetadata }
+            return item
+        }
+
+        /// Plays `url` instead, from the playhead, playing on if it was.
+        @MainActor func swap(to url: URL, in player: AVQueuePlayer) {
+            // A looper plays copies of the item it was made with.
+            guard looper == nil else { return }
+            self.url = url
+            if didStart {
+                // A swap whose item never got ready still holds the playhead.
+                pendingSwap = pendingSwap ?? (player.currentTime(), player.timeControlStatus != .paused)
+            }
+            let item = makeItem(url)
+            self.item = item
+            observe(item, in: player)
+            player.replaceCurrentItem(with: item)
+        }
+
+        /// Failure, readiness and the end of `item`, replacing the
+        /// observers of the item before it.
+        @MainActor func observe(_ item: AVPlayerItem, in player: AVQueuePlayer) {
+            statusObservation?.invalidate()
+            for observer in [failureObserver, endObserver].compactMap({ $0 }) {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            failureObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemFailedToPlayToEndTime,
+                object: item,
+                queue: .main
+            ) { [weak self] _ in
+                self?.onPlaybackFailed()
+            }
+            statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self, weak player] observedItem, _ in
+                switch observedItem.status {
+                case .failed:
+                    DispatchQueue.main.async {
+                        self?.onPlaybackFailed()
+                    }
+                case .readyToPlay:
+                    DispatchQueue.main.async {
+                        guard let self, let player else { return }
+                        MainActor.assumeIsolated { self.itemIsReady(in: player) }
+                    }
+                default:
+                    break
+                }
+            }
+            endObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime,
+                object: item,
+                queue: .main
+            ) { [weak self, weak player] _ in
+                guard let self else { return }
+                if self.loops, let player {
+                    player.seek(to: .zero) { _ in player.play() }
+                } else {
+                    // actionAtItemEnd is .none, so end the way the player would have.
+                    player?.pause()
+                    self.onPlayedToEnd?()
+                }
+            }
+        }
+
+        /// A swapped-in item picks up where the last one was. Otherwise the
+        /// first start: a seek issued before the item is ready is dropped,
+        /// so a resume waits for readiness, and playback starts after it so
+        /// the resume point is the first frame shown.
+        @MainActor private func itemIsReady(in player: AVQueuePlayer) {
+            if let swap = pendingSwap {
+                pendingSwap = nil
+                player.seek(to: swap.time, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+                    if swap.plays { player.play() }
+                }
+                return
+            }
+            guard !didStart else { return }
+            didStart = true
+            guard startSeconds > 0 else { player.play(); return }
+            player.seek(to: CMTime(seconds: startSeconds, preferredTimescale: 600),
+                        toleranceBefore: .zero, toleranceAfter: .positiveInfinity) { _ in
+                player.play()
+            }
+        }
 
         /// The Info panel's title, subtitle, description and art, on every
         /// item the player has (a looper's copies included), when they change.
@@ -473,6 +566,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
             shownInfo = details
             shownArtwork = artwork
             let metadata = details.externalMetadata(artwork: artwork)
+            shownMetadata = metadata
             var items = (player as? AVQueuePlayer)?.items() ?? []
             if let item, !items.contains(item) { items.append(item) }
             for item in items { item.externalMetadata = metadata }

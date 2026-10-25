@@ -111,6 +111,7 @@ struct YouTubeTabView: View {
                 YouTubePageHost(session: session)
             }
         }
+        .task { autoPlayIfRequested() }
         .task {
             watchHistory.refreshTiles()
             watchHistory.flush()
@@ -465,6 +466,22 @@ struct YouTubeTabView: View {
     }
 
     // MARK: - Playback
+
+    /// DEBUG-only, like `tvAutoPlayVideoIndex` (`Support/UITestingConfiguration.swift`):
+    /// `-UITestDefault youTubeAutoPlayID=<id or link>` plays that video when
+    /// the tab first shows, once, for checking a player's YouTube path
+    /// (surround, quality) where nothing else can open a video without taps:
+    /// the tvOS simulator and the Mac.
+    private func autoPlayIfRequested() {
+        #if DEBUG
+        let key = "youTubeAutoPlayID"
+        guard let raw = UserDefaults.standard.string(forKey: key) else { return }
+        // `-UITestDefault` values persist; this one is for one launch.
+        UserDefaults.standard.removeObject(forKey: key)
+        guard let id = YouTubeVideoID(parsing: raw) else { return }
+        play(YouTubeVideoSummary(id: id, title: "YouTube video", lengthSeconds: nil))
+        #endif
+    }
 
     private func play(_ summary: YouTubeVideoSummary) {
         guard resolvingID == nil else { return }
