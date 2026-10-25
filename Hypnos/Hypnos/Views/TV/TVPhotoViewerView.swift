@@ -15,6 +15,10 @@
  as in Photos), a press points at where to go (right is next).
  `TVArrowPressObserver` sees presses first, so the move command knows which
  it was.
+
+ An animated GIF, APNG, WebP or HEIF sequence plays (`TVAnimatedImageView`,
+ ImageIO's own frame timing) where the other platforms use WebKit, which
+ tvOS lacks; its first frame is decoded like any picture and shows meanwhile.
  */
 
 #if os(tvOS)
@@ -32,6 +36,8 @@ struct TVPhotoViewerView: View {
 
     @State private var index: Int
     @State private var currentImage: UIImage?
+    /// The picture's encoded bytes while it is an animation; nil for a still.
+    @State private var animatedData: Data?
     /// Index `currentImage` belongs to; keys the image's identity so a change
     /// animates as a transition instead of swapping in place.
     @State private var shownIndex: Int
@@ -62,17 +68,25 @@ struct TVPhotoViewerView: View {
             Color.black.ignoresSafeArea()
 
             if let currentImage {
-                Image(platformImage: currentImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    // tvOS insets the safe area for TV overscan; without this the
-                    // picture is letterboxed on all four sides.
-                    .ignoresSafeArea()
-                    .id(shownIndex)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: slideEdge).combined(with: .opacity),
-                        removal: .move(edge: slideEdge == .trailing ? .leading : .trailing)
-                            .combined(with: .opacity)))
+                Group {
+                    if let animatedData {
+                        TVAnimatedImageView(data: animatedData, poster: currentImage)
+                    } else {
+                        Image(platformImage: currentImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                    }
+                }
+                // tvOS insets the safe area for TV overscan; without this the
+                // picture is letterboxed on all four sides. The frame first,
+                // so the fit is made against the whole screen.
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
+                .id(shownIndex)
+                .transition(.asymmetric(
+                    insertion: .move(edge: slideEdge).combined(with: .opacity),
+                    removal: .move(edge: slideEdge == .trailing ? .leading : .trailing)
+                        .combined(with: .opacity)))
             } else if isLoading {
                 ProgressView()
             }
@@ -136,11 +150,20 @@ struct TVPhotoViewerView: View {
         // Cancelled when the user steps on (`.task(id: index)`), which also
         // stops the download and skips the decode of a photo already left behind.
         // 4K is the most a TV can show, so nothing above that is ever decoded.
-        let loaded = try? await ImageLoader.shared.loadDisplayImage(
-            from: image.fullSizeURL, maxPixelSize: Self.maxDisplayPixels)
+        let data = try? await ImageLoader.shared.loadRawData(from: image.fullSizeURL)
+        guard !Task.isCancelled else { return }
+        var decoded: (still: UIImage?, animated: Data?)?
+        if let data {
+            let maxPixels = Self.maxDisplayPixels
+            decoded = await Task.detached(priority: .userInitiated) {
+                (MetalImageRenderer.downsampledImage(from: data, maxDimension: maxPixels),
+                 TVAnimatedImage.isAnimated(data) ? data : nil)
+            }.value
+        }
         guard !Task.isCancelled else { return }
         withAnimation(.easeInOut(duration: 0.35)) {
-            currentImage = loaded
+            currentImage = decoded?.still
+            animatedData = decoded?.animated
             shownIndex = index
         }
         isLoading = false

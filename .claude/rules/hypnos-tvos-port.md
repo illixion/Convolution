@@ -56,6 +56,15 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   (`.onMoveCommand`) move prev/next, Play/Pause (`.onPlayPauseCommand`) starts
   or stops a slideshow timer, Menu (`.onExitCommand`) dismisses. None of
   `PhotoDisplayView`'s rendering tiers, adjustments or 3D modes are reused.
+  An animated GIF, APNG, WebP or HEIF sequence plays through ImageIO
+  (`TVAnimatedImageView`: `CGAnimateImageDataWithBlock` hands one decoded
+  frame at a time to a `UIImageView`, with the file's own timing), its first
+  frame decoded like any picture meanwhile. Memory is the encoded file plus
+  the frame on screen: a 72 MB 4K GIF held the simulator app at ~160 MB while
+  playing, back to ~60 MB once closed. **Animated JPEG XL stays still**:
+  ImageIO decodes only its first frame (`CGImageSourceGetCount` is 1 for an
+  animated `.jxl`, on macOS too), and the WebKit/WASM decoder the other
+  platforms use doesn't exist here.
 - **`TVVideoPlayerView`** — `AVPlayerViewController` via
   `UIViewControllerRepresentable`. Its Info panel (a swipe down while it
   plays) shows the title's details through `AVPlayerItem.externalMetadata`
@@ -333,9 +342,10 @@ pattern in the main CLAUDE.md:
   `VideoWindowView`, `VideoQuickLookView`, `ThumbnailGenerator`'s WebM poster
   path) is gated the same way, with
   a Metal/native fallback or a static first frame in place of the animation.
-  **There is no WebKit fallback on tvOS, full stop** — an animated
-  GIF/WebP/JXL shows its first decoded frame rather than animating, and a
-  video whose format needs WebKit to decode simply doesn't play.
+  **There is no WebKit fallback on tvOS, full stop** — the TV UI animates
+  GIF/APNG/WebP with ImageIO instead (`TVAnimatedImageView`), an animated JXL
+  shows its first frame, and a video whose format needs WebKit to decode
+  plays through the Matroska remux or the server's transcode, or not at all.
 
 `Support/PlatformShims.swift` gained same-name stand-ins so the touch-only
 SwiftUI list above compiles out of call sites that belong to visionOS/iOS-only
@@ -369,8 +379,8 @@ doesn't exist there).
 
 ## Known gaps
 
-- **Animated GIF/WebP/JXL** — render as a static first frame, not animated
-  (no WebKit).
+- **Animated JPEG XL** — shows its first frame (ImageIO doesn't animate it;
+  GIF, APNG and WebP do animate).
 - **Photos as a library source** may have little or nothing to show on a TV
   that has never had a personal camera roll in the way iOS/visionOS do;
   Stash and Local remain the practical sources. It works end to end when
