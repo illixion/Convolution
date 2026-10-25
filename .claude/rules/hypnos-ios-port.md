@@ -72,4 +72,12 @@ Moved out of `CLAUDE.md` (the compile check and the "compile both platforms" rul
   the stack's root page adds the way back to the More list. A new
   stack-owning tab needs both. Verified on an iPhone 17 simulator
   (2026-10-20).
+- **Incoming URLs** (`hypnos://`, shared files) are handled by `IOSRootView`'s
+  `handleIncomingMediaURLs`, which must sit *inside* `.environment(router)`:
+  outside it the handler's `@OpenWindowProxy` had no router and every link
+  or shared file opened nothing (since the iOS port; found 2026-10-25 with the
+  DEBUG `-UITestDefault debugOpenURL=<url>` launch default).
+- The video window's subtitles rise 120 pt while the controls show
+  (`VideoWindowView.subtitleLift`): the bar lies over the foot of a landscape
+  picture and hid the last line (checked on an iPhone 17 simulator).
 - `HypnosUITests` stays visionOS-only.

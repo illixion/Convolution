@@ -32,9 +32,11 @@ struct IOSRootView: View {
                     .environment(appModel)
             }
             .iosToolSheets(level: -1, router: router, appModel: appModel)
+            // Inside the router's environment: its window opens go through
+            // the router, and outside it a link or shared file opened nothing.
+            .handleIncomingMediaURLs(appModel: appModel)
             .environment(router)
             .environment(appModel)
-            .handleIncomingMediaURLs(appModel: appModel)
             // RAVEUI's session bookkeeping; on iOS it only ever counts to one.
             .registerAsMainWindow()
     }

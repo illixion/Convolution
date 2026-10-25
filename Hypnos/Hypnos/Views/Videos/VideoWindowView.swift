@@ -124,11 +124,14 @@ struct VideoWindowView: View {
         #endif
     }
 
-    /// The Mac's controls lie over the foot of the picture, where subtitles
-    /// are: while they show, the subtitles move up out of their way.
+    /// iOS's and the Mac's controls lie over the foot of the picture, where
+    /// subtitles are: while they show, the subtitles move up out of their
+    /// way (visionOS hangs the controls under the window).
     private var subtitleLift: CGFloat {
         #if os(macOS)
         windowModel.isUIHidden ? 0 : 96
+        #elseif os(iOS)
+        windowModel.isUIHidden ? 0 : 120
         #else
         0
         #endif

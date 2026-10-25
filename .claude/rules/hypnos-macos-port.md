@@ -74,7 +74,8 @@ the key video window through `FocusedValues.videoWindowModel`.
 
 The video window's controls lie over the picture as on iOS
 (`ornamentBottomPadding` 0, `overlayBottomInset` clears them), and the
-subtitles rise 96 pt while they show (`VideoWindowView.subtitleLift`). The
+subtitles rise 96 pt while they show (`VideoWindowView.subtitleLift`; iOS
+120 pt). The
 picture readout's frame rate comes from `currentVideoFrameRate` for HLS,
 which reads low (≈5 fps) while macOS has the window occluded (seen with the
 Mac shown on a Vision Pro's virtual display); it isn't the decode rate.
