@@ -199,7 +199,7 @@ work on an area without having touched one of those files yet.
 | --- | --- |
 | `hypnos-photo-viewer.md` | Photo viewer windows, `WindowResizeCoalescer`, the GPU 2D path, deep colour, auto-3D restore, Spatial 3D images |
 | `hypnos-gallery-grid.md` | Pictures grid (square / justified rows), 3D depth and diorama thumbnails, thumbnail context menus and Quick Look, tvOS no-delete |
-| `hypnos-video-window.md` | Video window, ornaments and control bar, WebKit / native Metal players, stream-URL strategy, immersive MV-HEVC, visionOS player chrome |
+| `hypnos-video-window.md` | Video window, ornaments and control bar, WebKit / native Metal players, stream-URL strategy, the Matroska remux, immersive MV-HEVC, visionOS player chrome |
 | `hypnos-ai-3d-video.md` | AI 3D (fake-3D) engage flow, depth models and cache, `Pseudo3DSettings`, live stereo, 3D overload |
 | `hypnos-film-player.md` | Object-audio film player, audio governor, Dolby Vision, picture tiers, the room |
 | `hypnos-library-jellyfin.md` | Library tab, stream quality, Jellyfin 12.x, subtitles, offline downloads |
@@ -232,6 +232,7 @@ Invariants that bite outside the files above, so they stay here:
 - **Shaders.metal** - Vertex shader (procedural fullscreen quad, 6 vertices, no vertex buffer) + fragment shader (brightness/contrast/saturation adjustments matching SwiftUI modifiers).
 - **MetalImageView** - `UIViewRepresentable` wrapping `MTKView`. Draw-on-demand mode (`isPaused=true`, `enableSetNeedsDisplay=true`). Transparent background. Auto-detects deep color textures and switches framebuffer format and pipeline state.
 - **NativeVideoDecodeProbe** - Shared "can AVFoundation decode this URL?" check (`AVURLAsset.isPlayable` + a non-empty video track, trusting `isPlayable` alone for `.m3u8` since HLS exposes video via `AVAssetVariant`), plus a timeout-bounded overload. Being decodable is what unlocks the native Metal player and real-time fake-3D. Used by `VideoWindowModel.resolvePlaybackRenderer` and `SlideshowEngine.resolvePseudo3DTarget`.
+- **MatroskaRemuxService** - An MKV/WebM original the native player can't open (AVFoundation decodes VP9, HEVC, Opus… but not that container), remuxed losslessly to fragmented-MP4 HLS on the device by the app-local `Packages/MatroskaRemux` (Foundation only; `swift test` there) and served from **LoopbackHTTPServer** (127.0.0.1, which also serves YouTube's composed masters). Tried after a failed decode probe, before WebKit and the Stash transcode, on every platform. See "Matroska remux" in `.claude/rules/hypnos-video-window.md`
 - **StashAPIClient** - Actor for GraphQL communication with Stash server
 - **ImageLoader** - Actor-based image loader with NSCache and disk cache
 - **DiskImageCache/DiskVideoCache** - Persistent disk caching (excluded from backup). Files stored as SHA256 hashes with `.heic` extension.

@@ -234,6 +234,16 @@ struct MacVideoPlayerWindow: View {
             return
         }
 
+        // An MKV/WebM the player can't open, remuxed to HLS on the device
+        // (lossless, ahead of the server's transcode). Library titles keep
+        // Jellyfin's own streams.
+        if LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity) == nil,
+           let remuxed = await MatroskaRemuxService.shared.playlistURL(for: authenticated, fileName: video.fileName) {
+            AppLogger.videoWindow.info("[macOS] playing the original remuxed to HLS")
+            player = AVPlayer(playerItem: AVPlayerItem(asset: MediaAuthorization.shared.asset(for: remuxed)))
+            return
+        }
+
         guard let transcode = video.transcodeStreamURL else {
             failureMessage = "This video's format isn't supported, and no server transcode is available."
             return

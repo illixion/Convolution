@@ -60,8 +60,11 @@ gaze/touch-shaped chrome is worse than a small platform-native one):
   auth-then-decode-probe-then-transcode-fallback sequence as
   `TVVideoPlayerView` (see the tvOS rule's "Auth" section) — VP9 is
   registered as a supplemental decoder at launch on macOS too
-  (`HypnosApp.init`), so VP9-in-MP4 may decode natively; VP9-in-WebM still
-  needs the transcode, since WebKit isn't wired up on macOS this pass.
+  (`HypnosApp.init`), so VP9-in-MP4 may decode natively, and a WebM or MKV
+  the probe refuses is remuxed to HLS on the Mac (`MatroskaRemuxService`,
+  "Matroska remux" in `hypnos-video-window.md`) before the transcode is
+  tried; WebKit isn't wired up on macOS. The DEBUG `-RemuxHarness` launch
+  argument (`Support/RemuxHarness.swift`) drives that path headless.
   Verified against the dev Stash instance: the H.264 clip plays natively
   through a real `AVPlayerView` (timecode advancing, genuine
   `AVAudioSession`/`FigPlayer` activity in the log) — the VP9 fallback path

@@ -67,11 +67,17 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
   a `photos-asset:///` identity resolves through `PhotosAssetStore` first;
   every other source runs through `NativeVideoDecodeProbe.canPlayNatively`
   (which is what the VP9 supplemental decoder below actually unlocks — VP9
-  *inside an MP4* can decode, but the WebM *container* still can't) and
-  falls back to Stash's HLS transcode (`GalleryVideo.transcodeStreamURL`) —
-  the *only* fallback tier here, unlike the two-tier native/WebKit split
-  visionOS and iOS get — when it can't; a source with neither simply reports
-  it can't play rather than showing a stuck black screen. Every URL goes
+  *inside an MP4* can decode, but AVFoundation can't open the WebM or MKV
+  *container*). An original it refuses is next offered to the on-device
+  Matroska remux (`MatroskaRemuxService`: MKV/WebM to fMP4 HLS on loopback,
+  lossless; see "Matroska remux" in `hypnos-video-window.md`), so a WebM or
+  MKV plays natively with no server involved; Library titles are left to
+  Jellyfin's own streams. Only then does it fall back to Stash's HLS
+  transcode (`GalleryVideo.transcodeStreamURL`), the last tier here (no
+  WebKit); a source with none of these reports it can't play rather than
+  showing a stuck black screen. On an SDR TV an HDR remux is served as one
+  muxed media playlist, since AVPlayer refuses an HDR master on a display
+  that can't show HDR. Every URL goes
   through `MediaAuthorization.shared.asset(for:)`/`authorizedURL(_:)` so a
   Stash server behind a login authenticates like everywhere else in the app
   (see "Auth" below). DEBUG-only `tvAutoOpenPictureIndex=N` /
@@ -196,9 +202,9 @@ almost none of their views, whose gestures and chrome are touch/gaze-shaped:
 - **VP9 decoding**: `HypnosApp.init` calls
   `VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9)` once,
   guarded `#available(tvOS 26.2, *)`, matching the spike in
-  `TVLab/FilmLabTV/YouTubeLab.swift`. Without it AVFoundation can't decode the
-  WebM/VP9 sources Stash/Jellyfin commonly serve — there is no WebKit
-  fallback to decode them another way.
+  `TVLab/FilmLabTV/YouTubeLab.swift`. Without it AVFoundation can't decode
+  VP9 at all, in the remuxed WebM/MKV or a server's VP9 HLS — there is no
+  WebKit fallback to decode it another way.
 - A DEBUG-only launch argument opens `TVRootView` straight to a given tab —
   `-UITest -UITestDefault tvInitialTab=Videos` — reusing the existing
   `-UITestDefault key=value` mechanism (`Support/UITestingConfiguration.swift`)
@@ -448,7 +454,8 @@ for the Library feature: four more movies (`Crimson Tide Station`/Action,
 `Paper Moon Diner`/Comedy, `The Quiet Ledger`/Drama, `Wide Static Field`/
 Sci-Fi — deliberately a WebM/VP9 mux, since AVFoundation can't parse that
 *container* at all regardless of codec, so this is the one item guaranteed
-to force Hypnos's HLS-transcode fallback rather than direct play) and one
+to force Hypnos's HLS-transcode fallback rather than direct play: Library
+titles don't go through the on-device Matroska remux) and one
 series, **Nebula Drift** (2 seasons × 3 episodes). Each gets a real Kodi-style
 NFO (`write_movie_nfo`/`write_tvshow_nfo`/`write_episode_nfo`) plus generated
 poster/fanart/logo art (`gen_art`) — shaped like real artwork so the

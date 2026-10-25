@@ -64,6 +64,9 @@ struct HypnosApp: App {
         if #available(tvOS 26.2, macOS 26.0, iOS 26.2, visionOS 26.2, *) {
             VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9)
         }
+        #if DEBUG && os(macOS)
+        RemuxHarness.runIfRequested()
+        #endif
     }
 
     var body: some Scene {

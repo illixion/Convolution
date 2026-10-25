@@ -4,8 +4,8 @@
  Shared "can AVFoundation decode this?" check. Being AVFoundation-decodable is
  what unlocks the native Metal player and, with it, real-time fake-3D — the
  stereo pump pulls frames from an `AVPlayerItemVideoOutput`, so a source only
- WebKit can decode (WebM/VP9 on visionOS) has to be routed through a transcode
- first or played flat.
+ WebKit can decode (a WebM or MKV the Matroska remux declines) has to be
+ routed through a transcode first or played flat.
 
  Used by `VideoWindowModel.resolvePlaybackRenderer` (which renderer to mount)
  and by `SlideshowEngine` (whether a slideshow video can be converted to 3D).

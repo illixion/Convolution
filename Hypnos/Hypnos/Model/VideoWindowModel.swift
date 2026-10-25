@@ -346,6 +346,16 @@ final class VideoWindowModel {
     /// `photos-asset:///` URL in `video.streamURL` remains the stable key.
     @ObservationIgnored private var resolvedPhotosStreamURL: URL?
     @ObservationIgnored private var photosResolveTask: Task<Void, Never>?
+    /// A Matroska/WebM original the native player can't open, remuxed to HLS
+    /// on loopback (`MatroskaRemuxService`); resolved once per video.
+    ///
+    /// Like `resolvedPhotosStreamURL`, valid for this launch only and never
+    /// identity: `video.streamURL` keeps the original, which is what a
+    /// window restored after a relaunch resolves again.
+    @ObservationIgnored private var remuxedStreamURL: URL?
+    /// The native player failed on this video's remux: the original goes to
+    /// WebKit (or the transcode) instead, as before the remux existed.
+    @ObservationIgnored private var remuxRefused = false
     @ObservationIgnored private var playbackRendererTask: Task<Void, Never>?
     #if HYPNOS_YOUTUBE
     /// The YouTube rendition chosen for this window, by its size class (1080
@@ -630,6 +640,8 @@ final class VideoWindowModel {
         ai3DUsesStashTier = false
         ai3DAutoCappedLibrary = false
         pseudo3DEnabled = false
+        remuxedStreamURL = nil
+        remuxRefused = false
         resolvePlaybackRenderer()
         armLoadStallWatch()
     }
@@ -752,6 +764,8 @@ final class VideoWindowModel {
         ai3DUsesStashTier = false
         ai3DAutoCappedLibrary = false
         resolvedPhotosStreamURL = nil
+        remuxedStreamURL = nil
+        remuxRefused = false
         isFlipped = false
         currentAdjustments = VisualAdjustments()
         loopController.reset()
@@ -1247,7 +1261,8 @@ final class VideoWindowModel {
         pseudo3DSettings.isModified ? pseudo3DSettings : appModel.globalPseudo3DSettings
     }
 
-    /// The URL this window is currently playing: the original file, or the
+    /// The URL this window is currently playing: the original file (or its
+    /// on-device remux, for an MKV/WebM the player can't open), or the
     /// server transcode once `usingTranscodedStream` is set.
     var activeStreamURL: URL {
         // A photos-asset URL is an identity, not something AVPlayer can open;
@@ -1259,9 +1274,22 @@ final class VideoWindowModel {
         }
         if ai3DUsesStashTier, let tier = video.ai3DStreamURL { return tier }
         guard usingTranscodedStream, let transcode = video.transcodeStreamURL else {
-            return video.streamURL
+            return remuxedStreamURL ?? video.streamURL
         }
         return transcode
+    }
+
+    /// Whether this video's original may be remuxed when the native player
+    /// refuses it: not a Photos asset, a YouTube video or a Library title
+    /// (Jellyfin serves its own HLS), and only while the original itself is
+    /// what plays (no transcode or AI 3D tier in its place).
+    private var canTryRemux: Bool {
+        guard !remuxRefused, remuxedStreamURL == nil, !usingTranscodedStream, !ai3DUsesStashTier,
+              !PhotosAssetURL.isPhotosAsset(video.streamURL), libraryItemId == nil else { return false }
+        #if HYPNOS_YOUTUBE
+        if youTubeID != nil { return false }
+        #endif
+        return true
     }
 
     var authenticatedStreamURL: URL {
@@ -1301,6 +1329,12 @@ final class VideoWindowModel {
         if dropYouTubeHDR(reason: "the native player couldn't play the HDR variants") { return }
         if dropYouTubeSurround(reason: "the native player couldn't play the surround stream") { return }
         #endif
+        if remuxedStreamURL != nil {
+            // The remux opened but didn't play: the original goes to WebKit.
+            AppLogger.remux.error("[\(self.videoDisplayName, privacy: .private(mask: .hash))] the native player failed on the remux; falling back")
+            remuxedStreamURL = nil
+            remuxRefused = true
+        }
         playbackRenderer = .webKit
     }
 
@@ -1361,11 +1395,25 @@ final class VideoWindowModel {
         }
 
         let url = authenticatedStreamURL
+        // An original the native player refuses may still play natively once
+        // remuxed (MKV/WebM): tried before WebKit and the server transcode,
+        // being lossless and on the device.
+        let remuxSource = canTryRemux ? url : nil
+        let remuxFileName = video.fileName
         playbackRendererTask = Task { [weak self] in
-            let isPlayable = await Self.canPlayNatively(url: url)
+            var isPlayable = await Self.canPlayNatively(url: url)
+            var remuxed: URL?
+            if !isPlayable, let remuxSource {
+                remuxed = await MatroskaRemuxService.shared.playlistURL(for: remuxSource, fileName: remuxFileName)
+                isPlayable = remuxed != nil
+            }
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard let self, self.authenticatedStreamURL == url else { return }
+                if let remuxed {
+                    AppLogger.videoWindow.info("[\(self.videoDisplayName, privacy: .private(mask: .hash))] playing the original remuxed to HLS")
+                    self.remuxedStreamURL = remuxed
+                }
                 #if HYPNOS_YOUTUBE
                 if !isPlayable, self.dropYouTubeHDR(reason: "the HDR variants aren't decodable") { return }
                 if !isPlayable, self.dropYouTubeSurround(reason: "the surround stream isn't decodable") { return }

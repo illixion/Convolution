@@ -16,6 +16,7 @@
 		AA08000000000000000000F1 /* AccessibilityIdentifiers.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA08000000000000000000EF /* AccessibilityIdentifiers.swift */; };
 		AA09000000000000000000F3 /* RAVESlideshow in Frameworks */ = {isa = PBXBuildFile; productRef = AA09000000000000000000F2 /* RAVESlideshow */; };
 		AA10000000000000000000A3 /* NextcloudMedia in Frameworks */ = {isa = PBXBuildFile; productRef = AA10000000000000000000A2 /* NextcloudMedia */; };
+		AA13000000000000000000A3 /* MatroskaRemux in Frameworks */ = {isa = PBXBuildFile; productRef = AA13000000000000000000A2 /* MatroskaRemux */; };
 		AA11000000000000000000A3 /* RAVEFilm in Frameworks */ = {isa = PBXBuildFile; productRef = AA11000000000000000000A2 /* RAVEFilm */; };
 		AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */ = {isa = PBXBuildFile; productRef = AA12000000000000000000A2 /* RAVEDeviceSetup */; };
 		967834AC244B65FE72E57FB4 /* DebugTrace in Frameworks */ = {isa = PBXBuildFile; productRef = 7ECF8E7CC7BA800706D085EF /* DebugTrace */; };
@@ -70,6 +71,7 @@
 				AA07000000000000000000D3 /* RAVEMedia in Frameworks */,
 				AA09000000000000000000F3 /* RAVESlideshow in Frameworks */,
 				AA10000000000000000000A3 /* NextcloudMedia in Frameworks */,
+				AA13000000000000000000A3 /* MatroskaRemux in Frameworks */,
 				AA11000000000000000000A3 /* RAVEFilm in Frameworks */,
 				AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */,
 				967834AC244B65FE72E57FB4 /* DebugTrace in Frameworks */,
@@ -164,6 +166,7 @@
 				AA07000000000000000000D2 /* RAVEMedia */,
 				AA09000000000000000000F2 /* RAVESlideshow */,
 				AA10000000000000000000A2 /* NextcloudMedia */,
+				AA13000000000000000000A2 /* MatroskaRemux */,
 				AA11000000000000000000A2 /* RAVEFilm */,
 				AA12000000000000000000A2 /* RAVEDeviceSetup */,
 				7ECF8E7CC7BA800706D085EF /* DebugTrace */,
@@ -231,6 +234,7 @@
 				AA01000000000000000000A1 /* XCLocalSwiftPackageReference "../../RAVESDK" */,
 				AA05000000000000000000B1 /* XCLocalSwiftPackageReference "../../RAVEEngine" */,
 				AA10000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/NextcloudMedia" */,
+				AA13000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/MatroskaRemux" */,
 				FF53DB263485AD6DE8BF39A4 /* XCLocalSwiftPackageReference "../../DebugTrace" */,
 				C3D000000000000000000A01 /* XCLocalSwiftPackageReference "../../vergence" */,
 			);
@@ -589,6 +593,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../Packages/NextcloudMedia;
 		};
+		AA13000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/MatroskaRemux" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../Packages/MatroskaRemux;
+		};
 		FF53DB263485AD6DE8BF39A4 /* XCLocalSwiftPackageReference "../../DebugTrace" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../../DebugTrace;
@@ -634,6 +642,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AA10000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/NextcloudMedia" */;
 			productName = NextcloudMedia;
+		};
+		AA13000000000000000000A2 /* MatroskaRemux */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA13000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/MatroskaRemux" */;
+			productName = MatroskaRemux;
 		};
 		AA11000000000000000000A2 /* RAVEFilm */ = {
 			isa = XCSwiftPackageProductDependency;
