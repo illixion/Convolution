@@ -100,6 +100,10 @@ enum AppLogger {
     /// Streamable-URL handoff (custom scheme, URL classification)
     static let streamURL = DebugLogger(subsystem: subsystem, category: "StreamURL")
 
+    /// Matroska/WebM remuxed to HLS on the device, and the loopback server
+    /// that serves it
+    static let remux = DebugLogger(subsystem: subsystem, category: "Remux")
+
     /// Atmos object-audio spike (Settings → Developer)
     static let filmPlayer = DebugLogger(subsystem: subsystem, category: "FilmPlayer")
 
