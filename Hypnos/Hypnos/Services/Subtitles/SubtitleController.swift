@@ -19,6 +19,9 @@
  way, only a forced track (foreign dialogue in an otherwise native film)
  shows.
 
+ A track inside an MKV or WebM the player is remuxing comes from the remux
+ itself (`SubtitleSource.matroska`), read near the playhead as it moves.
+
  An embedded text track is streamed (`SubtitleSource.progressive`, the
  plugin's `FilmSubtitles` route) rather than fetched whole: Jellyfin's own
  `Stream.vtt` reads the whole video file before answering, 15–90 s for an
@@ -31,6 +34,7 @@
 
 import DebugTrace
 import Foundation
+import MatroskaRemux
 import Observation
 import RAVEUI
 
@@ -43,9 +47,12 @@ struct SubtitleSource: Sendable {
     /// An embedded text track from a start time on, growing as it arrives;
     /// nil when the source can't stream that track.
     var progressive: (@Sendable (LibrarySubtitleTrack, Double) -> AsyncThrowingStream<SubtitleStreamChunk, Error>?)? = nil
-    /// Cues that grow while the film plays, for bitmap tracks
-    /// (`LibrarySubtitleTrack.isBitmap`): each element replaces the last.
-    var live: (@Sendable (LibrarySubtitleTrack) -> AsyncStream<RAVESubtitleTrack>)? = nil
+    /// Cues that grow while the film plays, each element replacing the
+    /// last: a disc's bitmap tracks, a remuxed file's tracks. Given the
+    /// player's position, as what is read can follow it; nil for a track
+    /// the source doesn't serve this way.
+    var live: (@Sendable (LibrarySubtitleTrack, @escaping @MainActor @Sendable () -> Double)
+        -> AsyncStream<RAVESubtitleTrack>?)? = nil
 
     /// A Jellyfin item's streams, or nil when no server is configured.
     @MainActor
@@ -84,7 +91,7 @@ struct SubtitleSource: Sendable {
                 guard let server else { throw URLError(.resourceUnavailable) }
                 return try await server.data(track)
             },
-            live: { track in subtitles.cues(pid: UInt16(clamping: track.id)) }
+            live: { track, _ in track.isBitmap ? subtitles.cues(pid: UInt16(clamping: track.id)) : nil }
         )
     }
 
@@ -114,16 +121,22 @@ struct SubtitleSource: Sendable {
         )
     }
 
-    /// Whichever source `video` came from, if it has subtitles at all.
+    /// Whichever source `video` came from, if it has subtitles at all, with
+    /// the tracks inside the MKV/WebM when the player plays it remuxed
+    /// (`remuxSource`: the URL the remux was opened from).
     @MainActor
-    static func forVideo(_ video: GalleryVideo) -> SubtitleSource? {
+    static func forVideo(_ video: GalleryVideo, remuxing remuxSource: URL? = nil) -> SubtitleSource? {
+        let base: SubtitleSource?
         if let itemId = LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity) {
-            return .jellyfin(itemId: itemId)
+            base = .jellyfin(itemId: itemId)
+        } else if video.streamURL.isFileURL {
+            base = .localFile(video.streamURL, identity: video.identity)
+        } else {
+            base = .stash(video)
         }
-        if video.streamURL.isFileURL {
-            return .localFile(video.streamURL, identity: video.identity)
-        }
-        return .stash(video)
+        guard let remuxSource, let session = MatroskaRemuxService.shared.session(for: remuxSource),
+              !session.subtitleTracks.isEmpty else { return base }
+        return .matroska(session, identity: video.identity, adding: base)
     }
 }
 
@@ -237,11 +250,11 @@ final class SubtitleController {
         fetchTask?.cancel()
         selected = track
         error = nil
-        if track.isBitmap, let live = source.live {
+        if let live = source.live?(track, { [weak self] in self?.playhead() ?? 0 }) {
             cues = nil
             isFetching = true
             fetchTask = Task { [weak self] in
-                for await cues in live(track) {
+                for await cues in live {
                     guard let self, !Task.isCancelled, self.selected == track else { return }
                     self.cues = cues
                     self.isFetching = false

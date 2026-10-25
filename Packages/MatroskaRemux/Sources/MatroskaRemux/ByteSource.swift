@@ -73,3 +73,77 @@ public final class FileByteSource: ByteSource, @unchecked Sendable {
         }
     }
 }
+
+/// A server's file with the ends of its recent reads kept, so a read that
+/// starts where an earlier one ended takes those bytes from memory.
+///
+/// That is how segments are read: a segment's parse reads a little past its
+/// last cluster (audio stored after the next keyframe), and the next
+/// segment's parse starts at that cluster; `open`'s probe reads the first
+/// segment's start in small steps too. Without this, those bytes crossed the
+/// network twice: 4 % of a 1080p file, 13 % of a UHD one (measured over HTTP).
+/// Only the front of a read is served from memory; the rest is one request.
+final class RecentReadsSource: ByteSource, @unchecked Sendable {
+    let base: any ByteSource
+    /// The most bytes kept from the end of one read.
+    private let tailLength: Int
+    /// The most bytes kept in all.
+    private let capacity: Int
+    private let lock = NSLock()
+    /// Oldest first.
+    private var kept: [(start: Int64, data: Data)] = []
+
+    init(base: any ByteSource, tailLength: Int = 8 << 20, capacity: Int = 24 << 20) {
+        self.base = base
+        self.tailLength = tailLength
+        self.capacity = capacity
+    }
+
+    var isLocal: Bool { base.isLocal }
+
+    func length() async throws -> Int64? { try await base.length() }
+
+    func read(_ range: Range<Int64>) async throws -> Data {
+        var result = Data()
+        var position = range.lowerBound
+        while position < range.upperBound, let piece = keptBytes(at: position, before: range.upperBound) {
+            result.append(piece)
+            position += Int64(piece.count)
+        }
+        guard position < range.upperBound else { return result }
+        let fetched = try await base.read(position ..< range.upperBound)
+        keep(fetched, at: position)
+        if result.isEmpty { return fetched }
+        result.append(fetched)
+        return result
+    }
+
+    /// Kept bytes from `position` on (up to `end`), if any piece holds it.
+    private func keptBytes(at position: Int64, before end: Int64) -> Data? {
+        lock.withLock {
+            guard let index = kept.lastIndex(where: { $0.start <= position && position < $0.start + Int64($0.data.count) })
+            else { return nil }
+            let piece = kept[index]
+            let from = Int(position - piece.start)
+            let to = Int(min(end, piece.start + Int64(piece.data.count)) - piece.start)
+            // Used again: now the newest.
+            kept.remove(at: index)
+            kept.append(piece)
+            return piece.data.subdata(in: piece.data.startIndex + from ..< piece.data.startIndex + to)
+        }
+    }
+
+    private func keep(_ data: Data, at start: Int64) {
+        guard !data.isEmpty else { return }
+        let count = min(data.count, tailLength)
+        // A copy: a slice would hold on to the whole read (a UHD segment).
+        let tail = data.subdata(in: data.endIndex - count ..< data.endIndex)
+        lock.withLock {
+            kept.append((start + Int64(data.count - count), tail))
+            var total = kept.reduce(0) { $0 + $1.data.count }
+            while total > capacity, kept.count > 1 {
+                total -= kept.removeFirst().data.count
+            }
+        }
+    }
+}

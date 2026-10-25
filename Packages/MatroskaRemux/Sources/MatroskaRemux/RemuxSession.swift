@@ -11,10 +11,14 @@
  Video and audio of one segment come from the same byte range, and the
  player asks for them at nearly the same moment, so a segment's clusters
  are parsed once into every kept track's frames and the result shared
- (`parsed`, which keeps the last few). The parse reads past the segment's
- last cluster until every track has a frame beyond the segment's end:
- muxers interleave by decode time, so audio belonging just before a
- keyframe can sit after it in the file.
+ (`parsed`, which keeps the last few). The audio of a parse is kept longer
+ (`parsedAudio`): it is a few percent of the bytes, and an audio rendition
+ can trail its video by a segment or two, which would otherwise read a UHD
+ segment's 100 MB again for its 500 KB of audio. The parse reads past the
+ segment's last cluster until every track has a frame beyond the segment's
+ end: muxers interleave by decode time, so audio belonging just before a
+ keyframe can sit after it in the file. The next segment's read starts
+ there, so a server file's recent reads are kept (`RecentReadsSource`).
 
  Which segment a frame belongs to is decided by time, not by where it is:
  video from one segment keyframe up to the next (decode order), audio by
@@ -25,6 +29,10 @@
  Output is deterministic, so a segment the player re-requests (after a
  seek, or a decoder reset when visionOS backgrounds the window) is
  byte-identical to the first.
+
+ Subtitle tracks are handed to the app as blocks rather than muxed
+ (`Subtitles.swift`): read alone through the Cues, and kept from every
+ parse.
  */
 
 import Foundation
@@ -39,6 +47,10 @@ public struct RemuxOptions: Sendable {
     /// count, and by bytes (the last one is always kept).
     public var cachedSegments = 2
     public var cachedBytes = 64 << 20
+    /// Segments whose audio is kept after their video is let go: by count,
+    /// and by bytes (lossless 5.1 is 3 MB a segment).
+    public var cachedAudioSegments = 16
+    public var cachedAudioBytes = 24 << 20
 
     public init() {}
 }
@@ -104,14 +116,49 @@ public actor RemuxSession {
     private var parsed: [Int: Task<ParsedSegment, Error>] = [:]
     private var parsedOrder: [Int] = []
     private var parsedBytes: [Int: Int] = [:]
+    /// Recent parses without their video.
+    private var parsedAudio: [Int: ParsedSegment] = [:]
+    private var parsedAudioOrder: [Int] = []
+    private var parsedAudioBytes: [Int: Int] = [:]
 
     /// Bytes read from the source while serving segments (for the caller's
     /// logs).
     public private(set) var bytesRead: Int64 = 0
 
-    private init(source: any ByteSource, header: MatroskaHeader, index: SegmentIndex, video: VideoPlan,
-                 audio: [AudioPlan], dropped: [RemuxSummary.DroppedTrack], scanned: Bool, options: RemuxOptions) {
+    /// The file's subtitle tracks, shown or not (`unsupportedReason`).
+    public nonisolated let subtitleTracks: [MatroskaSubtitleTrack]
+    /// Each readable track's entry, and its cue points by time when indexed.
+    nonisolated let subtitleEntries: [UInt64: MatroskaTrack]
+    nonisolated let subtitleCues: [UInt64: [CuePoint]]
+    /// The source without `RecentReadsSource`, whose kept ends are for
+    /// segments: a subtitle read is a few kilobytes anywhere in the file.
+    nonisolated let subtitleSource: any ByteSource
+    private var subtitleStores: [UInt64: SubtitleStore] = [:]
+
+    private init(source: any ByteSource, subtitleSource: any ByteSource, header: MatroskaHeader, index: SegmentIndex,
+                 video: VideoPlan, audio: [AudioPlan], dropped: [RemuxSummary.DroppedTrack], scanned: Bool,
+                 options: RemuxOptions) {
         self.source = source
+        self.subtitleSource = subtitleSource
+        var subtitleTracks: [MatroskaSubtitleTrack] = []
+        var subtitleEntries: [UInt64: MatroskaTrack] = [:]
+        var subtitleCues: [UInt64: [CuePoint]] = [:]
+        for track in header.tracks where track.kind == .subtitle && track.isEnabled {
+            let format = MatroskaSubtitleTrack.format(of: track.codecID)
+            let cues = header.cues.filter { $0.track == track.number }.sorted { $0.time < $1.time }
+            let reason = format == .unsupported ? track.codecID : SubtitleReading.unreadableEncoding(track)
+            subtitleTracks.append(MatroskaSubtitleTrack(
+                number: track.number, codecID: track.codecID, format: format, language: track.bcp47Language,
+                name: track.name.flatMap { $0.isEmpty ? nil : $0 }, isDefault: track.isDefault, isForced: track.isForced,
+                isHearingImpaired: track.isHearingImpaired,
+                isIndexed: !cues.isEmpty && cues.allSatisfy { $0.relativePosition != nil }, unsupportedReason: reason))
+            guard reason == nil else { continue }
+            subtitleEntries[track.number] = track
+            if subtitleTracks.last!.isIndexed { subtitleCues[track.number] = cues }
+        }
+        self.subtitleTracks = subtitleTracks
+        self.subtitleEntries = subtitleEntries
+        self.subtitleCues = subtitleCues
         self.header = header
         self.index = index
         self.video = video
@@ -165,6 +212,8 @@ public actor RemuxSession {
     // MARK: - Opening
 
     public static func open(source: any ByteSource, options: RemuxOptions = RemuxOptions()) async throws -> RemuxSession {
+        let original = source
+        let source: any ByteSource = source.isLocal ? source : RecentReadsSource(base: source)
         let header = try await MatroskaHeaderReader.read(source)
         guard let firstCluster = header.firstClusterPosition else { throw RemuxError.malformed("no Cluster") }
         let contentEnd = header.contentEnd ?? Int64.max
@@ -201,18 +250,22 @@ public actor RemuxSession {
                                                 byteLimit: options.probeByteLimit)
         guard let keyframe = firsts.videoKeyframe else { throw RemuxError.declined("no video keyframe near the start") }
 
-        // Every rendition's times start at or after zero (tfdt is unsigned):
-        // a file whose first timestamps are negative, or whose first audio
-        // block is earlier than its codec delay (an AAC or Opus track that
-        // starts at 0 with priming ahead of it), is shifted as a whole, so
-        // audio and video keep their relative timing.
+        // Every rendition's times start at zero: the file is shifted as a
+        // whole, so audio and video keep their relative timing. Not below
+        // zero, as tfdt is unsigned: a file whose first timestamps are
+        // negative, or whose first audio block is earlier than its codec
+        // delay (an AAC or Opus track that starts at 0 with priming ahead of
+        // it). And not above it: the player's clock starts at the first
+        // segment whatever its times say, and the app's subtitles, timed on
+        // this timeline, have to read the same clock (a file cut from the
+        // middle of a recording starts at 7 s, or an hour).
         let scale = header.timestampScale
         var earliest = (firsts.videoFirstTicks ?? keyframe.blockTimestamp) * scale
         for track in candidates {
             guard let first = firsts.audio[track.number] else { continue }
             earliest = min(earliest, first.blockTimestamp * scale - Int64(clamping: track.codecDelay))
         }
-        let offsetNanoseconds = max(0, -earliest)
+        let offsetNanoseconds = -earliest
 
         let video = try VideoPlan.make(track: videoTrack, firstKeyframe: keyframe.data,
                                        firstKeyframeTicks: keyframe.blockTimestamp,
@@ -270,8 +323,8 @@ public actor RemuxSession {
                                        endPosition: endPositionValue, timestampScale: header.timestampScale)
         guard index.count > 0 else { throw RemuxError.declined("no segments") }
 
-        return RemuxSession(source: source, header: header, index: index, video: video, audio: audio,
-                            dropped: dropped, scanned: scanned, options: options)
+        return RemuxSession(source: source, subtitleSource: original, header: header, index: index, video: video,
+                            audio: audio, dropped: dropped, scanned: scanned, options: options)
     }
 
     private struct FirstFrames {
@@ -430,35 +483,96 @@ public actor RemuxSession {
     /// a decoder (CoreMedia builds a format description from it as is).
     public nonisolated var videoSampleEntry: Data { Data(video.sampleEntry) }
 
+    // MARK: - Subtitles
+
+    /// `track`'s blocks known so far, after reading the indexed ones that
+    /// start between `start` and `end` (seconds on the remux's timeline) and
+    /// haven't been read. `revision` changes whenever a block is added, so a
+    /// caller polling this can tell when to rebuild what it shows.
+    public func subtitleBlocks(track number: UInt64, from start: Double, through end: Double) async throws
+        -> (blocks: [SubtitleBlock], revision: Int) {
+        guard let entry = subtitleEntries[number] else { return ([], 0) }
+        if let cues = subtitleCues[number] {
+            let first = cues.partitionIndex { self.subtitleSeconds($0.time) >= start }
+            let last = cues.partitionIndex { self.subtitleSeconds($0.time) > end }
+            let wanted = (first ..< last).filter { !(subtitleStores[number]?.requested.contains($0) ?? false) }
+            if !wanted.isEmpty {
+                subtitleStores[number, default: SubtitleStore()].requested.formUnion(wanted)
+                do {
+                    try await readIndexed(wanted.map { cues[$0] }, entry: entry)
+                } catch {
+                    subtitleStores[number]?.requested.subtract(wanted)
+                    throw error
+                }
+            }
+        }
+        let store = subtitleStores[number] ?? SubtitleStore()
+        let blocks = store.blocks.values.sorted { $0.ticks < $1.ticks }.map { raw in
+            SubtitleBlock(start: subtitleSeconds(raw.ticks),
+                          duration: raw.durationTicks.map { Double($0 * header.timestampScale) / 1e9 }, data: raw.data)
+        }
+        return (blocks, store.revision)
+    }
+
+    /// Seconds on the remux's timeline for a block's ticks.
+    nonisolated func subtitleSeconds(_ ticks: Int64) -> Double {
+        Double(ticks * header.timestampScale + video.offsetNanoseconds) / 1e9
+    }
+
+    private func readIndexed(_ cues: [CuePoint], entry: MatroskaTrack) async throws {
+        let source = subtitleSource
+        var pending = cues[...]
+        try await withThrowingTaskGroup(of: RawSubtitle?.self) { group in
+            func next() {
+                guard let cue = pending.popFirst() else { return }
+                group.addTask { try await SubtitleReading.read(cue, track: entry, from: source) }
+            }
+            for _ in 0 ..< SubtitleReading.concurrency { next() }
+            while let read = try await group.next() {
+                if let read { subtitleStores[entry.number, default: SubtitleStore()].add(read) }
+                next()
+            }
+        }
+    }
+
+    private func keepSubtitles(of segment: ParsedSegment) {
+        for (number, subtitles) in segment.subtitles {
+            for subtitle in subtitles { subtitleStores[number, default: SubtitleStore()].add(subtitle) }
+        }
+    }
+
     // MARK: - Media segments
 
     /// mfhd sequence numbers count segments (see FragmentWriter).
     private static func sequenceNumber(_ k: Int) -> UInt32 { UInt32(k) + 1 }
 
     public func videoSegment(_ k: Int) async throws -> Data {
-        let fragment = try await videoFragment(k)
+        let fragment = try videoFragment(k, from: try await parsedSegment(k))
         return FragmentWriter.mediaSegment(sequenceNumber: Self.sequenceNumber(k),
                                            runs: [TrackRun(trackID: 1, fragment: fragment, compositionOffsets: true)])
     }
 
     public func audioSegment(track number: UInt64, _ k: Int) async throws -> Data? {
         guard let plan = audio.first(where: { $0.track.number == number }) else { return nil }
-        let runs = try await audioFragments(plan, k).map { TrackRun(trackID: 1, fragment: $0, compositionOffsets: false) }
+        let runs = try await audioFragments(plan, k, from: try await audioOf(k))
+            .map { TrackRun(trackID: 1, fragment: $0, compositionOffsets: false) }
         return FragmentWriter.mediaSegment(sequenceNumber: Self.sequenceNumber(k), runs: runs)
     }
 
     /// The video and the muxed audio track in one segment.
     public func muxedSegment(_ k: Int) async throws -> Data {
-        var runs = [TrackRun(trackID: 1, fragment: try await videoFragment(k), compositionOffsets: true)]
+        // One parse for both: a second lookup could find it already let go
+        // (a UHD segment is over the byte budget on its own) and read it again.
+        let segment = try await parsedSegment(k)
+        var runs = [TrackRun(trackID: 1, fragment: try videoFragment(k, from: segment), compositionOffsets: true)]
         if let plan = muxedAudio {
-            runs += try await audioFragments(plan, k).filter { !$0.samples.isEmpty }
+            runs += try await audioFragments(plan, k, from: segment).filter { !$0.samples.isEmpty }
                 .map { TrackRun(trackID: 2, fragment: $0, compositionOffsets: false) }
         }
         return FragmentWriter.mediaSegment(sequenceNumber: Self.sequenceNumber(k), runs: runs)
     }
 
-    private func videoFragment(_ k: Int) async throws -> Fragment {
-        let segment = try await parsedSegment(k)
+    private func videoFragment(_ k: Int, from segment: ParsedSegment) throws -> Fragment {
         let frames = segment.video
         guard !frames.isEmpty else { throw RemuxError.malformed("segment \(k) has no video") }
         let presentation = frames.map { video.time(ticks: $0.blockTimestamp, laceIndex: $0.laceIndex) }
@@ -498,9 +612,8 @@ public actor RemuxSession {
     /// still outputs one frame; the player keeps time across the rest), and
     /// a stretch with no frames at all gets one placeholder sample (the
     /// track's first frame, usually silence) as long as the stretch.
-    private func audioFragments(_ plan: AudioPlan, _ k: Int) async throws -> [Fragment] {
+    private func audioFragments(_ plan: AudioPlan, _ k: Int, from segment: ParsedSegment) async throws -> [Fragment] {
         let number = plan.track.number
-        let segment = try await parsedSegment(k)
         var frames = segment.audio[number] ?? []
         let isLast = k + 1 == index.count
         let lower = k == 0 ? Int64.min : plan.boundary(ticks: index.startTime(k))
@@ -511,7 +624,7 @@ public actor RemuxSession {
         // previous segment's spill.
         let grid = Int64(plan.gridSamples ?? 1024)
         if k > 0, (frames.first?.time ?? Int64.max) > lower + grid + grid / 2 {
-            let previous = try await parsedSegment(k - 1)
+            let previous = try await audioOf(k - 1)
             frames += (previous.spill[number] ?? []).filter { $0.time >= lower && $0.time < upper }
         }
         // File order isn't time order where a muxer interleaved loosely;
@@ -575,7 +688,11 @@ public actor RemuxSession {
         var audio: [UInt64: [AudioFrame]] = [:]
         /// Audio past the segment's end, read on the way.
         var spill: [UInt64: [AudioFrame]] = [:]
+        /// Every subtitle block passed, whatever its time.
+        var subtitles: [UInt64: [RawSubtitle]] = [:]
         var bytes = 0
+        /// What the parse read from the source.
+        var fetched: Int64 = 0
     }
 
     private func parsedSegment(_ k: Int) async throws -> ParsedSegment {
@@ -590,6 +707,9 @@ public actor RemuxSession {
         trimCache()
         do {
             let segment = try await task.value
+            bytesRead += segment.fetched
+            keepAudio(of: segment, k)
+            keepSubtitles(of: segment)
             if parsed[k] != nil {
                 parsedBytes[k] = segment.bytes
                 trimCache()
@@ -612,14 +732,43 @@ public actor RemuxSession {
         }
     }
 
+    /// Segment `k`'s audio (and its spill): kept from an earlier parse, else
+    /// parsed.
+    private func audioOf(_ k: Int) async throws -> ParsedSegment {
+        if let kept = parsedAudio[k] {
+            parsedAudioOrder.removeAll { $0 == k }
+            parsedAudioOrder.append(k)
+            return kept
+        }
+        return try await parsedSegment(k)
+    }
+
+    private func keepAudio(of segment: ParsedSegment, _ k: Int) {
+        guard parsedAudio[k] == nil else { return }
+        var audioOnly = segment
+        audioOnly.video = []
+        parsedAudio[k] = audioOnly
+        parsedAudioOrder.append(k)
+        parsedAudioBytes[k] = [segment.audio, segment.spill].flatMap { $0.values.joined() }
+            .reduce(0) { $0 + $1.data.count }
+        while parsedAudioOrder.count > 1,
+              parsedAudioOrder.count > max(1, options.cachedAudioSegments)
+              || parsedAudioBytes.values.reduce(0, +) > options.cachedAudioBytes {
+            let oldest = parsedAudioOrder.removeFirst()
+            parsedAudio[oldest] = nil
+            parsedAudioBytes[oldest] = nil
+        }
+    }
+
     /// Lets go of every parsed segment (a session nobody is playing).
     public func dropCache() {
         parsed.removeAll()
         parsedOrder.removeAll()
         parsedBytes.removeAll()
+        parsedAudio.removeAll()
+        parsedAudioOrder.removeAll()
+        parsedAudioBytes.removeAll()
     }
-
-    private func noteRead(_ count: Int64) { bytesRead += count }
 
     private nonisolated func parse(_ k: Int) async throws -> ParsedSegment {
         let start = index.boundaries[k]
@@ -634,6 +783,9 @@ public actor RemuxSession {
             stripped[plan.track.number] = plan.track.strippedHeader
             plans[plan.track.number] = plan
         }
+        // Subtitle frames come as stored: `SubtitleReading.decoded` undoes
+        // their encodings.
+        for number in subtitleEntries.keys { modes[number] = .frames }
         var reader = ClusterReader(source: source, start: start.clusterPosition, limit: header.contentEnd ?? Int64.max,
                                    chunkSize: firstRead, modes: modes, strippedHeaders: stripped)
         var result = ParsedSegment()
@@ -656,6 +808,11 @@ public actor RemuxSession {
                 if videoStarted, !videoDone {
                     result.video.append(frame)
                     result.bytes += frame.data.count
+                }
+            } else if let entry = subtitleEntries[frame.track] {
+                if frame.laceCount == 1, let data = SubtitleReading.decoded(frame.data, track: entry) {
+                    result.subtitles[frame.track, default: []].append(
+                        RawSubtitle(ticks: frame.blockTimestamp, durationTicks: frame.blockDuration, data: data))
                 }
             } else if let plan = plans[frame.track] {
                 let samples = plan.samples(in: frame.data)
@@ -684,12 +841,8 @@ public actor RemuxSession {
             if videoDone, frame.blockTimestamp > upperTicks + 3 * ticksPerSecond { break }
             if reader.position > nominalEnd + (64 << 20) { break }
         }
-        noteReadDetached(reader.bytesFetched)
+        result.fetched = reader.bytesFetched
         return result
-    }
-
-    private nonisolated func noteReadDetached(_ count: Int64) {
-        Task { await self.noteRead(count) }
     }
 }
 

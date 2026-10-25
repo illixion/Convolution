@@ -80,6 +80,8 @@ struct TVVideoPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AppModel.self) private var appModel
     @State private var resolvedURL: URL?
+    /// What the remux playing was opened from, for the file's own subtitles.
+    @State private var remuxSource: URL?
     #if HYPNOS_YOUTUBE
     /// While surround plays: YouTube's stereo master, where a failed swap
     /// goes back to.
@@ -110,7 +112,9 @@ struct TVVideoPlayerView: View {
                                                       segments: skipper.segments,
                                                       details: details.details, artwork: artwork,
                                                       subtitles: subtitles,
-                                                      subtitleSource: { SubtitleSource.forVideo(video) },
+                                                      subtitleSource: { [remuxSource] in
+                                                          SubtitleSource.forVideo(video, remuxing: remuxSource)
+                                                      },
                                                       onProgress: onProgress, onPlayedToEnd: onPlayedToEnd) {
                     #if HYPNOS_YOUTUBE
                     if let stereoURL {
@@ -201,6 +205,7 @@ struct TVVideoPlayerView: View {
         if LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity) == nil,
            let remuxed = await MatroskaRemuxService.shared.playlistURL(for: authenticated, fileName: video.fileName) {
             AppLogger.videoWindow.info("[tvOS] playing the original remuxed to HLS")
+            remuxSource = authenticated
             resolvedURL = remuxed
             return
         }

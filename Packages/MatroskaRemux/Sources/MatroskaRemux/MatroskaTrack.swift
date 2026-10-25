@@ -98,6 +98,7 @@ public struct MatroskaTrack: Sendable {
     public var isEnabled = true
     public var isDefault = true
     public var isForced = false
+    public var isHearingImpaired = false
     /// Nanoseconds per frame, when constant.
     public var defaultDuration: UInt64?
     public var name: String?

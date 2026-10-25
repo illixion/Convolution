@@ -131,6 +131,55 @@
    "type": "audio"
   }
  ],
+ "subtitles-unindexed.mkv": [
+  {
+   "codec": "h264",
+   "packets": 200,
+   "type": "video"
+  },
+  {
+   "codec": "aac",
+   "packets": 346,
+   "type": "audio"
+  },
+  {
+   "codec": "subrip",
+   "packets": 3,
+   "type": "subtitle"
+  },
+  {
+   "codec": "ass",
+   "packets": 2,
+   "type": "subtitle"
+  }
+ ],
+ "subtitles.mkv": [
+  {
+   "codec": "h264",
+   "packets": 200,
+   "type": "video"
+  },
+  {
+   "codec": "aac",
+   "packets": 346,
+   "type": "audio"
+  },
+  {
+   "codec": "subrip",
+   "packets": 3,
+   "type": "subtitle"
+  },
+  {
+   "codec": "ass",
+   "packets": 2,
+   "type": "subtitle"
+  },
+  {
+   "codec": "hdmv_pgs_subtitle",
+   "packets": 4,
+   "type": "subtitle"
+  }
+ ],
  "two-audio.mkv": [
   {
    "codec": "h264",

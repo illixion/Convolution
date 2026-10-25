@@ -214,6 +214,7 @@ public enum MatroskaHeaderReader {
             case MatroskaID.flagEnabled: track.isEnabled = reader.uint(child) != 0
             case MatroskaID.flagDefault: track.isDefault = reader.uint(child) != 0
             case MatroskaID.flagForced: track.isForced = reader.uint(child) != 0
+            case MatroskaID.flagHearingImpaired: track.isHearingImpaired = reader.uint(child) != 0
             case MatroskaID.defaultDuration:
                 let duration = reader.uint(child)
                 if duration > 0 { track.defaultDuration = duration }

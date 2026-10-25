@@ -122,6 +122,12 @@ final class MatroskaRemuxService: Sendable {
         return Self.url(for: entry, form: form)
     }
 
+    /// The open session remuxing `source` (the URL `playlistURL(for:)` was
+    /// given), for the subtitle tracks inside the file.
+    func session(for source: URL) -> RemuxSession? {
+        state.withLock { $0.entries[source.absoluteString]?.session }
+    }
+
     private static func url(for entry: Entry, form: Form) -> URL {
         let muxed: Bool = switch form {
         case .master: false

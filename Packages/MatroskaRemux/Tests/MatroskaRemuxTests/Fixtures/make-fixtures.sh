@@ -103,6 +103,60 @@ ff -f lavfi -i "$(src 160x90 25 4)" -f lavfi -i "sine=frequency=440:duration=4" 
 ff -f lavfi -i "$(src 160x90 25 3)" -f lavfi -i "sine=frequency=440:duration=3:sample_rate=22050" \
    -c:v libx264 -preset veryfast -crf 40 -g 25 -c:a alac -ac 1 alac.mkv
 
+# Subtitles beside a little H.264 + AAC: SubRip, ASS and PGS (a .sup built
+# here, segment by segment, as ffmpeg can't encode PGS). mkvmerge indexes
+# every subtitle block in the Cues; the second file has no cue points for
+# its subtitles and zlib on its SubRip, so its blocks come from parsing.
+python3 - "$tmp" <<'PY'
+import sys
+tmp = sys.argv[1]
+open(f"{tmp}/subs.srt", "w").write(
+    "1\n00:00:01,000 --> 00:00:02,000\nOne <i>italic</i>\n\n"
+    "2\n00:00:03,000 --> 00:00:04,000\nTwo\n\n"
+    "3\n00:00:05,000 --> 00:00:06,500\nThree\nlines\n")
+open(f"{tmp}/subs.ass", "w").write("""[Script Info]
+ScriptType: v4.00+
+PlayResX: 160
+PlayResY: 90
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.50,0:00:02.50,Default,,0,0,0,,{\\i1}Un{\\i0}\\Ndeux, trois
+Dialogue: 0,0:00:04.00,0:00:05.00,Default,,0,0,0,,{\\an8\\b1}En haut
+""")
+def seg(t, body): return bytes([t, len(body) >> 8, len(body) & 255]) + bytes(body)
+def u16(v): return [v >> 8, v & 255]
+def show(n):
+    rle = [1, 1, 0, 0x02, 0, 0, 0, 0xC0, 4, 2, 0, 0]  # 4x2: white, white, clear; a run of colour 2
+    return [seg(0x16, u16(160) + u16(90) + [0x10] + u16(n) + [0x80, 0, 0, 1] + u16(0) + [0, 0] + u16(70) + u16(80)),
+            seg(0x17, [1, 0] + u16(70) + u16(80) + u16(4) + u16(2)),
+            seg(0x14, [0, 0, 1, 235, 128, 128, 255, 2, 16, 128, 128, 128]),
+            seg(0x15, u16(0) + [0, 0xC0, 0, 0, len(rle) + 4] + u16(4) + u16(2) + rle),
+            seg(0x80, [])]
+def clear(n):
+    return [seg(0x16, u16(160) + u16(90) + [0x10] + u16(n) + [0, 0, 0, 0]),
+            seg(0x17, [1, 0] + u16(70) + u16(80) + u16(4) + u16(2)),
+            seg(0x80, [])]
+sup = b""
+for n, (t, segments) in enumerate([(2.0, show), (3.0, clear), (6.0, show), (7.0, clear)]):
+    pts = int(t * 90000)
+    for s in segments(n):
+        sup += b"PG" + pts.to_bytes(4, "big") + pts.to_bytes(4, "big") + s
+open(f"{tmp}/subs.sup", "wb").write(sup)
+PY
+ff -f lavfi -i "$(src 160x90 25 8)" -f lavfi -i "sine=frequency=440:duration=8" \
+   -c:v libx264 -preset veryfast -crf 40 -g 25 -c:a aac -b:a 32k "$tmp/av.mkv"
+mkvmerge -q -o subtitles.mkv "$tmp/av.mkv" \
+   --language 0:en --track-name "0:English" "$tmp/subs.srt" \
+   --language 0:fr --forced-display-flag 0:yes "$tmp/subs.ass" \
+   --language 0:de --hearing-impaired-flag 0:yes "$tmp/subs.sup"
+mkvmerge -q -o subtitles-unindexed.mkv "$tmp/av.mkv" \
+   --language 0:en --cues 0:none --compression 0:zlib "$tmp/subs.srt" --cues 0:none "$tmp/subs.ass"
+
 write_expected
 
 ls -l ./*.mkv ./*.webm
