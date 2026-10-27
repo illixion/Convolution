@@ -15,6 +15,9 @@ import SwiftUI
 struct SubtitleMenu: View {
     let controller: SubtitleController
     @State private var speakerModel = RAVESpeakerModel.shared
+    #if os(iOS) || os(macOS)
+    @State private var showsTranslate = false
+    #endif
     /// The menu opened or closed, for a caller that has to move a stereo
     /// picture out of its way (the same signal the video ornament's menus use).
     var onOpenChanged: (Bool) -> Void = { _ in }
@@ -46,6 +49,16 @@ struct SubtitleMenu: View {
                     }
                 }
             }
+            #if os(iOS) || os(macOS)
+            if controller.canTranslate {
+                Button { close(); showsTranslate = true } label: {
+                    item("Translate…", isSelected: controller.translator.isActive)
+                }
+                if case .failed(let message) = controller.translator.phase {
+                    Text("Translation failed: \(message)").font(.caption).foregroundStyle(.red)
+                }
+            }
+            #endif
             if let error = controller.generated.error {
                 Text(error).font(.caption)
             }
@@ -68,6 +81,9 @@ struct SubtitleMenu: View {
             }
         }
         .accessibilityIdentifier("player.subtitles")
+        #if os(iOS) || os(macOS)
+        .sheet(isPresented: $showsTranslate) { SubtitleTranslateSheet(controller: controller) }
+        #endif
     }
 
     private var statusText: String {

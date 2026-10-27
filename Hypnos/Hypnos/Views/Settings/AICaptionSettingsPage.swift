@@ -1,6 +1,9 @@
 import GeneratedCaptions
 import Speech
 import SwiftUI
+#if os(iOS) || os(macOS)
+import Translation
+#endif
 
 struct AICaptionSettingsPage: View {
     @AppStorage("captions.locale") private var locale = Locale.preferredLanguages.first ?? "en-US"
@@ -38,6 +41,9 @@ struct AICaptionSettingsPage: View {
                 Text("Choose AI Captions in a video's subtitle menu. Speech is recognized on this device. Apple downloads the selected language on first use. Language and speaker settings apply the next time AI Captions starts.")
             }
             SpeakerModelSection()
+            #if os(iOS) || os(macOS)
+            TranslationTargetSection()
+            #endif
             Section {
                 Text("Audio is analyzed ahead of the picture. Playback may briefly buffer both sound and picture to let captions catch up. Live streams need enough buffered audio and require OS 27 or later.")
                     .foregroundStyle(.secondary)
@@ -101,3 +107,27 @@ struct SpeakerModelSection: View {
         }
     }
 }
+
+#if os(iOS) || os(macOS)
+/// The language "Translate" in a subtitle menu starts with.
+struct TranslationTargetSection: View {
+    @AppStorage(SubtitleTranslationSupport.targetKey) private var target = ""
+    @State private var languages: [Locale.Language] = []
+
+    var body: some View {
+        Section {
+            Picker("Translate To", selection: $target) {
+                Text("System Language (\(SubtitleTranslationSupport.name(of: SubtitleTranslationSupport.systemLanguage)))").tag("")
+                ForEach(languages, id: \.minimalIdentifier) { language in
+                    Text(SubtitleTranslationSupport.name(of: language)).tag(language.minimalIdentifier)
+                }
+            }
+        } header: {
+            Text("Subtitle Translation")
+        } footer: {
+            Text("Translate in a video's subtitle menu turns YouTube's automatic captions or AI Captions into this language, on this device. Apple downloads a language the first time it is used.")
+        }
+        .task { languages = await SubtitleTranslationSupport.supportedLanguages() }
+    }
+}
+#endif
