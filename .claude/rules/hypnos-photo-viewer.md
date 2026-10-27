@@ -57,8 +57,10 @@ presentation; the old `RAVEAIDepthPhotoView` is retained for other consumers.
   (real-time fallback); they never borrow a thumbnail-cache map. Still refinement
   uses the shared edge-aware kernels without temporal state or luma snapping.
 - RAVEMedia serializes bakes across windows, uses half-float extended-P3 colour
-  through adjustment/warp, and presents a tagged 10-bit PQ stereo frame through
-  `VideoPlayerComponent`. The usual flat image keeps sizing the window, remains
+  through adjustment/warp, and presents a 10-bit stereo frame tagged SDR (P3,
+  BT.709 transfer) through `VideoPlayerComponent`. A PQ tag made the photo
+  visibly brighter than the flat one (SDR white lands at 203 nits, shown as
+  HDR); HDR photos are clipped to SDR white until a per-photo HDR path exists. The usual flat image keeps sizing the window, remains
   until stereo is ready, and reappears for failures and transitions. Stereo
   stays on while ornaments and popovers are shown: the old relief-mesh fade
   workaround is unnecessary for depth that stays behind the window.
