@@ -169,6 +169,20 @@ actor YouTubeInnertube {
     // MARK: - Player
 
     func player(_ id: YouTubeVideoID) async throws -> YouTubePlayerInfo {
+        let json = try await visionPlayer(id)
+        return playerInfo(id, json)
+    }
+
+    /// The video's caption tracks as the visionOS client lists them: signed
+    /// URLs that need no PO token. Translations (`translationLanguages`) are
+    /// left out on purpose.
+    func captionTracks(_ id: YouTubeVideoID) async throws -> [YouTubeCaptionTrack] {
+        let json = try await visionPlayer(id)
+        let renderer = (json["captions"] as? [String: Any])?["playerCaptionsTracklistRenderer"] as? [String: Any]
+        return ((renderer?["captionTracks"] as? [[String: Any]]) ?? []).compactMap(YouTubeCaptionTrack.init)
+    }
+
+    private func visionPlayer(_ id: YouTubeVideoID) async throws -> [String: Any] {
         let visitor = try? await visitorID(for: id)
         var context = Self.visionClient
         if let visitor { context["visitorData"] = visitor }
@@ -178,13 +192,15 @@ actor YouTubeInnertube {
             "X-YouTube-Client-Version": "1.02",
         ]
         if let visitor { headers["X-Goog-Visitor-Id"] = visitor }
-        let json = try await post("player", body: [
+        return try await post("player", body: [
             "context": ["client": context],
             "videoId": id.rawValue,
             "contentCheckOk": true,
             "racyCheckOk": true,
         ], headers: headers)
+    }
 
+    private func playerInfo(_ id: YouTubeVideoID, _ json: [String: Any]) -> YouTubePlayerInfo {
         let playability = json["playabilityStatus"] as? [String: Any]
         let streaming = json["streamingData"] as? [String: Any]
         let details = json["videoDetails"] as? [String: Any]
