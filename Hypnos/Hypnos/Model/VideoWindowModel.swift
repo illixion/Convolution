@@ -1627,7 +1627,9 @@ final class VideoWindowModel {
         // Until the new player is at the carried position, the playhead (and
         // the progress reports read from it) stays where the user was.
         if resumeCarriedPosition(reportedTime: currentTime, duration: duration) { return }
-        self.currentTime = currentTime
+        // A player whose item is gone (a scene torn down) reads NaN; the
+        // playhead keeps the last real time rather than taking it.
+        if currentTime.isFinite { self.currentTime = currentTime }
         if duration > 0 { self.duration = duration }
         #if HYPNOS_YOUTUBE
         autoSkipYouTubeSegmentIfNeeded()

@@ -82,8 +82,8 @@ enum LibraryPlaybackCoordinator {
         var lastPosition: Double = 0
         defer {
             // The position at close, not at the last 10 s sample.
-            let position = FilmPlayerView.safeStopPosition(current: currentTime() ?? lastPosition,
-                                                           lastReported: lastPosition)
+            let current = currentTime().flatMap { $0.isFinite ? $0 : nil } ?? lastPosition
+            let position = FilmPlayerView.safeStopPosition(current: current, lastReported: lastPosition)
             // A stop report also ends the server's transcode for this play;
             // one that never started has to end it explicitly.
             if started {
@@ -95,6 +95,11 @@ enum LibraryPlaybackCoordinator {
 
         while !Task.isCancelled {
             guard let position = currentTime() else { break }
+            // Not a time (a player losing its item): skip the sample.
+            guard position.isFinite else {
+                try? await Task.sleep(for: interval)
+                continue
+            }
             let paused = isPaused()
             if !started, position > 0 {
                 started = true

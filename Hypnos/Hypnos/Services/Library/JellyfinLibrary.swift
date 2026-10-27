@@ -1153,22 +1153,36 @@ actor JellyfinLibrary: MediaServerLibrary {
         }
     }
 
+    /// Jellyfin's ticks (100 ns) for a position, or nil when it isn't a
+    /// time: `Int64(_:)` traps on NaN and infinity, and a player losing its
+    /// item at a scene's teardown reads NaN (crash, device 2026-10-27).
+    static func positionTicks(_ seconds: Double) -> Int64? {
+        let ticks = seconds * 10_000_000
+        guard ticks.isFinite, abs(ticks) < Double(Int64.max) else {
+            AppLogger.library.error("Not reporting a position that isn't a time")
+            return nil
+        }
+        return Int64(ticks)
+    }
+
     func reportPlaybackStarted(itemId: String, positionSeconds: Double) async {
+        guard let ticks = Self.positionTicks(positionSeconds) else { return }
         let sessionId = playSessionId(for: itemId)
         _ = await post("Sessions/Playing", body: [
             "ItemId": itemId,
             "PlaySessionId": sessionId,
-            "PositionTicks": Int64(positionSeconds * 10_000_000),
+            "PositionTicks": ticks,
             "IsPaused": false,
             "CanSeek": true,
         ])
     }
 
     func reportPlaybackProgress(itemId: String, positionSeconds: Double, isPaused: Bool) async {
+        guard let ticks = Self.positionTicks(positionSeconds) else { return }
         let reached = await post("Sessions/Playing/Progress", body: [
             "ItemId": itemId,
             "PlaySessionId": playSessionId(for: itemId),
-            "PositionTicks": Int64(positionSeconds * 10_000_000),
+            "PositionTicks": ticks,
             "IsPaused": isPaused,
             "CanSeek": true,
         ])
@@ -1181,12 +1195,15 @@ actor JellyfinLibrary: MediaServerLibrary {
         // Screens showing this item's progress reload once the server has
         // the new position, and a Play pressed meanwhile waits for it.
         await LibraryWatchState.shared.reportBegan(itemId: itemId)
-        let reached = await post("Sessions/Playing/Stopped", body: [
-            "ItemId": itemId,
-            "PlaySessionId": playSessionId(for: itemId),
-            "PositionTicks": Int64(positionSeconds * 10_000_000),
-        ])
-        LibraryOfflineStore.shared.noteLocalPosition(itemId: itemId, seconds: positionSeconds, synced: reached)
+        // The stop still goes (it ends the server's transcode); without a
+        // time it carries no position rather than resetting the resume point.
+        let ticks = Self.positionTicks(positionSeconds)
+        var body: [String: Any] = ["ItemId": itemId, "PlaySessionId": playSessionId(for: itemId)]
+        if let ticks { body["PositionTicks"] = ticks }
+        let reached = await post("Sessions/Playing/Stopped", body: body)
+        if ticks != nil {
+            LibraryOfflineStore.shared.noteLocalPosition(itemId: itemId, seconds: positionSeconds, synced: reached)
+        }
         if !reached, LibraryOfflineStore.shared.record(for: itemId) != nil {
             AppLogger.library.info("Offline: a download's position will be synced later")
         }
@@ -1382,10 +1399,8 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// 10.9+ takes it in one call; older servers have the per-user path.
     func syncUserData(itemId: String, positionSeconds: Double, played: Bool, lastPlayed: Date?) async throws {
         let userId = try await resolveUserId()
-        var body: [String: Any] = [
-            "PlaybackPositionTicks": Int64(positionSeconds * 10_000_000),
-            "Played": played,
-        ]
+        var body: [String: Any] = ["Played": played]
+        if let ticks = Self.positionTicks(positionSeconds) { body["PlaybackPositionTicks"] = ticks }
         if let lastPlayed {
             body["LastPlayedDate"] = ISO8601DateFormatter().string(from: lastPlayed)
         }
