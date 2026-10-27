@@ -244,7 +244,7 @@ extension VideoWindowModel {
             stereoLoadStrikes = 0
             return
         }
-        stereoLoadStrikes += 1
+        stereoLoadStrikes = sample.recoveryExhausted ? 3 : stereoLoadStrikes + 1
         AppLogger.videoWindow.info("Stereo picture dropping frames: \(Int(sample.deliveredFraction * 100), privacy: .public)% of \(sample.sourceFramesPerSecond, format: .fixed(precision: 1), privacy: .public) fps shown (\(self.stereoLoadStrikes, privacy: .public)/3)")
         guard stereoLoadStrikes >= 3 else { return }
         stereoLoadStrikes = 0
@@ -258,8 +258,18 @@ extension VideoWindowModel {
         if offersQualityChoice, qualityPreference == .auto, pictureHeight(sample) > 1080,
            let next = LibraryStreamQuality.smallerPicture(than: 1081, from: streamLevel) {
             AppLogger.videoWindow.info("3D couldn't keep up at \(self.streamLevel?.rawValue ?? "original", privacy: .public), \(sample.sourceHeight, privacy: .public) lines; stepping to \(next.rawValue, privacy: .public)")
-            switchStream(to: next, reason: "3D couldn't keep up")
+            ai3DAutoCappedLibrary = true
+            switchStream(to: next, reason: "3D couldn't keep up after buffering", forAI3D: true)
             showQualityNotice("Quality lowered to \(next.title) so 3D plays smoothly")
+            return
+        }
+        if shouldUsePseudo3D, video.ai3DStreamURL != nil, !ai3DUsesStashTier,
+           video.sourceHeight.map({ $0 > 1080 }) ?? true {
+            carryPositionToNextRenderer(reason: "AI 3D recovery exhausted")
+            streamSwitchStart = currentTime
+            ai3DUsesStashTier = true
+            resolvePlaybackRenderer()
+            showQualityNotice("Picture lowered to 1080p after AI 3D could not refill its buffer")
             return
         }
         guard stereoLoadAdvisedIdentity != video.identity else { return }

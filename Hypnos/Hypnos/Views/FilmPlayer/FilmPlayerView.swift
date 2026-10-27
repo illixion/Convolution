@@ -90,8 +90,6 @@ struct FilmPlayerView: View {
     /// The converted tier a Dolby Vision profile 5 film's 3D switched to,
     /// undone when 3D ends.
     @State private var stereoTierForDolbyVision: Int?
-    @State private var stereoTierForAutoAI3D: Int?
-    @State private var autoAI3DTierAttempted = false
     @State private var stereoTierRequestID = UUID()
     @State private var pictureNoticeTask: Task<Void, Never>?
     @State private var stereoLoadStrikes = 0
@@ -273,12 +271,12 @@ struct FilmPlayerView: View {
     /// 20 s pass before the next reports count; otherwise the viewer is told
     /// once per film.
     private func noteStereoPerformance(_ sample: StereoPerformance) {
-        guard player.isPlaying, !chromeOpen, !player.video.isChangingPictureTier,
+        guard player.isPlaying, (!player.analysisBuffering || sample.recoveryExhausted), !chromeOpen, !player.video.isChangingPictureTier,
               Date.now >= stereoLoadGraceUntil, sample.isOverloaded else {
             stereoLoadStrikes = 0
             return
         }
-        stereoLoadStrikes += 1
+        stereoLoadStrikes = sample.recoveryExhausted ? 3 : stereoLoadStrikes + 1
         AppLogger.filmPlayer.info("3D picture dropping frames: \(Int(sample.deliveredFraction * 100), privacy: .public)% of \(sample.sourceFramesPerSecond, format: .fixed(precision: 1), privacy: .public) fps shown (\(self.stereoLoadStrikes, privacy: .public)/3)")
         guard stereoLoadStrikes >= 3 else { return }
         stereoLoadStrikes = 0
@@ -452,7 +450,11 @@ struct FilmPlayerView: View {
                                 : "The 3D renderer is unavailable. Playback continues in 2D."
                         },
                         onToggleChrome: { toggleChrome() },
-                        onPerformance: { noteStereoPerformance($0) }
+                        onPerformance: { noteStereoPerformance($0) },
+                        onProcessingBuffering: { held in
+                            guard session.stereoTapOwner == ObjectIdentifier(source) else { return }
+                            player.setDepthBuffering(held)
+                        }
                     )
                     .background {
                         if stereoSubtitleStyle == .inPicture {
@@ -693,30 +695,6 @@ struct FilmPlayerView: View {
             showsDepthSetup = true
             return
         }
-        // Under Auto, fetch the plugin's 1080p picture before starting AI 3D.
-        // The flat film returns to its original picture when 3D ends.
-        if layout == nil, FilmPictureQuality.preferred == .auto,
-           !autoAI3DTierAttempted, player.video.pictureHeight == nil,
-           player.video.offeredPictureHeights.contains(1080) {
-            autoAI3DTierAttempted = true
-            let requestID = UUID()
-            stereoTierRequestID = requestID
-            let itemID = session.loadedItem?.id
-            Task {
-                let changed = await player.video.setPictureHeight(1080)
-                guard stereoTierRequestID == requestID, session.loadedItem?.id == itemID else {
-                    if changed, session.loadedItem?.id == itemID {
-                        _ = await player.video.setPictureHeight(nil)
-                    }
-                    return
-                }
-                if changed {
-                    stereoTierForAutoAI3D = 1080
-                }
-                startStereo()
-            }
-            return
-        }
         // Dolby Vision profile 5 shows right only through the system's own
         // renderer, which the 3D picture isn't. The plugin's lower tiers are
         // that picture converted to HDR10 on the server, so 3D plays one,
@@ -740,7 +718,7 @@ struct FilmPlayerView: View {
             return
         }
         stereoLayout = layout
-        let source = SampleBufferFrameSource(timebase: player.video.timebase)
+        let source = SampleBufferFrameSource(timebase: player.video.timebase, endTime: player.duration)
         player.video.onSampleBuffer = { source.submit($0) }
         player.video.onFlush = { source.reset() }
         session.stereoTapOwner = ObjectIdentifier(source)
@@ -759,7 +737,6 @@ struct FilmPlayerView: View {
     private func stopStereo(keepingPosition: Bool = true) {
         stereoTierRequestID = UUID()
         guard let source = stereoSource else {
-            autoAI3DTierAttempted = false
             return
         }
         source.close()
@@ -768,21 +745,14 @@ struct FilmPlayerView: View {
             // Back to the original Dolby Vision picture, which the flat
             // (system) renderer shows as it is.
             Task { _ = await player.video.setPictureHeight(nil) }
-        } else if stereoTierForAutoAI3D != nil, keepingPosition,
-                  FilmPictureQuality.preferred == .auto,
-                  player.video.pictureHeight == stereoTierForAutoAI3D {
-            Task { _ = await player.video.setPictureHeight(nil) }
         }
         stereoTierForDolbyVision = nil
-        if keepingPosition || player.video.pictureHeight != stereoTierForAutoAI3D {
-            stereoTierForAutoAI3D = nil
-        }
-        autoAI3DTierAttempted = false
         stereoSource = nil
         stereoLayout = nil
         mountedDepthModelName = nil
         // Another window's 3D may have taken the player since; that stays.
         guard session.stereoTapOwner == ObjectIdentifier(source) else { return }
+        player.setDepthBuffering(false)
         session.stereoTapOwner = nil
         player.video.onSampleBuffer = nil
         player.video.onFlush = nil

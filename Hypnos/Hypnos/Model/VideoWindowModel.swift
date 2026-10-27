@@ -1146,34 +1146,8 @@ final class VideoWindowModel {
     /// first. The intent is parked in `pendingPseudo3DEngage` and replayed by
     /// `resolvePlaybackRenderer` once the new renderer is known.
     func enablePseudo3D() {
-        // Auto quality starts at the server's 1080p tier before the stereo
-        // renderer mounts. A fixed quality remains an explicit override.
-        if offersQualityChoice, qualityPreference == .auto,
-           (streamLevel == nil || (streamLevel?.maxHeight ?? 0) > 1080),
-           !ai3DAutoCappedLibrary,
-           pendingPseudo3DEngage == nil {
-            pendingPseudo3DEngage = PendingPseudo3DEngage(
-                depthMode: pseudo3DDepthMode,
-                startPaused: pseudo3DEngagePaused,
-                resumeAt: pseudo3DEngageResumeTime ?? (currentTime > 0 ? currentTime : nil)
-            )
-            ai3DAutoCappedLibrary = true
-            switchStream(to: .mbps20, reason: "AI 3D starts at 1080p", forAI3D: true)
-            return
-        }
-        if video.ai3DStreamURL != nil,
-           (video.sourceHeight.map { $0 > 1080 } ?? true),
-           !ai3DUsesStashTier {
-            pendingPseudo3DEngage = PendingPseudo3DEngage(
-                depthMode: pseudo3DDepthMode,
-                startPaused: pseudo3DEngagePaused,
-                resumeAt: pseudo3DEngageResumeTime ?? (currentTime > 0 ? currentTime : nil)
-            )
-            ai3DUsesStashTier = true
-            AppLogger.videoWindow.info("AI 3D starts on Stash's 1080p HLS tier")
-            resolvePlaybackRenderer()
-            return
-        }
+        // Try the current picture with the bounded depth reserve first.
+        // Sustained overload lowers quality after a refill attempt fails.
         // Only swap once the renderer is actually known to be WebKit — swapping
         // while still `.resolving` could abandon an original that AVFoundation
         // was about to accept.
@@ -1445,21 +1419,6 @@ final class VideoWindowModel {
                 // A fake-3D engage waiting on the transcode swap resolves here.
                 if self.pendingPseudo3DEngage != nil {
                     self.resumePendingPseudo3DEngage()
-                    return
-                }
-                // A restored AI 3D window must prepare its 1080p server
-                // picture too; it did not pass through the menu's engage path.
-                if self.pseudo3DEnabled, self.offersQualityChoice,
-                   self.qualityPreference == .auto,
-                   !self.ai3DAutoCappedLibrary,
-                   (self.streamLevel == nil || (self.streamLevel?.maxHeight ?? 0) > 1080) {
-                    self.enablePseudo3D()
-                    return
-                }
-                if self.pseudo3DEnabled, self.video.ai3DStreamURL != nil,
-                   !self.ai3DUsesStashTier,
-                   (self.video.sourceHeight.map { $0 > 1080 } ?? true) {
-                    self.enablePseudo3D()
                     return
                 }
                 // A restored window that was in fake-3D over a WebKit-decoded

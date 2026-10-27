@@ -704,7 +704,7 @@ struct NativeMetalVideoPlayerView {
                     paused: analysisBuffering ? !intendsToPlay : player.timeControlStatus != .playing,
                     muted: player.isMuted,
                     buffered: buffered,
-                    waiting: analysisBuffering || player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                    waiting: !analysisBuffering && player.timeControlStatus == .waitingToPlayAtSpecifiedRate
                 )
             )
         }
