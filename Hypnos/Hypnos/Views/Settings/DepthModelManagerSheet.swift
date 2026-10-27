@@ -46,12 +46,14 @@ struct DepthModelManagerSheet: View {
                         .foregroundColor(.red)
                 }
 
+                SpeakerModelSection()
+
                 Section {
                 } footer: {
-                    Text("Downloads come from Apple's Hugging Face repo. Custom models (e.g. a Base conversion from scripts/convert-depth-model.py) can be added by copying the .mlpackage into this app's Documents folder with the Files app — it's imported automatically. Which model each 3D mode uses is chosen in Display settings.")
+                    Text("Depth model downloads come from Apple's Hugging Face repo. Custom depth models (e.g. a Base conversion from scripts/convert-depth-model.py) can be added by copying the .mlpackage into this app's Documents folder with the Files app — it's imported automatically. Which model each 3D mode uses is chosen in Display settings.")
                 }
             }
-            .navigationTitle("Depth Models")
+            .navigationTitle("AI Models")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }

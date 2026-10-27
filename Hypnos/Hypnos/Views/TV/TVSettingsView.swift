@@ -28,7 +28,7 @@ import RAVEUI
 import SwiftUI
 
 enum TVSettingsPage: String, Hashable {
-    case deviceSetup, librarySource, jellyfin, stash, nextcloud, cache, developer
+    case deviceSetup, librarySource, jellyfin, stash, nextcloud, cache, developer, aiCaptions
     #if HYPNOS_YOUTUBE
     case youtube
     #endif
@@ -104,6 +104,7 @@ struct TVSettingsView: View {
                     #endif
                 }
                 Section {
+                    row(.aiCaptions, "AI Captions", systemImage: "captions.bubble", value: "")
                     row(.cache, "Cache", systemImage: "internaldrive", value: cachePreset.label)
                     row(.developer, "Developer", systemImage: "hammer", value: "")
                 }
@@ -113,6 +114,8 @@ struct TVSettingsView: View {
                 if page == .deviceSetup {
                     // A QR code and instructions, not a list.
                     DeviceSetupReceiveView { state.path.removeAll() }
+                } else if page == .aiCaptions {
+                    AICaptionSettingsPage()
                 } else {
                     Form {
                         RAVEScreenHeading(title(for: page))
@@ -153,6 +156,7 @@ struct TVSettingsView: View {
         case .jellyfin: "Jellyfin"
         case .stash: "Stash"
         case .nextcloud: "Nextcloud"
+        case .aiCaptions: "AI Captions"
         case .cache: "Cache"
         case .developer: "Developer"
         #if HYPNOS_YOUTUBE
@@ -169,6 +173,7 @@ struct TVSettingsView: View {
         case .jellyfin: JellyfinServerSection()
         case .stash: StashServerSection()
         case .nextcloud: NextcloudSettingsSection()
+        case .aiCaptions: EmptyView()
         case .cache: CacheSettingsSection()
         case .developer: TVDeveloperSection()
         #if HYPNOS_YOUTUBE

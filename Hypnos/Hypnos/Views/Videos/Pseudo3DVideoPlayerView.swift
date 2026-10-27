@@ -232,6 +232,11 @@ extension Pseudo3DStereoEngine {
             loopController.setLoopBounds = { [weak self] a, b in self?.setLoopBounds(a: a, b: b) }
         }
         if let playbackModel {
+            onAnalysisPlayerChanged = { [weak playbackModel, weak self] player in
+                playbackModel?.subtitles.bindAnalysisPlayer(player, buffering: { [weak self] held in
+                    self?.setAnalysisBuffering(held)
+                })
+            }
             playbackModel.playCommand = { [weak self] in self?.play() }
             playbackModel.pauseCommand = { [weak self] in self?.pause() }
             playbackModel.seekCommand = { [weak self] t in self?.seek(to: t) }

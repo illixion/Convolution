@@ -113,6 +113,10 @@ final class FilmSession {
     var recenterRequest = 0
 
     private init() {
+        player.onCaptionSourceChanged = { [weak self] in
+            guard let self else { return }
+            self.subtitles.bindGeneratedFilm(self.player)
+        }
         restoreSound()
         subtitles.playhead = { [weak self] in self?.player.currentTime ?? 0 }
         Self.excludeFromOtherCredentials(server)
@@ -268,6 +272,7 @@ final class FilmSession {
         }
         loadedItem = item
         subtitles.load(disc.map { .disc($0.subtitles, itemId: item.id) } ?? .jellyfin(itemId: item.id))
+        subtitles.bindGeneratedFilm(player)
         if let disc {
             // The eyes come top and bottom out of MVCPictureSource's stereo frames.
             stereoFormat = disc.isStereo ? .overUnder : nil
@@ -329,6 +334,7 @@ final class FilmSession {
         }
         loadedItem = item
         subtitles.load(subtitleSource)
+        subtitles.bindGeneratedFilm(player)
         AppLogger.filmPlayer.info("Loaded a downloaded \(record.playback.rawValue, privacy: .public) film: \(self.player.video.formatSummary, privacy: .public); audio \(self.player.audioStatus, privacy: .public)")
         return true
     }
@@ -368,6 +374,7 @@ final class FilmSession {
         }
         loadedItem = item
         subtitles.load(.disc(disc.subtitles, itemId: item.id, includeServer: false))
+        subtitles.bindGeneratedFilm(player)
         stereoFormat = disc.isStereo ? .overUnder : nil
         AppLogger.filmPlayer.info("Loaded a local disc: \(disc.summary, privacy: .public); audio \(self.player.audioStatus, privacy: .public)")
         return true

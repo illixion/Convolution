@@ -48,6 +48,7 @@
 
 import AVKit
 import DebugTrace
+import GeneratedCaptions
 import SwiftUI
 
 struct TVVideoPlayerView: View {
@@ -334,7 +335,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         // An AVQueuePlayer so a looping clip can run through AVPlayerLooper,
         // which queues the next pass ahead of the end: no pause, no gap and
         // no transport UI popping up at the loop point.
-        let player = AVQueuePlayer()
+        let player = CaptionQueuePlayer()
         controller.player = player
         // The transport bar's speed menu, with the same choices as the
         // other players. It sets the player's `defaultRate`, which `play()`
@@ -357,6 +358,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         coordinator.controller = controller
         coordinator.item = item
         coordinator.subtitles = subtitles
+        subtitles.bindAnalysisPlayer(player, buffering: { [weak player] held in player?.setAnalysisBuffering(held) })
         coordinator.quality = quality
         coordinator.rating = rating
         coordinator.observePlayback(player, controller: controller)
@@ -505,6 +507,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         coordinator.timeControlObservation?.invalidate()
         coordinator.displayObservation?.invalidate()
         // A streamed track keeps the server reading the file until stopped.
+        coordinator.subtitles?.bindAnalysisPlayer(nil)
         coordinator.subtitles?.reset()
         coordinator.looperObservation?.invalidate()
         coordinator.looper?.disableLooping()
@@ -789,11 +792,15 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         /// Off and each track, then the timing offset while one shows.
         /// Absent until the tracks are listed, and for a video with none.
         @MainActor private func subtitleMenu() -> UIMenu? {
-            guard let subtitles, !subtitles.tracks.isEmpty else { return nil }
+            guard let subtitles, !subtitles.tracks.isEmpty || subtitles.canGenerate else { return nil }
             let selected = subtitles.selected
             var items: [UIMenuElement] = [
                 UIAction(title: "Off", state: selected == nil ? .on : .off) { _ in subtitles.select(nil) },
             ]
+            if subtitles.canGenerate {
+                items.append(UIAction(title: subtitles.generated.isBuffering ? "AI Captions (Buffering…)" : "AI Captions",
+                    state: subtitles.generated.enabled ? .on : .off) { _ in subtitles.selectGenerated() })
+            }
             for track in subtitles.tracks {
                 items.append(UIAction(title: subtitles.menuTitle(of: track),
                                       attributes: track.isPlayable ? [] : .disabled,
@@ -953,4 +960,25 @@ private struct TVSubtitleLayer: View {
     }
 }
 
+
+/// AVKit owns the transport on Apple TV. Its commands remain user intent while
+/// an analysis hold parks both sound and picture on the AVPlayer clock.
+private final class CaptionQueuePlayer: AVQueuePlayer, @unchecked Sendable {
+    private var analysisHeld = false
+    private var wantsPlayback = false
+    override func play() {
+        wantsPlayback = true
+        if !analysisHeld { super.play() }
+    }
+    override func playImmediately(atRate rate: Float) {
+        wantsPlayback = rate > 0
+        if !analysisHeld { super.playImmediately(atRate: rate) }
+    }
+    override func pause() { wantsPlayback = false; super.pause() }
+    func setAnalysisBuffering(_ held: Bool) {
+        analysisHeld = held
+        if held { super.pause() }
+        else if wantsPlayback { super.play() }
+    }
+}
 #endif

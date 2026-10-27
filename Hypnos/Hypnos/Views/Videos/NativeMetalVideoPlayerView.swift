@@ -252,7 +252,10 @@ struct NativeMetalVideoPlayerView {
             playbackModel.setSpeedCommand = { [weak coordinator] speed in
                 coordinator?.setSpeed(Float(speed))
             }
-            coordinator.onPlayerChanged = { [weak playbackModel] player in
+            coordinator.onPlayerChanged = { [weak playbackModel, weak coordinator] player in
+                playbackModel?.subtitles.bindAnalysisPlayer(player, buffering: { [weak coordinator] held in
+                    coordinator?.setAnalysisBuffering(held)
+                })
                 playbackModel?.noteNativePlayer(player)
             }
             coordinator.onFrameRateKnown = { [weak playbackModel] rate in
@@ -505,10 +508,18 @@ struct NativeMetalVideoPlayerView {
             }
         }
 
+        private var analysisBuffering = false
+        func setAnalysisBuffering(_ held: Bool) {
+            analysisBuffering = held
+            if held { player?.pause() }
+            else if intendsToPlay, isRoomActive { player?.play() }
+            reportPlaybackState()
+        }
+
         func play() {
             isRoomActive = true
             intendsToPlay = true
-            player?.play()
+            if !analysisBuffering { player?.play() }
             reportPlaybackState()
         }
 
@@ -524,7 +535,7 @@ struct NativeMetalVideoPlayerView {
         /// that) or we've already retried too many times (avoid a tight loop if
         /// the system genuinely won't let it play).
         private func resumeAfterInvoluntaryPause() {
-            guard let player, let item = player.currentItem else { return }
+            guard !analysisBuffering, let player, let item = player.currentItem else { return }
             let duration = item.duration.seconds
             let current = player.currentTime().seconds
             if duration.isFinite, duration > 0, current >= duration - 0.25 { return }
@@ -581,7 +592,7 @@ struct NativeMetalVideoPlayerView {
                 // still .waitingToPlayAtSpecifiedRate while buffering, and the
                 // transient inactive flap at window open would otherwise
                 // capture it as "paused" and kill autoplay for good.
-                wasPlayingBeforeRoomExit = player?.timeControlStatus != .paused
+                wasPlayingBeforeRoomExit = analysisBuffering ? intendsToPlay : player?.timeControlStatus != .paused
                 pause()
             }
         }
@@ -629,6 +640,7 @@ struct NativeMetalVideoPlayerView {
         }
 
         private func cleanupPlayer() {
+            intendsToPlay = false
             if player != nil { onPlayerChanged?(nil) }
             if let timeObserver, let player {
                 player.removeTimeObserver(timeObserver)
@@ -689,10 +701,10 @@ struct NativeMetalVideoPlayerView {
                 PlaybackState(
                     currentTime: currentTime ?? player.currentTime().seconds,
                     duration: duration.isFinite ? duration : 0,
-                    paused: player.timeControlStatus != .playing,
+                    paused: analysisBuffering ? !intendsToPlay : player.timeControlStatus != .playing,
                     muted: player.isMuted,
                     buffered: buffered,
-                    waiting: player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                    waiting: analysisBuffering || player.timeControlStatus == .waitingToPlayAtSpecifiedRate
                 )
             )
         }

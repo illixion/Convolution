@@ -7,6 +7,7 @@
  A stereo picture draws them into the picture instead (`StereoSubtitleFeeder`).
  */
 
+import GeneratedCaptions
 import RAVEMedia
 import RAVEUI
 import SwiftUI
@@ -22,6 +23,14 @@ struct SubtitleMenu: View {
                          systemImage: controller.selected == nil ? "captions.bubble" : "captions.bubble.fill",
                          help: statusText, onOpenChanged: onOpenChanged) { close in
             Button { close(); controller.select(nil) } label: { item("Off", isSelected: controller.selected == nil) }
+            if controller.canGenerate {
+                Button { close(); controller.selectGenerated() } label: {
+                    item(controller.generated.enabled && !controller.generated.status.isEmpty ? controller.generated.status : "AI Captions", isSelected: controller.generated.enabled)
+                }
+            }
+            if let error = controller.generated.error {
+                Text(error).font(.caption)
+            }
             ForEach(controller.tracks) { track in
                 Button { close(); controller.select(track) } label: {
                     item(controller.menuTitle(of: track), isSelected: controller.selected == track)
@@ -33,6 +42,7 @@ struct SubtitleMenu: View {
     }
 
     private var statusText: String {
+        if let error = controller.generated.error { return "AI captions failed: \(error)" }
         if let error = controller.error { return "Subtitles failed: \(error)" }
         if controller.isFetching { return "Loading subtitles…" }
         return controller.selected.map { "Subtitles: \($0.title)" } ?? "Subtitles"

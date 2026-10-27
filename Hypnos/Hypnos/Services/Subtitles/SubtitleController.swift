@@ -32,6 +32,9 @@
  the plugin (a 404) the track is fetched whole as before.
  */
 
+import AVFoundation
+import GeneratedCaptions
+import RAVEFilm
 import DebugTrace
 import Foundation
 import MatroskaRemux
@@ -188,8 +191,60 @@ enum SubtitlePreference {
 @MainActor
 @Observable
 final class SubtitleController {
+    let generated = RAVEGeneratedCaptions()
+    private(set) var canGenerate = false
+    private static let generatedTrack = LibrarySubtitleTrack(id: -10000, sourceId: "generated", language: nil, name: "AI Captions")
+
+    init() {
+        generated.onChange = { [weak self] in
+            guard let self, self.selected == Self.generatedTrack else { return }
+            self.cues = RAVESubtitleTrack(cues: self.generated.captions.map { caption in
+                let prefix = caption.speaker.map { "Speaker \($0): " } ?? ""
+                return RAVESubtitleCue(start: caption.start, end: caption.end, text: AttributedString(prefix + caption.text))
+            })
+        }
+    }
+    func bindAnalysisPlayer(_ player: AVPlayer?, buffering: ((Bool) -> Void)? = nil) {
+        // Release the previous transport before handing the hold callback to
+        // the new renderer. A late teardown must not hold its replacement.
+        generated.bind(player: nil)
+        generated.onBuffering = buffering
+        canGenerate = player != nil
+        generated.bind(player: player)
+    }
+    func bindGeneratedFilm(_ player: FilmPlayer) {
+        let resume = generated.enabled
+        generated.stop()
+        generated.onBuffering = { [weak player] held in player?.setAnalysisBuffering(held) }
+        generated.bindExternal(position: { [weak player] in player?.currentTime ?? 0 },
+            duration: { [weak player] in player?.duration ?? 0 },
+            speed: { [weak player] in player?.speed ?? 1 },
+            playing: { [weak player] in player?.isPlaying == true && player?.analysisBuffering == false },
+            source: { [weak player] start in
+                guard let player else { throw URLError(.cancelled) }
+                let filmSource = try await player.captionAudioSource(start: start)
+                return RAVECaptionAudioSource {
+                    try await filmSource.next().map { RAVECaptionAudioChunk(buffer: $0.buffer, time: $0.time) }
+                }
+            })
+        canGenerate = player.hasAudioScene
+        if resume, canGenerate { generated.start() }
+    }
+    func selectGenerated() {
+        guard canGenerate else { return }
+        if selected == Self.generatedTrack {
+            select(nil)
+            return
+        }
+        fetchTask?.cancel()
+        selectionMadeForSource = true
+        selected = Self.generatedTrack
+        cues = nil; error = nil; isFetching = false
+        generated.start()
+    }
     private(set) var tracks: [LibrarySubtitleTrack] = []
     private(set) var selected: LibrarySubtitleTrack?
+    private var selectionMadeForSource = false
     /// The parsed cues of `selected`, once fetched.
     private(set) var cues: RAVESubtitleTrack?
     private(set) var isFetching = false
@@ -220,7 +275,7 @@ final class SubtitleController {
                 let tracks = try await source.tracks()
                 guard let self, !Task.isCancelled else { return }
                 self.tracks = tracks
-                if let initial = SubtitlePreference.initialTrack(in: tracks) {
+                if !self.selectionMadeForSource, let initial = SubtitlePreference.initialTrack(in: tracks) {
                     self.fetch(initial)
                 }
                 AppLogger.subtitles.info("\(tracks.count, privacy: .public) subtitle tracks, \(tracks.filter(\.isPlayable).count, privacy: .public) playable")
@@ -233,6 +288,8 @@ final class SubtitleController {
 
     /// The user's pick from the menu; remembered for later films.
     func select(_ track: LibrarySubtitleTrack?) {
+        selectionMadeForSource = true
+        generated.stop()
         SubtitlePreference.remember(track)
         guard let track else {
             fetchTask?.cancel()
@@ -246,11 +303,13 @@ final class SubtitleController {
     }
 
     func reset() {
+        generated.stop()
         listTask?.cancel()
         fetchTask?.cancel()
         source = nil
         tracks = []
         selected = nil
+        selectionMadeForSource = false
         cues = nil
         error = nil
         isFetching = false
