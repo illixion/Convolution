@@ -267,6 +267,11 @@ class PhotoWindowModel {
     /// 2048 px on its long edge. Held only while AI 3D is on.
     var aiDepthSource: CGImage? = nil
     var aiDepthSourceDimension: Int = 0
+    /// Brightest value in `aiDepthSource` in multiples of SDR white: above 1
+    /// for an HDR photo (`HDRStills`), whose stereo frame is then HDR too.
+    var aiDepthHeadroom: Float = 1
+    /// A debug test pattern is on screen in place of the photo (`photoHDRTest`); reloads leave it alone.
+    var showsDebugPattern = false
     var aiDepthPresentationReady = false
 
     /// The current image's depth map. Shared with the "3D Depth" thumbnail
@@ -1064,6 +1069,7 @@ class PhotoWindowModel {
     /// Uses CGImageSource for memory-efficient downsampling without loading
     /// the full image into memory. No temp files are written to disk.
     func loadDisplayImage(for windowSize: CGSize) async {
+        guard !showsDebugPattern else { return }
         guard !isAnimatedImage else { return }
         guard !is3DMode else { return }
         guard !isLoadingDisplayImage else { return }

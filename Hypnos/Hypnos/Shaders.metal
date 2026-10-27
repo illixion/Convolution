@@ -22,6 +22,7 @@ struct ImageUniforms {
     float contrast;   // Multiplicative scale (0..2+), 1 = no change
     float saturation; // 0 = grayscale, 1 = original, 2 = oversaturated
     float sharpen;    // RCAS sharpening amount (0 = off, 1 = max). Spatial — runs before tonal ops.
+    float peak;       // Brightest value kept: 1 for SDR, the texture's headroom for HDR (EDR drawable).
 };
 
 struct VertexOut {
@@ -90,14 +91,14 @@ fragment float4 rcasFragmentShader(
     // hitMin: positive headroom going down. hitMax: non-positive headroom going up.
     const float epsilon = 1.0 / 16384.0;
     float3 hitMin = mn4 / max(4.0 * mx4, float3(epsilon));
-    float3 hitMax = (float3(1.0) - mx4) / min(4.0 * mn4 - 4.0, float3(-epsilon));
+    float3 hitMax = (float3(uniforms.peak) - mx4) / min(4.0 * mn4 - 4.0 * uniforms.peak, float3(-epsilon));
 
     float3 lobeRGB = max(-hitMin, hitMax);
     float lobePre = max(max(lobeRGB.r, lobeRGB.g), lobeRGB.b);
     float lobe = clamp(lobePre, -0.1875, 0.0) * uniforms.sharpen;
 
     float rcpL = 1.0 / (1.0 + 4.0 * lobe);
-    color.rgb = saturate((e + lobe * (b + d + f + h)) * rcpL);
+    color.rgb = clamp((e + lobe * (b + d + f + h)) * rcpL, 0.0, uniforms.peak);
     return color;
 }
 
@@ -120,6 +121,7 @@ struct AAUniforms {
     float contrast;
     float saturation;
     float applyResolve; // 1.0 = rotated-grid resolve, 0.0 = single bilinear sample
+    float peak;         // as ImageUniforms.peak
 };
 
 fragment float4 imageFragmentShader(
@@ -159,6 +161,6 @@ fragment float4 imageFragmentShader(
     float luminance = dot(color.rgb, float3(0.2126, 0.7152, 0.0722));
     color.rgb = mix(float3(luminance), color.rgb, uniforms.saturation);
 
-    color.rgb = clamp(color.rgb, 0.0, 1.0);
+    color.rgb = clamp(color.rgb, 0.0, uniforms.peak);
     return color;
 }

@@ -57,10 +57,11 @@ presentation; the old `RAVEAIDepthPhotoView` is retained for other consumers.
   (real-time fallback); they never borrow a thumbnail-cache map. Still refinement
   uses the shared edge-aware kernels without temporal state or luma snapping.
 - RAVEMedia serializes bakes across windows, uses half-float extended-P3 colour
-  through adjustment/warp, and presents a 10-bit stereo frame tagged SDR (P3,
-  BT.709 transfer) through `VideoPlayerComponent`. A PQ tag made the photo
-  visibly brighter than the flat one (SDR white lands at 203 nits, shown as
-  HDR); HDR photos are clipped to SDR white until a per-photo HDR path exists. The usual flat image keeps sizing the window, remains
+  through adjustment/warp, and presents a 10-bit stereo frame through
+  `VideoPlayerComponent`: tagged SDR (P3, BT.709 transfer) for an SDR photo, since
+  a PQ tag made it visibly brighter than the flat one (SDR white lands at 203
+  nits, shown as HDR); HLG (BT.2020, mid-tone power 1.09) for an HDR photo.
+  See "HDR photos" below. The usual flat image keeps sizing the window, remains
   until stereo is ready, and reappears for failures and transitions. Stereo
   stays on while ornaments and popovers are shown: the old relief-mesh fade
   workaround is unnecessary for depth that stays behind the window.
@@ -78,6 +79,31 @@ visibly rendering. Further checks cover resize/ornament stability, colour,
 transparency, transitions and thin structures. JXL decoder internals
 can exceed the rendition budget; measure `_memory` on device. Do not infer a
 Vision Pro memory ceiling or comfort result from Mac harness measurements.
+
+## HDR photos
+`HDRStills` decodes a photo with a gain map (iPhone and ISO 21496 HEICs) or a PQ/HLG
+transfer as HDR, through ImageIO's `kCGImageSourceDecodeToHDR` (every decode in
+`MetalImageRenderer` goes through `HDRStills.decodeOptions`). The picture is tone mapped
+with Core Image's headroom filter to `targetHeadroom` (2.5, **measured on the AVP in a
+photo window, 2026-10-27**: `photoHDRTest dots` keeps brightening to about 3-4x SDR white,
+`patches` stops at about 2.5-3x, a brightness limiter; Oneiros's immersive test found 2x,
+a different path) and uploaded as an `rgba16Float` texture, whose headroom is registered in
+`MetalImageRenderer.headroom(of:)`. `MetalImageView` turns EDR on for such a texture
+(`wantsExtendedDynamicRangeContent`, extended linear Display P3) and the shaders clamp at the
+photo's own peak instead of 1.0. An SDR photo decodes as before.
+- **AI 3D** gets the same tone-mapped picture as half-float (`aiDepthHeadroom`) and
+  encodes it HLG (RAVESDK's `CLAUDE.md`, stereo stills, has why PQ failed).
+  Slideshow AI 3D, auto-enhance, background removal and RealityKit 3D still decode SDR.
+- **Many photos have no gain map**: the share sheet converts to JPEG unless Options is set
+  to Current/Unmodified Original, and iPhones before the 12 never wrote one (an iPhone 11
+  Pro Max HEIC is SDR). `photoStereoState` reports `flatHeadroom`/`aiHeadroom` per
+  window: above 1 means the photo really decoded as HDR.
+- **Screenshots from the headset are SDR** (8-bit, sRGB transfer): they can compare relative
+  brightness but cannot measure HDR.
+- Debug server: `photoHDR` (enabled, headroom, midGamma) and `photoHDRTest` (`dots`,
+  `patches`, `dots3d`, `patches3d`, `flip`, `off`: a raw pattern through the flat EDR path
+  or AI 3D's video path). Open item: the AI 3D picture's black looked grey beside the flat one
+  on the PQ build; not re-checked on HLG.
 
 ## Spatial 3D Images
 Uses RealityKit's `ImagePresentationComponent` for 2D→3D conversion. States tracked via `Spatial3DImageState` enum: notGenerated → generating → generated. `ImagePresentationComponent` is a black-box component — it manages its own geometry and materials internally, so there's no direct access to its mesh or rendering pipeline.

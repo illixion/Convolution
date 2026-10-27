@@ -71,6 +71,7 @@ extension PhotoWindowModel {
         aiDepthPresentationReady = false
         aiDepthSourceDimension = 0
         aiDepthSource = nil
+        aiDepthHeadroom = 1
     }
 
     /// Decode the mesh's picture and find or make the depth map. Returns
@@ -89,10 +90,11 @@ extension PhotoWindowModel {
             guard let self else { return false }
             self.isProcessingAIDepth = true
             defer { self.isProcessingAIDepth = false }
-            let source = await Task.detached(priority: .userInitiated) {
+            let decoded = await Task.detached(priority: .userInitiated) {
                 Self.decodeAIDepthSource(data, maxPixelSize: target)
             }.value
-            guard !Task.isCancelled, self.imageURL == url, let source else { return false }
+            guard !Task.isCancelled, self.imageURL == url, let decoded else { return false }
+            let source = decoded.image
             // Full-size photos never borrow depth inferred from a thumbnail.
             let map = await RAVEStillDepthEstimator.shared.depth(for: source, photoQuality: true)
             guard !Task.isCancelled, self.imageURL == url, let map else {
@@ -102,6 +104,7 @@ extension PhotoWindowModel {
             self.aiDepthSourceDimension = target
             self.aiDepthPresentationReady = false
             self.aiDepthSource = source
+            self.aiDepthHeadroom = decoded.headroom
             self.aiDepthMap = map
             return true
         }
@@ -119,6 +122,7 @@ extension PhotoWindowModel {
         aiDepthPresentationReady = false
         aiDepthSourceDimension = 0
         aiDepthSource = nil
+        aiDepthHeadroom = 1
         aiDepthMap = nil
         isProcessingAIDepth = false
         isAIDepthMode = false
@@ -149,24 +153,27 @@ extension PhotoWindowModel {
     /// The existing resize debounce and resolution controls both enter here.
     /// Reuse the depth estimate: changing colour resolution doesn't change its UVs.
     func reloadAIDepthSourceIfNeeded() async {
-        guard isAIDepthMode, let data = currentImageData else { return }
+        guard isAIDepthMode, !showsDebugPattern, let data = currentImageData else { return }
         let target = aiDepthTargetDimension()
         let ratio = Double(target) / Double(max(aiDepthSourceDimension, 1))
         guard target < aiDepthSourceDimension || ratio >= 1.2 else { return }
         let url = imageURL
-        let source = await Task.detached(priority: .userInitiated) {
+        let decoded = await Task.detached(priority: .userInitiated) {
             Self.decodeAIDepthSource(data, maxPixelSize: target)
         }.value
         guard !Task.isCancelled, isAIDepthMode, imageURL == url,
-              aiDepthTargetDimension() == target, let source else { return }
+              aiDepthTargetDimension() == target, let decoded else { return }
         aiDepthSourceDimension = target
-        aiDepthSource = source
+        aiDepthSource = decoded.image
+        aiDepthHeadroom = decoded.headroom
     }
 
-    /// Oriented, downsampled decode. The thumbnail API applies the EXIF
-    /// orientation (`CreateThumbnailWithTransform`), unlike a plain
-    /// `CGImageSourceCreateImageAtIndex`.
-    nonisolated static func decodeAIDepthSource(_ data: Data, maxPixelSize: Int) -> CGImage? {
-        MetalImageRenderer.downsampledImage(from: data, maxDimension: CGFloat(maxPixelSize))?.cgImage
+    /// Oriented, downsampled decode. An HDR photo comes back tone mapped to
+    /// the display's headroom (`HDRStills`), with that headroom; SDR is 1.
+    nonisolated static func decodeAIDepthSource(_ data: Data, maxPixelSize: Int) -> (image: CGImage, headroom: Float)? {
+        guard let image = MetalImageRenderer.downsampledImage(from: data, maxDimension: CGFloat(maxPixelSize))?.cgImage else {
+            return nil
+        }
+        return HDRStills.toneMappedImage(image) ?? (image, 1)
     }
 }

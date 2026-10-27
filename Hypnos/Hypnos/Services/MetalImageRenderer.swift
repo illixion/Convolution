@@ -74,6 +74,26 @@ final class MetalImageRenderer: Sendable {
     /// per pixel. Tunable.
     static let oversizedDecodeByteThreshold = 140 * 1024 * 1024
 
+    /// Peak brightness, in multiples of SDR white, of each HDR texture made
+    /// here (`HDRStills`); SDR textures aren't listed. Weak keys, so an entry
+    /// goes with its texture, whichever cache or model held it.
+    private nonisolated(unsafe) static let hdrPeaks = NSMapTable<AnyObject, NSNumber>.weakToStrongObjects()
+    private static let hdrPeaksLock = NSLock()
+
+    /// 1 for SDR; above 1 the texture holds HDR highlights up to that value.
+    static func headroom(of texture: MTLTexture) -> Float {
+        hdrPeaksLock.lock()
+        defer { hdrPeaksLock.unlock() }
+        return hdrPeaks.object(forKey: texture)?.floatValue ?? 1
+    }
+
+    static func setHeadroom(_ headroom: Float, of texture: MTLTexture) {
+        hdrPeaksLock.lock()
+        defer { hdrPeaksLock.unlock() }
+        if headroom > 1 { hdrPeaks.setObject(NSNumber(value: headroom), forKey: texture) }
+        else { hdrPeaks.removeObject(forKey: texture) }
+    }
+
     /// Predicted bytes a full decode of `width`×`height` at `bitsPerComponent`
     /// would allocate, assuming 4 (RGBA) channels. Header-only — no decode.
     static func predictedDecodeBytes(width: Int, height: Int, bitsPerComponent: Int) -> Int {
@@ -174,7 +194,10 @@ final class MetalImageRenderer: Sendable {
         let height = cgImage.height
         guard width > 0, height > 0 else { return nil }
 
-        let isDeepColor = !forceStandardColorDepth && cgImage.bitsPerComponent > 8
+        // An HDR decode keeps its highlights, brought within the display's
+        // headroom; the memory-safety guard's 8-bit texture can't hold them.
+        let hdr = forceStandardColorDepth ? nil : HDRStills.toneMapped(cgImage)
+        let isDeepColor = hdr != nil || (!forceStandardColorDepth && cgImage.bitsPerComponent > 8)
         let pixelFormat: MTLPixelFormat = isDeepColor ? .rgba16Float : .bgra8Unorm
 
         // Create a writable staging texture for CIContext to render into.
@@ -194,7 +217,7 @@ final class MetalImageRenderer: Sendable {
 
         // CIImage origin is bottom-left; Metal textures expect top-left.
         // Flip vertically so the rendered image isn't upside down.
-        let ciImage = CIImage(cgImage: cgImage)
+        let ciImage = (hdr?.image ?? CIImage(cgImage: cgImage))
             .transformed(by: CGAffineTransform(scaleX: 1, y: -1))
             .transformed(by: CGAffineTransform(translationX: 0, y: CGFloat(height)))
 
@@ -261,6 +284,7 @@ final class MetalImageRenderer: Sendable {
 
         cmdBuf.commit()
         cmdBuf.waitUntilCompleted()
+        if let hdr { Self.setHeadroom(hdr.headroom, of: stagingTexture) }
         return stagingTexture
     }
 
@@ -294,7 +318,7 @@ final class MetalImageRenderer: Sendable {
                 let fullOptions: [CFString: Any] = [
                     kCGImageSourceShouldCacheImmediately: true
                 ]
-                cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, fullOptions as CFDictionary)
+                cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, HDRStills.decodeOptions(fullOptions) as CFDictionary)
             } else {
                 let nativeMaxDim: CGFloat
                 if let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any],
@@ -309,7 +333,7 @@ final class MetalImageRenderer: Sendable {
                     let fullOptions: [CFString: Any] = [
                         kCGImageSourceShouldCacheImmediately: true
                     ]
-                    cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, fullOptions as CFDictionary)
+                    cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, HDRStills.decodeOptions(fullOptions) as CFDictionary)
                 } else {
                     let thumbOptions: [CFString: Any] = [
                         kCGImageSourceThumbnailMaxPixelSize: maxDimension,
@@ -317,7 +341,7 @@ final class MetalImageRenderer: Sendable {
                         kCGImageSourceCreateThumbnailWithTransform: true,
                         kCGImageSourceShouldCacheImmediately: true
                     ]
-                    cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, thumbOptions as CFDictionary)
+                    cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, HDRStills.decodeOptions(thumbOptions) as CFDictionary)
                     orientationAlreadyApplied = true
                 }
             }
@@ -362,7 +386,7 @@ final class MetalImageRenderer: Sendable {
                 let fullOptions: [CFString: Any] = [
                     kCGImageSourceShouldCacheImmediately: true
                 ]
-                cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, fullOptions as CFDictionary)
+                cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, HDRStills.decodeOptions(fullOptions) as CFDictionary)
             } else {
                 // Read native dimensions and bit depth to decide decode path.
                 // Use NSNumber bridge for robust conversion — CGImageSource properties
@@ -373,7 +397,9 @@ final class MetalImageRenderer: Sendable {
                    let pw = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
                    let ph = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue {
                     nativeMaxDim = max(CGFloat(pw), CGFloat(ph))
-                    let depth = (properties[kCGImagePropertyDepth] as? NSNumber)?.intValue ?? 8
+                    var depth = (properties[kCGImagePropertyDepth] as? NSNumber)?.intValue ?? 8
+                    // An 8-bit HEIC with a gain map decodes to a deep HDR bitmap.
+                    if HDRStills.hasGainMap(imageSource) { depth = max(depth, 16) }
                     predictedBytes = Self.predictedDecodeBytes(width: Int(pw), height: Int(ph), bitsPerComponent: depth)
                 } else {
                     nativeMaxDim = 0
@@ -393,7 +419,7 @@ final class MetalImageRenderer: Sendable {
                     let fullOptions: [CFString: Any] = [
                         kCGImageSourceShouldCacheImmediately: true
                     ]
-                    cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, fullOptions as CFDictionary)
+                    cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, HDRStills.decodeOptions(fullOptions) as CFDictionary)
                 } else {
                     // Downsampled decode via thumbnail API. For oversized sources cap the
                     // thumbnail to maxDimension (or native if maxDimension is unset) so we
@@ -406,7 +432,7 @@ final class MetalImageRenderer: Sendable {
                         kCGImageSourceCreateThumbnailWithTransform: true,
                         kCGImageSourceShouldCacheImmediately: true
                     ]
-                    cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, thumbOptions as CFDictionary)
+                    cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, HDRStills.decodeOptions(thumbOptions) as CFDictionary)
                     orientationAlreadyApplied = true
                 }
             }

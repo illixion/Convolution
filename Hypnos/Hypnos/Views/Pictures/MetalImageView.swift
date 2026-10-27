@@ -77,6 +77,7 @@ private struct ImageUniforms {
     var contrast: Float
     var saturation: Float
     var sharpen: Float
+    var peak: Float
 }
 
 /// Matches `AAUniforms` in Shaders.metal — pass-2 (resolve + tonal) input.
@@ -85,6 +86,7 @@ private struct AAUniforms {
     var contrast: Float
     var saturation: Float
     var applyResolve: Float
+    var peak: Float
 }
 
 @MainActor
@@ -132,6 +134,7 @@ struct MetalImageView {
         // Pick framebuffer format based on texture depth
         let is16Bit = texture.map { Self.isDeepColor($0) } ?? false
         mtkView.colorPixelFormat = is16Bit ? .rgba16Float : .bgra8Unorm
+        Self.configureDynamicRange(mtkView, for: texture)
 
         // Store current state in coordinator
         coordinator.renderer = renderer
@@ -167,6 +170,7 @@ struct MetalImageView {
             if mtkView.colorPixelFormat != requiredFormat {
                 mtkView.colorPixelFormat = requiredFormat
             }
+            Self.configureDynamicRange(mtkView, for: texture)
             coordinator.texture = texture
             needsRedraw = true
         }
@@ -192,6 +196,18 @@ struct MetalImageView {
         } else if !coordinator.hasPresentedFrame {
             coordinator.ensureRedraw(in: mtkView)
         }
+    }
+
+    /// An HDR texture (`HDRStills`) needs an EDR drawable in its own extended
+    /// linear space, or everything above SDR white is clipped. SDR textures keep
+    /// the layer as it always was.
+    private static func configureDynamicRange(_ view: MTKView, for texture: MTLTexture?) {
+        #if !os(tvOS)
+        let hdr = texture.map { MetalImageRenderer.headroom(of: $0) > 1 } ?? false
+        guard let layer = view.layer as? CAMetalLayer, layer.wantsExtendedDynamicRangeContent != hdr else { return }
+        layer.wantsExtendedDynamicRangeContent = hdr
+        layer.colorspace = hdr ? CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3) : nil
+        #endif
     }
 
     /// Check if a texture uses a deep color (>8-bit) pixel format.
@@ -354,6 +370,7 @@ struct MetalImageView {
             }
 
             let is16 = view.colorPixelFormat == .rgba16Float
+            let peak = is16 ? MetalImageRenderer.headroom(of: texture) : 1
             let useRCAS = sharpen > 0.001
             let drawableW = drawable.texture.width
             let drawableH = drawable.texture.height
@@ -387,7 +404,7 @@ struct MetalImageView {
                         let rcasPipeline = is16 ? renderer.rcasPipelineState16 : renderer.rcasPipelineState
                         pass1Encoder.setRenderPipelineState(rcasPipeline)
                         pass1Encoder.setFragmentTexture(texture, index: 0)
-                        var rcasU = ImageUniforms(brightness: 0, contrast: 1, saturation: 1, sharpen: sharpen)
+                        var rcasU = ImageUniforms(brightness: 0, contrast: 1, saturation: 1, sharpen: sharpen, peak: peak)
                         pass1Encoder.setFragmentBytes(&rcasU, length: MemoryLayout<ImageUniforms>.size, index: 0)
                         pass1Encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
                         pass1Encoder.endEncoding()
@@ -414,7 +431,8 @@ struct MetalImageView {
                 brightness: brightness,
                 contrast: contrast,
                 saturation: saturation,
-                applyResolve: didSupersample ? 1.0 : 0.0
+                applyResolve: didSupersample ? 1.0 : 0.0,
+                peak: peak
             )
             pass2Encoder.setFragmentBytes(&aaU, length: MemoryLayout<AAUniforms>.size, index: 0)
             pass2Encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)

@@ -901,6 +901,7 @@ struct PhotoDisplayView: View {
                 isFlipped: windowModel.isImageFlipped,
                 opacity: adjustments.opacity,
                 fadeDuration: appModel.effectiveReduceMotion ? 0 : 0.25,
+                headroom: windowModel.aiDepthHeadroom,
                 onReady: { ready in
                     guard windowModel.imageURL == expectedURL else { return }
                     windowModel.aiDepthPresentationReady = ready
