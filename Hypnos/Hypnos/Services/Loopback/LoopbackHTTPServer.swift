@@ -21,6 +21,12 @@
  Network permission, and the plain-HTTP fetch is covered by
  `NSAllowsLocalNetworking` (Info.plist), which permits loopback.
 
+ A listener the system tore down while the app was suspended still reports
+ `.ready` (device, 2026-10-27: every URL refused, `-1004`, after the headset
+ slept), so the port is checked with a real connection before a URL is
+ handed out and when the app becomes active, and the listener is rebound on
+ the same port when nothing answers.
+
  The port is chosen once per launch. A restored window's loopback URL is
  dead after a relaunch; callers keep the URL they came from (the original
  file, YouTube's video id) and resolve again.
@@ -31,6 +37,12 @@ import Foundation
 import Network
 import os
 import Synchronization
+
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 final class LoopbackHTTPServer: Sendable {
     static let shared = LoopbackHTTPServer()
@@ -95,21 +107,83 @@ final class LoopbackHTTPServer: Sendable {
 
     // MARK: - Listening
 
+    /// One start or recovery at a time: two listeners can't share a port.
+    private static let bringingUp = Mutex<Task<UInt16?, Never>?>(nil)
+
+    init() {
+        #if canImport(UIKit)
+        let activated = UIApplication.didBecomeActiveNotification
+        #elseif canImport(AppKit)
+        let activated = NSApplication.didBecomeActiveNotification
+        #endif
+        NotificationCenter.default.addObserver(forName: activated, object: nil, queue: nil) { [weak self] _ in
+            guard let self, self.state.withLock({ $0.port }) != nil else { return }
+            Task { _ = await self.startIfNeeded() }
+        }
+    }
+
+    /// The port of a listener that answers, starting or rebinding it first
+    /// if need be.
     private func startIfNeeded() async -> UInt16? {
-        if let port = state.withLock({ $0.port }) { return port }
+        let task = Self.bringingUp.withLock { current -> Task<UInt16?, Never> in
+            if let current { return current }
+            let task = Task { await self.bringUp() }
+            current = task
+            return task
+        }
+        return await task.value
+    }
+
+    private func bringUp() async -> UInt16? {
+        defer { Self.bringingUp.withLock { $0 = nil } }
+        if let port = state.withLock({ $0.port }) {
+            if await isAccepting(port: port) { return port }
+            AppLogger.remux.error("Loopback server not answering; rebinding on its port")
+            state.withLock { state in
+                state.listener?.cancel()
+                state.listener = nil
+            }
+            if let (listener, _) = await listen(on: NWEndpoint.Port(rawValue: port) ?? .any) {
+                state.withLock { $0.listener = listener }
+                return port
+            }
+            AppLogger.remux.error("Loopback server could not rebind; choosing a new port")
+            state.withLock { $0.port = nil }
+        }
         guard let (listener, port) = await listen(on: .any) else {
             AppLogger.remux.error("Loopback server failed to start")
             return nil
         }
-        // A concurrent first caller may have won; keep its listener.
-        let kept = state.withLock { state -> UInt16 in
-            if let existing = state.port { return existing }
+        state.withLock { state in
             state.listener = listener
             state.port = port
-            return port
         }
-        if kept != port { listener.cancel() }
-        return kept
+        return port
+    }
+
+    /// Whether a connection to `port` is accepted: `.ready` on a listener
+    /// whose socket the system took away says nothing.
+    private func isAccepting(port: UInt16) async -> Bool {
+        guard let endpointPort = NWEndpoint.Port(rawValue: port) else { return false }
+        let connection = NWConnection(host: "127.0.0.1", port: endpointPort, using: .tcp)
+        defer { connection.cancel() }
+        return await withCheckedContinuation { continuation in
+            let resumed = OSAllocatedUnfairLock(initialState: false)
+            let finish: @Sendable (Bool) -> Void = { value in
+                if resumed.withLock({ done in defer { done = true }; return !done }) {
+                    continuation.resume(returning: value)
+                }
+            }
+            connection.stateUpdateHandler = { newState in
+                switch newState {
+                case .ready: finish(true)
+                case .failed, .waiting, .cancelled: finish(false)
+                default: break
+                }
+            }
+            connection.start(queue: queue)
+            queue.asyncAfter(deadline: .now() + 2) { finish(false) }
+        }
     }
 
     private func listen(on port: NWEndpoint.Port) async -> (NWListener, UInt16)? {
