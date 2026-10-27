@@ -23,11 +23,14 @@ typealias NativePlayerPlatformView = NSView
 typealias NativePlayerPlatformView = UIView
 #endif
 
+/// Both match their Shaders.metal twins, `peak` included. A missing `peak`
+/// reads as 0 and the shaders clamp every pixel to it: a black picture.
 private struct VideoRCASUniforms {
     var brightness: Float
     var contrast: Float
     var saturation: Float
     var sharpen: Float
+    var peak: Float = 1
 }
 
 private struct VideoAAUniforms {
@@ -35,6 +38,7 @@ private struct VideoAAUniforms {
     var contrast: Float
     var saturation: Float
     var applyResolve: Float
+    var peak: Float = 1
 }
 
 /// What the decoded frames are, read off the first one's attachments. The
