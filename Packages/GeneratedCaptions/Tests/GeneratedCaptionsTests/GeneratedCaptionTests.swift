@@ -27,6 +27,22 @@ struct GeneratedCaptionBufferTests {
 /// CAPTION_TWO_SPEAKERS; CAPTION_HLS_FIXTURE is an optional local HLS fixture.
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["CAPTION_INTEGRATION"] == "1"))
 struct GeneratedCaptionIntegrationTests {
+    @Test(.timeLimit(.minutes(2))) @MainActor func failedSourceReleasesSessionAndCanRetry() async throws {
+        let captions = RAVEGeneratedCaptions()
+        captions.bindExternal(position: { 0 }, duration: { 60 }, speed: { 1 }, playing: { true },
+                              source: { _ in throw URLError(.cannotDecodeContentData) })
+        for _ in 0..<2 {
+            captions.start()
+            let deadline = Date.now.addingTimeInterval(30)
+            while captions.error == nil, Date.now < deadline {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            #expect(captions.error != nil)
+            #expect(!captions.enabled)
+            #expect(!captions.isBuffering)
+        }
+        captions.stop()
+    }
     @MainActor private static func installedSpeakerModel() async throws -> URL {
         let store = RAVESpeakerModel.shared
         if !store.isInstalled { store.download() }

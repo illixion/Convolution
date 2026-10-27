@@ -232,7 +232,7 @@ final class SubtitleController {
     }
     func selectGenerated() {
         guard canGenerate else { return }
-        if selected == Self.generatedTrack {
+        if selected == Self.generatedTrack, generated.enabled {
             select(nil)
             return
         }

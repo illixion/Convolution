@@ -142,6 +142,14 @@ public final class RAVEGeneratedCaptions {
                 var lastWall = Date.now
                 var holdingSince: Date?
                 while !Task.isCancelled, generation == token, isCurrent() {
+                    // A file reader is tied to one track. Follow an audio
+                    // selection made while captions are already running.
+                    let currentAudioTrackID = item?.tracks.first(where: {
+                        $0.isEnabled && $0.assetTrack?.mediaType == .audio
+                    })?.assetTrack?.trackID
+                    if externalSource == nil, currentAudioTrackID != selectedAudioTrackID {
+                        start(); return
+                    }
                     let now = position()
                     let elapsed = Date.now.timeIntervalSince(lastWall)
                     // Compare elapsed media time, not a fixed threshold: fast
@@ -179,9 +187,12 @@ public final class RAVEGeneratedCaptions {
             catch is CaptionSequenceRestart { if generation == token { start() } }
             catch {
                 guard generation == token else { return }
-                self.error = error.localizedDescription
+                let message = error.localizedDescription
+                // Release the reader, model lease, forward-buffer override and
+                // playback hold on every failure, not only when switched off.
+                stop()
+                self.error = message
                 status = "AI captions failed"
-                setBuffering(false)
             }
         }
     }
