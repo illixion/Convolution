@@ -224,6 +224,7 @@ class SlideshowEngine {
             } else {
                 clearDepth()
             }
+            refreshDepthWarmIntent()
             pushDisplaySettings()
             // A video already on screen converts (or drops back to flat)
             // immediately, matching how the image layer swaps renderers.
@@ -467,8 +468,18 @@ class SlideshowEngine {
         sharedEngine.start()
     }
 
+    /// AI 3D stills use the pre-process model, any 3D mode's videos the
+    /// real-time one; a slideshow in 3D keeps what it will use warm.
+    private func refreshDepthWarmIntent() {
+        var roles: Set<DepthModelRole> = []
+        if isSlideshow3DActive { roles.insert(AI3DWarmup.videoRole) }
+        if isSlideshowAIDepthActive { roles.insert(AI3DWarmup.stillRole) }
+        AI3DWarmup.shared.setIntent(self, roles: state == .stopped ? [] : roles)
+    }
+
     func stop() {
         state = .stopped
+        AI3DWarmup.shared.clearIntent(self)
         if let sharedEngine {
             RAVESlideshowLocalSyncCoordinator.shared.unregister(sharedEngine)
             sharedEngine.stop()

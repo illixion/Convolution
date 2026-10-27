@@ -450,6 +450,7 @@ class PhotoWindowModel {
         // mode. Not recorded per image (the default speaks for every image).
         if appModel.defaultImageViewingMode == .aiDepth {
             guard !isDioramaMode else { return }
+            refreshAIDepthWarmIntent()
             Task { @MainActor [weak self] in
                 await self?.setAIDepthMode(true, trackChange: false)
             }
@@ -1396,6 +1397,7 @@ class PhotoWindowModel {
     /// Ensures GPU textures and image data are freed promptly rather than
     /// waiting for ARC/deinit which may be delayed by SwiftUI state retention.
     func cleanup() {
+        AI3DWarmup.shared.clearIntent(self)
         PhotoStereoDebugEndpoints.windows.remove(self)
         // Cancel all tasks
         scenePhaseIdleTask?.cancel()

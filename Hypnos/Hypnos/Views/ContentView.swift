@@ -39,6 +39,13 @@ struct ContentView: View {
             }
         }
         .animation(.smooth(duration: 0.25), value: windowModel.selectedTab)
+        // Keep the depth model warm where AI 3D opens by default. Hopping
+        // between tabs only changes the declared roles; the warmer's dwell and
+        // grace times decide whether anything loads or unloads.
+        .onChange(of: AI3DWarmup.roles(forTab: windowModel.selectedTab, appModel: appModel), initial: true) { _, roles in
+            AI3DWarmup.shared.setIntent(windowModel, roles: roles)
+        }
+        .onDisappear { AI3DWarmup.shared.clearIntent(windowModel) }
         .animation(.smooth(duration: 0.35), value: showWelcome)
         // Filters has nothing to filter by in a file-tree library, and Albums
         // has nothing to browse in one with no folder browser, so each hides

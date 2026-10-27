@@ -694,6 +694,7 @@ final class VideoWindowModel {
 
     /// Call from onDisappear.
     func cleanup() {
+        AI3DWarmup.shared.clearIntent(self)
         nextEpisodeTask?.cancel()
         audioTracksTask?.cancel()
         if popOutWindowValue != nil {
@@ -1462,6 +1463,9 @@ final class VideoWindowModel {
     /// overridden by an old cache), else real-time inference; with no depth
     /// model installed it stays 2D silently — never forces the setup sheet.
     private func autoEngagePseudo3DIfPreferred() {
+        // Between videos (next episode, gallery switch) the player drops its
+        // model; this window keeps the next one warm while AI 3D is the default.
+        AI3DWarmup.shared.setIntent(self, roles: appModel.defaultRealtimePseudo3D && pseudo3DAvailable ? [AI3DWarmup.videoRole] : [])
         guard appModel.defaultRealtimePseudo3D, !holdsBigScreen,
               !pseudo3DEnabled, !shouldUse3DMode,
               // WebKit-decoded sources qualify too — enablePseudo3D swaps them

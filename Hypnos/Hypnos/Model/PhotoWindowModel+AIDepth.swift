@@ -31,7 +31,16 @@ extension PhotoWindowModel {
 
     /// Set AI 3D explicitly. Turning it on leaves the RealityKit 3D modes,
     /// Diorama and background removal first.
+    /// Keeps the depth model warm while this window is in AI 3D, or will be
+    /// for the next picture (the default viewing mode), so prev/next stays
+    /// fast even when no main window is on a tab that asks for it.
+    func refreshAIDepthWarmIntent() {
+        let wants = isAIDepthMode || appModel.defaultImageViewingMode == .aiDepth
+        AI3DWarmup.shared.setIntent(self, roles: wants ? [AI3DWarmup.stillRole] : [])
+    }
+
     func setAIDepthMode(_ on: Bool, trackChange: Bool = true) async {
+        defer { refreshAIDepthWarmIntent() }
         guard on else {
             exitAIDepthMode()
             if trackChange { await trackViewingMode(.mono) }
