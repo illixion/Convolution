@@ -523,6 +523,7 @@ struct RemoteViewerWindowView: View {
                         // warps.
                         Pseudo3DVideoPlayerView(
                             videoURL: url3D,
+                            spatialAudioSceneIdentifier: sceneDelegate?.spatialAudioSceneIdentifier,
                             isRoomActive: model.isRoomActive,
                             // RealityKit ignores SwiftUI's .brightness/.contrast/
                             // .saturation, so the slideshow's adjustments (incl.

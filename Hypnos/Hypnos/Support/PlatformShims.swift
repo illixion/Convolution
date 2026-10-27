@@ -456,11 +456,11 @@ extension AVPlayerItem {
     /// the wrong window. iOS plays through the device or headphones as-is.
     /// `nonisolated` like the RAVEMedia original: callers run off the main
     /// actor (`ChunkBufferManager`).
-    nonisolated func applySpatialAudioPolicy() {}
+    nonisolated func applySpatialAudioPolicy(sceneIdentifier: String? = nil) {}
 }
 
 extension AVPlayer {
-    nonisolated func applySpatialAudioPolicy(for asset: AVURLAsset) {}
+    nonisolated func applySpatialAudioPolicy(for asset: AVURLAsset, sceneIdentifier: String? = nil) {}
 }
 
 #endif

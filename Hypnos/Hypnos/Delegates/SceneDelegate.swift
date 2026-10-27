@@ -20,12 +20,14 @@ import SwiftUI
 #if os(macOS)
 @Observable class SceneDelegate: NSObject {
     weak var windowScene: PlatformWindowScene?
+    var spatialAudioSceneIdentifier: String? { nil }
 
     func onDisconnect(_ handler: @escaping @MainActor () -> Void) {}
 }
 #else
 @Observable class SceneDelegate: NSObject, UIWindowSceneDelegate {
     weak var windowScene: UIWindowScene?
+    var spatialAudioSceneIdentifier: String? { windowScene?.session.persistentIdentifier }
 
     @ObservationIgnored private var disconnectHandlers: [@MainActor () -> Void] = []
     @ObservationIgnored private var isDisconnected = false

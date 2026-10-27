@@ -21,6 +21,7 @@ import SwiftUI
 
 struct Pseudo3DVideoPlayerView: View {
     let videoURL: URL
+    var spatialAudioSceneIdentifier: String? = nil
     var isRoomActive: Bool = true
     /// When true (a menu/popover/sheet is open), recede the video plane within
     /// the RealityKit scene so it renders behind the presented chrome.
@@ -114,8 +115,10 @@ struct Pseudo3DVideoPlayerView: View {
                 engine.observeVideoSize(content: content)
                 engine.load(url: videoURL, roomActive: isRoomActive, depthMode: depthMode, startAt: startAtSeconds, startPaused: startPaused,
                             httpHeaderFields: MediaAuthorization.shared.headerFields(for: videoURL),
-                            packedStereo: packedStereo)
+                            packedStereo: packedStereo,
+                            spatialAudioSceneIdentifier: spatialAudioSceneIdentifier)
             } update: { content in
+                engine.updateSpatialAudioSceneIdentifier(spatialAudioSceneIdentifier)
                 // Fit the video plane to the window (VideoPlayerComponent's screen
                 // defaults to ~2× the window otherwise).
                 let bounds = content.convert(geometry.frame(in: .local), from: .local, to: .scene)
@@ -367,6 +370,7 @@ private struct AnimatableSceneOpacity: ViewModifier, Animatable {
 /// call sites compile unchanged.
 struct Pseudo3DVideoPlayerView: View {
     let videoURL: URL
+    var spatialAudioSceneIdentifier: String? = nil
     var isRoomActive: Bool = true
     var chromeOpen: Bool = false
     var chromeTakesInput: Bool = false

@@ -798,8 +798,20 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
                 UIAction(title: "Off", state: selected == nil ? .on : .off) { _ in subtitles.select(nil) },
             ]
             if subtitles.canGenerate {
-                items.append(UIAction(title: subtitles.generated.isBuffering ? "AI Captions (Buffering…)" : "AI Captions",
+                let status = subtitles.generated.status
+                let title = subtitles.generated.isBuffering ? "AI Captions (Buffering…)"
+                    : status.isEmpty ? "AI Captions" : "AI Captions (\(status))"
+                items.append(UIAction(title: title,
                     state: subtitles.generated.enabled ? .on : .off) { _ in subtitles.selectGenerated() })
+            }
+            let speakerModel = RAVESpeakerModel.shared
+            if let progress = speakerModel.progress {
+                items.append(UIAction(title: "Downloading Speaker Labels… \(Int(progress * 100))%", attributes: .disabled) { _ in })
+                items.append(UIAction(title: "Cancel Speaker Model Download") { _ in speakerModel.cancel() })
+            } else if !speakerModel.isInstalled {
+                items.append(UIAction(title: "Download Speaker Labels (97 MB)", image: UIImage(systemName: "person.2")) { _ in
+                    speakerModel.download()
+                })
             }
             for track in subtitles.tracks {
                 items.append(UIAction(title: subtitles.menuTitle(of: track),

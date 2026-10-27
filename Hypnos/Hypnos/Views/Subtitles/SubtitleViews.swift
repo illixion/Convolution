@@ -14,6 +14,7 @@ import SwiftUI
 
 struct SubtitleMenu: View {
     let controller: SubtitleController
+    @State private var speakerModel = RAVESpeakerModel.shared
     /// The menu opened or closed, for a caller that has to move a stereo
     /// picture out of its way (the same signal the video ornament's menus use).
     var onOpenChanged: (Bool) -> Void = { _ in }
@@ -25,11 +26,39 @@ struct SubtitleMenu: View {
             Button { close(); controller.select(nil) } label: { item("Off", isSelected: controller.selected == nil) }
             if controller.canGenerate {
                 Button { close(); controller.selectGenerated() } label: {
-                    item(controller.generated.enabled && !controller.generated.status.isEmpty ? controller.generated.status : "AI Captions", isSelected: controller.generated.enabled)
+                    item("AI Captions", isSelected: controller.generated.enabled)
+                }
+                if controller.generated.enabled {
+                    if controller.generated.status != "AI captions" {
+                        HStack(spacing: 8) {
+                            if !controller.generated.isBuffering { ProgressView().controlSize(.small) }
+                            Text(controller.generated.status.isEmpty ? "Preparing AI captions…" : controller.generated.status)
+                                .font(.caption)
+                        }
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("captions.progress.status")
+                    }
+                    if controller.generated.isBuffering {
+                        ProgressView(value: controller.generated.lookaheadProgress)
+                            .accessibilityLabel("AI caption audio analyzed ahead")
+                        Text(String(format: "%.1f seconds analyzed ahead", controller.generated.analysisBufferedSeconds))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
             }
             if let error = controller.generated.error {
                 Text(error).font(.caption)
+            }
+            if let progress = speakerModel.progress {
+                ProgressView(value: progress) { Text("Downloading Speaker Labels…") }
+                Button("Cancel Download") { speakerModel.cancel() }
+            } else if !speakerModel.isInstalled {
+                Button { speakerModel.download() } label: {
+                    item("Download Speaker Labels (97 MB)", isSelected: false)
+                }
+            }
+            if let error = speakerModel.error {
+                Text(error).font(.caption).foregroundStyle(.red)
             }
             ForEach(controller.tracks) { track in
                 Button { close(); controller.select(track) } label: {

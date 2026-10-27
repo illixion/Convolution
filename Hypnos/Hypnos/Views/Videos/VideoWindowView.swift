@@ -205,6 +205,7 @@ struct VideoWindowView: View {
                         let liveLayout = windowModel.liveStereoLayout
                         Pseudo3DVideoPlayerView(
                             videoURL: windowModel.authenticatedStreamURL,
+                            spatialAudioSceneIdentifier: sceneDelegate?.spatialAudioSceneIdentifier,
                             isRoomActive: windowModel.isInActiveRoom,
                             // Recede the video (in-scene) while a menu/popover is
                             // open so it doesn't occlude the presented chrome.
@@ -257,6 +258,7 @@ struct VideoWindowView: View {
                         case .nativeMetal:
                             NativeMetalVideoPlayerView(
                                 videoURL: windowModel.authenticatedStreamURL,
+                                spatialAudioSceneIdentifier: sceneDelegate?.spatialAudioSceneIdentifier,
                                 isRoomActive: windowModel.isInActiveRoom,
                                 onVideoSizeKnown: { size in
                                     lockWindowToVideoAspectRatio(videoSize: size)

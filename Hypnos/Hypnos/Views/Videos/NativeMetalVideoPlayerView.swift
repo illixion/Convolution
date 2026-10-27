@@ -170,6 +170,7 @@ extension NativeMetalVideoPlayerView: UIViewRepresentable {
 @MainActor
 struct NativeMetalVideoPlayerView {
     let videoURL: URL
+    var spatialAudioSceneIdentifier: String? = nil
     var isRoomActive: Bool = true
     var onVideoSizeKnown: ((CGSize) -> Void)? = nil
     var visualAdjustments: VisualAdjustments = VisualAdjustments()
@@ -215,6 +216,7 @@ struct NativeMetalVideoPlayerView {
     }
 
     func update(coordinator: Coordinator) {
+        coordinator.spatialAudioSceneIdentifier = spatialAudioSceneIdentifier
         coordinator.visualAdjustments = visualAdjustments
         coordinator.onVideoSizeKnown = onVideoSizeKnown
         coordinator.onPlaybackError = onPlaybackError
@@ -324,6 +326,15 @@ struct NativeMetalVideoPlayerView {
         /// Playback speed, the default rate every `play()` starts at.
         var speed: Float = 1
         var loops = true
+        var spatialAudioSceneIdentifier: String? {
+            didSet {
+                guard oldValue != spatialAudioSceneIdentifier,
+                      let player, let item = player.currentItem,
+                      let asset = item.asset as? AVURLAsset else { return }
+                item.applySpatialAudioPolicy(sceneIdentifier: spatialAudioSceneIdentifier)
+                player.applySpatialAudioPolicy(for: asset, sceneIdentifier: spatialAudioSceneIdentifier)
+            }
+        }
 
         private var player: AVPlayer?
         private var playerItem: AVPlayerItem? {
@@ -392,7 +403,7 @@ struct NativeMetalVideoPlayerView {
 
             let asset = MediaAuthorization.shared.asset(for: url)
             let item = AVPlayerItem(asset: asset)
-            item.applySpatialAudioPolicy()
+            item.applySpatialAudioPolicy(sceneIdentifier: spatialAudioSceneIdentifier)
             let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
                 kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
                 kCVPixelBufferMetalCompatibilityKey as String: true
@@ -400,7 +411,7 @@ struct NativeMetalVideoPlayerView {
             item.add(output)
 
             let player = AVPlayer(playerItem: item)
-            player.applySpatialAudioPolicy(for: asset)
+            player.applySpatialAudioPolicy(for: asset, sceneIdentifier: spatialAudioSceneIdentifier)
             player.isMuted = startMuted
             player.volume = startVolume
             player.defaultRate = speed

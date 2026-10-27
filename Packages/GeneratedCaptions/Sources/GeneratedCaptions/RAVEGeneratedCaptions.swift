@@ -33,6 +33,12 @@ public final class RAVEGeneratedCaptions {
     public private(set) var status = ""
     public private(set) var error: String?
     public private(set) var isBuffering = false
+    /// Decoded audio available ahead of the current playhead.
+    public private(set) var audioBufferedSeconds = 0.0
+    /// Audio the recognizer (and optional diarizer) has finished analyzing.
+    public private(set) var analysisBufferedSeconds = 0.0
+    /// Readiness relative to the 2.5-second normal resume target.
+    public private(set) var lookaheadProgress = 0.0
     public private(set) var enabled = false
     public var onChange: (() -> Void)?
     /// Host preserves user play/pause intent while applying this hold.
@@ -83,8 +89,11 @@ public final class RAVEGeneratedCaptions {
         let speed: () -> Double = externalSpeed ?? { [weak player] in Double(player?.defaultRate ?? 1) }
         let playing: () -> Bool = externalPlaying ?? { [weak player] in (player?.rate ?? 0) > 0 }
         let isCurrent: () -> Bool = { [weak player] in externalSource != nil || (player != nil && player?.currentItem === item) }
-        let locale = Locale(identifier: UserDefaults.standard.string(forKey: "captions.locale") ?? "en-US")
-        let useSpeakers = UserDefaults.standard.bool(forKey: "captions.speakers") && RAVESpeakerModel.shared.isInstalled
+        let localeIdentifier = UserDefaults.standard.string(forKey: "captions.locale")
+            ?? Locale.preferredLanguages.first ?? Locale.current.identifier
+        let locale = Locale(identifier: localeIdentifier)
+        let speakerPreference = UserDefaults.standard.object(forKey: "captions.speakers") as? Bool ?? true
+        let useSpeakers = speakerPreference && RAVESpeakerModel.shared.isInstalled
         let model = useSpeakers ? RAVESpeakerModel.shared.modelURL : nil
         stop()
         enabled = true
@@ -168,6 +177,9 @@ public final class RAVEGeneratedCaptions {
                     if ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical {
                         policy.resumeSeconds = 4
                     }
+                    audioBufferedSeconds = max(0, state.audioThrough - now)
+                    analysisBufferedSeconds = max(0, state.readyThrough - now)
+                    lookaheadProgress = min(1, analysisBufferedSeconds / max(0.25, policy.resumeSeconds * max(0.25, speed())))
                     let needsHold = policy.needsHold(playhead: now, readyThrough: state.readyThrough,
                         duration: duration(), rate: speed(), alreadyHolding: isBuffering, finished: state.finished)
                     if needsHold {
@@ -175,7 +187,9 @@ public final class RAVEGeneratedCaptions {
                         // Unsupported/protected streams and failed analysis must
                         // never leave playback held indefinitely.
                         if Date.now.timeIntervalSince(holdingSince!) > 12 {
-                            throw CaptionFailure("AI captions could not prepare audio ahead of playback. Try another stream or turn AI captions off.")
+                            throw CaptionFailure(audioBufferedSeconds < 0.25
+                                ? "This stream isn't providing decoded audio to AI captions. Try another stream or use its built-in subtitles."
+                                : "Speech recognition couldn't analyze this audio quickly enough to stay ahead. Try another stream or turn AI captions off.")
                         }
                     } else { holdingSince = nil }
                     setBuffering(needsHold)
@@ -217,6 +231,7 @@ public final class RAVEGeneratedCaptions {
         bufferingItem = nil
         originalForwardBufferDuration = nil
         captions = []; status = ""; error = nil
+        audioBufferedSeconds = 0; analysisBufferedSeconds = 0; lookaheadProgress = 0
         setBuffering(false)
         onChange?()
     }
@@ -228,8 +243,11 @@ public final class RAVEGeneratedCaptions {
             holdWatchdog = Task { [weak self] in
                 do { try await Task.sleep(for: .seconds(12)) } catch { return }
                 guard let self, self.isBuffering else { return }
+                let message = self.audioBufferedSeconds < 0.25
+                    ? "This stream isn't providing decoded audio to AI captions. Try another stream or use its built-in subtitles."
+                    : "Speech recognition couldn't analyze this audio quickly enough to stay ahead. Try another stream or turn AI captions off."
                 self.stop()
-                self.error = "AI captions could not prepare audio ahead of playback. Try another stream or turn AI captions off."
+                self.error = message
                 self.status = "AI captions failed"
             }
         }
@@ -257,6 +275,7 @@ actor CaptionWorker {
     struct State: Sendable {
         var captions: [RAVEGeneratedCaption]
         var readyThrough: Double
+        var audioThrough: Double
         var finished: Bool
     }
     private let transcriber: SpeechTranscriber
@@ -445,7 +464,8 @@ actor CaptionWorker {
                 }
             }
         }
-        return State(captions: snapshot(near: playhead), readyThrough: min(analyzedThrough, speakerThrough), finished: ended)
+        return State(captions: snapshot(near: playhead), readyThrough: min(analyzedThrough, speakerThrough),
+                     audioThrough: fedThrough, finished: ended)
     }
     private func updateSpeakers(_ update: DiarizerTimelineUpdate, origin: Double) {
         let boundary = origin + Double(update.chunkResult.startFrame) * 0.08

@@ -49,6 +49,7 @@ private let previewMenuSpacing: CGFloat = 24
 
 struct VideoQuickLookView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(SceneDelegate.self) private var sceneDelegate: SceneDelegate?
 
     let video: GalleryVideo
     /// Source cell frame in the gallery coordinate space; drives the
@@ -273,6 +274,7 @@ struct VideoQuickLookView: View {
         if pseudo3DEnabled {
             Pseudo3DVideoPlayerView(
                 videoURL: previewURL,
+                spatialAudioSceneIdentifier: sceneDelegate?.spatialAudioSceneIdentifier,
                 onVideoSizeKnown: updateAspect,
                 settings: appModel.globalPseudo3DSettings,
                 depthMode: .realtime,
@@ -314,6 +316,7 @@ struct VideoQuickLookView: View {
         Group {
             NativeMetalVideoPlayerView(
                 videoURL: previewURL,
+                spatialAudioSceneIdentifier: sceneDelegate?.spatialAudioSceneIdentifier,
                 onVideoSizeKnown: updateAspect,
                 playbackModel: playbackModel,
                 startMuted: isMuted,
