@@ -273,8 +273,9 @@ class PhotoWindowModel {
     /// A debug test pattern is on screen in place of the photo (`photoHDRTest`); reloads leave it alone.
     var showsDebugPattern = false
     /// AI HDR: an SDR photo gets a generated gain map (`GainMapHDR`), flat
-    /// and in AI 3D. Per window, starting from the last window's choice.
-    var aiHDREnabled = UserDefaults.standard.bool(forKey: GainMapHDR.enabledKey)
+    /// and in AI 3D. Per image (`restoreAIHDRPreference`), starting from the
+    /// Settings default.
+    var aiHDREnabled = PlatformCapabilities.supportsAIHDR && UserDefaults.standard.bool(forKey: GainMapHDR.enabledKey)
     /// Set while an AI HDR toggle reloads the picture.
     var isProcessingAIHDR = false
     var aiDepthPresentationReady = false
@@ -798,6 +799,7 @@ class PhotoWindowModel {
             // let createImagePresentationComponent claim it — nothing to
             // generate. Deposits only exist for the moment around a pop-out, so
             // this cannot override the general "images open in 2D" policy.
+            await self.restoreAIHDRPreference()
             if Spatial3DImageHandoff.shared.has(key: self.spatial3DHandoffLookupKey) {
                 AppLogger.photoWindow.info(
                     "[Handoff] window opening with a waiting instance — activating 3D directly"

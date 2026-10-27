@@ -38,6 +38,7 @@ actor ImageEnhancementTracker {
     private let spatial3DResolutionOverrideKey = "imageSpatial3DResolutionOverride"
     private let windowSizeKey = "imageWindowSize"
     private let adjustmentsKey = "imageVisualAdjustments"
+    private let aiHDRKey = "imageAIHDR"
     /// Converted images, keyed by URL with the item's *identity* as the value.
     ///
     /// One record, two readings. `wasConverted(url:)` asks the key — the URL is
@@ -54,6 +55,9 @@ actor ImageEnhancementTracker {
     private var spatial3DResolutionOverrideByURL: [String: Int]
     private var windowSizeByURL: [String: [Double]]
     private var adjustmentsByURL: [String: Data]
+    /// AI HDR chosen for an image against the Settings default; images not
+    /// listed follow the default.
+    private var aiHDRByURL: [String: Bool]
 
     private init() {
         if let dict = UserDefaults.standard.dictionary(forKey: convertedIdentityKey) as? [String: String] {
@@ -108,6 +112,8 @@ actor ImageEnhancementTracker {
         } else {
             adjustmentsByURL = [:]
         }
+
+        aiHDRByURL = UserDefaults.standard.dictionary(forKey: aiHDRKey) as? [String: Bool] ?? [:]
     }
 
     /// Mark an image as having been converted to spatial 3D.
@@ -146,6 +152,7 @@ actor ImageEnhancementTracker {
         spatial3DResolutionOverrideByURL.removeAll()
         windowSizeByURL.removeAll()
         adjustmentsByURL.removeAll()
+        aiHDRByURL.removeAll()
         save()
     }
 
@@ -162,20 +169,21 @@ actor ImageEnhancementTracker {
         UserDefaults.standard.set(spatial3DResolutionOverrideByURL, forKey: spatial3DResolutionOverrideKey)
         UserDefaults.standard.set(windowSizeByURL, forKey: windowSizeKey)
         UserDefaults.standard.set(adjustmentsByURL, forKey: adjustmentsKey)
+        UserDefaults.standard.set(aiHDRByURL, forKey: aiHDRKey)
     }
 
     // MARK: - Backup Export / Import
 
     /// Export all tracking data for backup
-    func exportData() -> (convertedURLs: [String], lastViewingModes: [String: String], flippedURLs: [String], resolutionOverrides: [String: Int], spatial3DResolutionOverrides: [String: Int], windowSizes: [String: [Double]], adjustments: [String: Data]) {
+    func exportData() -> (convertedURLs: [String], lastViewingModes: [String: String], flippedURLs: [String], resolutionOverrides: [String: Int], spatial3DResolutionOverrides: [String: Int], windowSizes: [String: [Double]], adjustments: [String: Data], aiHDR: [String: Bool]) {
         // Exported as bare URLs so a backup stays readable by versions that
         // predate identities. A restore then behaves like the migration above:
         // identity falls back to the URL.
-        return (Array(convertedIdentityByURL.keys), lastViewingModeByURL, Array(flippedByURL), resolutionOverrideByURL, spatial3DResolutionOverrideByURL, windowSizeByURL, adjustmentsByURL)
+        return (Array(convertedIdentityByURL.keys), lastViewingModeByURL, Array(flippedByURL), resolutionOverrideByURL, spatial3DResolutionOverrideByURL, windowSizeByURL, adjustmentsByURL, aiHDRByURL)
     }
 
     /// Import tracking data from backup, replacing current data
-    func importData(convertedURLs: [String], lastViewingModes: [String: String], flippedURLs: [String]? = nil, resolutionOverrides: [String: Int]? = nil, spatial3DResolutionOverrides: [String: Int]? = nil, windowSizes: [String: [Double]]? = nil, adjustments: [String: Data]? = nil) {
+    func importData(convertedURLs: [String], lastViewingModes: [String: String], flippedURLs: [String]? = nil, resolutionOverrides: [String: Int]? = nil, spatial3DResolutionOverrides: [String: Int]? = nil, windowSizes: [String: [Double]]? = nil, adjustments: [String: Data]? = nil, aiHDR: [String: Bool]? = nil) {
         convertedIdentityByURL = Dictionary(uniqueKeysWithValues: convertedURLs.map { ($0, $0) })
         lastViewingModeByURL = lastViewingModes
         if let flippedURLs {
@@ -192,6 +200,9 @@ actor ImageEnhancementTracker {
         }
         if let adjustments {
             adjustmentsByURL = adjustments
+        }
+        if let aiHDR {
+            aiHDRByURL = aiHDR
         }
         save()
     }
@@ -290,5 +301,23 @@ actor ImageEnhancementTracker {
     func adjustments(url: URL) -> VisualAdjustments? {
         guard let data = adjustmentsByURL[MediaIdentity.persistentKey(for: url)] else { return nil }
         return try? JSONDecoder().decode(VisualAdjustments.self, from: data)
+    }
+
+    // MARK: - AI HDR
+
+    /// Record AI HDR for an image. A choice that matches the default is
+    /// forgotten, so the image follows the default again.
+    func setAIHDR(url: URL, enabled: Bool, default defaultEnabled: Bool) {
+        let urlString = MediaIdentity.persistentKey(for: url)
+        if enabled == defaultEnabled {
+            aiHDRByURL.removeValue(forKey: urlString)
+        } else {
+            aiHDRByURL[urlString] = enabled
+        }
+        save()
+    }
+
+    func aiHDR(url: URL) -> Bool? {
+        aiHDRByURL[MediaIdentity.persistentKey(for: url)]
     }
 }

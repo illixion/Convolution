@@ -14,8 +14,12 @@
  `contentHeadroom`, which `HDRStills` tone maps to the display like any HDR
  photo, flat and in AI 3D.
 
- Opt-in per window from Adjustments ("AI HDR"); the last choice is the
- default for the next window (`enabledKey`).
+ Per photo from Adjustments ("AI HDR"), remembered by
+ `ImageEnhancementTracker`; photos without a choice of their own follow
+ Settings → Photos → "AI HDR" (`enabledKey`), and while that is on the model
+ is loaded at launch (`prewarm`). Never on RealityKit 3D: its
+ `ImagePresentationComponent` takes only an image source and has no material,
+ shader or dynamic-range hook (visionOS 27 SDK, checked 2026-10-28).
  */
 
 import CoreImage
@@ -92,6 +96,16 @@ final class GainMapHDR: @unchecked Sendable {
         }
         guard gain.headroom >= Self.minimumHeadroom, let image = apply(gain, to: sdr) else { return nil }
         return Result(image: image, headroom: gain.headroom, inferenceMilliseconds: milliseconds)
+    }
+
+    /// Load the model off the caller's thread, so the first photo pays only
+    /// for inference (device: 1.4 s cold vs 0.63 s warm).
+    func prewarm() {
+        DispatchQueue.global(qos: .utility).async { [self] in
+            lock.lock()
+            defer { lock.unlock() }
+            _ = loadedModel()
+        }
     }
 
     func clearCache() {

@@ -89,6 +89,13 @@ enum PlatformCapabilities {
     static let supportsWindowManagement = false
     #endif
 
+    /// AI HDR (`GainMapHDR`) needs an EDR layer, which tvOS doesn't have.
+    #if os(tvOS)
+    static let supportsAIHDR = false
+    #else
+    static let supportsAIHDR = true
+    #endif
+
     /// Marketing name of the device family, for copy that names the platform.
     @MainActor
     static var deviceFamilyName: String {

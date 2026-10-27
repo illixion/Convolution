@@ -1014,6 +1014,17 @@ class AppModel {
         }
     }
 
+    /// Whether a photo opens with AI HDR (`GainMapHDR`) when it has no choice
+    /// of its own. The model is loaded ahead of the first photo while this is on.
+    var aiHDRByDefault: Bool {
+        didSet {
+            if aiHDRByDefault != oldValue {
+                UserDefaults.standard.set(aiHDRByDefault, forKey: GainMapHDR.enabledKey)
+                if aiHDRByDefault { GainMapHDR.shared.prewarm() }
+            }
+        }
+    }
+
     /// When true, previously converted images auto-restore into spatial 3D mode.
     /// This only applies when rememberImageEnhancements is enabled.
     var autoRestoreSpatial3D: Bool {
@@ -1320,6 +1331,10 @@ class AppModel {
         Task.detached(priority: .utility) {
             DepthConversionManager.cleanupOrphanedDownloads()
         }
+        // Photos open with AI HDR: load its model before the first one does.
+        if PlatformCapabilities.supportsAIHDR, UserDefaults.standard.bool(forKey: GainMapHDR.enabledKey) {
+            GainMapHDR.shared.prewarm()
+        }
 
         // Load persisted settings or use defaults (use local vars to avoid self reference issues)
         let defaultServerURL = ""
@@ -1588,6 +1603,7 @@ class AppModel {
         self.autoRestoreSpatial3D = loadedAutoRestoreSpatial3D
         self.fullyImmersive3DMode = loadedFullyImmersive3DMode
         self.defaultImageViewingMode = loadedDefaultImageViewingMode
+        self.aiHDRByDefault = PlatformCapabilities.supportsAIHDR && UserDefaults.standard.bool(forKey: GainMapHDR.enabledKey)
         self.librarySource = loadedLibrarySource
         self.hasCompletedWelcome = loadedHasCompletedWelcome
         self.showDebugConsole = loadedShowDebugConsole
@@ -2386,6 +2402,7 @@ class AppModel {
             imageEnhancementResolutionOverrides: imageEnhancementData.resolutionOverrides,
             imageEnhancementSpatial3DResolutionOverrides: imageEnhancementData.spatial3DResolutionOverrides,
             imageEnhancementWindowSizes: imageEnhancementData.windowSizes,
+            imageEnhancementAIHDR: imageEnhancementData.aiHDR,
             globalVisualAdjustments: try? JSONEncoder().encode(globalVisualAdjustments),
             imageEnhancementAdjustments: imageEnhancementData.adjustments,
             thumbnailStyle: thumbnailStyle.rawValue,
@@ -2400,7 +2417,8 @@ class AppModel {
             videoAutoplayMuted: videoAutoplayMuted,
             useLossyTextureCompression: useLossyTextureCompression,
             globalPseudo3DSettings: try? JSONEncoder().encode(globalPseudo3DSettings),
-            cacheSizePreset: UserDefaults.standard.string(forKey: CacheBudget.presetKey)
+            cacheSizePreset: UserDefaults.standard.string(forKey: CacheBudget.presetKey),
+            aiHDRByDefault: aiHDRByDefault
         )
         return backup
     }
@@ -2439,6 +2457,7 @@ class AppModel {
         if let raw = backup.galleryGridStyle, let style = GalleryGridStyle(rawValue: raw) { galleryGridStyle = style }
         if let v = backup.reduceMotion { reduceMotion = v }
         if let raw = backup.defaultImageViewingMode, let mode = DefaultImageViewingMode(rawValue: raw) { defaultImageViewingMode = mode }
+        if let v = backup.aiHDRByDefault { aiHDRByDefault = v }
         if let v = backup.enableStashTranscoding { enableStashTranscoding = v }
         if let v = backup.realtimeDepthModelName { realtimeDepthModelName = v }
         if let v = backup.preprocessDepthModelName { preprocessDepthModelName = v }
@@ -2481,7 +2500,8 @@ class AppModel {
                 resolutionOverrides: backup.imageEnhancementResolutionOverrides,
                 spatial3DResolutionOverrides: backup.imageEnhancementSpatial3DResolutionOverrides,
                 windowSizes: backup.imageEnhancementWindowSizes,
-                adjustments: backup.imageEnhancementAdjustments
+                adjustments: backup.imageEnhancementAdjustments,
+                aiHDR: backup.imageEnhancementAIHDR
             )
         }
 

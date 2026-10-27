@@ -106,6 +106,7 @@ extension PhotoWindowModel {
             savedWindowSize = nil
         }
 
+        await restoreAIHDRPreference()
         await loadImageDataForDetail(url: newImage.fullSizeURL)
 
         if !isAnimatedImage && !useRealityKitDisplay {

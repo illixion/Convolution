@@ -80,6 +80,7 @@ struct SettingsBackup: Codable {
     var imageEnhancementResolutionOverrides: [String: Int]?
     var imageEnhancementSpatial3DResolutionOverrides: [String: Int]?
     var imageEnhancementWindowSizes: [String: [Double]]?
+    var imageEnhancementAIHDR: [String: Bool]?
 
     // Visual adjustments
     var globalVisualAdjustments: Data?
@@ -101,6 +102,7 @@ struct SettingsBackup: Codable {
     var useLossyTextureCompression: Bool?
     var globalPseudo3DSettings: Data?
     var cacheSizePreset: String?
+    var aiHDRByDefault: Bool?
 
     /// 2: credentials are no longer exported (see `stashAPIKey`). Version 1
     /// files may contain one and are still imported as before.

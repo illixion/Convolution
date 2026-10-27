@@ -127,6 +127,15 @@ struct PhotoSettingsPage: View {
                 }
             }
 
+            if PlatformCapabilities.supportsAIHDR {
+                Section {
+                    Toggle("AI HDR", isOn: $appModel.aiHDRByDefault)
+                } footer: {
+                    Text("Opens photos in HDR, brightening their highlights with a gain map made on this device. "
+                         + "Turn it on or off for a single photo in its Adjustments. Not shown in RealityKit 3D.")
+                }
+            }
+
             Section {
                 Toggle("Remember Image Enhancements", isOn: Binding(
                     get: { appModel.rememberImageEnhancements },
