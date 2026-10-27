@@ -199,40 +199,26 @@ struct MetalImageView {
     }
 
     /// An HDR texture (`HDRStills`) needs an EDR drawable in its own extended
-    /// linear space, or everything above SDR white is clipped. SDR textures keep
-    /// the layer as it always was.
+    /// linear space, or everything above SDR white is clipped. SDR textures get
+    /// the colour space MTKView itself picks for their pixel format (sRGB for
+    /// 8-bit, extended linear sRGB for half-float, read on the device
+    /// 2026-10-27).
     ///
-    /// MTKView picks the layer's colour space itself whenever its pixel format
-    /// changes (sRGB for 8-bit, extended linear sRGB for half-float, read on
-    /// the device 2026-10-27), so leaving HDR puts back the one it had chosen,
-    /// unless the format has changed since and it has chosen again. Setting
-    /// nil instead showed the SDR picture far too dark after AI HDR was off.
+    /// Set it explicitly every time: once a colour space has been set by hand,
+    /// MTKView no longer picks one when the pixel format changes. Leaving AI
+    /// HDR on an 8-bit photo (half-float HDR back to `bgra8Unorm`) kept the
+    /// extended linear space on an 8-bit drawable, so the picture's
+    /// sRGB-encoded values were shown as linear light: badly blown out. Nil
+    /// instead showed a half-float SDR picture far too dark.
     private static func configureDynamicRange(_ view: MTKView, for texture: MTLTexture?) {
         #if !os(tvOS)
         let hdr = texture.map { MetalImageRenderer.headroom(of: $0) > 1 } ?? false
-        guard let layer = view.layer as? CAMetalLayer, layer.wantsExtendedDynamicRangeContent != hdr else { return }
+        guard let layer = view.layer as? CAMetalLayer else { return }
         layer.wantsExtendedDynamicRangeContent = hdr
-        if hdr {
-            sdrColorSpaces.setObject(SDRColorSpace(space: layer.colorspace, format: view.colorPixelFormat), forKey: layer)
-            layer.colorspace = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)
-        } else if let saved = sdrColorSpaces.object(forKey: layer) {
-            sdrColorSpaces.removeObject(forKey: layer)
-            if saved.format == view.colorPixelFormat { layer.colorspace = saved.space }
-        }
+        layer.colorspace = CGColorSpace(name: hdr ? CGColorSpace.extendedLinearDisplayP3
+            : view.colorPixelFormat == .bgra8Unorm ? CGColorSpace.sRGB : CGColorSpace.extendedLinearSRGB)
         #endif
     }
-
-    private final class SDRColorSpace {
-        let space: CGColorSpace?
-        let format: MTLPixelFormat
-        init(space: CGColorSpace?, format: MTLPixelFormat) {
-            self.space = space
-            self.format = format
-        }
-    }
-
-    /// The colour space each layer had before HDR, keyed weakly by layer.
-    private static let sdrColorSpaces = NSMapTable<CAMetalLayer, SDRColorSpace>.weakToStrongObjects()
 
     /// Check if a texture uses a deep color (>8-bit) pixel format.
     private static func isDeepColor(_ texture: MTLTexture) -> Bool {

@@ -106,12 +106,22 @@ photo's own peak instead of 1.0. An SDR photo decodes as before.
   multiply-adds so it converts with constant weights). The model returns the linear
   multiplier per pixel; it is cached per photo URL and stretched over any decode, and the
   result is an extended linear P3 `CGImage` with `contentHeadroom` set, so the flat view and
-  AI 3D take step 1's path unchanged. Shared textures key it as `<url>#aihdr`. Per window,
-  defaulting to the last choice (`aiHDRPhotos`); skipped for HDR, transparent, animated,
-  auto-enhanced and background-removed pictures, and on tvOS (no EDR). **Device, 2026-10-27:**
+  AI 3D take step 1's path unchanged. Shared textures key it as `<url>#aihdr`. Per image
+  (`ImageEnhancementTracker`, only choices that differ from the default, when Remember Image
+  Enhancements is on), defaulting to Settings → Photos → AI HDR (`aiHDRPhotos`,
+  `AppModel.aiHDRByDefault`); while that is on the model loads at launch (`prewarm`). Skipped
+  for HDR, transparent, animated, auto-enhanced and background-removed pictures, on tvOS (no
+  EDR), and on RealityKit 3D: `ImagePresentationComponent` takes only an image source and has
+  no material, shader or dynamic-range hook (visionOS 27 SDK, checked 2026-10-28), so the
+  toggle isn't offered there. **Device, 2026-10-27:**
   1.4 s for the first photo (model load), 0.63 s warm; the iPhone 11 sunset came out at
   headroom 3.5 (5 % of pixels above SDR white on the Mac, the sun and its glow).
   `photoAIHDR` (window, enabled, clearCache) toggles it; `photoStereoState` reports `aiHDR`.
+- **`MetalImageView` sets the layer's colour space on every texture change** (EDR: extended
+  linear P3; SDR: sRGB for `bgra8Unorm`, extended linear sRGB for half-float, MTKView's own
+  picks). Once set by hand, MTKView stops choosing one when the pixel format changes, so
+  restoring "what it had" left an 8-bit photo leaving AI HDR on an extended linear layer:
+  blown out (device, 2026-10-28).
 - **Screenshots from the headset are SDR** (8-bit, sRGB transfer): they can compare relative
   brightness but cannot measure HDR.
 - Debug server: `photoHDR` (enabled, headroom, midGamma) and `photoHDRTest` (`dots`,
