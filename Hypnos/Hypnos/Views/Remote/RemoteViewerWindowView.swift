@@ -23,6 +23,7 @@ struct RemoteViewerWindowView: View {
     @OpenWindowProxy private var openWindow
     @DismissWindowProxy private var dismissWindow
 
+    @State private var stereoReadyImage: ObjectIdentifier?
     @State private var viewerModel: RemoteViewerModel?
     @State private var windowSize: CGSize = .zero
     @State private var currentTime = Date()
@@ -444,7 +445,7 @@ struct RemoteViewerWindowView: View {
                 // input layer in front hands taps to the window's tap
                 // gesture: the mesh's RealityView would swallow them.
                 if model.isSlideshowAIDepthActive, let cgImage = image.cgImage, let depth = model.currentDepth {
-                    RAVEAIDepthPhotoView(
+                    RAVEStereoPhotoView(
                         image: cgImage,
                         depth: depth,
                         contentID: ObjectIdentifier(image),
@@ -453,8 +454,12 @@ struct RemoteViewerWindowView: View {
                             contrast: model.effectiveContrast,
                             saturation: model.effectiveSaturation
                         ),
-                        opacity: model.isTransitioning || model.showAdjustmentsPopover || model.isAnyOrnamentMenuOpen ? 0 : 1,
-                        fadeDuration: model.isTransitioning && !appModel.effectiveReduceMotion ? 0.6 : 0.25
+                        opacity: model.isTransitioning ? 0 : 1,
+                        fadeDuration: appModel.effectiveReduceMotion ? 0 : (model.isTransitioning ? 0.6 : 0.25),
+                        onReady: { ready in
+                            if ready { stereoReadyImage = ObjectIdentifier(image) }
+                            else if stereoReadyImage == ObjectIdentifier(image) { stereoReadyImage = nil }
+                        }
                     )
                     .aspectRatio(image.size, contentMode: .fit)
                     // A fresh view per picture, so its mesh fades in once
@@ -463,7 +468,7 @@ struct RemoteViewerWindowView: View {
 
                     Color.white.opacity(0.001)
                         .aspectRatio(image.size, contentMode: .fit)
-                        .offset(z: RAVEAIDepthPhotoView.inputTargetZ)
+                        .offset(z: RAVEStereoPhotoView.inputTargetZ)
                 }
                 #endif
             }
@@ -635,6 +640,14 @@ struct RemoteViewerWindowView: View {
     /// uses SwiftUI modifiers so its output matches.
     @ViewBuilder
     private func currentImageRenderer(model: RemoteViewerModel, image: UIImage) -> some View {
+        currentFlatImageRenderer(model: model, image: image)
+            .opacity(model.isSlideshowAIDepthActive && stereoReadyImage == ObjectIdentifier(image)
+                && !model.isTransitioning ? 0 : 1)
+            .animation(appModel.effectiveReduceMotion ? nil : .easeInOut(duration: 0.25), value: stereoReadyImage)
+    }
+
+    @ViewBuilder
+    private func currentFlatImageRenderer(model: RemoteViewerModel, image: UIImage) -> some View {
         if let texture = model.currentTexture {
             MetalImageView(
                 texture: texture,

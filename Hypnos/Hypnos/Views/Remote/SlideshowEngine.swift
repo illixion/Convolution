@@ -848,7 +848,7 @@ class SlideshowEngine {
     private func requestDepth(for id: String, image: UIImage) {
         guard depthMaps[id] == nil, depthTasks[id] == nil, let cgImage = image.cgImage else { return }
         depthTasks[id] = Task { @MainActor [weak self] in
-            let map = await RAVEStillDepthEstimator.shared.depth(for: cgImage)
+            let map = await RAVEStillDepthEstimator.shared.depth(for: cgImage, photoQuality: true)
             guard let self, !Task.isCancelled else { return }
             self.depthTasks.removeValue(forKey: id)
             guard let map, self.isSlideshowAIDepthActive else { return }

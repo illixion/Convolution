@@ -89,6 +89,11 @@ struct SharedPhotoWindowView: View {
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // visionOS hit-tests drawn pixels; a clear contentShape alone cannot
+        // restore hidden controls when the shared file has gone away.
+        .background(Color.white.opacity(0.001))
+        .contentShape(.rect)
+        .onTapGesture { windowModel.toggleUIVisibility() }
     }
 
     // MARK: - Save

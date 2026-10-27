@@ -44,14 +44,38 @@ The two thin wrapper views:
 - **Important:** When swapping `displayTexture` (e.g. toggling background removal or auto-enhance from in-memory cache), `imageAspectRatio` must always be updated from the new texture's dimensions. The Metal renderer stretches the texture to fill its view — aspect ratio is controlled externally by SwiftUI's `.aspectRatio()` modifier driven by `imageAspectRatio`.
 
 ## AI 3D
-The cheap 3D: the "3D Depth" thumbnail's mesh at window size (RAVEMedia's `RAVEAIDepthPhotoView`, built from `RAVEDepthMesh`; shared with RoboFrame's slideshows, design notes in RAVESDK's `CLAUDE.md`). One pass of the real-time depth model, then one RealityKit mesh, against RealityKit 3D's seconds-long generation and memory spike. visionOS only; needs a real-time depth model (the menu item says so when there is none).
-- **State** in `PhotoWindowModel+AIDepth.swift`: `isAIDepthMode`, `aiDepthSource` (the picture, oriented, ≤2048 px, held only while on), `aiDepthMap`. A sibling mode to Diorama and the RealityKit modes, mutually exclusive with them and with background removal (its cut-out is cropped to the subject, so depth no longer lines up). `switchToViewingMode` to a RealityKit mode and `setDioramaMode(true)` exit it. Recorded as `ViewingModePreference.aiDepth`; a default viewing mode too.
-- **Follows gallery navigation** (unlike Diorama): `switchToImage` re-engages it on the next picture without recording it as that picture's mode.
-- **Depth is shared with the thumbnail cache**, keyed by `image.thumbnailURL` (`ThumbnailDioramaCache.depth(for:source:)`, same estimator queue): a picture seen in the 3D Depth grid engages without inference, and one seen here shows in 3D in the grid.
-- **Laid over the flat picture**, which keeps sizing the window and shows until the mesh fades in. Same rect and corner radius; the mesh floats 1 pt off the plane. Depth is 8% of the short side (24–64 pt).
-- **Input:** the mesh's RealityView takes no input but would swallow it, so a near-invisible layer at `RAVEAIDepthPhotoView.inputTargetZ` carries the tap and swipe; the restore pill is lifted above it. Pinch zoom is off in AI 3D.
-- **Adjustments are baked into the texture** (CIColorControls with the same contrast remap as the RealityKit re-bake, plus auto-enhance), re-baked 350 ms after the sliders settle and swapped in place. Flip is a negative x scale on the entity. The mesh fades out while any menu or popover is open.
-- **Resizing** scales the entity uniformly (the aspect is fixed); only a ~30% change rebuilds it, for texture detail.
+Full-size AI 3D uses RAVEMedia's `RAVEStereoPhotoView` and Vergence's
+`StillStereoRenderer`: the video pipeline's per-eye warp, with nearest depth on
+the window and background behind it. `RAVEDepthMesh` remains the raised thumbnail
+presentation; the old `RAVEAIDepthPhotoView` is retained for other consumers.
+- `PhotoWindowModel+AIDepth` decodes through `MetalImageRenderer.downsampledImage`,
+  using the same `displayTargetDimension` as 2D, global max and per-photo override,
+  then `StillStereoResolution`'s stereo working-set bound. The resolution readout
+  reports the actual AI source. Resizes debounce, resolution/model changes reload,
+  and memory-pressure downscale releases the presentation and restores it later.
+- Photos infer their own full-precision depth via the pre-process model role
+  (real-time fallback); they never borrow a thumbnail-cache map. Still refinement
+  uses the shared edge-aware kernels without temporal state or luma snapping.
+- RAVEMedia serializes bakes across windows, uses half-float extended-P3 colour
+  through adjustment/warp, and presents a tagged 10-bit PQ stereo frame through
+  `VideoPlayerComponent`. The usual flat image keeps sizing the window, remains
+  until stereo is ready, and reappears for failures and transitions. Stereo
+  stays on while ornaments and popovers are shown: the old relief-mesh fade
+  workaround is unnecessary for depth that stays behind the window.
+- `photoStereo` on the debug server reports dimensions/limits/readiness and can
+  toggle AI 3D, a resolution override, or `separated` for the experimental
+  antialiased disconnected renderer. The latter defaults off pending headset A/B.
+- Pinch zoom remains off in AI 3D. The front input layer owns taps/swipes; normal
+  photo sizing still goes through `WindowResizeCoalescer`.
+
+Device checks confirmed natural recession and correct size. The shared video
+window recess hid the photo behind its window; `RAVEVideoPlaneView.windowSurface`
+now places it on the surface on every resize. Do not use the component's square
+placeholder mesh as a readiness gate: it remained square while the photo was
+visibly rendering. Further checks cover resize/ornament stability, colour,
+transparency, transitions and thin structures. JXL decoder internals
+can exceed the rendition budget; measure `_memory` on device. Do not infer a
+Vision Pro memory ceiling or comfort result from Mac harness measurements.
 
 ## Spatial 3D Images
 Uses RealityKit's `ImagePresentationComponent` for 2D→3D conversion. States tracked via `Spatial3DImageState` enum: notGenerated → generating → generated. `ImagePresentationComponent` is a black-box component — it manages its own geometry and materials internally, so there's no direct access to its mesh or rendering pipeline.

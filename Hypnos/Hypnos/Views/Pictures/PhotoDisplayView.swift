@@ -80,6 +80,15 @@ struct PhotoDisplayView: View {
             && !windowModel.isAIDepthMode
     }
 
+    /// Depth of the auto-restore pill: in front of the diorama foreground, and
+    /// of AI 3D's input target (visionOS only; `offset(z:)` is a no-op elsewhere).
+    private var autoRestorePillDepth: CGFloat {
+        #if os(visionOS)
+        if windowModel.isAIDepthMode { return RAVEStereoPhotoView.inputTargetZ + 4 }
+        #endif
+        return windowModel.isDioramaMode ? 30 : 0
+    }
+
     /// Pull-down-to-close, off while zoomed so a vertical drag pans instead.
     private var dismissDragAction: (() -> Void)? {
         zoom.isZoomed ? nil : { dismissViewer() }
@@ -186,6 +195,10 @@ struct PhotoDisplayView: View {
             #endif
 
             imageContent
+                .opacity(windowModel.isAIDepthMode && windowModel.aiDepthPresentationReady
+                    ? 0 : 1)
+                .animation(appModel.effectiveReduceMotion ? nil : .easeInOut(duration: 0.25),
+                           value: windowModel.aiDepthPresentationReady)
                 .scaleEffect(x: windowModel.isImageFlipped ? -1 : 1, y: 1)
                 .zoomPanTransform(zoom)
                 .zoomPanGestures($zoom, enabled: isZoomAvailable)
@@ -305,8 +318,8 @@ struct PhotoDisplayView: View {
                 .animation(.easeInOut(duration: 0.3), value: windowModel.showAutoRestorePrompt)
                 // Match the ornament's z-offset so the pill stays above the
                 // diorama foreground (which sits at appModel.dioramaDistance),
-                // and clear AI 3D's input target (RAVEAIDepthPhotoView.inputTargetZ).
-                .offset(z: windowModel.isAIDepthMode ? 70 : windowModel.isDioramaMode ? 30 : 0)
+                // and clear AI 3D's input target (RAVEStereoPhotoView.inputTargetZ).
+                .offset(z: autoRestorePillDepth)
             }
         }
         #if os(iOS)
@@ -357,6 +370,12 @@ struct PhotoDisplayView: View {
             }
         }
         #endif
+        .task(id: appModel.preprocessDepthModelName + "|" + appModel.realtimeDepthModelName) {
+            await windowModel.reloadAIDepthModelIfNeeded()
+        }
+        .task(id: windowModel.effectiveMaxResolution) {
+            if windowModel.isAIDepthMode { await windowModel.reloadAIDepthSourceIfNeeded() }
+        }
         .onChange(of: windowModel.isLoadingDetailImage) { wasLoading, isLoading in
             if wasLoading && !isLoading && !isSwipeTransitioning {
                 windowModel.isUIHidden = false
@@ -867,7 +886,8 @@ struct PhotoDisplayView: View {
            let source = windowModel.aiDepthSource,
            let depth = windowModel.aiDepthMap {
             let adjustments = windowModel.effectiveAdjustments
-            RAVEAIDepthPhotoView(
+            let expectedURL = windowModel.imageURL
+            RAVEStereoPhotoView(
                 image: source,
                 depth: depth,
                 contentID: windowModel.imageURL,
@@ -879,10 +899,16 @@ struct PhotoDisplayView: View {
                 ),
                 cornerRadius: appModel.photoCornerRadius,
                 isFlipped: windowModel.isImageFlipped,
-                opacity: windowModel.hasOpenPopover ? 0 : adjustments.opacity
+                opacity: adjustments.opacity,
+                fadeDuration: appModel.effectiveReduceMotion ? 0 : 0.25,
+                onReady: { ready in
+                    guard windowModel.imageURL == expectedURL else { return }
+                    windowModel.aiDepthPresentationReady = ready
+                }
             )
             .aspectRatio(windowModel.imageAspectRatio, contentMode: .fit)
             .offset(x: dragOffset)
+            .id(expectedURL)
 
             Color.white.opacity(0.001)
                 .aspectRatio(windowModel.imageAspectRatio, contentMode: .fit)
@@ -892,7 +918,7 @@ struct PhotoDisplayView: View {
                 }
                 .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissDragAction))
                 .offset(x: dragOffset)
-                .offset(z: RAVEAIDepthPhotoView.inputTargetZ)
+                .offset(z: RAVEStereoPhotoView.inputTargetZ)
         }
     }
     #endif
@@ -938,10 +964,9 @@ struct PhotoDisplayView: View {
         }
         .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.white.opacity(0.001))
         .contentShape(.rect)
-        .onTapGesture {
-            windowModel.toggleUIVisibility()
-        }
+        .onTapGesture { windowModel.toggleUIVisibility() }
         .onChange(of: windowModel.loadFailure) { _, failure in
             // A restored window sits behind the "Restoring Photo" diagnostic
             // until media reaches the presentation layer. A failed load never

@@ -475,6 +475,9 @@ extension PhotoWindowModel {
         resolutionOverride = resolution
         await trackResolutionOverride()
         guard !isAnimatedImage, !is3DMode else { return }
+        if isAIDepthMode {
+            await reloadAIDepthSourceIfNeeded()
+        }
 
         if backgroundRemovalState == .removed {
             // Re-downscale the background-removed image at the new resolution

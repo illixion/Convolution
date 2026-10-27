@@ -266,6 +266,8 @@ class PhotoWindowModel {
     /// The picture the AI 3D mesh is textured with: decoded oriented, at most
     /// 2048 px on its long edge. Held only while AI 3D is on.
     var aiDepthSource: CGImage? = nil
+    var aiDepthSourceDimension: Int = 0
+    var aiDepthPresentationReady = false
 
     /// The current image's depth map. Shared with the "3D Depth" thumbnail
     /// cache (keyed by the thumbnail URL), so a picture already seen in the
@@ -532,6 +534,7 @@ class PhotoWindowModel {
     var hadBackgroundRemoval: Bool = false
     var had3DMode: Bool = false
     var hadAutoEnhance: Bool = false
+    var hadAIDepthMode: Bool = false
 
     /// Max dimension used for idle-downscaled thumbnail display
     static let idleDownscaleDimension: CGFloat = 256
@@ -676,6 +679,7 @@ class PhotoWindowModel {
     /// The current display resolution in pixels (longest edge of the displayed image).
     /// Returns 0 when no display image is loaded (e.g., in 3D mode or loading).
     var currentDisplayResolution: Int {
+        if isAIDepthMode, let source = aiDepthSource { return max(source.width, source.height) }
         if let texture = displayTexture {
             return max(texture.width, texture.height)
         }
@@ -737,6 +741,7 @@ class PhotoWindowModel {
     func start() {
         guard !didStart else { return }
         didStart = true
+        PhotoStereoDebugEndpoints.windows.add(self)
         isInitialLoadInProgress = true
         // init set the loading flag through its stored backing, so arm the
         // watchdog now that the window is really starting to load.
@@ -1102,21 +1107,7 @@ class PhotoWindowModel {
         // During initial load, use max resolution directly — window size is unreliable
         // during visionOS scene restoration and the resize handler will adjust later.
         let effectiveRes = effectiveMaxResolution
-        let targetDimension: CGFloat
-        if effectiveRes > 0 {
-            let maxRes = CGFloat(effectiveRes)
-            if isInitialLoadInProgress {
-                targetDimension = min(maxRes, nativeMaxDim)
-            } else {
-                targetDimension = min(
-                    max(windowSize.width, windowSize.height) * Self.displayScaleFactor,
-                    maxRes,
-                    nativeMaxDim
-                )
-            }
-        } else {
-            targetDimension = nativeMaxDim
-        }
+        let targetDimension = displayTargetDimension(nativeMaxDimension: nativeMaxDim, windowSize: windowSize)
 
         // Skip if already loaded at a similar resolution (within 20%)
         if displayTexture != nil, currentDisplayMaxDimension > 0 {
@@ -1205,6 +1196,10 @@ class PhotoWindowModel {
     /// image in memory when the window size changes significantly.
     /// No-op when dynamic image resolution is disabled (already at full res).
     func handleWindowResize(_ newSize: CGSize) {
+        // Ornament/window reattachment can briefly report an empty layout.
+        // It isn't a request for a 1-pixel AI rendition (or a full 2D decode).
+        guard newSize.width.isFinite, newSize.height.isFinite,
+              newSize.width > 1, newSize.height > 1 else { return }
         // Update LRU timestamp but don't trigger idle-downscale restore.
         // SwiftUI fires geometry changes when content is cleared (e.g. during
         // memory-pressure downscale), which would cause an immediate re-restore.
@@ -1225,6 +1220,10 @@ class PhotoWindowModel {
                 await self.trackWindowSize(newSize)
             }
 
+            if self.isAIDepthMode {
+                await self.reloadAIDepthSourceIfNeeded()
+                return
+            }
             // Re-downsample display image if dynamic resolution is active
             guard self.effectiveMaxResolution > 0 else { return }
             guard !self.is3DMode, !self.isAnimatedImage else { return }
@@ -1283,6 +1282,15 @@ class PhotoWindowModel {
     }
 
     // MARK: - Shared Utilities
+
+    /// One resolution policy for flat, enhanced and AI stereo photos.
+    func displayTargetDimension(nativeMaxDimension: CGFloat, windowSize: CGSize? = nil) -> CGFloat {
+        guard effectiveMaxResolution > 0 else { return nativeMaxDimension }
+        let cap = min(CGFloat(effectiveMaxResolution), nativeMaxDimension)
+        if isInitialLoadInProgress { return cap }
+        let size = windowSize ?? lastWindowSize ?? appModel.mainWindowSize
+        return min(max(size.width, size.height) * Self.displayScaleFactor, cap)
+    }
 
     /// Calculate the target dimension for background-removed image downsampling.
     /// Mirrors the logic from loadDisplayImage / downscaleForDisplay.
@@ -1366,6 +1374,7 @@ class PhotoWindowModel {
     /// Ensures GPU textures and image data are freed promptly rather than
     /// waiting for ARC/deinit which may be delayed by SwiftUI state retention.
     func cleanup() {
+        PhotoStereoDebugEndpoints.windows.remove(self)
         // Cancel all tasks
         scenePhaseIdleTask?.cancel()
         scenePhaseIdleTask = nil

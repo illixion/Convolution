@@ -93,6 +93,7 @@ extension PhotoWindowModel {
         hadBackgroundRemoval = backgroundRemovalState == .removed
         had3DMode = is3DMode
         hadAutoEnhance = currentAdjustments.isAutoEnhanced
+        hadAIDepthMode = isAIDepthMode
 
         // If in 3D mode, release RealityKit textures (GPU memory)
         if is3DMode {
@@ -108,6 +109,9 @@ extension PhotoWindowModel {
             contentEntity.components.remove(ImagePresentationComponent.self)
             is3DMode = false
         }
+
+        // Stereo eyes and decoded AI source must yield to memory pressure too.
+        clearAIDepthState()
 
         // Clear background removal caches
         clearBackgroundRemovalState()
@@ -220,6 +224,8 @@ extension PhotoWindowModel {
             // Standard 2D image — just reload at correct resolution
             await loadDisplayImage(for: windowSize)
         }
+
+        if hadAIDepthMode { await setAIDepthMode(true, trackChange: false) }
 
         // Restore flip state
         if appModel.rememberImageEnhancements, !is3DMode {

@@ -1,20 +1,12 @@
 /*
  Hypnos - Photo Window Model: AI 3D
 
- AI 3D shows the photo as a mesh displaced by the real-time depth model's map
- (`RAVEAIDepthPhotoView`): one inference and one RealityKit mesh, the cheap
- alternative to "RealityKit 3D" (`ImagePresentationComponent`), which takes
- seconds and a large memory spike to generate.
-
- A sibling viewing mode to Diorama and the RealityKit 3D modes, engaged from
- the 3D menu and mutually exclusive with them and with background removal
- (whose cut-out is cropped to the subject, so the depth map no longer lines
- up). Unlike Diorama it follows the user across gallery navigation: it's
- cheap enough to keep on.
-
- The depth map is shared with the "3D Depth" thumbnail cache, keyed by the
- image's thumbnail URL, so a picture already seen in that grid style engages
- without running the model, and one viewed here appears in 3D in the grid.
+ AI 3D uses the shared stereo warp with the nearest content on the window
+ and the background behind it. Full-size photos infer their own precise depth,
+ guided by the selected pre-process model, independently of thumbnail caches.
+ Resolution follows the normal viewer policy plus a stereo working-set bound.
+ It remains mutually exclusive with RealityKit 3D, Diorama and background
+ removal, and follows gallery navigation.
  */
 
 import DebugTrace
@@ -70,10 +62,14 @@ extension PhotoWindowModel {
     /// Leave AI 3D without recording anything: the caller is switching to
     /// another mode, which records itself.
     func exitAIDepthMode() {
+        aiDepthTask?.cancel()
+        aiDepthTask = nil
+        isProcessingAIDepth = false
         guard isAIDepthMode || aiDepthSource != nil else { return }
         isAIDepthMode = false
-        // The depth map is small and stays for a quick return; the decoded
-        // picture is up to 16 MB of CPU memory and goes.
+        // Release decoded colour; a later engage infers with the active model.
+        aiDepthPresentationReady = false
+        aiDepthSourceDimension = 0
         aiDepthSource = nil
     }
 
@@ -88,30 +84,23 @@ extension PhotoWindowModel {
             return false
         }
         let url = imageURL
-        let depthKey = image.thumbnailURL
+        let target = aiDepthTargetDimension()
         let task = Task { @MainActor [weak self] () -> Bool in
             guard let self else { return false }
             self.isProcessingAIDepth = true
             defer { self.isProcessingAIDepth = false }
             let source = await Task.detached(priority: .userInitiated) {
-                Self.decodeAIDepthSource(data, maxPixelSize: 2048)
+                Self.decodeAIDepthSource(data, maxPixelSize: target)
             }.value
             guard !Task.isCancelled, self.imageURL == url, let source else { return false }
-            var map = self.aiDepthMap
-            if map == nil {
-                map = await ThumbnailDioramaCache.shared.cachedOrDiskDepth(for: depthKey)?.map
-            }
-            if map == nil {
-                let start = Date()
-                map = await ThumbnailDioramaCache.shared.depth(for: depthKey) { UIImage(cgImage: source) }?.map
-                if map != nil {
-                    AppLogger.photoWindow.info("AI 3D depth in \(Int(Date().timeIntervalSince(start) * 1000), privacy: .public) ms")
-                }
-            }
+            // Full-size photos never borrow depth inferred from a thumbnail.
+            let map = await RAVEStillDepthEstimator.shared.depth(for: source, photoQuality: true)
             guard !Task.isCancelled, self.imageURL == url, let map else {
                 if !Task.isCancelled { AppLogger.photoWindow.warning("AI 3D has no depth for this image") }
                 return false
             }
+            self.aiDepthSourceDimension = target
+            self.aiDepthPresentationReady = false
             self.aiDepthSource = source
             self.aiDepthMap = map
             return true
@@ -127,23 +116,57 @@ extension PhotoWindowModel {
     func clearAIDepthState() {
         aiDepthTask?.cancel()
         aiDepthTask = nil
+        aiDepthPresentationReady = false
+        aiDepthSourceDimension = 0
         aiDepthSource = nil
         aiDepthMap = nil
         isProcessingAIDepth = false
         isAIDepthMode = false
     }
 
+    /// Respect the normal viewer target first, then bound the stereo working set.
+    func aiDepthTargetDimension() -> Int {
+        var width = Int(nativeImageDimensions?.width ?? 8192)
+        var height = Int(nativeImageDimensions?.height ?? 8192)
+        if let data = currentImageData,
+           let src = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+           let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] {
+            width = (props[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue ?? width
+            height = (props[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue ?? height
+        }
+        let requested = displayTargetDimension(nativeMaxDimension: CGFloat(max(width, height)))
+        return StillStereoResolution.longSide(width: width, height: height, requested: Double(requested))
+    }
+
+    func reloadAIDepthModelIfNeeded() async {
+        guard isAIDepthMode, let source = aiDepthSource else { return }
+        let url = imageURL
+        let map = await RAVEStillDepthEstimator.shared.depth(for: source, photoQuality: true)
+        guard !Task.isCancelled, isAIDepthMode, imageURL == url, let map else { return }
+        aiDepthMap = map
+    }
+
+    /// The existing resize debounce and resolution controls both enter here.
+    /// Reuse the depth estimate: changing colour resolution doesn't change its UVs.
+    func reloadAIDepthSourceIfNeeded() async {
+        guard isAIDepthMode, let data = currentImageData else { return }
+        let target = aiDepthTargetDimension()
+        let ratio = Double(target) / Double(max(aiDepthSourceDimension, 1))
+        guard target < aiDepthSourceDimension || ratio >= 1.2 else { return }
+        let url = imageURL
+        let source = await Task.detached(priority: .userInitiated) {
+            Self.decodeAIDepthSource(data, maxPixelSize: target)
+        }.value
+        guard !Task.isCancelled, isAIDepthMode, imageURL == url,
+              aiDepthTargetDimension() == target, let source else { return }
+        aiDepthSourceDimension = target
+        aiDepthSource = source
+    }
+
     /// Oriented, downsampled decode. The thumbnail API applies the EXIF
     /// orientation (`CreateThumbnailWithTransform`), unlike a plain
     /// `CGImageSourceCreateImageAtIndex`.
     nonisolated static func decodeAIDepthSource(_ data: Data, maxPixelSize: Int) -> CGImage? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
-            kCGImageSourceShouldCacheImmediately: true,
-        ]
-        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        MetalImageRenderer.downsampledImage(from: data, maxDimension: CGFloat(maxPixelSize))?.cgImage
     }
 }
