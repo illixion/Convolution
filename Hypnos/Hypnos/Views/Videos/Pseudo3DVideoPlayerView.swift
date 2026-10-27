@@ -79,6 +79,8 @@ struct Pseudo3DVideoPlayerView: View {
     /// chrome's plane. ~10 points/cm; tune on device — 0 restores the old
     /// front-of-region placement.
     private static let videoPlaneZRecess: CGFloat = 90
+    /// How far (points) the loading card sits in front of the video plane.
+    private static let preparationCardLift: CGFloat = 8
 
     var body: some View {
         GeometryReader3D { geometry in
@@ -122,6 +124,18 @@ struct Pseudo3DVideoPlayerView: View {
             // the ornament/window-controls plane (front of the depth region
             // measured ~9cm proud of the chrome on-device).
             .frame(depth: 0, alignment: .front)
+            // Until the first 3D frame the plane draws nothing, so the window
+            // would be empty glass (and nothing at all once the chrome hid).
+            // On the plane's own zero-depth slab, so the recess below brings
+            // it back with the picture: hung on the outer view it sat mid-depth,
+            // well in front of the plane and the controls (device, 2026-10-27).
+            // Nudged just ahead of the plane so the two don't share a depth.
+            .overlay {
+                if let preparation = engine.preparation {
+                    Pseudo3DPreparationCard(preparation: preparation)
+                        .offset(z: Self.preparationCardLift)
+                }
+            }
             // Tapping the video toggles chrome. Targeted to the video entity's
             // tap-target collision (set up once the video size is known).
             .gesture(
@@ -132,13 +146,6 @@ struct Pseudo3DVideoPlayerView: View {
         }
         // Align the video plane with the chrome — see videoPlaneZRecess.
         .offset(z: -Self.videoPlaneZRecess)
-        // Until the first 3D frame the plane draws nothing, so the window
-        // would be empty glass (and nothing at all once the chrome hid).
-        .overlay {
-            if let preparation = engine.preparation {
-                Pseudo3DPreparationCard(preparation: preparation)
-            }
-        }
         .onChange(of: engine.preparation != nil, initial: true) { _, preparing in
             playbackModel?.setStereoPicturePreparing(preparing)
         }
