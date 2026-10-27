@@ -16,6 +16,12 @@ enum PlayerChromeAnimation {
     static let hide = Animation.easeIn(duration: 0.2)
     /// How long the hide plays before the ornament is taken down.
     static let hideDuration: Duration = .milliseconds(240)
+    /// How far (points, about a millimetre each) the title corner comes
+    /// forward over a stereo picture. Its ornament hangs on the glass and
+    /// overlaps the picture, whose plane sits ~12 mm in front of the glass,
+    /// so the plane covered it: the title showed only while an open menu
+    /// dimmed the picture (device, 2026-10-27).
+    static let stereoTitleLift: CGFloat = 30
 }
 
 /// Chrome shown or hidden: faded and nudged towards the window it hangs

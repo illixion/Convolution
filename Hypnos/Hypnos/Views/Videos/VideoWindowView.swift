@@ -551,6 +551,7 @@ struct VideoWindowView: View {
         ) { shown in
             titleButton.padding(20)
                 .modifier(PlayerChromeReveal(shown: shown, edge: .top))
+                .offset(z: windowModel.showsStereoPicture ? PlayerChromeAnimation.stereoTitleLift : 0)
         }
         #else
         .ornament(

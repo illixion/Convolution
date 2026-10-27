@@ -505,6 +505,7 @@ struct FilmPlayerView: View {
                               attachmentAnchor: .scene(.topLeading), contentAlignment: .topLeading) { shown in
             titleButton.padding(20)
                 .modifier(PlayerChromeReveal(shown: shown, edge: .top))
+                .offset(z: stereoSource != nil ? PlayerChromeAnimation.stereoTitleLift : 0)
         }
         .onAppear { revealChrome() }
         .onChange(of: player.isPlaying) { _, playing in
