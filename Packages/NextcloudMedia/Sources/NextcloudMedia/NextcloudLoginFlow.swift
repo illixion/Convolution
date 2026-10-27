@@ -33,6 +33,9 @@ public struct NextcloudLoginFlow: Sendable {
     public enum FlowError: Error, LocalizedError, Equatable {
         case invalidServerURL(String)
         case notApprovedYet
+        /// The first request got a 404: whatever answers at this address is not
+        /// a Nextcloud login flow (wrong host or subfolder, or a proxy page).
+        case flowNotFound(String)
         case expiredOrDenied
         case transport(String)
         case malformedResponse
@@ -41,6 +44,8 @@ public struct NextcloudLoginFlow: Sendable {
             switch self {
             case .invalidServerURL(let value): return "Not a valid server URL: \(value)"
             case .notApprovedYet: return "Waiting for approval in the browser."
+            case .flowNotFound(let server):
+                return "\(server) did not answer like a Nextcloud server (404 at /index.php/login/v2). Check the address, including any subfolder."
             case .expiredOrDenied: return "The login request expired or was denied."
             case .transport(let message): return "Network error: \(message)"
             case .malformedResponse: return "The server's login response could not be read."
@@ -96,7 +101,13 @@ public struct NextcloudLoginFlow: Sendable {
         request.httpMethod = "POST"
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
 
-        let data = try await send(request)
+        let data: Data
+        do {
+            data = try await send(request)
+        } catch FlowError.notApprovedYet {
+            // 404 means "not approved yet" only while polling; here it means no flow.
+            throw FlowError.flowNotFound(base.host ?? base.absoluteString)
+        }
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let loginText = root["login"] as? String,
               let loginURL = URL(string: loginText),
