@@ -14,6 +14,7 @@
 
 import RealityKit
 import RAVEMedia
+import RAVEUI
 import SwiftUI
 
 #if os(visionOS)
@@ -81,6 +82,10 @@ struct Pseudo3DVideoPlayerView: View {
     private static let videoPlaneZRecess: CGFloat = 90
     /// How far (points) the loading card sits in front of the video plane.
     private static let preparationCardLift: CGFloat = 8
+    /// How far (points) the pointer surface sits in front of the plane: the
+    /// picture never comes nearer than the plane (convergence keeps its
+    /// nearest content on it), so a few millimetres clear it.
+    private static let pointerSurfaceLift: CGFloat = 4
 
     var body: some View {
         GeometryReader3D { geometry in
@@ -130,6 +135,19 @@ struct Pseudo3DVideoPlayerView: View {
             // it back with the picture: hung on the outer view it sat mid-depth,
             // well in front of the plane and the controls (device, 2026-10-27).
             // Nudged just ahead of the plane so the two don't share a depth.
+            // The pointer clicks the plane's input target but draws no cursor
+            // on it; this invisible surface just in front gets both, and the
+            // tap. Off while a menu holds the gaze, like the plane's target
+            // (which comes back on its own after a while, see the engine).
+            .overlay {
+                if let onToggleUI {
+                    RAVEPointerSurface()
+                        .contentShape(.rect)
+                        .onTapGesture { onToggleUI() }
+                        .allowsHitTesting(!chromeOpen || chromeTakesInput)
+                        .offset(z: Self.pointerSurfaceLift)
+                }
+            }
             .overlay {
                 if let preparation = engine.preparation {
                     Pseudo3DPreparationCard(preparation: preparation)
