@@ -296,10 +296,13 @@ struct GalleryGridView: View {
     /// Every image at its own aspect ratio, packed into rows that fill the
     /// width. Geometry comes from metadata (reported dimensions, else a ratio
     /// learned earlier), so the sheet is laid out before any thumbnail loads
-    /// and skipped ranges of a fast flick are already the right size.
+    /// and skipped ranges of a fast flick are already the right size. Images
+    /// with neither are not placed at all until `MediaAspectResolver` has
+    /// measured them, so nothing starts square and jumps.
     private func justifiedGrid(width: CGFloat) -> some View {
         let images = appModel.galleryImages
         let rows = gridRows(images: images, width: width)
+        let placed = rows.last.map { $0.row.cells.last!.index + 1 } ?? 0
         return LazyVStack(alignment: .leading, spacing: gridSpacing) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { position, gridRow in
                 HStack(spacing: gridSpacing) {
@@ -319,13 +322,25 @@ struct GalleryGridView: View {
                 }
             }
 
-            if appModel.isLoadingGallery {
+            if appModel.isLoadingGallery || placed < images.count {
                 ProgressView()
                     .frame(maxWidth: .infinity)
                     .padding()
             }
         }
         .padding()
+        // Keyed on the loaded set, not on `revision`: the resolver's own
+        // publishes must not restart it mid-run.
+        .task(id: ResolveKey(count: images.count, first: images.first?.id)) {
+            let pending = MediaAspectResolver.unresolved(in: images)
+            guard !pending.isEmpty else { return }
+            await MediaAspectResolver.resolve(pending)
+        }
+    }
+
+    private struct ResolveKey: Equatable {
+        let count: Int
+        let first: UUID?
     }
 
     private func gridRows(images: [GalleryImage], width: CGFloat) -> [JustifiedGridRow] {
@@ -344,7 +359,19 @@ struct GalleryGridView: View {
                                          revision: MediaAspectStore.shared.revision)
         if rowsCache.key == key { return rowsCache.rows }
         let store = MediaAspectStore.shared
-        let aspects = images.map { $0.reportedAspectRatio ?? store.ratio(for: $0.identity) ?? 1 }
+        // Only the leading run of placeable images is laid out. An image whose
+        // ratio is still being measured ends the run: laying out the ones
+        // behind it would reorder the grid when it arrives.
+        var aspects: [CGFloat] = []
+        for image in images {
+            if let ratio = image.reportedAspectRatio ?? store.ratio(for: image.identity) {
+                aspects.append(ratio)
+            } else if store.isResolved(image.identity) {
+                aspects.append(1) // measuring failed; square beats blocking the rest
+            } else {
+                break
+            }
+        }
         let rows = JustifiedRowLayout.rows(aspects: aspects, width: available, targetHeight: target, spacing: gridSpacing)
             .map { JustifiedGridRow(id: images[$0.firstIndex].id, row: $0) }
         rowsCache.key = key

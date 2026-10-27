@@ -5,10 +5,12 @@
  dimensions (a Nextcloud library that was bulk-scanned rather than uploaded,
  local files), learned the first time their thumbnail loads.
 
- The justified gallery lays out from metadata alone. Without a stored ratio
- an item is laid out provisionally at 1:1 and its row reflows once when the
- thumbnail arrives; with one it is right from the first frame on every later
- launch, so each item reflows at most once per install.
+ The justified gallery lays out from metadata alone, and never guesses: an
+ item with no reported or stored ratio is held back from the grid until
+ `MediaAspectResolver` has loaded its thumbnail and recorded the true ratio,
+ so nothing is placed at a provisional 1:1 and nothing reflows when pixels
+ arrive. With a stored ratio an item is right from the first frame on every
+ later launch.
 
  Persisted as one small JSON file (identity -> ratio). It is re-derivable,
  so it lives in Application Support excluded from backup.
@@ -29,6 +31,9 @@ final class MediaAspectStore {
     private(set) var revision = 0
 
     @ObservationIgnored private var ratios: [String: Float] = [:]
+    /// Items whose thumbnail could not be measured this session. The grid
+    /// lays them out square rather than holding everything behind them back.
+    @ObservationIgnored private var unmeasurable: Set<String> = []
     @ObservationIgnored private var loaded = false
     @ObservationIgnored private var pendingRevision: Task<Void, Never>?
     @ObservationIgnored private var pendingSave: Task<Void, Never>?
@@ -44,26 +49,51 @@ final class MediaAspectStore {
         return ratios[identity].map { CGFloat($0) }
     }
 
+    /// Whether the grid can place this item: a ratio is known, or measuring it
+    /// already failed and it falls back to square.
+    func isResolved(_ identity: String) -> Bool {
+        loadIfNeeded()
+        return ratios[identity] != nil || unmeasurable.contains(identity)
+    }
+
     /// Records a ratio measured from a loaded thumbnail. Ignores a ratio that
     /// matches what is already known, so re-loading a thumbnail is free.
-    func record(ratio: CGFloat, for identity: String) {
+    /// With `notify` false the grid is not told, so a resolver can record a
+    /// whole batch and reveal it with one `publish()`.
+    func record(ratio: CGFloat, for identity: String, notify: Bool = true) {
         loadIfNeeded()
         guard ratio.isFinite, ratio > 0 else { return }
         let value = Float(ratio)
         if let existing = ratios[identity], abs(existing - value) / existing < 0.01 { return }
         ratios[identity] = value
+        unmeasurable.remove(identity)
 
-        pendingRevision?.cancel()
-        pendingRevision = Task { [weak self] in
-            try? await Task.sleep(for: Self.revisionDelay)
-            guard !Task.isCancelled else { return }
-            self?.revision += 1
+        if notify {
+            pendingRevision?.cancel()
+            pendingRevision = Task { [weak self] in
+                try? await Task.sleep(for: Self.revisionDelay)
+                guard !Task.isCancelled else { return }
+                self?.revision += 1
+            }
         }
         scheduleSave()
     }
 
+    /// Gives up measuring an item, so the grid places it square instead of
+    /// waiting on it. Not persisted: the next launch tries again.
+    func markUnmeasurable(_ identity: String) {
+        unmeasurable.insert(identity)
+    }
+
+    /// Tells the grid new ratios are in, now rather than after the debounce.
+    func publish() {
+        pendingRevision?.cancel()
+        revision += 1
+    }
+
     func clear() {
         ratios.removeAll()
+        unmeasurable.removeAll()
         loaded = true
         try? FileManager.default.removeItem(at: Self.fileURL)
         revision += 1
