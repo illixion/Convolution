@@ -1039,7 +1039,7 @@ struct FilmTransport: View {
             if player.audioEncoding != nil {
                 ObjectAudioQualityMenu(player: player, onOpenChanged: { menuChanged("Audio Quality", $0) })
             }
-            if !session.subtitles.tracks.isEmpty {
+            if !session.subtitles.tracks.isEmpty || session.subtitles.canGenerate {
                 SubtitleMenu(controller: session.subtitles, onOpenChanged: { menuChanged("Subtitles", $0) })
             }
             PlaybackSpeedMenu(speed: player.speed, onOpenChanged: { menuChanged("Speed", $0) }) { speed in

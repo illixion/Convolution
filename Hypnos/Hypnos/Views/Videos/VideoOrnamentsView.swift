@@ -222,7 +222,7 @@ struct VideoOrnamentsView: View {
 
     @ViewBuilder
     private var subtitleMenu: some View {
-        if !windowModel.subtitles.tracks.isEmpty {
+        if !windowModel.subtitles.tracks.isEmpty || windowModel.subtitles.canGenerate {
             SubtitleMenu(controller: windowModel.subtitles, onOpenChanged: { chromeMenu("Subtitles", opened: $0) })
         }
     }
