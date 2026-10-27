@@ -171,6 +171,10 @@ final class VideoWindowModel {
     /// never produces a frame is an empty, transparent window, and with the
     /// ornament auto-hidden there was nothing left to see or tap.
     private(set) var hasPresentedVideo = false
+    /// The stereo picture is loading its depth model or working out its first
+    /// frames, behind the player's loading card. The chrome stays up: with no
+    /// picture yet, a window whose chrome hid showed nothing at all.
+    private(set) var isPreparingStereoPicture = false
     /// Nothing has appeared `loadStallTimeout` after the player started.
     private(set) var isLoadStalled = false
     /// Every renderer has given up on this video. Shown in place of the video.
@@ -675,6 +679,17 @@ final class VideoWindowModel {
     private func revealChrome() {
         cancelAutoHideTimer()
         isUIHidden = false
+    }
+
+    /// From the stereo player, as its loading card comes and goes.
+    func setStereoPicturePreparing(_ preparing: Bool) {
+        guard preparing != isPreparingStereoPicture else { return }
+        isPreparingStereoPicture = preparing
+        if preparing {
+            revealChrome()
+        } else {
+            startAutoHideTimer()
+        }
     }
 
     /// Call from onDisappear.
@@ -1677,12 +1692,13 @@ final class VideoWindowModel {
         guard appModel.autoHideDelay > 0 else { return }
         guard !hasOpenPopover else { return }
 
-        // Hide only over a picture; `markVideoPresented` re-arms this.
-        guard hasPresentedVideo else { return }
+        // Hide only over a picture; `markVideoPresented` and
+        // `setStereoPicturePreparing` re-arm this.
+        guard hasPresentedVideo, !isPreparingStereoPicture else { return }
 
         autoHideTask = Task {
             try? await Task.sleep(for: .seconds(appModel.autoHideDelay))
-            if !Task.isCancelled, !self.hasOpenPopover, self.hasPresentedVideo {
+            if !Task.isCancelled, !self.hasOpenPopover, self.hasPresentedVideo, !self.isPreparingStereoPicture {
                 isUIHidden = true
                 scheduleWindowControlsHiding()
             }

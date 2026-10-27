@@ -132,6 +132,16 @@ struct Pseudo3DVideoPlayerView: View {
         }
         // Align the video plane with the chrome — see videoPlaneZRecess.
         .offset(z: -Self.videoPlaneZRecess)
+        // Until the first 3D frame the plane draws nothing, so the window
+        // would be empty glass (and nothing at all once the chrome hid).
+        .overlay {
+            if let preparation = engine.preparation {
+                Pseudo3DPreparationCard(preparation: preparation)
+            }
+        }
+        .onChange(of: engine.preparation != nil, initial: true) { _, preparing in
+            playbackModel?.setStereoPicturePreparing(preparing)
+        }
         .background {
             if let subtitles {
                 StereoSubtitleFeeder(controller: subtitles, filmTime: { [engine] in engine.currentTime },
@@ -208,6 +218,41 @@ struct Pseudo3DVideoPlayerView: View {
         }
         .onDisappear {
             engine.cleanup()
+            playbackModel?.setStereoPicturePreparing(false)
+        }
+    }
+}
+
+/// What the stereo player shows before its first 3D frame: which step it is
+/// on and how far along. Held back briefly, so a warm start (a model already
+/// loaded, a first frame in a tenth of a second) doesn't flash it.
+private struct Pseudo3DPreparationCard: View {
+    let preparation: Pseudo3DPreparation
+    @State private var isShown = false
+
+    private var title: String {
+        switch preparation {
+        case .loadingModel: "Loading AI 3D model"
+        case .preparingPicture: "Preparing 3D picture"
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Label(title, systemImage: "cube.transparent")
+                .font(.headline)
+            ProgressView(value: preparation.progress)
+                .progressViewStyle(.linear)
+                .frame(width: 260)
+                .animation(.easeOut(duration: 0.2), value: preparation.progress)
+        }
+        .padding(28)
+        .glassBackgroundEffect(in: RoundedRectangle(cornerRadius: 24))
+        .opacity(isShown ? 1 : 0)
+        .accessibilityElement(children: .combine)
+        .task {
+            try? await Task.sleep(for: .milliseconds(400))
+            withAnimation(.easeIn(duration: 0.2)) { isShown = true }
         }
     }
 }
