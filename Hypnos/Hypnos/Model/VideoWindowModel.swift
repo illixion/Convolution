@@ -1506,6 +1506,23 @@ final class VideoWindowModel {
 
     func togglePlayPause() {
         if isPaused {
+            if let since = pausedSince, Date().timeIntervalSince(since) >= Self.longPause, isRenewableJellyfinStream {
+                // Jellyfin ends the job of a stream paused this long; the
+                // player's next segment request starts one mid-file and the
+                // playlist clock, subtitles with it, drifts off the sound
+                // (device, 2026-10-27). A new play session starts the job
+                // exactly where the player asks.
+                pausedSince = nil
+                let before = video.streamURL
+                renewJellyfinStream(reason: "after a long pause") { [weak self] in
+                    // A renewed URL opens a new player that starts playing;
+                    // with nothing to renew, the paused one is resumed.
+                    if let self, self.video.streamURL == before { self.playCommand?() }
+                }
+                isPaused = false
+                stallMonitor.restartGrace(at: .now)
+                return
+            }
             playCommand?()
         } else {
             pauseCommand?()
@@ -1521,6 +1538,15 @@ final class VideoWindowModel {
         endScrub(at: currentTime + seconds)
     }
 
+    /// A seek the player has to ask the server for: back past what it keeps
+    /// behind the playhead, or ahead of what it has buffered. Only a Jellyfin
+    /// remux has a job to misplace.
+    private func seekLeavesPlayerBuffer(from: Double, to: Double) -> Bool {
+        guard isRenewableJellyfinStream else { return false }
+        if to < from { return from - to > 5 }
+        return to > max(bufferedEnd, from) - 1
+    }
+
     func beginScrub() {
         isScrubbing = true
         cancelAutoHideTimer()
@@ -1534,8 +1560,22 @@ final class VideoWindowModel {
         // The user chose a position; nothing may snap it back.
         carriedPosition = nil
         let clamped = max(0, duration > 0 ? min(time, duration) : time)
+        let renews = seekLeavesPlayerBuffer(from: currentTime, to: clamped)
         currentTime = clamped
-        seekCommand?(clamped)
+        if renews {
+            // Jellyfin ends the job it started at the playhead's last stop and
+            // cuts a new one mid-file for a segment it no longer has or hasn't
+            // made: its segments then sit up to a GOP off the playlist's
+            // clock, and the picture and subtitles drift from the sound for
+            // good (device, 2026-10-27: a long pause, then a skip ahead and
+            // two back). A new play session starts its job at the target.
+            let before = video.streamURL
+            renewJellyfinStream(reason: "before a seek outside what is buffered") { [weak self] in
+                if let self, self.video.streamURL == before { self.seekCommand?(clamped) }
+            }
+        } else {
+            seekCommand?(clamped)
+        }
         isScrubbing = false
         stallMonitor.restartGrace(at: .now)
         startAutoHideTimer()
@@ -1641,6 +1681,7 @@ final class VideoWindowModel {
         autoSkipYouTubeSegmentIfNeeded()
         #endif
         self.isPaused = paused
+        if !paused { pausedSince = nil } else if pausedSince == nil { pausedSince = Date() }
         self.isMuted = muted
         self.bufferedEnd = buffered
         noticeEndIfReached(currentTime: currentTime, duration: self.duration, paused: paused)
@@ -1778,6 +1819,10 @@ final class VideoWindowModel {
     /// at 1 holds the chrome and keeps a stereo picture dimmed for good
     /// (device, 2026-10-07).
     @ObservationIgnored private var backgroundedAt: Date?
+    /// When the player was last seen paused; a resume after `longPause`
+    /// renews a Jellyfin stream (`togglePlayPause`).
+    @ObservationIgnored private var pausedSince: Date?
+    private static let longPause: TimeInterval = 120
     /// Where a player opening the same video on a new URL starts, rather
     /// than playing from 0 and seeking: that asked Jellyfin for a job at the
     /// start, then one at the playhead, and the picture sat frozen with the
