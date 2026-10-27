@@ -1175,8 +1175,14 @@ final class VideoWindowModel {
             switchToTranscodedStream(reason: "fake-3D requires the AVFoundation renderer")
             return
         }
-        stereoscopicOverride = false
-        pseudo3DEnabled = true
+        // The stereo player opens the stream at the playhead; on a session
+        // whose job began elsewhere that restarts Jellyfin's remux mid-file
+        // and the player's clock, and the subtitles with it, runs seconds off
+        // the sound (device, 2026-10-27). A new session starts the job there.
+        renewJellyfinStream(reason: "before AI 3D") { [weak self] in
+            self?.stereoscopicOverride = false
+            self?.pseudo3DEnabled = true
+        }
     }
 
     /// A fake-3D engage deferred until the transcode's renderer resolves.
@@ -1797,19 +1803,26 @@ final class VideoWindowModel {
     /// decoder away, so the player reloads a segment) with its playlist clock
     /// misaligned. A new play session realigns it. See
     /// `JellyfinLibrary.renewedStreamURL`.
-    private func renewJellyfinStream(reason: String) {
+    ///
+    /// `then` runs once the new URL is in place, or at once when there is
+    /// nothing to renew, for a change that has to open the stream afresh.
+    private func renewJellyfinStream(reason: String, then: (() -> Void)? = nil) {
         guard isRenewableJellyfinStream,
               let itemId = LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity),
-              let library = LibraryService.current() else { return }
+              let library = LibraryService.current() else { then?(); return }
         let streamURL = video.streamURL
         Task { [weak self] in
-            guard let renewed = await library.renewedStreamURL(itemId: itemId, streamURL: streamURL) else { return }
+            guard let renewed = await library.renewedStreamURL(itemId: itemId, streamURL: streamURL) else {
+                if let self, self.video.streamURL == streamURL { then?() }
+                return
+            }
             guard let self, self.video.streamURL == streamURL else { return }
             AppLogger.videoWindow.info("Reopening the Jellyfin stream in a new play session \(reason, privacy: .public) at \(self.currentTime, format: .fixed(precision: 2))s")
             self.carryPositionToNextRenderer(reason: "new Jellyfin play session")
             self.streamSwitchStart = self.currentTime
             self.stallMonitor.restartGrace(at: .now)
             self.video.streamURL = renewed
+            then?()
         }
     }
 
