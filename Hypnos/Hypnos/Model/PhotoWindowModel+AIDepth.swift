@@ -86,12 +86,13 @@ extension PhotoWindowModel {
         }
         let url = imageURL
         let target = aiDepthTargetDimension()
+        let aiHDRKey = aiHDREnabled ? url.absoluteString : nil
         let task = Task { @MainActor [weak self] () -> Bool in
             guard let self else { return false }
             self.isProcessingAIDepth = true
             defer { self.isProcessingAIDepth = false }
             let decoded = await Task.detached(priority: .userInitiated) {
-                Self.decodeAIDepthSource(data, maxPixelSize: target)
+                Self.decodeAIDepthSource(data, maxPixelSize: target, aiHDRKey: aiHDRKey)
             }.value
             guard !Task.isCancelled, self.imageURL == url, let decoded else { return false }
             let source = decoded.image
@@ -158,8 +159,9 @@ extension PhotoWindowModel {
         let ratio = Double(target) / Double(max(aiDepthSourceDimension, 1))
         guard target < aiDepthSourceDimension || ratio >= 1.2 else { return }
         let url = imageURL
+        let aiHDRKey = aiHDREnabled ? url.absoluteString : nil
         let decoded = await Task.detached(priority: .userInitiated) {
-            Self.decodeAIDepthSource(data, maxPixelSize: target)
+            Self.decodeAIDepthSource(data, maxPixelSize: target, aiHDRKey: aiHDRKey)
         }.value
         guard !Task.isCancelled, isAIDepthMode, imageURL == url,
               aiDepthTargetDimension() == target, let decoded else { return }
@@ -170,10 +172,12 @@ extension PhotoWindowModel {
 
     /// Oriented, downsampled decode. An HDR photo comes back tone mapped to
     /// the display's headroom (`HDRStills`), with that headroom; SDR is 1.
-    nonisolated static func decodeAIDepthSource(_ data: Data, maxPixelSize: Int) -> (image: CGImage, headroom: Float)? {
-        guard let image = MetalImageRenderer.downsampledImage(from: data, maxDimension: CGFloat(maxPixelSize))?.cgImage else {
+    /// With `aiHDRKey` an SDR photo gets its generated gain map first.
+    nonisolated static func decodeAIDepthSource(_ data: Data, maxPixelSize: Int, aiHDRKey: String?) -> (image: CGImage, headroom: Float)? {
+        guard var image = MetalImageRenderer.downsampledImage(from: data, maxDimension: CGFloat(maxPixelSize))?.cgImage else {
             return nil
         }
+        if let aiHDRKey, let generated = aiHDRImage(from: image, key: aiHDRKey) { image = generated }
         return HDRStills.toneMappedImage(image) ?? (image, 1)
     }
 }

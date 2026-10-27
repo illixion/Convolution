@@ -42,7 +42,25 @@ enum PhotoStereoDebugEndpoints {
                     .number("headroom", "display headroom in multiples of SDR white; 0 restores the default (2.5)", range: 0 ... 16),
                     .number("midGamma", "power on the AI 3D frame's linear picture; above 1 darkens mid-tones (default 1.09)", range: 0.5 ... 2)
                 ]) { args in setHDR(args) },
-            .command("photoHDRTest", "Show an HDR test pattern in place of a photo window's picture, drawn raw "
+            .command("photoAIHDR", "AI HDR on a photo window: an SDR photo gets a generated gain map (GMNet). "
+                + "Watch flatHeadroom / aiHeadroom in the reply; the log has the model's time.", parameters: [
+                    .integer("window", "window index, most recently used first", default: 0, range: 0 ... 64),
+                    .boolean("enabled", "AI HDR on or off", required: true),
+                    .boolean("clearCache", "forget cached gain maps first, to time the model again")
+                ]) { args in
+                    if args.bool("clearCache") == true { GainMapHDR.shared.clearCache() }
+                    let models = orderedWindows
+                    if let index = args.int("window"), models.indices.contains(index), let enabled = args.bool("enabled") {
+                        let model = models[index]
+                        if args.bool("clearCache") == true, model.aiHDREnabled == enabled {
+                            // Same state: reload anyway so the model runs again.
+                            await model.setAIHDR(!enabled)
+                        }
+                        await model.setAIHDR(enabled)
+                    }
+                    return reply()
+                },
+                        .command("photoHDRTest", "Show an HDR test pattern in place of a photo window's picture, drawn raw "
                 + "through the flat EDR path. Left to right: " + testValues.map { String($0) }.joined(separator: ", ")
                 + " times SDR white, each beside a 1.0 reference. dots: small dots over black (the ceiling); "
                 + "patches: window-filling bars (the panel's brightness limiter). dots3d and patches3d send the pattern through AI 3D's video path instead. off reloads the photo.", parameters: [
@@ -200,6 +218,7 @@ enum PhotoStereoDebugEndpoints {
         let preciseDepth: Bool
         let aiHeadroom: Float
         let flatHeadroom: Float
+        let aiHDR: Bool
     }
     private static func reply() -> Reply {
         Reply(separated: UserDefaults.standard.bool(forKey: "aiPhotoSeparateBoundaries"),
@@ -211,7 +230,8 @@ enum PhotoStereoDebugEndpoints {
                 effectiveLimit: $0.effectiveMaxResolution, stereoTarget: $0.aiDepthTargetDimension(),
                 depthWidth: $0.aiDepthMap?.width ?? 0, depthHeight: $0.aiDepthMap?.height ?? 0,
                 preciseDepth: $0.aiDepthMap?.preciseValues != nil, aiHeadroom: $0.aiDepthHeadroom,
-                flatHeadroom: $0.displayTexture.map { MetalImageRenderer.headroom(of: $0) } ?? 1)
+                flatHeadroom: $0.displayTexture.map { MetalImageRenderer.headroom(of: $0) } ?? 1,
+                aiHDR: $0.aiHDREnabled)
         })
     }
 }

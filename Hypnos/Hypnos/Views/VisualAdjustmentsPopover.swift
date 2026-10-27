@@ -60,6 +60,17 @@ struct VisualAdjustmentsPopover: View {
     /// Callback for background removal toggle
     var onToggleBackgroundRemoval: (() -> Void)? = nil
 
+    // MARK: - AI HDR
+
+    /// Whether to show the AI HDR button (SDR photos given a generated gain map)
+    var showAIHDR: Bool = false
+
+    var isAIHDREnabled: Bool = false
+
+    var isProcessingAIHDR: Bool = false
+
+    var onToggleAIHDR: (() -> Void)? = nil
+
     // MARK: - Flip Image
 
     /// Whether to show the flip button
@@ -120,8 +131,8 @@ struct VisualAdjustmentsPopover: View {
     @ViewBuilder
     private var currentTabContent: some View {
         VStack(spacing: 14) {
-            // Action buttons row (auto-enhance, background removal, flip)
-            if showAutoEnhance || showBackgroundRemoval || showFlip {
+            // Action buttons row (auto-enhance, background removal, AI HDR, flip)
+            if showAutoEnhance || showBackgroundRemoval || showAIHDR || showFlip {
                 HStack(spacing: 0) {
                     if showAutoEnhance {
                         actionToggle(
@@ -146,6 +157,17 @@ struct VisualAdjustmentsPopover: View {
                             isProcessing: backgroundRemovalState == .removing
                         ) {
                             onToggleBackgroundRemoval?()
+                        }
+                    }
+
+                    if showAIHDR {
+                        actionToggle(
+                            icon: "sun.max",
+                            tooltip: "AI HDR",
+                            isActive: isAIHDREnabled,
+                            isProcessing: isProcessingAIHDR
+                        ) {
+                            onToggleAIHDR?()
                         }
                     }
 

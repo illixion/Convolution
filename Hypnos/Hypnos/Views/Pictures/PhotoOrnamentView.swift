@@ -540,6 +540,15 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
                         await windowModel.toggleBackgroundRemoval()
                     }
                 },
+                showAIHDR: Self.offersAIHDR && !windowModel.isAnimatedImage && !windowModel.isRealityKitDisplay
+                    && windowModel.backgroundRemovalState == .original && !windowModel.currentAdjustments.isAutoEnhanced,
+                isAIHDREnabled: windowModel.aiHDREnabled,
+                isProcessingAIHDR: windowModel.isProcessingAIHDR,
+                onToggleAIHDR: {
+                    Task {
+                        await windowModel.toggleAIHDR()
+                    }
+                },
                 showFlip: !windowModel.isRealityKitDisplay && !windowModel.is3DMode,
                 isImageFlipped: windowModel.isImageFlipped,
                 onToggleFlip: {
@@ -549,6 +558,15 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
                 }
             )
         }
+    }
+
+    /// AI HDR needs an EDR layer, which tvOS doesn't have.
+    private static var offersAIHDR: Bool {
+        #if os(tvOS)
+        false
+        #else
+        true
+        #endif
     }
 
     /// Increment / decrement the open-menu counter on `windowModel`. Clamped

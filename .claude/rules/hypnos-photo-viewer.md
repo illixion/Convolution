@@ -98,6 +98,20 @@ photo's own peak instead of 1.0. An SDR photo decodes as before.
   to Current/Unmodified Original, and iPhones before the 12 never wrote one (an iPhone 11
   Pro Max HEIC is SDR). `photoStereoState` reports `flatHeadroom`/`aiHeadroom` per
   window: above 1 means the photo really decoded as HDR.
+- **AI HDR** (Adjustments, sun icon; `GainMapHDR`, `PhotoWindowModel+AIHDR`): an SDR photo
+  gets a gain map from GMNet (Liao et al., ICLR 2025, MIT; real-world checkpoint, peak 5x),
+  converted by `scripts/convert-gainmap-model.py` and bundled as
+  `Resources/GainMapGMNet.mlpackage` (fp16, ~4 MB, enumerated inputs about a megapixel plus
+  a 256x256 thumbnail; GMNet's per-image depthwise conv is unrolled into shifted
+  multiply-adds so it converts with constant weights). The model returns the linear
+  multiplier per pixel; it is cached per photo URL and stretched over any decode, and the
+  result is an extended linear P3 `CGImage` with `contentHeadroom` set, so the flat view and
+  AI 3D take step 1's path unchanged. Shared textures key it as `<url>#aihdr`. Per window,
+  defaulting to the last choice (`aiHDRPhotos`); skipped for HDR, transparent, animated,
+  auto-enhanced and background-removed pictures, and on tvOS (no EDR). **Device, 2026-10-27:**
+  1.4 s for the first photo (model load), 0.63 s warm; the iPhone 11 sunset came out at
+  headroom 3.5 (5 % of pixels above SDR white on the Mac, the sun and its glow).
+  `photoAIHDR` (window, enabled, clearCache) toggles it; `photoStereoState` reports `aiHDR`.
 - **Screenshots from the headset are SDR** (8-bit, sRGB transfer): they can compare relative
   brightness but cannot measure HDR.
 - Debug server: `photoHDR` (enabled, headroom, midGamma) and `photoHDRTest` (`dots`,

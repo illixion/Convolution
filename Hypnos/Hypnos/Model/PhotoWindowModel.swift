@@ -272,6 +272,11 @@ class PhotoWindowModel {
     var aiDepthHeadroom: Float = 1
     /// A debug test pattern is on screen in place of the photo (`photoHDRTest`); reloads leave it alone.
     var showsDebugPattern = false
+    /// AI HDR: an SDR photo gets a generated gain map (`GainMapHDR`), flat
+    /// and in AI 3D. Per window, starting from the last window's choice.
+    var aiHDREnabled = UserDefaults.standard.bool(forKey: GainMapHDR.enabledKey)
+    /// Set while an AI HDR toggle reloads the picture.
+    var isProcessingAIHDR = false
     var aiDepthPresentationReady = false
 
     /// The current image's depth map. Shared with the "3D Depth" thumbnail
@@ -1127,8 +1132,10 @@ class PhotoWindowModel {
             }
         }
 
+        // AI HDR makes a different texture of the same photo.
+        let aiHDRKey = aiHDREnabled ? imageURL.absoluteString : nil
         let newCacheKey = SharedTextureCache.TextureKey(
-            imageURL: imageURL.absoluteString,
+            imageURL: imageURL.absoluteString + (aiHDRKey != nil ? "#aihdr" : ""),
             maxDimension: Int(targetDimension)
         )
 
@@ -1162,7 +1169,16 @@ class PhotoWindowModel {
         // CGImageSource thumbnail API which can introduce interpolation artifacts.
         let useLossy = appModel.useLossyTextureCompression
         let fullDecode = effectiveRes == 0
-        let sendable = await Task.detached { [sourceURL, targetDimension, useLossy, fullDecode] () -> SendableTexture? in
+        let aiHDRData = aiHDRKey != nil ? currentImageData : nil
+        let sendable = await Task.detached { [sourceURL, targetDimension, useLossy, fullDecode, aiHDRKey, aiHDRData] () -> SendableTexture? in
+            if let aiHDRKey, let aiHDRData,
+               let decoded = MetalImageRenderer.downsampledImage(from: aiHDRData, maxDimension: targetDimension)?.cgImage {
+                // A photo that is HDR already, or that the model can't help,
+                // uploads as it decoded.
+                let generated = Self.aiHDRImage(from: decoded, key: aiHDRKey)
+                guard let tex = MetalImageRenderer.shared?.createTexture(from: generated ?? decoded, useLossyCompression: useLossy) else { return nil }
+                return SendableTexture(texture: tex)
+            }
             guard let tex = MetalImageRenderer.shared?.createTexture(from: sourceURL, maxDimension: targetDimension, useLossyCompression: useLossy, forceFullDecode: fullDecode) else { return nil }
             return SendableTexture(texture: tex)
         }.value

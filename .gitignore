@@ -34,6 +34,8 @@ build/
 
 # Core ML depth models (large binaries — use git-lfs if you want them in the repo)
 *.mlpackage/
+# Except AI HDR's gain-map model: small (fp16, ~4 MB) and bundled in the app.
+!Hypnos/Hypnos/Resources/GainMapGMNet.mlpackage/
 
 # Local compiled depth models (pushed to device, not bundled)
 /models/
