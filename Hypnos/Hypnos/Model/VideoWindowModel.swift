@@ -785,6 +785,9 @@ final class VideoWindowModel {
         pseudo3DSettings = .default
         pendingPseudo3DEngage = nil
         // A different video starts from its own beginning.
+        streamRenewalGeneration += 1
+        streamRenewalPending = false
+        streamSwitchStart = nil
         carriedPosition = nil
         // Every video starts on its own original file, whatever the previous
         // one ended up playing.
@@ -1551,7 +1554,10 @@ final class VideoWindowModel {
         return to > max(bufferedEnd, from) - 1
     }
 
+    @ObservationIgnored private var scrubOrigin: Double?
+
     func beginScrub() {
+        scrubOrigin = currentTime
         isScrubbing = true
         cancelAutoHideTimer()
     }
@@ -1563,8 +1569,11 @@ final class VideoWindowModel {
     func endScrub(at time: Double) {
         // The user chose a position; nothing may snap it back.
         carriedPosition = nil
+        streamRenewalGeneration += 1
+        streamRenewalPending = false
         let clamped = max(0, duration > 0 ? min(time, duration) : time)
-        let renews = seekLeavesPlayerBuffer(from: currentTime, to: clamped)
+        let renews = seekLeavesPlayerBuffer(from: scrubOrigin ?? currentTime, to: clamped)
+        scrubOrigin = nil
         currentTime = clamped
         if renews {
             // Jellyfin ends the job it started at the playhead's last stop and
@@ -1643,11 +1652,11 @@ final class VideoWindowModel {
     /// (leaving fake-3D, a retry) builds a new player that starts at 0; the
     /// playhead must survive that, both on screen and in what progress
     /// reporting sends to the server.
-    @ObservationIgnored private var carriedPosition: (time: Double, deadline: Date)?
+    @ObservationIgnored private var carriedPosition: (time: Double, deadline: Date, requested: Bool)?
 
     func carryPositionToNextRenderer(reason: String) {
         guard currentTime > 1 else { return }
-        carriedPosition = (currentTime, Date().addingTimeInterval(20))
+        carriedPosition = (currentTime, Date().addingTimeInterval(20), false)
         AppLogger.videoWindow.info("Carrying \(self.currentTime, format: .fixed(precision: 2))s to the next renderer: \(reason, privacy: .public)")
     }
 
@@ -1659,10 +1668,15 @@ final class VideoWindowModel {
             carriedPosition = nil
             return false
         }
-        // The outgoing player still reporting the old position: keep waiting.
-        guard reportedTime < carried.time - 2 else { return false }
+        // Keep shielding progress reports until the asynchronous seek lands.
+        // Clearing on dispatch lets the next zero-time report erase the target.
+        if abs(reportedTime - carried.time) <= 2 {
+            if carried.requested { carriedPosition = nil }
+            return false
+        }
         guard duration > 0, let seekCommand else { return true }
-        carriedPosition = nil
+        guard !carried.requested else { return true }
+        carriedPosition?.requested = true
         AppLogger.videoWindow.info("Resuming new renderer at \(carried.time, format: .fixed(precision: 2))s (it reported \(reportedTime, format: .fixed(precision: 2))s)")
         seekCommand(min(carried.time, max(0, duration - 0.5)))
         return true
@@ -1672,7 +1686,7 @@ final class VideoWindowModel {
     func applyPlaybackState(currentTime: Double, duration: Double, paused: Bool, muted: Bool, buffered: Double,
                             waiting: Bool = false) {
         noteBuffering(waiting)
-        guard !isScrubbing else { return }
+        guard !isScrubbing, !streamRenewalPending else { return }
         if duration > 0 { self.duration = duration }
         // Until the new player is at the carried position, the playhead (and
         // the progress reports read from it) stays where the user was.
@@ -1813,7 +1827,8 @@ final class VideoWindowModel {
             backgroundedAt = Date()
         } else if newPhase == .active, let since = backgroundedAt {
             backgroundedAt = nil
-            if Date().timeIntervalSince(since) >= 2 { renewJellyfinStream(reason: "after the background") }
+            // Resume is an explicit user action after a system interruption.
+            if Date().timeIntervalSince(since) >= 2 { pausedSince = since }
         }
     }
 
@@ -1855,20 +1870,33 @@ final class VideoWindowModel {
     ///
     /// `then` runs once the new URL is in place, or at once when there is
     /// nothing to renew, for a change that has to open the stream afresh.
+    @ObservationIgnored private var streamRenewalGeneration = 0
+    @ObservationIgnored private var streamRenewalPending = false
+
     private func renewJellyfinStream(reason: String, then: (() -> Void)? = nil) {
         guard isRenewableJellyfinStream,
               let itemId = LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity),
               let library = LibraryService.current() else { then?(); return }
         let streamURL = video.streamURL
+        let target = currentTime
+        streamRenewalGeneration += 1
+        let generation = streamRenewalGeneration
+        // Reports from the outgoing player must not overwrite the chosen seek.
+        streamRenewalPending = true
         Task { [weak self] in
             guard let renewed = await library.renewedStreamURL(itemId: itemId, streamURL: streamURL) else {
-                if let self, self.video.streamURL == streamURL { then?() }
+                if let self, self.streamRenewalGeneration == generation, self.video.streamURL == streamURL {
+                    self.streamRenewalPending = false
+                    then?()
+                }
                 return
             }
-            guard let self, self.video.streamURL == streamURL else { return }
+            guard let self, self.streamRenewalGeneration == generation, self.video.streamURL == streamURL else { return }
             AppLogger.videoWindow.info("Reopening the Jellyfin stream in a new play session \(reason, privacy: .public) at \(self.currentTime, format: .fixed(precision: 2))s")
-            self.carryPositionToNextRenderer(reason: "new Jellyfin play session")
-            self.streamSwitchStart = self.currentTime
+            self.streamRenewalPending = false
+            self.currentTime = target
+            self.carriedPosition = (target, Date().addingTimeInterval(20), false)
+            self.streamSwitchStart = target
             self.stallMonitor.restartGrace(at: .now)
             self.video.streamURL = renewed
             then?()

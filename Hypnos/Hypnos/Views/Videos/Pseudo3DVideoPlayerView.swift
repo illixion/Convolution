@@ -107,6 +107,7 @@ struct Pseudo3DVideoPlayerView: View {
                 engine.startVolume = Float(playbackModel?.volume ?? 1)
                 engine.startRate = Float(playbackModel?.playbackSpeed ?? 1)
                 engine.loops = loops
+                engine.resumesAfterInterruptions = playbackModel == nil
                 engine.preferredMaximumResolution = playbackModel?.maximumPictureResolution ?? .zero
                 engine.setContentOpacity(contentOpacity)
                 engine.setSquareCorners(!appModel.roundedCorners)
@@ -183,6 +184,7 @@ struct Pseudo3DVideoPlayerView: View {
         .onChange(of: videoURL) { _, newURL in
             engine.load(url: newURL, roomActive: isRoomActive, depthMode: depthMode,
                         startAt: playbackModel?.takeStreamSwitchStart(),
+                        startPaused: playbackModel?.isPaused ?? false,
                         httpHeaderFields: MediaAuthorization.shared.headerFields(for: newURL),
                         packedStereo: packedStereo)
         }

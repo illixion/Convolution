@@ -228,6 +228,7 @@ struct NativeMetalVideoPlayerView {
         coordinator.startVolume = Float(playbackModel?.volume ?? 1)
         coordinator.speed = Float(playbackModel?.playbackSpeed ?? 1)
         coordinator.loops = loops
+        coordinator.resumesAfterInterruptions = playbackModel == nil
         coordinator.maximumResolution = playbackModel?.maximumPictureResolution ?? .zero
 
         if let loopController {
@@ -280,7 +281,7 @@ struct NativeMetalVideoPlayerView {
         }
 
         if coordinator.loadedURL != videoURL {
-            coordinator.load(url: videoURL)
+            coordinator.load(url: videoURL, startPaused: coordinator.loadedURL != nil && (playbackModel?.isPaused ?? false))
         }
 
         coordinator.setRoomActive(isRoomActive)
@@ -377,6 +378,7 @@ struct NativeMetalVideoPlayerView {
         /// room change fires, so nothing resumes it and the video freezes. When
         /// the player drops to .paused while we still intend to play and the
         /// room is active, that pause is involuntary and we resume it.
+        var resumesAfterInterruptions = true
         private var intendsToPlay = false
         /// Guards the involuntary-resume path against a tight play/pause loop if
         /// the system insists on pausing. Reset to 0 each time playback actually
@@ -396,7 +398,7 @@ struct NativeMetalVideoPlayerView {
             }
         }
 
-        func load(url: URL) {
+        func load(url: URL, startPaused: Bool = false) {
             cleanupPlayer()
             loadedURL = url
             guard let renderer else { return }
@@ -499,12 +501,14 @@ struct NativeMetalVideoPlayerView {
             timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] observed, _ in
                 let status = observed.timeControlStatus
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
+                    guard let self, self.player === observed else { return }
                     self.reportPlaybackState()
                     if status == .playing {
                         self.involuntaryResumeCount = 0
-                    } else if status == .paused, self.intendsToPlay, self.isRoomActive {
+                    } else if status == .paused, self.intendsToPlay, self.isRoomActive, self.resumesAfterInterruptions {
                         self.resumeAfterInvoluntaryPause()
+                    } else if status == .paused, !self.resumesAfterInterruptions, !self.analysisBuffering {
+                        self.intendsToPlay = false
                     }
                 }
             }
@@ -518,7 +522,7 @@ struct NativeMetalVideoPlayerView {
                 }
             }
 
-            if renderer.device.currentAllocatedSize >= 0, isRoomActive {
+            if renderer.device.currentAllocatedSize >= 0, isRoomActive, !startPaused {
                 play()
             }
         }
@@ -601,7 +605,7 @@ struct NativeMetalVideoPlayerView {
                 // other media / Mac Virtual Display would otherwise unpause
                 // it), while wall-snapped windows that were playing keep the
                 // auto-resume-on-room-entry behavior.
-                if wasPlayingBeforeRoomExit { play() }
+                if resumesAfterInterruptions, wasPlayingBeforeRoomExit { play() }
             } else {
                 // `!= .paused` (not `== .playing`): a just-opened player is
                 // still .waitingToPlayAtSpecifiedRate while buffering, and the

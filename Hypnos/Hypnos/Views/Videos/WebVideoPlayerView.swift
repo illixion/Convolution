@@ -308,7 +308,7 @@ struct WebVideoPlayerView {
                     window._roomActive = false;
                     var p = document.getElementById('player');
                     if (p) {
-                        window._resumeOnRoomActive = !p.paused || !window.__playbackEverStarted;
+                        window._resumeOnRoomActive = window._resumesAfterInterruptions && (!p.paused || !window.__playbackEverStarted);
                         p.pause();
                     }
                 })();
@@ -566,6 +566,7 @@ struct WebVideoPlayerView {
                 // a scene-phase transition (window restoration), to recover from
                 // spurious system pauses. Outside this window, user-initiated
                 // pauses and audio-session interruptions are respected.
+                window._resumesAfterInterruptions = \(playbackModel == nil ? "true" : "false");
                 window._autoResumeUntil = Date.now() + 3000;
 
                 // ----- WebGL sharpen presentation -----
@@ -1061,7 +1062,7 @@ struct WebVideoPlayerView {
                 // Scoped to a brief window after a scene-phase transition so that user-initiated
                 // pauses and audio-session interruptions outside that window are respected.
                 video.addEventListener('pause', function() {
-                    if (!window._roomActive) return;
+                    if (!window._roomActive || !window._resumesAfterInterruptions) return;
                     if (Date.now() > (window._autoResumeUntil || 0)) return;
                     if (!video.ended && video.readyState >= 2) {
                         setTimeout(function() {
