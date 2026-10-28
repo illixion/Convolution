@@ -17,18 +17,83 @@ import AVFoundation
 import CoreMedia
 import DebugTrace
 import Foundation
+import Synchronization
 
 @MainActor
 enum VideoPlayerDebugEndpoints {
     private static var registered = false
 
+    static func registerNetworkTests() {
+        DebugSurface.shared.register([
+            .command("videoNetworkTest", "Temporarily fail or delay remote file reads for the active device-remux player. "
+                     + "Keeps the debug connection intact. Existing buffers must drain before a stall; this is transport "
+                     + "fault injection, not Wi-Fi packet conditioning. Automatically expires. off stops the fault.",
+                     parameters: [.string("profile", "outage, slow or off", required: true, choices: ["outage", "slow", "off"]),
+                                  .number("seconds", "Test duration (default 30)", range: 0 ... 600),
+                                  .number("delaySeconds", "Per-read delay for slow (default 2)", range: 0 ... 30)]) { args in
+                VideoPlayerDebugEndpoints.applyNetworkTest(args)
+            },
+            .query("videoNetworkSamples", "Once-per-second clocks, buffering and fault counts from the last network test. "
+                   + "Recording stops if its player changes. No titles, URLs, dialogue or credentials.", trace: .never) { _ in
+                PlaybackNetworkRecording.samples
+            },
+        ])
+    }
+
+    static func applyNetworkTest(_ args: DebugArguments) -> [String: Double] {
+        let profile = args.string("profile") ?? "off"
+        if profile == "off" {
+            PlaybackNetworkFault.stop()
+            PlaybackNetworkRecording.generation = UUID()
+            return ["stopped": 1.0]
+        }
+        let seconds: Double = args.double("seconds") ?? 30
+        var delay: Double = 0
+        if profile == "slow" { delay = args.double("delaySeconds") ?? 2 }
+        return VideoPlayerDebugEndpoints.networkTest(seconds: seconds, delay: delay, fails: profile == "outage")
+    }
+
+    static func networkTest(seconds: Double, delay: Double = 0, fails: Bool = true) -> [String: Double] {
+        guard let model = VideoWindowModel.withNativePlayers.allObjects.first(where: { $0.nativePlayer?.currentItem != nil }),
+              let player = model.nativePlayer, let item = player.currentItem,
+              let asset = item.asset as? AVURLAsset, asset.url.host == "127.0.0.1",
+              MatroskaRemuxService.shared.session(for: MediaAuthorization.shared.authorizedURL(model.video.streamURL)) != nil
+        else { return ["available": 0] }
+        PlaybackNetworkFault.configure(target: MediaAuthorization.shared.authorizedURL(model.video.streamURL),
+                                       seconds: seconds, delay: delay, fails: fails)
+        PlaybackNetworkRecording.samples = []
+        PlaybackNetworkRecording.generation = UUID()
+        let generation = PlaybackNetworkRecording.generation
+        Task { @MainActor [weak model, weak player, weak item] in
+            for _ in 0 ..< Int(seconds + 35) {
+                guard let model, let player, let item, model.nativePlayer === player,
+                      player.currentItem === item, PlaybackNetworkRecording.generation == generation else { break }
+                let current = player.currentTime().seconds
+                let end = item.loadedTimeRanges.map { $0.timeRangeValue.end.seconds }.max() ?? current
+                PlaybackNetworkRecording.samples.append([
+                    "wall": Date.timeIntervalSinceReferenceDate,
+                    "player": current, "model": model.currentTime, "bufferEnd": end,
+                    "playing": player.timeControlStatus == .playing ? 1 : 0,
+                    "waiting": player.timeControlStatus == .waitingToPlayAtSpecifiedRate ? 1 : 0,
+                    "failed": item.status == .failed ? 1 : 0,
+                    "delay": model.subtitles.delay,
+                    "faults": Double(PlaybackNetworkFault.state.withLock { $0.affected })
+                ])
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        return ["available": 1, "seconds": seconds, "responseDelay": delay, "player": player.currentTime().seconds,
+                "bufferEnd": item.loadedTimeRanges.map { $0.timeRangeValue.end.seconds }.max() ?? 0]
+    }
+
     static func register() {
         guard !registered else { return }
         registered = true
+        registerNetworkTests()
         DebugSurface.shared.register([
             .query("videoAudio", "Each video window's native player: item status, the audio track as decoded "
                    + "(codec, channels), the audible option selected, and the spatial-audio experience in force. "
-                   + "For checking that a surround stream is surround and spatialized.") { _ in
+                   + "Includes player and model clocks and subtitle timing, without cue text.") { _ in
                 await reply()
             },
             .command("videoAudioTrack", "Picks an entry of the first video window's Audio menu, as a tap would: "
@@ -61,6 +126,18 @@ enum VideoPlayerDebugEndpoints {
         /// The Audio menu: each entry's source and what labels it.
         var audioMenu: [MenuEntry]
         var audioMenuSelected: Int?
+        var timing: Timing
+    }
+
+    struct Timing: Encodable {
+        var playerSeconds: Double?
+        var modelSeconds: Double?
+        var subtitleDelaySeconds: Double
+        var subtitleEmbedded: Bool?
+        var subtitleFromMatroska: Bool
+        var subtitleCueCount: Int
+        var originalFileOnDevice: Bool
+        var showing: [[Double]]
     }
 
     struct MenuEntry: Encodable {
@@ -119,7 +196,18 @@ enum VideoPlayerDebugEndpoints {
                 allowedSpatialization: allowed,
                 playing: player.timeControlStatus == .playing,
                 audioMenu: model.audioTracks.map(menuEntry),
-                audioMenuSelected: model.audioTracks.firstIndex { $0.id == model.selectedAudioTrack }
+                audioMenuSelected: model.audioTracks.firstIndex { $0.id == model.selectedAudioTrack },
+                timing: Timing(
+                    playerSeconds: player.currentTime().seconds.isFinite ? player.currentTime().seconds : nil,
+                    modelSeconds: model.currentTime.isFinite ? model.currentTime : nil,
+                    subtitleDelaySeconds: model.subtitles.delay,
+                    subtitleEmbedded: model.subtitles.selected?.isEmbedded,
+                    subtitleFromMatroska: model.subtitles.selected.map(MatroskaSubtitles.owns) == true,
+                    subtitleCueCount: model.subtitles.cues?.cues.count ?? 0,
+                    originalFileOnDevice: model.video.streamURL.isFileURL,
+                    showing: model.subtitles.cues?.cues(at: model.subtitles.cueTime(forFilmTime: model.currentTime))
+                        .map { [$0.start, $0.end] } ?? []
+                )
             ))
         }
         return Reply(windows: windows)
@@ -139,4 +227,10 @@ enum VideoPlayerDebugEndpoints {
         let bytes = [24, 16, 8, 0].map { UInt8((code >> $0) & 0xff) }
         return String(decoding: bytes, as: UTF8.self)
     }
+}
+
+@MainActor
+private enum PlaybackNetworkRecording {
+    static var samples: [[String: Double]] = []
+    static var generation = UUID()
 }

@@ -1340,6 +1340,15 @@ final class VideoWindowModel {
 
     func forceWebKitPlayback() {
         playbackRendererTask?.cancel()
+        if remuxedStreamURL != nil,
+           MatroskaRemuxService.shared.hasRecentNetworkFailure(for: authenticatedURL(video.streamURL)) {
+            // AVPlayer eventually exhausts its HLS retries. A failed network
+            // read does not make a previously playing MKV unsupported: keep
+            // its renderer/session and offer Retry at the current position.
+            pauseCommand?()
+            reportPlaybackFailure("The connection was interrupted. Check your network, then retry to continue from this position.")
+            return
+        }
         #if HYPNOS_YOUTUBE
         if dropYouTubeHDR(reason: "the native player couldn't play the HDR variants") { return }
         if dropYouTubeSurround(reason: "the native player couldn't play the surround stream") { return }
@@ -1351,6 +1360,7 @@ final class VideoWindowModel {
             remuxRefused = true
             subtitles.load(SubtitleSource.forVideo(video))
         }
+        carryPositionToNextRenderer(reason: "native renderer fallback")
         playbackRenderer = .webKit
     }
 
@@ -1367,6 +1377,7 @@ final class VideoWindowModel {
         AppLogger.videoWindow.info(
             "[\(self.videoDisplayName, privacy: .private(mask: .hash))] switching to server transcode: \(reason, privacy: .public)"
         )
+        carryPositionToNextRenderer(reason: "server transcode fallback")
         usingTranscodedStream = true
         resolvePlaybackRenderer()
         return true
@@ -1656,11 +1667,11 @@ final class VideoWindowModel {
     /// (leaving fake-3D, a retry) builds a new player that starts at 0; the
     /// playhead must survive that, both on screen and in what progress
     /// reporting sends to the server.
-    @ObservationIgnored private var carriedPosition: (time: Double, deadline: Date, requested: Bool)?
+    @ObservationIgnored private var carriedPosition: (time: Double, requested: Bool)?
 
     func carryPositionToNextRenderer(reason: String) {
         guard currentTime > 1 else { return }
-        carriedPosition = (currentTime, Date().addingTimeInterval(20), false)
+        carriedPosition = (currentTime, false)
         AppLogger.videoWindow.info("Carrying \(self.currentTime, format: .fixed(precision: 2))s to the next renderer: \(reason, privacy: .public)")
     }
 
@@ -1668,10 +1679,9 @@ final class VideoWindowModel {
     /// carried position; it has been sent there and the report is dropped.
     private func resumeCarriedPosition(reportedTime: Double, duration: Double) -> Bool {
         guard let carried = carriedPosition else { return false }
-        if Date() > carried.deadline {
-            carriedPosition = nil
-            return false
-        }
+        // A slow/reconnecting source can take longer than twenty seconds
+        // to open. Keep the target until it arrives; an explicit seek or a
+        // different video cancels the carry itself.
         // Keep shielding progress reports until the asynchronous seek lands.
         // Clearing on dispatch lets the next zero-time report erase the target.
         if abs(reportedTime - carried.time) <= 2 {
@@ -1905,7 +1915,7 @@ final class VideoWindowModel {
             AppLogger.videoWindow.info("Reopening the Jellyfin stream in a new play session \(reason, privacy: .public) at \(self.currentTime, format: .fixed(precision: 2))s")
             self.streamRenewalPending = false
             self.currentTime = target
-            self.carriedPosition = (target, Date().addingTimeInterval(20), false)
+            self.carriedPosition = (target, false)
             self.streamSwitchStart = target
             self.stallMonitor.restartGrace(at: .now)
             self.video.streamURL = renewed

@@ -64,10 +64,23 @@ final class RemoteByteSource: ByteSource {
     }
 
     func read(_ range: Range<Int64>) async throws -> Data {
+        do {
+            let data = try await readNetwork(range)
+            MatroskaRemuxService.noteNetworkRead(url, range: range, error: nil)
+            return data
+        } catch {
+            MatroskaRemuxService.noteNetworkRead(url, range: range, error: error)
+            throw error
+        }
+    }
+
+    private func readNetwork(_ range: Range<Int64>) async throws -> Data {
         guard !range.isEmpty else { return Data() }
+        try await PlaybackNetworkFault.beforeRead(url)
         var request = MediaAuthorization.shared.request(for: url)
         request.setValue("bytes=\(range.lowerBound)-\(range.upperBound - 1)", forHTTPHeaderField: "Range")
         let (data, response) = try await session.data(for: request)
+        try PlaybackNetworkFault.check(url)
         guard let http = response as? HTTPURLResponse else { throw Failure.status(0) }
         switch http.statusCode {
         case 206:
@@ -89,5 +102,47 @@ final class RemoteByteSource: ByteSource {
     static func total(fromContentRange header: String?) -> Int64? {
         guard let header, let slash = header.lastIndex(of: "/") else { return nil }
         return Int64(header[header.index(after: slash)...].trimmingCharacters(in: .whitespaces))
+    }
+}
+
+/// A bounded, opt-in transport fault for device playback tests. No routing,
+/// credentials or system network settings are changed.
+enum PlaybackNetworkFault {
+    struct State {
+        var target: URL?
+        var until = ContinuousClock.now
+        var delay: Duration = .zero
+        var fails = false
+        var affected = 0
+    }
+    static let state = Mutex(State())
+
+    static func stop() {
+        state.withLock { $0.target = nil; $0.until = .now }
+    }
+
+    static func configure(target: URL, seconds: Double, delay: Double = 0, fails: Bool) {
+        state.withLock {
+            $0 = State(target: target, until: .now + .seconds(seconds), delay: .seconds(delay), fails: fails)
+        }
+    }
+
+    static func check(_ url: URL) throws {
+        let fail = state.withLock { value in
+            guard value.target == url, ContinuousClock.now < value.until, value.fails else { return false }
+            value.affected += 1
+            return true
+        }
+        if fail { throw URLError(.networkConnectionLost) }
+    }
+
+    static func beforeRead(_ url: URL) async throws {
+        try check(url)
+        let delay = state.withLock { value -> Duration in
+            guard value.target == url, ContinuousClock.now < value.until else { return .zero }
+            value.affected += 1
+            return value.delay
+        }
+        if delay > .zero { try await Task.sleep(for: delay) }
     }
 }

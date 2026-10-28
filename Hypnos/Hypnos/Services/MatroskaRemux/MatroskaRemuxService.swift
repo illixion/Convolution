@@ -77,6 +77,45 @@ final class MatroskaRemuxService: Sendable {
     private let state = Mutex<State>(State())
     private static let maximumSessions = 6
 
+    // A transport failure is not evidence that the file's codecs cannot be
+    // decoded. Keep this separate from `declined`, including concurrent
+    // audio/video requests: one successful rendition must not hide another
+    // rendition's failed read.
+    private static let networkFailures = Mutex<[String: [String: ContinuousClock.Instant]]>([:])
+
+    func hasRecentNetworkFailure(for source: URL) -> Bool {
+        Self.networkFailures.withLock { failures in
+            failures[source.absoluteString]?.values.contains { .now - $0 < .seconds(120) } == true
+        }
+    }
+
+    static func noteNetworkRead(_ source: URL, range: Range<Int64>, error: Error?) {
+        let key = source.absoluteString
+        let request = "\(range.lowerBound)-\(range.upperBound)"
+        networkFailures.withLock { failures in
+            if let error, isNetworkFailure(error) {
+                failures[key, default: [:]][request] = .now
+            } else if error == nil {
+                failures[key]?[request] = nil
+            }
+            for source in Array(failures.keys) {
+                let recent = failures[source]?.filter { .now - $0.value < .seconds(120) } ?? [:]
+                failures[source] = recent.isEmpty ? nil : recent
+            }
+        }
+    }
+
+    private static func isNetworkFailure(_ error: Error) -> Bool {
+        if let failure = error as? RemoteByteSource.Failure, case .status(let code) = failure {
+            return code == 408 || code == 429 || (500 ... 599).contains(code)
+        }
+        let error = error as NSError
+        return error.domain == NSURLErrorDomain && [
+            NSURLErrorTimedOut, NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost,
+            NSURLErrorNetworkConnectionLost, NSURLErrorDNSLookupFailed, NSURLErrorNotConnectedToInternet,
+        ].contains(error.code)
+    }
+
     // MARK: - Candidates
 
     /// Containers that are certainly not Matroska: not worth a byte read.
