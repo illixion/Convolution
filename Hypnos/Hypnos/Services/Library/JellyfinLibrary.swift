@@ -749,6 +749,11 @@ actor JellyfinLibrary: MediaServerLibrary {
                                        sourceBitrate: sourceBitrate)
         }
 
+        // Prefer the file's own timeline. Jellyfin's synthetic HLS playlist
+        // can disagree with a remux job restarted between keyframes after
+        // a tracking interruption; replacing its play session only moves
+        // that problem to the next restart. Our range-based remux indexes
+        // actual boundaries and keeps video, audio and subtitles together.
         // Settings → Jellyfin → Play MKV Files on This Device: the file
         // itself, read in pieces and remuxed on the device as a Stash or
         // local MKV is (`MatroskaRemuxService`), which keeps every audio
@@ -789,10 +794,12 @@ actor JellyfinLibrary: MediaServerLibrary {
                                    sourceBitrate: sourceBitrate)
     }
 
-    /// Settings → Jellyfin → Play MKV Files on This Device (off unless
-    /// chosen): see `streamPlan`.
+    /// Settings → Jellyfin → Play MKV Files on This Device. Default on;
+    /// preserve an explicit server-remux preference. See `streamPlan`.
     static let remuxesOnDeviceKey = "library.remuxOnDevice"
-    static var remuxesOnDevice: Bool { UserDefaults.standard.bool(forKey: remuxesOnDeviceKey) }
+    static var remuxesOnDevice: Bool {
+        UserDefaults.standard.object(forKey: remuxesOnDeviceKey) as? Bool ?? true
+    }
 
     /// The URL is the title's file itself (`Videos/{id}/stream?static=true`),
     /// which a player reads as a server's file rather than a stream made

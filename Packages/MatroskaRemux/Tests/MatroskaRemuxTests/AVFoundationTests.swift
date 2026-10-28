@@ -16,6 +16,51 @@ import VideoToolbox
 
 @Suite("AVFoundation decodes the remux", .serialized)
 struct AVFoundationTests {
+    @MainActor
+    @Test func hlsPauseAndDecoderReplacementKeepThePlayhead() async throws {
+        let session = try await Fixtures.open("subtitles.mkv")
+        let (server, base) = try await LoopbackServer.start(session)
+        defer { server.stop() }
+        let url = base.appendingPathComponent("master.m3u8")
+        let player = AVPlayer()
+        player.isMuted = true
+        defer { player.replaceCurrentItem(with: nil) }
+        for _ in 0 ..< 3 {
+            // Discard the decoder, then reopen at a non-keyframe position,
+            // as after an interruption that takes the decoder away.
+            let item = AVPlayerItem(url: url)
+            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: nil)
+            item.add(output)
+            player.replaceCurrentItem(with: item)
+            for _ in 0 ..< 100 where item.status == .unknown {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            try #require(item.status == .readyToPlay)
+            let target = CMTime(seconds: 3.4, preferredTimescale: 600)
+            #expect(await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero))
+            #expect(abs(player.currentTime().seconds - target.seconds) < 0.05)
+            player.play()
+            var displayed = CMTime.invalid
+            for _ in 0 ..< 60 {
+                let now = player.currentTime()
+                if output.hasNewPixelBuffer(forItemTime: now),
+                   output.copyPixelBuffer(forItemTime: now, itemTimeForDisplay: &displayed) != nil { break }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            try #require(displayed.isNumeric)
+            #expect(abs(displayed.seconds - player.currentTime().seconds) < 0.2)
+            player.pause()
+            let paused = player.currentTime().seconds
+            try await Task.sleep(for: .milliseconds(300))
+            #expect(abs(player.currentTime().seconds - paused) < 0.05)
+            player.play()
+            try await Task.sleep(for: .milliseconds(300))
+            #expect(player.currentTime().seconds > paused + 0.1, "resume must advance without rebuilding the stream")
+            #expect(player.currentTime().seconds - paused < 0.7, "resume must not jump to another segment")
+            player.pause()
+        }
+    }
+
     init() {
         VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9)
     }

@@ -104,14 +104,14 @@ struct JellyfinServerSection: View {
 /// How a title's MKV file plays: through Jellyfin's remux, or read and
 /// repackaged on the device (`JellyfinLibrary.remuxesOnDevice`).
 struct LibraryFilePlaybackSection: View {
-    @AppStorage(JellyfinLibrary.remuxesOnDeviceKey) private var remuxesOnDevice = false
+    @AppStorage(JellyfinLibrary.remuxesOnDeviceKey) private var remuxesOnDevice = true
 
     var body: some View {
         if LibraryService.isAvailable {
             Section {
                 Toggle("Play MKV Files on This Device", isOn: $remuxesOnDevice)
             } footer: {
-                Text("Reads a title's MKV file from the server in pieces and repackages it here, losslessly, instead of having Jellyfin remux it: every audio track, the original sound, and nothing for the server to do. A file this device can't repackage still plays through the server.")
+                Text("Reads a title's MKV file from the server in pieces and repackages it here, losslessly, keeping its original timing through pauses and interruptions. Includes every audio track and the original sound. A file this device can't repackage still plays through the server.")
             }
         }
     }

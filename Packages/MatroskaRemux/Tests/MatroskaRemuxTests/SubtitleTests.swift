@@ -10,6 +10,42 @@ struct SubtitleTests {
     /// zero this far into the remux's timeline.
     static let priming = 1024.0 / 44100
 
+    @Test func reopeningMidFileKeepsVideoAndSubtitleTimeline() async throws {
+        // Keyframes intentionally do not fall on six-second boundaries.
+        // A server remux restarted here must not rebase the next segment
+        // or its captions to a new, estimated timeline.
+        var writer = try await MatroskaTestWriter.load(try Fixtures.data("subtitles.mkv"))
+        for i in writer.frames.indices {
+            writer.frames[i].timestamp = writer.frames[i].timestamp * 237 / 100
+        }
+        if let duration = writer.duration { writer.duration = duration * 2.37 }
+        let data = writer.write()
+        let uninterrupted = try await RemuxSession.open(source: DataByteSource(data))
+        #expect(uninterrupted.segmentCount > 1)
+        // Establish what straight-through playback produces.
+        let video = try await uninterrupted.allSegments("video")
+        let captions = try await uninterrupted.subtitleBlocks(track: 3, from: 0, through: 60).blocks
+        #expect(captions.count == 3)
+        for (cue, seconds) in zip(captions, [2.37, 7.11, 11.85]) {
+            #expect(abs(cue.start - seconds - Self.priming) < 0.001)
+        }
+        // Fresh decoder/session, middle segment first, then backwards and
+        // forwards. Neither request order nor session lifetime changes PTS.
+        for _ in 0 ..< 3 {
+            let resumed = try await RemuxSession.open(source: DataByteSource(data))
+            for index in Array((0 ..< resumed.segmentCount).reversed()) + [0, resumed.segmentCount - 1] {
+                let actual = try MP4Read.segment(await resumed.fetch("video/\(index).m4s"))
+                let expected = try MP4Read.segment(video[index])
+                #expect(actual.runs.first?.baseDecodeTime == expected.runs.first?.baseDecodeTime)
+                #expect(actual.runs.first?.samples.map(\.compositionOffset)
+                        == expected.runs.first?.samples.map(\.compositionOffset))
+            }
+            let reread = try await resumed.subtitleBlocks(track: 3, from: 0, through: 60).blocks
+            #expect(reread.map(\.start) == captions.map(\.start))
+            #expect(reread.map(\.data) == captions.map(\.data))
+        }
+    }
+
     @Test func listsTracksWithTheirFlags() async throws {
         let session = try await Fixtures.open("subtitles.mkv")
         let tracks = session.subtitleTracks
