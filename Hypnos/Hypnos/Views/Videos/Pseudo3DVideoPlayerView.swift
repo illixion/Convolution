@@ -114,7 +114,9 @@ struct Pseudo3DVideoPlayerView: View {
                 engine.setSubtitles(subtitleFrame)
                 content.add(engine.makeVideoEntity())
                 engine.observeVideoSize(content: content)
-                engine.load(url: videoURL, roomActive: isRoomActive, depthMode: depthMode, startAt: startAtSeconds, startPaused: startPaused,
+                engine.load(url: videoURL, roomActive: isRoomActive, depthMode: depthMode,
+                            startAt: playbackModel?.takeStreamSwitchStart(fallback: startAtSeconds) ?? startAtSeconds,
+                            startPaused: startPaused,
                             httpHeaderFields: MediaAuthorization.shared.headerFields(for: videoURL),
                             packedStereo: packedStereo,
                             spatialAudioSceneIdentifier: spatialAudioSceneIdentifier)

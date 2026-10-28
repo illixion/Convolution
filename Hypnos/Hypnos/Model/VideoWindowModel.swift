@@ -1513,13 +1513,16 @@ final class VideoWindowModel {
 
     func togglePlayPause() {
         if isPaused {
-            if let since = pausedSince, Date().timeIntervalSince(since) >= Self.longPause, isRenewableJellyfinStream {
+            if isRenewableJellyfinStream,
+               (shouldRenewStreamOnExplicitResume
+                || (pausedSince.map { Date().timeIntervalSince($0) >= Self.longPause } ?? false)) {
                 // Jellyfin ends the job of a stream paused this long; the
                 // player's next segment request starts one mid-file and the
                 // playlist clock, subtitles with it, drifts off the sound
                 // (device, 2026-10-27). A new play session starts the job
                 // exactly where the player asks.
                 pausedSince = nil
+                shouldRenewStreamOnExplicitResume = false
                 let before = video.streamURL
                 renewJellyfinStream(reason: "after a long pause") { [weak self] in
                     // A renewed URL opens a new player that starts playing;
@@ -1530,6 +1533,7 @@ final class VideoWindowModel {
                 stallMonitor.restartGrace(at: .now)
                 return
             }
+            shouldRenewStreamOnExplicitResume = false
             playCommand?()
         } else {
             pauseCommand?()
@@ -1820,6 +1824,9 @@ final class VideoWindowModel {
             isInActiveRoom = true
         } else if oldPhase == .active && (newPhase == .inactive || newPhase == .background) {
             isInActiveRoom = false
+            if isRenewableJellyfinStream {
+                shouldRenewStreamOnExplicitResume = true
+            }
         }
         // The system closes menus when the window goes away.
         if newPhase == .background {
@@ -1841,6 +1848,9 @@ final class VideoWindowModel {
     /// When the player was last seen paused; a resume after `longPause`
     /// renews a Jellyfin stream (`togglePlayPause`).
     @ObservationIgnored private var pausedSince: Date?
+    /// A Jellyfin HLS stream may need a fresh server play session after a
+    /// system interruption. Renew only when the user explicitly resumes.
+    @ObservationIgnored private var shouldRenewStreamOnExplicitResume = false
     private static let longPause: TimeInterval = 120
     /// Where a player opening the same video on a new URL starts, rather
     /// than playing from 0 and seeking: that asked Jellyfin for a job at the
@@ -1850,10 +1860,10 @@ final class VideoWindowModel {
     @ObservationIgnored var streamSwitchStart: Double?
 
     /// The stereo player's start for a new URL; taking it drops the carry.
-    func takeStreamSwitchStart() -> Double? {
-        guard let start = streamSwitchStart else { return nil }
+    func takeStreamSwitchStart(fallback: Double? = nil) -> Double? {
+        let start = streamSwitchStart ?? fallback
         streamSwitchStart = nil
-        carriedPosition = nil
+        if start != nil { carriedPosition = nil }
         return start
     }
 
