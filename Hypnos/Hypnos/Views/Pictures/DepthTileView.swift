@@ -1,9 +1,10 @@
 /*
  Hypnos - Depth Tile View
 
- A gallery thumbnail as one 3D object: a grid mesh displaced toward the
- viewer by the thumbnail's depth map (`ThumbnailDioramaCache.ThumbnailDepth`),
- textured with the visible crop of the thumbnail. The "3D Depth" style.
+ A gallery thumbnail as one 3D object: a grid mesh displaced around the
+ window plane by the thumbnail's depth map (`ThumbnailDioramaCache.ThumbnailDepth`),
+ textured with the visible crop of the thumbnail. Near content rises toward
+ the viewer while the background recedes behind the window. The "3D Depth" style.
 
  One mesh rather than a stack of masked SwiftUI planes, because the planes
  couldn't be lifted: the gaze hover scales a cell as one 2D layer, and planes
@@ -35,14 +36,16 @@ struct DepthTileView: View {
     @Environment(\.physicalMetrics) private var metrics
     @State private var ready = false
 
-    /// Displacement of the nearest content, in points.
+    /// Maximum displacement on either side of the window plane, in points.
     nonisolated static let span: CGFloat = 32
     nonisolated static let cornerRadius: CGFloat = 12
     nonisolated static let edgeFalloff: CGFloat = 14
     /// Vertices along the tile's long edge. With the depth softened, this
     /// is dense enough that a subject's outline doesn't read as stepped.
     nonisolated static let gridLongSide = 112
-    nonisolated static let shape = RAVEDepthMesh.Shape(span: span, edgeFalloff: edgeFalloff, gridLongSide: gridLongSide)
+    nonisolated static let shape = RAVEDepthMesh.Shape(
+        span: span, edgeFalloff: edgeFalloff, gridLongSide: gridLongSide, convergence: 0.5
+    )
 
     var body: some View {
         let widthMeters = Float(metrics.convert(size.width, to: .meters))
