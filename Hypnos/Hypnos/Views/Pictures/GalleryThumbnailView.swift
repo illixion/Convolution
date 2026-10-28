@@ -64,7 +64,7 @@ struct GalleryThumbnailView: View {
             #if os(visionOS)
             if let depth, let loadedImage, appModel.effectiveThumbnailDepth {
                 DepthTileView(image: loadedImage, depth: depth.map, size: size)
-                tileInputTarget(lift: DepthTileView.span)
+                tileInputTarget(lift: RAVEStereoPhotoView.inputTargetZ)
             } else if let dioramaPair, showsDiorama {
                 DioramaTileView(backdrop: dioramaPair.backdrop, foreground: dioramaPair.foreground, size: size)
                 tileInputTarget(lift: DioramaTileView.lift)
@@ -166,11 +166,10 @@ struct GalleryThumbnailView: View {
         appModel.effectiveThumbnailDiorama || appModel.effectiveThumbnailDepth
     }
 
-    /// The input target, in front of a 3D tile. RealityKit content standing
-    /// proud of the window plane caught the pointer and hand scrolling even
-    /// with hit testing off (device, 2026-10-07); a drawn SwiftUI layer ahead
-    /// of it gets them first. Not `.clear`: a fully clear layer isn't
-    /// targetable.
+    /// An input target in front of the stereo plane. RealityKit content can
+    /// catch pointer and hand scrolling even with hit testing off, so a drawn
+    /// SwiftUI layer ahead of it gets them first. Not `.clear`: a fully clear
+    /// layer isn't targetable.
     private func tileInputTarget(lift: CGFloat) -> some View {
         Color.white.opacity(0.001)
             .offset(z: lift + 2)

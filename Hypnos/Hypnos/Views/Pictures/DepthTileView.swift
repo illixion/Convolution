@@ -1,58 +1,36 @@
 /*
  Hypnos - Depth Tile View
 
- A gallery thumbnail as one 3D object: a grid mesh displaced around the
- window plane by the thumbnail's depth map (`ThumbnailDioramaCache.ThumbnailDepth`),
- textured with the visible crop of the thumbnail. Near content rises toward
- the viewer while the background recedes behind the window. The "3D Depth" style.
-
- One mesh rather than a stack of masked SwiftUI planes, because the planes
- couldn't be lifted: the gaze hover scales a cell as one 2D layer, and planes
- at different z offsets slid against each other under it (device,
- 2026-10-07), whether the scale was applied to the cell or to each plane.
- A single entity scales as one unit, and its depth is continuous rather than
- stepped.
-
- - The texture is the cell's visible region only (the grid's `scaledToFill`
-   crop, done here), with the cell's rounded corners baked into its alpha:
-   SwiftUI clipping doesn't reach RealityKit content.
- - Depth falls off to zero over the outer `edgeFalloff` points, so the tile's
-   outline stays flat on the window plane and can't project past itself when
-   seen off-axis.
+ A gallery thumbnail presented as the same tagged-eye stereo picture as full
+ AI 3D photos. The image and depth map are cropped together to the cell's
+ scaled-to-fill region before rendering.
  */
 
 #if os(visionOS)
 import DebugTraceUI
 import RAVEMedia
-import RealityKit
 import SwiftUI
 
 struct DepthTileView: View {
+    nonisolated static let cornerRadius: CGFloat = 12
+    nonisolated static let edgeFalloff: CGFloat = 14
+
     let image: UIImage
     let depth: StillDepthMap
     let size: CGSize
 
     @PatchRefresh var patchRefresh
-    @Environment(\.physicalMetrics) private var metrics
+    @State private var prepared: CroppedSource?
     @State private var ready = false
 
-    /// Maximum displacement on either side of the window plane, in points.
-    nonisolated static let span: CGFloat = 32
-    nonisolated static let cornerRadius: CGFloat = 12
-    nonisolated static let edgeFalloff: CGFloat = 14
-    /// Vertices along the tile's long edge. With the depth softened, this
-    /// is dense enough that a subject's outline doesn't read as stepped.
-    nonisolated static let gridLongSide = 112
-    nonisolated static let shape = RAVEDepthMesh.Shape(
-        span: span, edgeFalloff: edgeFalloff, gridLongSide: gridLongSide, convergence: 0.5
-    )
+    private var preparationKey: String {
+        "\(ObjectIdentifier(image))-\(depth.id)-\(size.width)x\(size.height)"
+    }
 
     var body: some View {
-        let widthMeters = Float(metrics.convert(size.width, to: .meters))
-        let heightMeters = Float(metrics.convert(size.height, to: .meters))
-        let spanMeters = Float(metrics.convert(Self.span, to: .meters))
         ZStack {
-            // Until the entity is up, the flat thumbnail stands in.
+            // Keep the familiar flat thumbnail visible until the stereo frame
+            // is ready, including when a resized cell is being prepared.
             if !ready {
                 Image(platformImage: image)
                     .resizable()
@@ -60,48 +38,72 @@ struct DepthTileView: View {
                     .frame(width: size.width, height: size.height)
                     .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius))
             }
-            RealityView { content in
-                guard let entity = await Self.makeEntity(
-                    image: image, depth: depth, size: size,
-                    widthMeters: widthMeters, heightMeters: heightMeters, spanMeters: spanMeters
-                ) else { return }
-                content.add(entity)
-                ready = true
+
+            if let prepared {
+                RAVEStereoPhotoView(
+                    image: prepared.image,
+                    depth: prepared.depth,
+                    contentID: AnyHashable(preparationKey),
+                    cornerRadius: Self.cornerRadius,
+                    onReady: { ready = $0 }
+                )
+                .frame(width: size.width, height: size.height)
+                .allowsHitTesting(false)
             }
-            .frame(width: size.width, height: size.height)
+
         }
-        // Purely visual: the cell around it owns tap, long press and hover.
-        // Hit-testable, the RealityView swallowed hand-tracked scrolling and
-        // pointer hover over every tile (device, 2026-10-07).
-        .allowsHitTesting(false)
-        // A resize rebuilds the mesh at the new size.
-        .id(size)
+        .frame(width: size.width, height: size.height)
+        .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius))
+        .task(id: preparationKey) {
+            ready = false
+            prepared = nil
+            guard let source = image.cgImage, size.width > 0, size.height > 0 else { return }
+            let cellSize = size
+            let map = depth
+            let cropped = await Task.detached(priority: .userInitiated) {
+                Self.crop(source: source, depth: map, cell: cellSize)
+            }.value
+            guard !Task.isCancelled else { return }
+            prepared = cropped
+        }
+        .rebuildsOnPatch()
     }
 
-    @MainActor
-    private static func makeEntity(
-        image: UIImage, depth: StillDepthMap, size: CGSize,
-        widthMeters: Float, heightMeters: Float, spanMeters: Float
-    ) async -> Entity? {
-        guard let cgImage = image.cgImage, size.width > 0, size.height > 0 else { return nil }
-        let crop = RAVEDepthMesh.fillCrop(imageWidth: CGFloat(cgImage.width), imageHeight: CGFloat(cgImage.height), cell: size)
-        let built = await Task.detached(priority: .userInitiated) { () -> Built? in
-            guard let texture = RAVEDepthMesh.renderTexture(cgImage, crop: crop, cell: size, cornerRadius: cornerRadius) else { return nil }
-            let mesh = RAVEDepthMesh.meshDescriptor(
-                depth: depth, crop: crop, cell: size, shape: shape,
-                widthMeters: widthMeters, heightMeters: heightMeters, spanMeters: spanMeters
-            )
-            return Built(texture: texture, mesh: mesh)
-        }.value
-        guard let built else { return nil }
-        return await RAVEDepthMesh.makeModel(texture: built.texture, mesh: built.mesh)
+    private struct CroppedSource: @unchecked Sendable {
+        let image: CGImage
+        let depth: StillDepthMap
     }
 
-    /// Built off the main actor, handed back once. `MeshDescriptor` isn't
-    /// `Sendable`, but nothing touches it after the hand-off.
-    private struct Built: @unchecked Sendable {
-        let texture: CGImage
-        let mesh: MeshDescriptor
+    nonisolated private static func crop(source: CGImage, depth: StillDepthMap, cell: CGSize) -> CroppedSource? {
+        let crop = RAVEDepthMesh.fillCrop(
+            imageWidth: CGFloat(source.width), imageHeight: CGFloat(source.height), cell: cell
+        )
+        guard let croppedImage = RAVEDepthMesh.renderTexture(
+            source, crop: crop, cell: cell, cornerRadius: 0, maxPixels: 640
+        ) else { return nil }
+
+        let values = depth.preciseValues ?? depth.values.map { Float($0) / 255 }
+        guard depth.width > 1, depth.height > 1, values.count == depth.width * depth.height else { return nil }
+        let outWidth = max(2, Int((CGFloat(depth.width) * crop.width).rounded()))
+        let outHeight = max(2, Int((CGFloat(depth.height) * crop.height).rounded()))
+        var output = [Float](repeating: 0, count: outWidth * outHeight)
+        for y in 0..<outHeight {
+            let v = crop.minY + (CGFloat(y) / CGFloat(outHeight - 1)) * crop.height
+            let sy = Float(v) * Float(depth.height - 1)
+            let y0 = Int(sy), y1 = min(y0 + 1, depth.height - 1), fy = sy - Float(y0)
+            for x in 0..<outWidth {
+                let u = crop.minX + (CGFloat(x) / CGFloat(outWidth - 1)) * crop.width
+                let sx = Float(u) * Float(depth.width - 1)
+                let x0 = Int(sx), x1 = min(x0 + 1, depth.width - 1), fx = sx - Float(x0)
+                let a = values[y0 * depth.width + x0] * (1 - fx) + values[y0 * depth.width + x1] * fx
+                let b = values[y1 * depth.width + x0] * (1 - fx) + values[y1 * depth.width + x1] * fx
+                output[y * outWidth + x] = a * (1 - fy) + b * fy
+            }
+        }
+        return CroppedSource(
+            image: croppedImage,
+            depth: StillDepthMap(width: outWidth, height: outHeight, normalizedValues: output)
+        )
     }
 }
 #endif
