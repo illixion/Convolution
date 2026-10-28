@@ -152,7 +152,26 @@ struct GeneratedCaptionIntegrationTests {
         #expect(player.rate == 0)
         session.stop()
         try await Task.sleep(for: .milliseconds(100))
-        #expect(item.outputs.filter { $0 is AVPlayerItemSampleBufferOutput }.isEmpty)
+        // The item only feeds the output it had at its latest seek, so a
+        // restart must reuse that output rather than attach another.
+        session.start()
+        let restartDeadline = Date.now.addingTimeInterval(25)
+        while (session.captions.isEmpty || session.isBuffering), session.error == nil, Date.now < restartDeadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(session.error == nil)
+        #expect(!session.captions.isEmpty)
+        #expect(item.outputs.filter { $0 is AVPlayerItemSampleBufferOutput }.count == 1)
+        // A seek renumbers an HLS item's tracks; analysis must follow the
+        // playhead rather than treat that as an audio-track change.
+        await player.seek(to: CMTime(seconds: 30, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        let seekDeadline = Date.now.addingTimeInterval(25)
+        while !session.captions.contains(where: { $0.start >= 29 }), session.error == nil, Date.now < seekDeadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(session.error == nil)
+        #expect(session.captions.contains { $0.start >= 29 })
+        #expect(item.outputs.filter { $0 is AVPlayerItemSampleBufferOutput }.count == 1)
     }
 
     @Test func silenceAdvancesReadinessWithoutInventingCaptions() async throws {

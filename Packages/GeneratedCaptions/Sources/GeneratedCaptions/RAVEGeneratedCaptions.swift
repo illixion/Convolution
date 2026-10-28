@@ -84,6 +84,9 @@ public final class RAVEGeneratedCaptions {
             $0.isEnabled && $0.assetTrack?.mediaType == .audio
         })?.assetTrack?.trackID
         let externalSource = externalSource
+        // HLS audio comes from the item's own output, which follows whatever
+        // the player renders; its track IDs are renumbered on every seek.
+        let followsAudioTrack = externalSource == nil && !isHLS(item?.asset)
         let position: () -> Double = externalPosition ?? { [weak player] in player?.currentTime().seconds ?? 0 }
         let duration: () -> Double = externalDuration ?? { [weak player] in player?.currentItem?.duration.seconds ?? .nan }
         let speed: () -> Double = externalSpeed ?? { [weak player] in Double(player?.defaultRate ?? 1) }
@@ -153,10 +156,9 @@ public final class RAVEGeneratedCaptions {
                 while !Task.isCancelled, generation == token, isCurrent() {
                     // A file reader is tied to one track. Follow an audio
                     // selection made while captions are already running.
-                    let currentAudioTrackID = item?.tracks.first(where: {
+                    if followsAudioTrack, item?.tracks.first(where: {
                         $0.isEnabled && $0.assetTrack?.mediaType == .audio
-                    })?.assetTrack?.trackID
-                    if externalSource == nil, currentAudioTrackID != selectedAudioTrackID {
+                    })?.assetTrack?.trackID != selectedAudioTrackID {
                         start(); return
                     }
                     let now = position()
@@ -255,6 +257,10 @@ public final class RAVEGeneratedCaptions {
     }
 }
 
+private func isHLS(_ asset: AVAsset?) -> Bool {
+    (asset as? AVURLAsset)?.url.pathExtension.lowercased() == "m3u8"
+}
+
 private enum CaptionSequenceRestart: Error { case changed }
 
 private struct CaptionFailure: LocalizedError {
@@ -285,7 +291,6 @@ actor CaptionWorker {
     private var reader: AVAssetReader?
     private var output: AVAssetReaderTrackOutput?
     private var externalPull: (@Sendable () async throws -> RAVECaptionAudioChunk?)?
-    private var detachHLS: (@MainActor @Sendable () -> Void)?
     private var hlsPull: (@Sendable () throws -> CaptionAudioPacket?)?
     private var converter: AVAudioConverter?
     private var speechFormat: AVAudioFormat?
@@ -330,13 +335,9 @@ actor CaptionWorker {
         }
         if let external { externalPull = external.next }
         else if let asset, let item {
-        let isHLS: Bool
-        if let url = (asset as? AVURLAsset)?.url { isHLS = url.pathExtension.lowercased() == "m3u8" }
-        else { isHLS = false }
-        if isHLS {
+        if isHLS(asset) {
             if #available(macOS 27, iOS 27, tvOS 27, visionOS 27, *) {
-                let attached = await Self.attachHLS(to: item)
-                hlsPull = attached.pull; detachHLS = attached.detach
+                hlsPull = await Self.attachHLS(to: item)
             } else { throw CaptionFailure("AI captions for HLS streams require OS 27 or later.") }
         } else {
             let tracks = try await asset.loadTracks(withMediaType: .audio)
@@ -477,7 +478,6 @@ actor CaptionWorker {
     func cancel() async {
         continuation?.finish(); analysisTask?.cancel()
         reader?.cancelReading()
-        if let detachHLS { await detachHLS(); self.detachHLS = nil }
         await analyzer.cancelAndFinishNow()
     }
     private static func convert(_ input: AVAudioPCMBuffer, to format: AVAudioFormat, converter: inout AVAudioConverter?) throws -> AVAudioPCMBuffer {
@@ -506,18 +506,32 @@ actor CaptionWorker {
         guard status == noErr else { throw CaptionFailure("Cannot read decoded audio (\(status)).") }
         return CaptionAudioPacket(buffer: buffer, time: CMSampleBufferGetOutputPresentationTimeStamp(sample).seconds)
     }
+    /// An HLS item feeds decoded audio only to the output it had at its latest
+    /// seek: a second output, even one added after the first was removed, gets
+    /// nothing until the item seeks again. So one output stays attached for the
+    /// item's life, and a restart seeks the item to where it is, which resets
+    /// that output to the playhead and drops what the last analysis read ahead.
+    /// The seek is nudged 1 ms: a seek to exactly the current time is a no-op
+    /// while paused and leaves the output where the last analysis stopped.
     @available(macOS 27, iOS 27, tvOS 27, visionOS 27, *)
-    @MainActor private static func attachHLS(to item: AVPlayerItem) -> (pull: @Sendable () throws -> CaptionAudioPacket?, detach: @MainActor @Sendable () -> Void) {
-        let configuration = AVPlayerItemSampleBufferOutputAudioConfiguration()
-        configuration.requestedAudioFormat = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)!.formatDescription
-        let output = AVPlayerItemSampleBufferOutput(configuration: configuration)
-        // Keep AVPlayer rendering sound; this is an analysis copy only.
-        item.add(output)
-        return ({
+    @MainActor private static func attachHLS(to item: AVPlayerItem) async -> @Sendable () throws -> CaptionAudioPacket? {
+        let output: AVPlayerItemSampleBufferOutput
+        if let attached = item.outputs.lazy.compactMap({ $0 as? AVPlayerItemSampleBufferOutput }).first {
+            output = attached
+            _ = await item.seek(to: item.currentTime() + CMTime(value: 1, timescale: 1000),
+                                toleranceBefore: .zero, toleranceAfter: .zero)
+        } else {
+            let configuration = AVPlayerItemSampleBufferOutputAudioConfiguration()
+            configuration.requestedAudioFormat = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)!.formatDescription
+            output = AVPlayerItemSampleBufferOutput(configuration: configuration)
+            // Keep AVPlayer rendering sound; this is an analysis copy only.
+            item.add(output)
+        }
+        return {
             guard let next = output.nextAvailableSampleBuffer() else { return nil }
             var packet = try next.sampleBuffer.withUnsafeSampleBuffer { try pcm($0) }
             packet?.restarted = next.sequenceWasRestarted
             return packet
-        }, { [weak item] in item?.remove(output) })
+        }
     }
 }
