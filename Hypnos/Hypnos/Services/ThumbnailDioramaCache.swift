@@ -66,7 +66,7 @@ final class ThumbnailDioramaCache {
 
     private let depthCache: NSCache<NSURL, ThumbnailDepth> = {
         let c = NSCache<NSURL, ThumbnailDepth>()
-        c.totalCostLimit = 24 * 1024 * 1024 // ~200 KB per map
+        c.totalCostLimit = 24 * 1024 * 1024 // bounded even with full-precision photo depth
         return c
     }()
     /// Thumbnails the model returned nothing usable for.
@@ -178,7 +178,8 @@ final class ThumbnailDioramaCache {
         if let cached = depthCache.object(forKey: url as NSURL) { return cached }
         if withoutDepth.contains(url) { return nil }
         guard let cgImage = source()?.cgImage else { return nil }
-        guard let map = await RAVEStillDepthEstimator.shared.depth(for: cgImage) else {
+        // Match full-size AI 3D's selected photo-quality model and precision.
+        guard let map = await RAVEStillDepthEstimator.shared.depth(for: cgImage, photoQuality: true) else {
             // Cancelled (scrolled away) or no model: both retry next time.
             if !Task.isCancelled, RAVEStillDepthEstimator.shared.isModelAvailable {
                 withoutDepth.insert(url)
@@ -192,7 +193,8 @@ final class ThumbnailDioramaCache {
 
     private func storeDepth(_ map: StillDepthMap, for url: URL) -> ThumbnailDepth {
         let depth = ThumbnailDepth(map: map)
-        depthCache.setObject(depth, forKey: url as NSURL, cost: map.values.count)
+        depthCache.setObject(depth, forKey: url as NSURL,
+                             cost: map.values.count + (map.preciseValues?.count ?? 0) * MemoryLayout<Float>.stride)
         return depth
     }
 
@@ -271,28 +273,30 @@ final class ThumbnailDioramaCache {
 
     // MARK: - Depth disk persistence and masks
 
-    /// Stored as the 8-bit map: a few tens of KB of lossless PNG.
+    /// Versioned binary cache retains the photo model's normalized floats.
     nonisolated private static func depthDiskURL(for url: URL) -> URL {
-        let data = Data((url.absoluteString + ":thumbnailDepth:v1").utf8)
+        let data = Data((url.absoluteString + ":thumbnailDepth:v2").utf8)
         var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
         data.withUnsafeBytes { bytes in
             _ = CC_SHA256(bytes.baseAddress, CC_LONG(data.count), &hash)
         }
-        return cacheDirectory.appendingPathComponent(hash.map { String(format: "%02x", $0) }.joined() + ".depth.png")
+        return cacheDirectory.appendingPathComponent(hash.map { String(format: "%02x", $0) }.joined() + ".depth")
     }
 
     nonisolated private static func saveDepthToDisk(_ map: StillDepthMap, for url: URL) {
-        guard let image = grayImage(map.values, width: map.width, height: map.height) else { return }
-        let data = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(
-            data as CFMutableData, UTType.png.identifier as CFString, 1, nil
-        ) else { return }
-        CGImageDestinationAddImage(destination, image, nil)
-        guard CGImageDestinationFinalize(destination) else { return }
+        guard map.width > 0, map.height > 0 else { return }
+        let floats = map.preciseValues ?? map.values.map { Float($0) / 255 }
+        guard floats.count == map.width * map.height else { return }
+        var data = Data([0x54, 0x44, 0x30, 0x32]) // TD02
+        var width = UInt32(map.width).littleEndian
+        var height = UInt32(map.height).littleEndian
+        withUnsafeBytes(of: &width) { data.append(contentsOf: $0) }
+        withUnsafeBytes(of: &height) { data.append(contentsOf: $0) }
+        floats.withUnsafeBytes { data.append(contentsOf: $0) }
         let fileURL = depthDiskURL(for: url)
         let replaced = engine.sizeOnDisk(of: fileURL)
         do {
-            try (data as Data).write(to: fileURL)
+            try data.write(to: fileURL)
             engine.noteWrite(at: fileURL, replacing: replaced)
         } catch {
             AppLogger.diskCache.warning("Failed to persist thumbnail depth: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
@@ -302,30 +306,18 @@ final class ThumbnailDioramaCache {
     nonisolated private static func loadDepthFromDisk(for url: URL) -> StillDepthMap? {
         let fileURL = depthDiskURL(for: url)
         guard FileManager.default.fileExists(atPath: fileURL.path),
-              let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+              let data = try? Data(contentsOf: fileURL), data.count >= 12,
+              Array(data.prefix(4)) == [0x54, 0x44, 0x30, 0x32] else { return nil }
         engine.touch(fileURL)
-        let width = image.width, height = image.height
-        var values = [UInt8](repeating: 0, count: width * height)
-        let drawn = values.withUnsafeMutableBytes { buffer -> Bool in
-            guard let context = CGContext(
-                data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
-                bytesPerRow: width, space: CGColorSpaceCreateDeviceGray(),
-                bitmapInfo: CGImageAlphaInfo.none.rawValue
-            ) else { return false }
-            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-            return true
-        }
-        return drawn ? StillDepthMap(width: width, height: height, values: values) : nil
-    }
-
-    nonisolated private static func grayImage(_ values: [UInt8], width: Int, height: Int) -> CGImage? {
-        guard let provider = CGDataProvider(data: Data(values) as CFData) else { return nil }
-        return CGImage(
-            width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: width,
-            space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
-            provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent
-        )
+        let width = Int(data[4]) | Int(data[5]) << 8 | Int(data[6]) << 16 | Int(data[7]) << 24
+        let height = Int(data[8]) | Int(data[9]) << 8 | Int(data[10]) << 16 | Int(data[11]) << 24
+        guard width > 0, height > 0, width <= 16_384, height <= 16_384 else { return nil }
+        let count = width * height
+        guard count <= (data.count - 12) / MemoryLayout<Float>.stride,
+              data.count == 12 + count * MemoryLayout<Float>.stride else { return nil }
+        let values = data[12...].withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+        guard values.allSatisfy({ $0.isFinite }) else { return nil }
+        return StillDepthMap(width: width, height: height, normalizedValues: values)
     }
 
     nonisolated private static func encodeHeicData(from image: UIImage) -> Data? {
