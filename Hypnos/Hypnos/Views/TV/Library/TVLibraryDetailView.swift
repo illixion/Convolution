@@ -30,6 +30,7 @@ struct TVLibraryDetailView: View {
     @State private var seasons: [LibraryItem] = []
     @State private var selectedSeasonId: String?
     @State private var episodes: [LibraryItem] = []
+    @State private var episodeScrollTarget: String?
     @State private var similar: [LibraryItem] = []
     @State private var actionError: String?
     @State private var scrollOffset: CGFloat = 0
@@ -37,6 +38,7 @@ struct TVLibraryDetailView: View {
     @State private var showsSkipHint = false
     @State private var settingUpSkipMarkers = false
     @FocusState private var focus: Action?
+    @FocusState private var focusedEpisodeId: String?
 
     private enum Action: Hashable { case play, startOver, played, favorite }
 
@@ -44,6 +46,27 @@ struct TVLibraryDetailView: View {
     private var library: JellyfinLibrary? { LibraryService.current() }
     /// What Play actually starts: the item, or a series' next episode.
     private var playTarget: LibraryItem? { shown.kind == .series ? nextEpisode : shown }
+    /// Keep focus movement and visual order tied to the server's episode
+    /// numbers even when the endpoint returns its rows in a different order.
+    private var orderedEpisodes: [LibraryItem] {
+        episodes.sorted { lhs, rhs in
+            switch (lhs.episodeNumber, rhs.episodeNumber) {
+            case let (left?, right?) where left != right:
+                return left < right
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                let leftTitle = lhs.sortTitle ?? lhs.title
+                let rightTitle = rhs.sortTitle ?? rhs.title
+                if leftTitle.localizedStandardCompare(rightTitle) != .orderedSame {
+                    return leftTitle.localizedStandardCompare(rightTitle) == .orderedAscending
+                }
+                return lhs.id < rhs.id
+            }
+        }
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -214,30 +237,52 @@ struct TVLibraryDetailView: View {
                     .padding(.horizontal, 90)
             }
 
-            ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 44) {
-                    ForEach(episodes) { episode in
-                        Button {
-                            if episode.userData.resumeSeconds != nil {
-                                resumeChoice = episode
-                            } else {
-                                Task { await playback.play(episode) }
+            ScrollViewReader { episodeProxy in
+                ScrollView(.horizontal) {
+                    LazyHStack(alignment: .top, spacing: 44) {
+                        ForEach(orderedEpisodes) { episode in
+                            Button {
+                                if episode.userData.resumeSeconds != nil {
+                                    resumeChoice = episode
+                                } else {
+                                    Task { await playback.play(episode) }
+                                }
+                            } label: {
+                                TVEpisodeLockup(episode: episode, isResolving: playback.resolvingItemId == episode.id)
                             }
-                        } label: {
-                            TVEpisodeLockup(episode: episode, isResolving: playback.resolvingItemId == episode.id)
-                        }
-                        .buttonStyle(.borderless)
-                        .contextMenu {
-                            LibraryItemContextMenu(item: episode, playback: playback,
-                                                   showsDetails: false, showsSeries: false)
+                            .buttonStyle(.borderless)
+                            .focused($focusedEpisodeId, equals: episode.id)
+                            .id(episode.id)
+                            .contextMenu {
+                                LibraryItemContextMenu(item: episode, playback: playback,
+                                                       showsDetails: false, showsSeries: false)
+                            }
                         }
                     }
+                    .padding(.horizontal, 90)
                 }
-                .padding(.horizontal, 90)
+                .scrollClipDisabled()
+                .scrollIndicators(.hidden)
+                .focusSection()
+                .onChange(of: focusedEpisodeId) { _, id in
+                    guard let id, orderedEpisodes.contains(where: { $0.id == id }) else { return }
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        episodeProxy.scrollTo(id, anchor: .leading)
+                    }
+                }
+                .onChange(of: orderedEpisodes.map(\.id)) { _, ids in
+                    guard let target = episodeScrollTarget, ids.contains(target) else { return }
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        episodeProxy.scrollTo(target, anchor: .leading)
+                    }
+                }
+                .onChange(of: episodeScrollTarget) { _, target in
+                    guard let target, orderedEpisodes.contains(where: { $0.id == target }) else { return }
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        episodeProxy.scrollTo(target, anchor: .leading)
+                    }
+                }
             }
-            .scrollClipDisabled()
-            .scrollIndicators(.hidden)
-            .focusSection()
         }
     }
 
@@ -296,6 +341,7 @@ struct TVLibraryDetailView: View {
                     ?? seasons.first
                 selectedSeasonId = initial?.id
                 await loadEpisodes()
+                scrollToNextEpisode()
                 showsSkipHint = await IntroSkipperSetup.shared.suggestsInstall(for: nextEpisode)
             }
             similar = (try? await library.similar(itemId: fresh.seriesId ?? fresh.id)) ?? []
@@ -317,15 +363,29 @@ struct TVLibraryDetailView: View {
         guard let library else { return }
         detail = (try? await library.item(id: item.id)) ?? detail
         if shown.kind == .series {
+            let previousNextId = nextEpisode?.id
             nextEpisode = (try? await library.nextUp(seriesId: shown.id)) ?? nextEpisode
+            let nextSeason = seasons.first { $0.id == nextEpisode?.seasonId }
+                ?? seasons.first { $0.seasonNumber == nextEpisode?.seasonNumber && $0.seasonNumber != nil }
+            if let nextSeason, nextSeason.id != selectedSeasonId {
+                selectedSeasonId = nextSeason.id
+            }
             await loadEpisodes()
+            if nextEpisode?.id != previousNextId { scrollToNextEpisode() }
         }
     }
 
     private func selectSeason(_ id: String) {
         guard id != selectedSeasonId else { return }
+        let shouldRefocusEpisodes = focusedEpisodeId != nil
+        episodeScrollTarget = nil
         selectedSeasonId = id
-        Task { await loadEpisodes() }
+        Task {
+            await loadEpisodes()
+            if shouldRefocusEpisodes, let first = orderedEpisodes.first {
+                focusedEpisodeId = first.id
+            }
+        }
     }
 
     private func loadEpisodes() async {
@@ -333,6 +393,12 @@ struct TVLibraryDetailView: View {
         if let loaded = try? await library.episodes(seasonId: seasonId), seasonId == selectedSeasonId {
             episodes = loaded
         }
+    }
+
+    private func scrollToNextEpisode() {
+        guard let nextEpisode, orderedEpisodes.contains(where: { $0.id == nextEpisode.id }) else { return }
+        episodeScrollTarget = nextEpisode.id
+        if focusedEpisodeId != nil { focusedEpisodeId = nextEpisode.id }
     }
 
     private func togglePlayed() async {
