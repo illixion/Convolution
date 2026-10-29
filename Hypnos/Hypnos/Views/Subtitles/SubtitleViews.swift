@@ -87,6 +87,19 @@ struct SubtitleMenu: View {
                 }
                 .disabled(!track.isPlayable)
             }
+            if !controller.translationOptions.isEmpty {
+                Menu {
+                    ForEach(controller.translationOptions) { language in
+                        Button { close(); controller.selectTranslation(language) } label: {
+                            item(language.name, isSelected: controller.selected == .translated(to: language.code))
+                        }
+                    }
+                } label: {
+                    Label("Translate Captions To…", systemImage: "translate")
+                }
+                .menuStyle(.button)
+                .accessibilityIdentifier("player.subtitles.translateTo")
+            }
             #if !os(tvOS)
             Divider()
             Button {

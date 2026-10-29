@@ -1726,6 +1726,15 @@ final class VideoWindowModel {
         isPreparingShare = true
         defer { isPreparingShare = false }
 
+        #if HYPNOS_YOUTUBE
+        // What a YouTube video plays is a manifest (an .m3u8 of segment
+        // links, useless to the person it's sent to): share the page.
+        if let id = youTubeID {
+            presentShareSheet(url: id.watchURL)
+            return
+        }
+        #endif
+
         let url = video.streamURL
         let shareName = video.fileName ?? video.title
 

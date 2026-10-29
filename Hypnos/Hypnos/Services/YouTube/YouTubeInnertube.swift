@@ -174,12 +174,24 @@ actor YouTubeInnertube {
     }
 
     /// The video's caption tracks as the visionOS client lists them: signed
-    /// URLs that need no PO token. Translations (`translationLanguages`) are
-    /// left out on purpose.
-    func captionTracks(_ id: YouTubeVideoID) async throws -> [YouTubeCaptionTrack] {
+    /// URLs that need no PO token, the languages YouTube can translate them
+    /// into (`tlang`) and the track its default audio goes with.
+    func captionList(_ id: YouTubeVideoID) async throws -> YouTubeCaptionList {
         let json = try await visionPlayer(id)
         let renderer = (json["captions"] as? [String: Any])?["playerCaptionsTracklistRenderer"] as? [String: Any]
-        return ((renderer?["captionTracks"] as? [[String: Any]]) ?? []).compactMap(YouTubeCaptionTrack.init)
+        let tracks = ((renderer?["captionTracks"] as? [[String: Any]]) ?? []).compactMap(YouTubeCaptionTrack.init)
+        let translations = ((renderer?["translationLanguages"] as? [[String: Any]]) ?? []).compactMap { entry -> SubtitleTranslationLanguage? in
+            guard let code = entry["languageCode"] as? String else { return nil }
+            let names = entry["languageName"] as? [String: Any]
+            let theirs = (names?["simpleText"] as? String) ?? ((names?["runs"] as? [[String: Any]])?.first?["text"] as? String)
+            return SubtitleTranslationLanguage(code: code, name: Locale.current.localizedString(forIdentifier: code) ?? theirs ?? code)
+        }
+        // A video with several audio languages (dubs) has an entry for each,
+        // all naming the same tracks; the default one is what plays first.
+        let audio = renderer?["audioTracks"] as? [[String: Any]] ?? []
+        let audioIndex = (renderer?["defaultAudioTrackIndex"] as? Int) ?? 0
+        let defaultIndex = audio.indices.contains(audioIndex) ? audio[audioIndex]["defaultCaptionTrackIndex"] as? Int : nil
+        return YouTubeCaptionList(tracks: tracks, translations: translations, defaultTrackIndex: defaultIndex)
     }
 
     private func visionPlayer(_ id: YouTubeVideoID) async throws -> [String: Any] {
