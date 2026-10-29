@@ -43,6 +43,8 @@ trim AAC priming at every boundary. Audio fragments alone are read, never the
 whole file. This bypasses `AVPlayerItemSampleBufferOutput`, which delivered no
 audio on visionOS 27.2 despite the same code working on macOS.
 
+**Volatile and final results** (`CaptionWorker.receive`, fixed 2026-10-29): a volatile result is the recognizer's whole current guess from the last final on, as ONE run spanning the stretch (`6.92-10.26`); the final that settles it arrives word by word over a narrower range (`6.98-8.96`). Removing only the words inside the final's range left the guess behind, so a line showed twice ("I'll be your proxy… I'll be a proxy…"), with speaker detection on or off. A volatile result now replaces the previous volatile words (`volatileWords`), and a final drops the guesses it covers. `overlappingResultsDoNotRepeatWords` (`CAPTION_INTEGRATION=1 CAPTION_FIXTURE=<a speech file over ~15 s>`, e.g. from `say -o`) fails on the old merge and passes now.
+
 **Every other HLS stream is read the same way** (2026-10-29, `StreamCaptionAudio`
 → `HLSCaptionAudio` in the package): YouTube and a Jellyfin remux or transcode
 had fallen back to the OS output and failed on the headset with "This stream

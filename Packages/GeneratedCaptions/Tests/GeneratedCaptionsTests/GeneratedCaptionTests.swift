@@ -145,6 +145,48 @@ struct GeneratedCaptionIntegrationTests {
         #expect(captions.map(\.text).joined().lowercased().contains("caption"))
         if speakers { #expect(captions.contains { $0.speaker != nil }) }
     }
+    /// The recognizer's volatile guesses and the final results that settle
+    /// them overlap in time; no sentence may show twice, with speaker
+    /// detection on or off.
+    @Test(.timeLimit(.minutes(3)), arguments: [false, true]) func overlappingResultsDoNotRepeatWords(speakers: Bool) async throws {
+        guard #available(macOS 26, *) else { return }
+        let path = try #require(ProcessInfo.processInfo.environment["CAPTION_FIXTURE"])
+        let transcriber = SpeechTranscriber(locale: Locale(identifier: "en-US"), transcriptionOptions: [],
+            reportingOptions: [.volatileResults], attributeOptions: [.audioTimeRange])
+        if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+            try await request.downloadAndInstall()
+        }
+        let asset = AVURLAsset(url: URL(fileURLWithPath: path))
+        let worker = CaptionWorker(transcriber: transcriber)
+        let model: URL? = speakers ? try await Self.installedSpeakerModel() : nil
+        try await worker.prepare(asset: asset, item: AVPlayerItem(asset: asset), start: 0, speakerModel: model, selectedAudioTrackID: nil)
+        let results = Task {
+            for try await result in transcriber.results { await worker.receive(result) }
+        }
+        defer { results.cancel(); Task { await worker.cancel() } }
+        var state = try await worker.advance(playhead: 0, rate: 1)
+        let deadline = Date.now.addingTimeInterval(90)
+        var playhead = 0.0
+        while !state.finished, Date.now < deadline {
+            // Play along, as a player would: the playhead moves, results keep arriving.
+            playhead = min(playhead + 0.5, max(0, state.readyThrough - 1))
+            state = try await worker.advance(playhead: playhead, rate: 1)
+            try await Task.sleep(for: .milliseconds(150))
+        }
+        try await Task.sleep(for: .milliseconds(500))
+        let captions = await worker.snapshot(near: 0)
+        // No sentence may appear twice in a row.
+        for caption in captions {
+            // Punctuation can be all that separates the copies ("okay.I'll").
+            let words = caption.text.lowercased().split { !($0.isLetter || $0.isNumber || $0 == "'") }.map(String.init)
+            for length in 3 ... max(3, words.count / 2) where words.count >= length * 2 {
+                for index in 0 ... words.count - length * 2 {
+                    #expect(Array(words[index ..< index + length]) != Array(words[index + length ..< index + length * 2]),
+                            "repeated: \(caption.text)")
+                }
+            }
+        }
+    }
     @Test(.timeLimit(.minutes(2))) func diarizationDistinguishesTwoVoices() async throws {
         guard #available(macOS 26, *) else { return }
         let path = try #require(ProcessInfo.processInfo.environment["CAPTION_TWO_SPEAKERS"])

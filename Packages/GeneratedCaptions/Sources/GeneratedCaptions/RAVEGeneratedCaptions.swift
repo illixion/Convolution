@@ -327,6 +327,7 @@ actor CaptionWorker {
     private var speakerThrough: Double = .infinity
     private var ended = false
     private var words: [RAVEGeneratedCaption] = []
+    private var volatileWords: [RAVEGeneratedCaption] = []
     private var speakers: [(start: Double, end: Double, id: Int)] = []
     private var analysisError: String?
 
@@ -396,27 +397,42 @@ actor CaptionWorker {
     private func noteAnalyzed(_ time: Double) {
         if time.isFinite { analyzedThrough = max(analyzedThrough, time) }
     }
+    /// A volatile result is the recognizer's current guess for everything
+    /// not yet final, from the last final on, as one run spanning the whole
+    /// stretch; each one replaces the one before. A final result arrives word
+    /// by word over a narrower range than the guess it settles, so removing
+    /// only the words inside its range left that guess behind, and the line
+    /// showed twice ("I'll be your proxy… I'll be a proxy…").
     func receive(_ result: SpeechTranscriber.Result) {
         let start = result.range.start.seconds, end = result.range.end.seconds
         guard start.isFinite, end.isFinite else { return }
-        words.removeAll { $0.start >= start - 0.001 && $0.end <= end + 0.001 }
-        var added = false
+        var fresh: [RAVEGeneratedCaption] = []
         for run in result.text.runs {
             guard let range = run.audioTimeRange else { continue }
             let text = String(result.text[run.range].characters)
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
-            words.append(.init(start: range.start.seconds, end: range.end.seconds, text: text, speaker: nil))
-            added = true
+            fresh.append(.init(start: range.start.seconds, end: range.end.seconds, text: text, speaker: nil))
         }
-        if !added { words.append(.init(start: start, end: end, text: String(result.text.characters), speaker: nil)) }
-        words.sort { $0.start < $1.start }
+        if fresh.isEmpty { fresh.append(.init(start: start, end: end, text: String(result.text.characters), speaker: nil)) }
+        if result.isFinal {
+            words.removeAll { $0.start >= start - 0.001 && $0.end <= end + 0.001 }
+            // The guess for this stretch is settled; what the recognizer
+            // still guesses beyond it comes with its next volatile result.
+            volatileWords.removeAll { $0.start < end - 0.001 }
+            words += fresh
+            words.sort { $0.start < $1.start }
+        } else {
+            volatileWords = fresh
+        }
         noteAnalyzed(end)
     }
     func snapshot(near time: Double) -> [RAVEGeneratedCaption] {
         words.removeAll { $0.end < time - 60 }
+        volatileWords.removeAll { $0.end < time - 60 }
         speakers.removeAll { $0.end < time - 60 }
         var result: [RAVEGeneratedCaption] = []
-        for var word in words {
+        // Final words, then the guess after the last of them.
+        for var word in (words + volatileWords).sorted(by: { $0.start < $1.start }) {
             word.speaker = speakers.max { overlap($0, word) < overlap($1, word) }.flatMap { overlap($0, word) > 0 ? $0.id : nil }
             if let last = result.last, last.speaker == word.speaker, word.start - last.end < 0.7,
                word.end - last.start < 3.5, (last.text + word.text).count < 90 {
