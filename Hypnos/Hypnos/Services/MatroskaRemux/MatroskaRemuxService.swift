@@ -168,6 +168,15 @@ final class MatroskaRemuxService: Sendable {
         state.withLock { $0.entries[source.absoluteString]?.session }
     }
 
+    /// Resolve a playing loopback URL without guessing the original server URL.
+    func session(playing playlist: URL) -> RemuxSession? {
+        state.withLock { state in
+            state.entries.values.first {
+                playlist.deletingLastPathComponent() == $0.baseURL
+            }?.session
+        }
+    }
+
     private static func url(for entry: Entry, form: Form) -> URL {
         let muxed: Bool = switch form {
         case .master: false

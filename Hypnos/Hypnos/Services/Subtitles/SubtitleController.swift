@@ -206,6 +206,9 @@ final class SubtitleController {
     private static let generatedTrack = LibrarySubtitleTrack(id: -10000, sourceId: "generated", language: nil, name: "AI Captions")
 
     init() {
+        generated.onDiagnostic = { message in
+            AppLogger.subtitles.info("\(message, privacy: .public)")
+        }
         generated.onChange = { [weak self] in
             #if os(iOS) || os(macOS)
             self?.translator.generatedChanged(self?.generated.captions ?? [])
@@ -223,7 +226,9 @@ final class SubtitleController {
         generated.bind(player: nil)
         generated.onBuffering = buffering
         canGenerate = player != nil
-        generated.bind(player: player)
+        generated.bind(player: player, audioSource: { item, start in
+            try await MatroskaCaptionAudio.source(item: item, start: start)
+        })
     }
     func bindGeneratedFilm(_ player: FilmPlayer) {
         let resume = generated.enabled

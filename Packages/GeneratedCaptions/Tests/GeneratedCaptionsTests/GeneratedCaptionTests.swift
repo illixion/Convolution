@@ -27,6 +27,53 @@ struct GeneratedCaptionBufferTests {
 /// CAPTION_TWO_SPEAKERS; CAPTION_HLS_FIXTURE is an optional local HLS fixture.
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["CAPTION_INTEGRATION"] == "1"))
 struct GeneratedCaptionIntegrationTests {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["CAPTION_FRAGMENT_FIXTURE"] != nil), arguments: [0, 7])
+    func fragmentedAudioKeepsAbsoluteTimeAndDecodesAcrossBoundaries(first: Int) async throws {
+        let directory = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["CAPTION_FRAGMENT_FIXTURE"]))
+        let fragments = CaptionFragmentFixture(directory: directory, indices: Array(first ..< first + 3))
+        let source = RAVECaptionAudioSource.fragmentedMP4 { try await fragments.next() }
+        var firstTime: Double?
+        var through = 0.0
+        var energy = 0.0
+        while let chunk = try await source.next() {
+            if firstTime == nil { firstTime = chunk.time }
+            else { #expect(abs(chunk.time - through) < 0.05) }
+            through = chunk.time + Double(chunk.buffer.frameLength) / chunk.buffer.format.sampleRate
+            if let values = chunk.buffer.floatChannelData {
+                for channel in 0..<Int(chunk.buffer.format.channelCount) {
+                    energy += UnsafeBufferPointer(start: values[channel], count: Int(chunk.buffer.frameLength)).reduce(0) { $0 + Double($1 * $1) }
+                }
+            }
+        }
+        #expect(abs(try #require(firstTime) - Double(first * 4)) < 0.05)
+        #expect(through > Double((first + 3) * 4) - 0.1)
+        #expect(energy > 0.1)
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["CAPTION_FRAGMENT_FIXTURE"] != nil)) @MainActor
+    func fragmentedAudioGeneratesCaptionsWithoutAnHLSOutput() async throws {
+        let directory = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["CAPTION_FRAGMENT_FIXTURE"]))
+        let session = RAVEGeneratedCaptions()
+        session.bindExternal(position: { 28 }, duration: { 60 }, speed: { 1 }, playing: { false }, source: { _ in
+            let fragments = CaptionFragmentFixture(directory: directory, indices: Array(7..<13))
+            return .fragmentedMP4 { try await fragments.next() }
+        })
+        defer { session.stop() }
+        // Each restart opens a fresh reader near the playhead; no player seek
+        // or sample-buffer output is needed to escape the caption startup hold.
+        for _ in 0..<2 {
+            session.start()
+            let deadline = Date.now + 25
+            while (session.captions.isEmpty || session.isBuffering), session.error == nil, Date.now < deadline {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            #expect(session.error == nil)
+            #expect(!session.captions.isEmpty)
+            #expect(session.captions.allSatisfy { $0.start >= 28 })
+            #expect(!session.isBuffering)
+            session.stop()
+        }
+    }
     @Test(.timeLimit(.minutes(2))) @MainActor func failedSourceReleasesSessionAndCanRetry() async throws {
         let captions = RAVEGeneratedCaptions()
         captions.bindExternal(position: { 0 }, duration: { 60 }, speed: { 1 }, playing: { true },
@@ -195,6 +242,17 @@ struct GeneratedCaptionIntegrationTests {
 
 }
 
+private actor CaptionFragmentFixture {
+    let directory: URL
+    var indices: [Int]
+    init(directory: URL, indices: [Int]) { self.directory = directory; self.indices = indices }
+    func next() throws -> Data? {
+        guard !indices.isEmpty else { return nil }
+        let index = indices.removeFirst()
+        return try Data(contentsOf: directory.appendingPathComponent("init.mp4"))
+            + Data(contentsOf: directory.appendingPathComponent("audio\(index).m4s"))
+    }
+}
 
 private actor SilentCaptionAudio {
     var time: Double = 0

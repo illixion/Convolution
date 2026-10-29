@@ -47,6 +47,9 @@ public final class RAVEGeneratedCaptions {
     private weak var bufferingItem: AVPlayerItem?
     private var originalForwardBufferDuration: TimeInterval?
     private var externalSource: (@Sendable (Double) async throws -> RAVECaptionAudioSource)?
+    private var playerAudioSource: (@MainActor (AVPlayerItem, Double) async throws -> RAVECaptionAudioSource?)?
+    /// Code-defined route/progress diagnostics; never contains URLs or dialogue.
+    public var onDiagnostic: ((String) -> Void)?
     private var externalPosition: (() -> Double)?
     private var externalDuration: (() -> Double)?
     private var externalSpeed: (() -> Double)?
@@ -55,7 +58,7 @@ public final class RAVEGeneratedCaptions {
     public func bindExternal(position: @escaping () -> Double, duration: @escaping () -> Double,
                              speed: @escaping () -> Double, playing: @escaping () -> Bool,
                              source: @escaping @Sendable (Double) async throws -> RAVECaptionAudioSource) {
-        stop(); player = nil
+        stop(); player = nil; playerAudioSource = nil
         externalPosition = position; externalDuration = duration
         externalSpeed = speed; externalPlaying = playing; externalSource = source
     }
@@ -66,11 +69,12 @@ public final class RAVEGeneratedCaptions {
     private var generation = UUID()
     public init() {}
 
-    public func bind(player: AVPlayer?) {
+    public func bind(player: AVPlayer?, audioSource: (@MainActor (AVPlayerItem, Double) async throws -> RAVECaptionAudioSource?)? = nil) {
         guard self.player !== player || externalSource != nil else { return }
         let restart = enabled
         stop()
         self.player = player
+        self.playerAudioSource = audioSource
         externalSource = nil; externalPosition = nil; externalDuration = nil
         externalSpeed = nil; externalPlaying = nil
         enabled = restart
@@ -84,6 +88,7 @@ public final class RAVEGeneratedCaptions {
             $0.isEnabled && $0.assetTrack?.mediaType == .audio
         })?.assetTrack?.trackID
         let externalSource = externalSource
+        let playerAudioSource = playerAudioSource
         // HLS audio comes from the item's own output, which follows whatever
         // the player renders; its track IDs are renumbered on every seek.
         let followsAudioTrack = externalSource == nil && !isHLS(item?.asset)
@@ -130,7 +135,13 @@ public final class RAVEGeneratedCaptions {
                 self.worker = worker
                 defer { Task { await worker.cancel() } }
                 let begin = max(0, position())
-                let source = try await externalSource?(begin)
+                let audioGroup = try? await item?.asset.loadMediaSelectionGroup(for: .audible)
+                let audioOption = audioGroup.flatMap { item?.currentMediaSelection.selectedMediaOption(in: $0) }
+                let source: RAVECaptionAudioSource?
+                if let externalSource { source = try await externalSource(begin) }
+                else if let item { source = try await playerAudioSource?(item, begin) }
+                else { source = nil }
+                onDiagnostic?(source != nil ? "AI captions: independent audio decoder" : (isHLS(item?.asset) ? "AI captions: OS HLS audio output" : "AI captions: file audio reader"))
                 try await worker.prepare(asset: item?.asset, item: item, start: begin,
                     speakerModel: model, selectedAudioTrackID: selectedAudioTrackID, external: source)
                 try Task.checkCancellation()
@@ -153,7 +164,12 @@ public final class RAVEGeneratedCaptions {
                 var previous = position()
                 var lastWall = Date.now
                 var holdingSince: Date?
+                var reportedAudio = false
                 while !Task.isCancelled, generation == token, isCurrent() {
+                    if source != nil, let audioGroup,
+                       item?.currentMediaSelection.selectedMediaOption(in: audioGroup) != audioOption {
+                        start(); return
+                    }
                     // A file reader is tied to one track. Follow an audio
                     // selection made while captions are already running.
                     if followsAudioTrack, item?.tracks.first(where: {
@@ -180,6 +196,10 @@ public final class RAVEGeneratedCaptions {
                         policy.resumeSeconds = 4
                     }
                     audioBufferedSeconds = max(0, state.audioThrough - now)
+                    if !reportedAudio, audioBufferedSeconds > 0 {
+                        reportedAudio = true
+                        onDiagnostic?("AI captions: decoded audio arriving")
+                    }
                     analysisBufferedSeconds = max(0, state.readyThrough - now)
                     lookaheadProgress = min(1, analysisBufferedSeconds / max(0.25, policy.resumeSeconds * max(0.25, speed())))
                     let needsHold = policy.needsHold(playhead: now, readyThrough: state.readyThrough,
@@ -194,6 +214,7 @@ public final class RAVEGeneratedCaptions {
                                 : "Speech recognition couldn't analyze this audio quickly enough to stay ahead. Try another stream or turn AI captions off.")
                         }
                     } else { holdingSince = nil }
+                    if isBuffering, !needsHold { onDiagnostic?("AI captions: analysis ready") }
                     setBuffering(needsHold)
                     status = needsHold ? "Buffering AI captions…" : "AI captions"
                     try await Task.sleep(for: .milliseconds(100))
@@ -204,6 +225,7 @@ public final class RAVEGeneratedCaptions {
             catch {
                 guard generation == token else { return }
                 let message = error.localizedDescription
+                onDiagnostic?("AI captions: failed (code \((error as NSError).code)); audio ahead \(audioBufferedSeconds), analysis ahead \(analysisBufferedSeconds)")
                 // Release the reader, model lease, forward-buffer override and
                 // playback hold on every failure, not only when switched off.
                 stop()
@@ -248,6 +270,7 @@ public final class RAVEGeneratedCaptions {
                 let message = self.audioBufferedSeconds < 0.25
                     ? "This stream isn't providing decoded audio to AI captions. Try another stream or use its built-in subtitles."
                     : "Speech recognition couldn't analyze this audio quickly enough to stay ahead. Try another stream or turn AI captions off."
+                self.onDiagnostic?("AI captions: hold timed out; audio ahead \(self.audioBufferedSeconds), analysis ahead \(self.analysisBufferedSeconds)")
                 self.stop()
                 self.error = message
                 self.status = "AI captions failed"
