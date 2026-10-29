@@ -224,6 +224,12 @@ def process(capture, output, args):
     save(output / 'alpha.png', alpha)
     save(output / 'background.png', B)
     save(output / 'foreground-premult.png', P)
+    near_depth.astype('<f4').tofile(output / 'near-depth.f32')
+    far_depth.astype('<f4').tofile(output / 'far-depth.f32')
+    (output / 'layer-map.json').write_text(json.dumps({
+        'width': int(color.shape[1]), 'height': int(color.shape[0]),
+        'format': 'float32-little-endian', 'origin': 'top-left',
+    }, indent=2) + '\n')
     for eye, sign in [('left', 1), ('right', -1)]:
         image, diagnostics = render(layers, meta['strength'], meta['convergence'], sign)
         report['eyes'][eye] = diagnostics

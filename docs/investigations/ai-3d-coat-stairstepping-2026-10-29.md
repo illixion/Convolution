@@ -330,3 +330,40 @@ located the wait in `AVAssetReaderOutput.copyNextSampleBuffer`, outside changed
 code. The other **204 tests pass** with that suite excluded, and its seven tests
 are checked separately. No production code or public API changed, so no app
 rebuild or deployment was needed for these diagnostic changes.
+
+### Broader scenes and GPU ray-warp spike (2026-10-29)
+
+The layer hypothesis and ray map were checked on four additional 1920×1080
+frames from the supplied episode, sampled at nominal 10:00, 15:00, 25:00 and
+30:00: overlapping pale coats, a face/hair edge against curtains, fine hair and
+medical leads against a dark room, and hair/skin/fabric against bedding. Each
+used the same local Small model and a fresh first-frame inference; these are
+single-frame scene checks, not temporal captures. The broad comparison sheet is
+`build/edge-comparison/broad-scenes/edge-crops.png`.
+
+Those comparisons do **not** establish a general visible improvement. The
+layered results are close to the connected mesh at full-frame scale, and the
+hair and overlapping-fabric cases show no dependable edge-quality win. The
+coat remains the clearest positive case. The decomposition still reports
+3,290–8,887 premultiplied RGB channels outside the physical range by more than
+one code value across these scenes. It remains an approximate layer guess.
+
+An eight-frame sequence at nominal 24 fps around 25:00 retained one depth
+provider across the frames. The experimental GPU raycaster in
+`scripts/stereo-matte-gpu-warp.swift` intersects output rays with the two
+pre-separated horizontal depth surfaces, chooses the nearest valid surface,
+and combines premultiplied foreground coverage with the background sample. It
+is intentionally a standalone offline spike; the matte/depth layer preparation
+is still CPU-side, and it is not wired into Vergence or the app. On this Mac,
+the Metal kernel took 5–8 ms per 1080p eye. Across all four stills and eight
+sequence frames (24 eye renders), it produced no uncovered pixels. Compared
+with the CPU raycaster using the same quantized layer inputs, RGB MAE was
+0.03–0.07 code values and the 99th-percentile channel difference was one code
+value. The timing excludes matting, video decode, model inference, pixel-buffer
+transfer and visionOS compositor work; it is not an AVP frame-budget result.
+
+The spike shows that per-eye layer raycasting itself can run on Metal while
+matching the slow reference. It does not solve the still-open problem: producing
+stable, physically plausible foreground coverage and uncontaminated background
+layers on the GPU across hair, thin structures, overlapping subjects, motion
+and cuts. No production renderer, setting, build or device was changed.
