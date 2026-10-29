@@ -41,9 +41,27 @@ single codec decoder across fragments and restores absolute PTS using
 Vergence's `FragmentTimes`: separate AVAssetReader PCM decoders reset time and
 trim AAC priming at every boundary. Audio fragments alone are read, never the
 whole file. This bypasses `AVPlayerItemSampleBufferOutput`, which delivered no
-audio on visionOS 27.2 despite the same code working on macOS. Other HLS routes
-still use that OS output; the restart fix alone does not solve its headset
-failure. The Subtitles log reports the route, first decoded audio, and buffer
+audio on visionOS 27.2 despite the same code working on macOS.
+
+**Every other HLS stream is read the same way** (2026-10-29, `StreamCaptionAudio`
+→ `HLSCaptionAudio` in the package): YouTube and a Jellyfin remux or transcode
+had fallen back to the OS output and failed on the headset with "This stream
+isn't providing decoded audio to AI captions" (log: "OS HLS audio output", then
+"hold timed out; audio ahead 0.0"). The playlists are read with the stream's
+credentials (`MediaAuthorization`), the rendition the player has selected is
+matched by NAME then LANGUAGE (`HLSPlaylist.rendition`), and only segments from
+the playhead on are fetched. Two containers: **fragmented MP4** (an `EXT-X-MAP`;
+Jellyfin's `SegmentContainer=mp4`, muxed with the picture, so its video bytes
+are fetched and ignored) through `fragmentedMP4`, and **packed audio** (ADTS AAC
+behind an ID3 tag, no init segment; YouTube's audio renditions) through
+`packedAudio`, placed by the playlist's own timeline rather than the ID3
+timestamp. MPEG-TS segments and encrypted streams fail with their own message.
+A progressive file still uses the file reader. The log now says "independent
+audio decoder" for all of these. Checked: package tests for the playlist parser
+and rendition choice, and `CAPTION_PACKED_FIXTURE=a.aac,b.aac
+CAPTION_PACKED_DURATIONS=… swift test --filter PackedCaptionAudioIntegrationTests`
+against two real YouTube segments on the Mac. **Not yet checked on the headset
+or against a Jellyfin stream.** The Subtitles log reports the route, first decoded audio, and buffer
 levels at failure, without URLs or dialogue.
 
 ## Library downloads (offline)

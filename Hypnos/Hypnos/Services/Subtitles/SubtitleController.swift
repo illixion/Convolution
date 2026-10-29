@@ -243,7 +243,10 @@ final class SubtitleController {
         generated.onBuffering = buffering
         canGenerate = player != nil
         generated.bind(player: player, audioSource: { item, start in
-            try await MatroskaCaptionAudio.source(item: item, start: start)
+            // A device remux's own fragments, else any other HLS stream's
+            // segments; a file the player reads directly needs neither.
+            if let remux = try await MatroskaCaptionAudio.source(item: item, start: start) { return remux }
+            return try await StreamCaptionAudio.source(item: item, start: start)
         })
     }
     func bindGeneratedFilm(_ player: FilmPlayer) {
