@@ -280,8 +280,14 @@ struct NativeMetalVideoPlayerView {
             }
         }
 
-        if coordinator.loadedURL != videoURL {
-            coordinator.load(url: videoURL, startPaused: coordinator.loadedURL != nil && (playbackModel?.isPaused ?? false))
+        let identity = playbackModel?.video.identity ?? videoURL.absoluteString
+        if coordinator.loadedURL != videoURL || coordinator.loadedIdentity != identity {
+            let sameVideo = coordinator.loadedIdentity == identity
+            coordinator.load(
+                url: videoURL,
+                identity: identity,
+                startPaused: sameVideo && coordinator.loadedURL != nil && (playbackModel?.isPaused ?? false)
+            )
         }
 
         coordinator.setRoomActive(isRoomActive)
@@ -303,6 +309,7 @@ struct NativeMetalVideoPlayerView {
         weak var host: NativeVideoHostView?
         var renderer: MetalImageRenderer?
         var loadedURL: URL?
+        var loadedIdentity: String?
         var visualAdjustments = VisualAdjustments() {
             didSet { updatePresentation() }
         }
@@ -398,9 +405,10 @@ struct NativeMetalVideoPlayerView {
             }
         }
 
-        func load(url: URL, startPaused: Bool = false) {
+        func load(url: URL, identity: String, startPaused: Bool = false) {
             cleanupPlayer()
             loadedURL = url
+            loadedIdentity = identity
             guard let renderer else { return }
             dynamicRange = .unknown
             needsSystemRenderer = false

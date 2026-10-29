@@ -33,6 +33,9 @@ final class LibraryWatchState {
 
     /// Stop reports still on their way to the server, per item.
     @ObservationIgnored private var inFlight: [String: Int] = [:]
+    /// Keep active playback shelves current without refreshing the whole
+    /// Library for every ten-second progress packet.
+    @ObservationIgnored private var lastProgressNotification: [String: (position: Double, date: Date)] = [:]
 
     private init() {}
 
@@ -43,6 +46,22 @@ final class LibraryWatchState {
     func reportLanded(itemId: String) {
         let remaining = (inFlight[itemId] ?? 1) - 1
         inFlight[itemId] = remaining > 0 ? remaining : nil
+        lastProgressNotification[itemId] = nil
+        revision += 1
+    }
+
+    /// Refresh Library screens as playback advances, at most every 30
+    /// seconds per title. A stop still refreshes immediately via
+    /// `reportLanded(itemId:)`.
+    func progressReported(itemId: String, positionSeconds: Double) {
+        guard positionSeconds.isFinite, positionSeconds >= 0 else { return }
+        let now = Date()
+        if let last = lastProgressNotification[itemId],
+           now.timeIntervalSince(last.date) < 30,
+           positionSeconds - last.position < 30 {
+            return
+        }
+        lastProgressNotification[itemId] = (positionSeconds, now)
         revision += 1
     }
 

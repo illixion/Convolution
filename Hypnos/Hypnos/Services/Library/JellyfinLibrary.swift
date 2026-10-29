@@ -1196,6 +1196,9 @@ actor JellyfinLibrary: MediaServerLibrary {
         // A download keeps its own place too, so an offline watch resumes
         // where it stopped and reaches the server later.
         LibraryOfflineStore.shared.noteLocalPosition(itemId: itemId, seconds: positionSeconds, synced: reached)
+        if reached {
+            await LibraryWatchState.shared.progressReported(itemId: itemId, positionSeconds: positionSeconds)
+        }
     }
 
     func reportPlaybackStopped(itemId: String, positionSeconds: Double) async {
