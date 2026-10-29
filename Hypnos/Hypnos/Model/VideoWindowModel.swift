@@ -1830,9 +1830,11 @@ final class VideoWindowModel {
     }
 
     func handleScenePhaseChange(from oldPhase: ScenePhase, to newPhase: ScenePhase) {
+        // Home View and system panels make the scene inactive while its
+        // window remains visible. Only backgrounding leaves the room.
         if newPhase == .active {
             isInActiveRoom = true
-        } else if oldPhase == .active && (newPhase == .inactive || newPhase == .background) {
+        } else if newPhase == .background {
             isInActiveRoom = false
             if isRenewableJellyfinStream {
                 shouldRenewStreamOnExplicitResume = true

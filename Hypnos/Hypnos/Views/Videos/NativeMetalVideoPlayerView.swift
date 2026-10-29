@@ -502,6 +502,7 @@ struct NativeMetalVideoPlayerView {
                 let status = observed.timeControlStatus
                 Task { @MainActor [weak self] in
                     guard let self, self.player === observed else { return }
+                    self.needsPictureRedraw = true
                     self.reportPlaybackState()
                     if status == .playing {
                         self.involuntaryResumeCount = 0
@@ -599,6 +600,7 @@ struct NativeMetalVideoPlayerView {
         func setRoomActive(_ active: Bool) {
             guard isRoomActive != active else { return }
             isRoomActive = active
+            needsPictureRedraw = true
             if active {
                 // Restore the state from when the room deactivated — a video
                 // the user manually paused must stay paused (focus flaps from
@@ -659,6 +661,8 @@ struct NativeMetalVideoPlayerView {
         }
 
         private func cleanupPlayer() {
+            lastPixelBuffer = nil
+            needsPictureRedraw = true
             intendsToPlay = false
             if player != nil { onPlayerChanged?(nil) }
             if let timeObserver, let player {
@@ -720,7 +724,7 @@ struct NativeMetalVideoPlayerView {
                 PlaybackState(
                     currentTime: currentTime ?? player.currentTime().seconds,
                     duration: duration.isFinite ? duration : 0,
-                    paused: analysisBuffering ? !intendsToPlay : player.timeControlStatus != .playing,
+                    paused: analysisBuffering ? !intendsToPlay : player.timeControlStatus == .paused,
                     muted: player.isMuted,
                     buffered: buffered,
                     waiting: !analysisBuffering && player.timeControlStatus == .waitingToPlayAtSpecifiedRate
@@ -729,6 +733,7 @@ struct NativeMetalVideoPlayerView {
         }
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+            needsPictureRedraw = true
             intermediate = nil
             // A cleared frame at the new size keeps the hit region whole
             // (see showSystemLayer); the drawable has the size next turn.
@@ -739,6 +744,11 @@ struct NativeMetalVideoPlayerView {
                 }
             }
         }
+
+        // Keep the last decoded picture available when the compositor needs
+        // a new drawable after suspension, before decoding resumes.
+        private var lastPixelBuffer: CVPixelBuffer?
+        private var needsPictureRedraw = true
 
         func draw(in view: MTKView) {
             guard let renderer,
@@ -751,8 +761,13 @@ struct NativeMetalVideoPlayerView {
             }
 
             let itemTime = output.itemTime(forHostTime: CACurrentMediaTime())
-            guard output.hasNewPixelBuffer(forItemTime: itemTime),
-                  let pixelBuffer = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil),
+            if output.hasNewPixelBuffer(forItemTime: itemTime),
+               let buffer = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil) {
+                lastPixelBuffer = buffer
+                needsPictureRedraw = true
+            }
+            guard needsPictureRedraw else { return }
+            guard let pixelBuffer = lastPixelBuffer,
                   let sourceTexture = makeTexture(from: pixelBuffer, cache: textureCache) else {
                 return
             }
@@ -812,6 +827,7 @@ struct NativeMetalVideoPlayerView {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
             encoder.endEncoding()
 
+            needsPictureRedraw = false
             commandBuffer.present(drawable)
             commandBuffer.commit()
         }
