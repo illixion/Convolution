@@ -195,3 +195,138 @@ swift test --package-path ../vergence --filter VideoStereoFrameLabTests/exportFr
 Then pass that output directory directly to `stereo-edge-lab`; it detects the floating-point files. The diagnostic model/source/output are explicit environment inputs, so ordinary package tests do not run personal-video inference or export pictures. Prototype code is confined to the opt-in test harness. The tool and harness do not install, launch or change the app.
 
 Validation: original-file runs completed with all four models; the final float-export harness run passed; the standalone tool compiled and completed all supported sampling variants with the recorded float plane. The complete Vergence test run passed **211 tests across four test bundles**. No production source/public API changed, so no app platform build or headset deployment was necessary. There is still **no acceptable production fix** among these variants.
+
+## Follow-up: preserve coverage, then move the two contributions
+
+There is now a **visibly better offline candidate for both coat edges**, in
+`scripts/stereo-matte-lab.py`. It is not enabled in the app. The candidate separates
+foreground coverage and radiance from a background estimate, moves each layer
+using its own depth, and composites the results. Strength remains **0.008** and
+convergence **1**. No coat color or crop coordinates enter that renderer; the
+crop and R−B measurements below are evaluation fixtures only.
+
+The controlled hypothesis is two depth layers, partitioned at budgeted depth
+0.5. Eroding each side by 16 source pixels supplies confident foreground and
+background seeds. Normalized Gaussian convolution extends their colors and
+depths into the boundary band. A local RGB color-line projection estimates
+coverage `a`. The background estimate transitions continuously to the actual
+source as coverage approaches zero. The foreground's premultiplied contribution
+is the residual `P = C − (1 − a) B`, so recomposition at zero disparity preserves
+the source. These are **experimental parameters and a two-layer assumption**,
+not a generally validated segmentation method.
+
+Two intermediate mistakes were instructive:
+
+- Clipping `P` into a legal premultiplied range before moving it created a second
+  contour in the right eye. A hard `a == 0` switch between estimated and original
+  background also introduced a discontinuity. Keeping floating-point residuals
+  and a continuous transition removes those particular defects, but does not
+  make an underdetermined foreground/background estimate physically exact.
+- Fixed-point inverse warping failed to converge at thousands of pixels elsewhere
+  in the full image. The final experiment instead intersects each output ray with
+  the forward-warped horizontal segments and selects the nearest surface when
+  segments overlap. Across the twelve frames, no ray's forward-equation residual
+  exceeded 0.25 pixel; the maximum was **0.0163 pixel**. This is a numerical check,
+  not proof that the estimated scene geometry is correct.
+
+### Evidence and limits
+
+The frame harness now accepts a consecutive PNG directory and retains **one
+CoreMLDepthProvider across the sequence**, exercising temporal refinement and
+shot anchoring. Twelve consecutive original-file frames were extracted at the
+24,000/1,001 fps cadence, starting near 12:22. Harness metadata uses a caller-
+supplied nominal start of 742 seconds, not decoded MKV timestamps. The first
+frame is cold; the remaining eleven share provider state. An additional frame
+near 12:25 also shows the coat-edge improvement. Partitions at 0.4 and 0.6 retain
+it on the first frame without retuning the color calculation.
+
+`scripts/measure-stereo-matte.py` measures rows 580–670. These are means of the
+per-frame median 90–10% R−B transition widths and per-frame contour residual RMS
+(Gaussian sigma 3 rows). Do not compare their absolute RMS directly with the
+older paused-frame table: the source poses and row range differ.
+
+| Image | Transition width | Contour residual RMS |
+| --- | ---: | ---: |
+| Source | 7.95 px | 0.478 px |
+| Production left | 2.31 px | 0.321 px |
+| Prototype left | 6.10 px | 0.359 px |
+| Production right | 15.73 px | 1.245 px |
+| Prototype right | 6.15 px | 0.343 px |
+
+The important improvement is balanced edge width and much less right-eye
+fringing. **The left-eye RMS is not lower**; its less conspicuous teeth accompany
+a broader edge, closer to the source's softness. There is no ground-truth second
+camera view here, and this is not a general perceptual score.
+
+A comparison with [PyMatting's closed-form alpha and multi-level foreground
+estimation](https://pymatting.github.io/examples.html), using the same automatic
+trimap, also recovered a soft silhouette but left a dark contour in the estimated
+background. Substituting an extended clean-background estimate improved that
+result. This independently reinforces the need to check both the matte and the
+revealed background; an attractive cutout alone is insufficient. PyMatting is an
+optional dependency of the offline tool only.
+
+Remaining barriers to a player change:
+
+- A single global depth partition cannot represent arbitrary overlapping objects,
+  fine structures and multiple depth discontinuities. Similar foreground and
+  background colors also leave coverage ambiguous.
+- The new background is extrapolated, not observed behind the coat. It can smear
+  structure and still produces a faint displaced background band in places.
+- The residual method produces 5,074–6,448 premultiplied channel values outside the
+  physical `[0, alpha]` interval by more than one 8-bit code value per frame
+  (about 0.08–0.10% of all RGB channels). They remain floating point until final
+  image export; this is explicitly measured, not silently called valid matting.
+- This operates on SDR PNG code values, not a validated linear-light HDR pipeline.
+- The CPU reference takes roughly **4 seconds per 1080p frame**, including two-eye
+  rendering and output, with about **1.5 seconds** in separation. It is a quality
+  experiment, not a realtime implementation or AVP performance measurement.
+- Twelve frames cover only half a second. Broader motion, cuts, hair, low-contrast
+  boundaries and other scenes still need coverage before a production choice.
+
+The next implementation step is a confidence-aware, multiple-layer formulation
+with uncontaminated background reconstruction and a GPU implementation. The
+existing snap/fill switches and separated-boundary renderer are still not a
+substitute for that. No renderer defaults, app settings or device installation
+were changed in this follow-up.
+
+### Reproduction and validation
+
+Local artifacts are under `build/edge-comparison/matte-lab/`:
+
+- `motion-depth/frame-01` … `frame-12`: source, production eyes and lossless depth,
+  generated with one retained depth provider.
+- `motion-raycast/frame-*/comparison.png`: unfiltered 2×, source / production left /
+  prototype left / production right / prototype right; full eye images and
+  diagnostic `report.json` beside each.
+- `coat-comparison-motion.mp4`: the twelve-frame comparison, lossy review copy;
+  PNGs remain the pixel reference.
+- `later-result/`, `threshold-04-raycast/`, `threshold-06-raycast/`: additional checks.
+- `edge-metrics-final.json`: per-frame measurements; input hashes are in each
+  renderer report. Maximum zero-disparity reconstruction RMSE was below
+  `3e-7` 8-bit code values before export.
+
+Example, with dependencies installed in an isolated local Python environment:
+
+```sh
+VERGENCE_VIDEO_FRAME=/path/to/consecutive-pngs \
+VERGENCE_VIDEO_FPS=23.976023976 VERGENCE_VIDEO_START=742 \
+VERGENCE_VIDEO_MODEL=/path/to/DepthAnythingV2Small560x252.mlpackage \
+VERGENCE_VIDEO_OUTPUT=/path/to/new-captures VERGENCE_VIDEO_VARIANTS=connected \
+swift test --package-path ../vergence --filter VideoStereoFrameLabTests/exportFrame
+
+python scripts/stereo-matte-lab.py /path/to/new-captures /path/to/new-render \
+  --sequence --crop 620,550,760,800
+python scripts/measure-stereo-matte.py /path/to/new-captures /path/to/new-render \
+  /path/to/new-metrics.json
+python scripts/stereo-matte-lab.py --self-test
+```
+
+The synthetic self-test checks zero disparity, both eye shifts against analytic
+separate-layer translations, numerical inversion and source recomposition. The
+real sequence and single-frame harness runs pass. The ordinary suite initially
+hung in simultaneous `SampleBufferFrameSourceTests` fixture reads; sampling
+located the wait in `AVAssetReaderOutput.copyNextSampleBuffer`, outside changed
+code. The other **204 tests pass** with that suite excluded, and its seven tests
+are checked separately. No production code or public API changed, so no app
+rebuild or deployment was needed for these diagnostic changes.
