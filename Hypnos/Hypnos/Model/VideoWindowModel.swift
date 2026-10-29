@@ -1358,7 +1358,7 @@ final class VideoWindowModel {
             AppLogger.remux.error("[\(self.videoDisplayName, privacy: .private(mask: .hash))] the native player failed on the remux; falling back")
             remuxedStreamURL = nil
             remuxRefused = true
-            subtitles.load(SubtitleSource.forVideo(video))
+            subtitles.load(SubtitleSource.forVideo(video), keepingPickedFile: true)
         }
         carryPositionToNextRenderer(reason: "native renderer fallback")
         playbackRenderer = .webKit
@@ -1441,7 +1441,7 @@ final class VideoWindowModel {
                     AppLogger.videoWindow.info("[\(self.videoDisplayName, privacy: .private(mask: .hash))] playing the original remuxed to HLS")
                     self.remuxedStreamURL = remuxed
                     // The file's own subtitle tracks, read from the remux.
-                    self.subtitles.load(SubtitleSource.forVideo(self.video, remuxing: url))
+                    self.subtitles.load(SubtitleSource.forVideo(self.video, remuxing: url), keepingPickedFile: true)
                 }
                 #if HYPNOS_YOUTUBE
                 if !isPlayable, self.dropYouTubeHDR(reason: "the HDR variants aren't decodable") { return }

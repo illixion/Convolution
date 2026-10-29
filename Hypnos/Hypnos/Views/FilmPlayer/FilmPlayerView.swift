@@ -945,13 +945,6 @@ struct FilmTransport: View {
                                   decrease: { nudgeConvergence(-0.05) }, increase: { nudgeConvergence(0.05) })
                 }
                 #endif
-                if session.subtitles.selected != nil {
-                    PlayerStepRow(title: "Subtitle Timing",
-                                  value: String(format: "%+.1f s", session.subtitles.delay),
-                                  decrease: { session.subtitles.delay -= 0.5 },
-                                  increase: { session.subtitles.delay += 0.5 },
-                                  reset: session.subtitles.delay == 0 ? nil : { session.subtitles.delay = 0 })
-                }
                 soundAndPictureButton
             }
         }
@@ -1039,7 +1032,7 @@ struct FilmTransport: View {
             if player.audioEncoding != nil {
                 ObjectAudioQualityMenu(player: player, onOpenChanged: { menuChanged("Audio Quality", $0) })
             }
-            if !session.subtitles.tracks.isEmpty || session.subtitles.canGenerate {
+            if session.subtitles.offersMenu {
                 SubtitleMenu(controller: session.subtitles, onOpenChanged: { menuChanged("Subtitles", $0) })
             }
             PlaybackSpeedMenu(speed: player.speed, onOpenChanged: { menuChanged("Speed", $0) }) { speed in
@@ -1165,14 +1158,14 @@ struct FilmAdjustmentsView: View {
             }
         }
         #endif
+        // The timing offset is in the player's Subtitles menu.
+        #if os(visionOS)
         if session.subtitles.selected != nil {
             Section("Subtitles") {
-                SubtitleDelayControl(controller: session.subtitles)
-                #if os(visionOS)
                 if session.stereoEnabled { StereoSubtitleSettings(subtitles: session.subtitles) } else { FlatSubtitleSettings() }
-                #endif
             }
         }
+        #endif
         if !session.player.video.offeredPictureHeights.isEmpty {
             Section("Picture") { FilmPictureQualityPicker(player: session.player.video) }
         }

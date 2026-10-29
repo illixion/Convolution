@@ -22,6 +22,11 @@
  A track inside an MKV or WebM the player is remuxing comes from the remux
  itself (`SubtitleSource.matroska`), read near the playhead as it moves.
 
+ The viewer can also pick an SRT or WebVTT file of their own (`loadFile`),
+ whatever the video offers, even a video with no subtitles at all. It joins
+ the track list like any other and stays with the video through a reload of
+ its source (the remux opening), not into the next one.
+
  An embedded text track is streamed (`SubtitleSource.progressive`, the
  plugin's `FilmSubtitles` route) rather than fetched whole: Jellyfin's own
  `Stream.vtt` reads the whole video file before answering, 15–90 s for an
@@ -263,6 +268,12 @@ final class SubtitleController {
     }
     private(set) var tracks: [LibrarySubtitleTrack] = []
     private(set) var selected: LibrarySubtitleTrack?
+    /// Why the last file the viewer picked couldn't be used.
+    private(set) var fileError: String?
+    /// Files the viewer picked for this video, already parsed, by track id.
+    @ObservationIgnored private var pickedCues: [Int: RAVESubtitleTrack] = [:]
+    @ObservationIgnored private var pickedTracks: [LibrarySubtitleTrack] = []
+    @ObservationIgnored private var nextPickedID = 1_000_000
     private var selectionMadeForSource = false
     /// The parsed cues of `selected`, once fetched.
     private(set) var cues: RAVESubtitleTrack?
@@ -284,16 +295,23 @@ final class SubtitleController {
     func cueTime(forFilmTime filmTime: Double) -> Double { filmTime - delay }
 
     /// Lists `source`'s tracks and starts the preferred one. Nil clears.
-    func load(_ source: SubtitleSource?) {
-        guard source?.id != self.source?.id else { return }
-        reset()
+    /// `keepingPickedFile` is for a reload of the same video's source (the
+    /// remux opening): the files the viewer picked, and the timing, stay.
+    func load(_ source: SubtitleSource?, keepingPickedFile: Bool = false) {
+        guard source?.id != self.source?.id else {
+            // Nothing before, nothing now: a different video with no
+            // subtitles of its own must not inherit the last one's file.
+            if source == nil, !keepingPickedFile { reset() }
+            return
+        }
+        reset(keepingPickedFile: keepingPickedFile)
         self.source = source
         guard let source else { return }
         listTask = Task { [weak self] in
             do {
                 let tracks = try await source.tracks()
                 guard let self, !Task.isCancelled else { return }
-                self.tracks = tracks
+                self.tracks = tracks + self.pickedTracks
                 if !self.selectionMadeForSource, let initial = SubtitlePreference.initialTrack(in: tracks) {
                     self.fetch(initial)
                 }
@@ -305,8 +323,79 @@ final class SubtitleController {
         }
     }
 
+    // MARK: Files the viewer picked
+
+    /// Whether a player's control bar has a Subtitles menu: something to
+    /// choose from, or a file to pick.
+    var offersMenu: Bool { !tracks.isEmpty || canGenerate || Self.canPickFile }
+
+    /// Whether a player can offer a file picker: every platform but tvOS,
+    /// which has no document picker.
+    static var canPickFile: Bool {
+        #if os(tvOS)
+        false
+        #else
+        true
+        #endif
+    }
+
+    /// Reads an SRT or WebVTT file the viewer chose and shows it. It joins the
+    /// track list under the file's name; picking the same name again
+    /// replaces the earlier one. Works with no source at all.
+    func loadFile(at url: URL) async {
+        fileError = nil
+        // Not security-scoped when the file is already in the app's container.
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let cues = try await Task.detached(priority: .userInitiated) {
+                let data = try Data(contentsOf: url)
+                // UTF-16 files (Windows tools write them) carry a byte-order mark.
+                if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]),
+                   let text = String(data: data, encoding: .utf16) {
+                    return try RAVESubtitleTrack(text: text)
+                }
+                return try RAVESubtitleTrack(data: data)
+            }.value
+            let name = url.lastPathComponent
+            if let old = pickedTracks.first(where: { $0.name == name }) {
+                pickedTracks.removeAll { $0 == old }
+                pickedCues[old.id] = nil
+                tracks.removeAll { $0 == old }
+                if selected == old { selected = nil }
+            }
+            let track = LibrarySubtitleTrack(id: nextPickedID, sourceId: "file", language: nil, name: name)
+            nextPickedID += 1
+            pickedTracks.append(track)
+            pickedCues[track.id] = cues
+            tracks.append(track)
+            show(picked: track)
+            AppLogger.subtitles.info("Subtitle file picked: \(cues.cues.count, privacy: .public) cues")
+        } catch {
+            fileError = error.localizedDescription
+            AppLogger.subtitles.error("Subtitle file failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+        }
+    }
+
+    /// Makes a picked file the shown track. Not remembered for later films:
+    /// a file belongs to the video it was picked for.
+    private func show(picked track: LibrarySubtitleTrack) {
+        selectionMadeForSource = true
+        translator.stop()
+        generated.stop()
+        fetchTask?.cancel()
+        selected = track
+        cues = pickedCues[track.id]
+        error = nil
+        isFetching = false
+    }
+
     /// The user's pick from the menu; remembered for later films.
     func select(_ track: LibrarySubtitleTrack?) {
+        if let track, pickedCues[track.id] != nil {
+            show(picked: track)
+            return
+        }
         selectionMadeForSource = true
         translator.stop()
         generated.stop()
@@ -322,19 +411,25 @@ final class SubtitleController {
         fetch(track)
     }
 
-    func reset() {
+    func reset(keepingPickedFile keep: Bool = false) {
         translator.stop()
         generated.stop()
         listTask?.cancel()
         fetchTask?.cancel()
+        let keptSelection = keep ? selected.flatMap { pickedCues[$0.id] != nil ? $0 : nil } : nil
         source = nil
-        tracks = []
-        selected = nil
-        selectionMadeForSource = false
-        cues = nil
+        tracks = keep ? pickedTracks : []
+        selected = keptSelection
+        selectionMadeForSource = keptSelection != nil
+        cues = keptSelection.flatMap { pickedCues[$0.id] }
         error = nil
+        fileError = nil
         isFetching = false
-        delay = 0
+        if !keep {
+            delay = 0
+            pickedTracks = []
+            pickedCues = [:]
+        }
         parsed = [:]
     }
 

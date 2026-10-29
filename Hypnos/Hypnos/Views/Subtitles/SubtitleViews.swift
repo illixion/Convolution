@@ -2,21 +2,29 @@
  Hypnos - the subtitle menu and overlay every player shows
 
  `SubtitleMenu` is a player-controls accessory: Off, then each track, with
- image tracks other than PGS listed but disabled. `SubtitleOverlay` draws the selected
+ image tracks other than PGS listed but disabled, a row to pick a subtitle
+ file of the viewer's own (always there, so a video with no subtitles and no
+ AI captions can still get some) and the timing offset, which belongs with
+ the choice it adjusts. `SubtitleOverlay` draws the selected
  track on the player's clock through RAVEUI, applying the timing offset.
  A stereo picture draws them into the picture instead (`StereoSubtitleFeeder`).
  */
 
+import DebugTrace
 import GeneratedCaptions
 import RAVEMedia
 import RAVEUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SubtitleMenu: View {
     let controller: SubtitleController
     @State private var speakerModel = RAVESpeakerModel.shared
     #if os(iOS) || os(macOS)
     @State private var showsTranslate = false
+    #endif
+    #if !os(tvOS)
+    @State private var showsFileImporter = false
     #endif
     /// The menu opened or closed, for a caller that has to move a stereo
     /// picture out of its way (the same signal the video ornament's menus use).
@@ -79,12 +87,55 @@ struct SubtitleMenu: View {
                 }
                 .disabled(!track.isPlayable)
             }
+            #if !os(tvOS)
+            Divider()
+            Button {
+                close()
+                // After the popover has finished closing, so its close is
+                // reported before the picker's open and the chrome stays up.
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(350))
+                    showsFileImporter = true
+                }
+            } label: {
+                Label("Choose Subtitle File…", systemImage: "doc.badge.plus")
+            }
+            .accessibilityIdentifier("player.subtitles.chooseFile")
+            if let error = controller.fileError {
+                Text(error).font(.caption).foregroundStyle(.red)
+            }
+            if controller.selected != nil {
+                Divider()
+                SubtitleDelayControl(controller: controller)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+            }
+            #endif
         }
         .accessibilityIdentifier("player.subtitles")
+        #if !os(tvOS)
+        .fileImporter(isPresented: $showsFileImporter, allowedContentTypes: Self.fileTypes) { result in
+            switch result {
+            case .success(let url): Task { await controller.loadFile(at: url) }
+            case .failure(let error): AppLogger.subtitles.error("Subtitle file picker failed (\(error.logCode, privacy: .public))")
+            }
+        }
+        // The picker is a menu too as far as the chrome is concerned: it
+        // must not hide, and take the picker with it, while it is up.
+        .onChange(of: showsFileImporter) { _, shown in onOpenChanged(shown) }
+        #endif
         #if os(iOS) || os(macOS)
         .sheet(isPresented: $showsTranslate) { SubtitleTranslateSheet(controller: controller) }
         #endif
     }
+
+    #if !os(tvOS)
+    /// SRT and WebVTT, which the parser reads. Plain text is allowed too: a
+    /// system without a type for the extension reports it as that.
+    private static let fileTypes: [UTType] = [
+        UTType(filenameExtension: "srt"), UTType(filenameExtension: "vtt"), .plainText,
+    ].compactMap { $0 }
+    #endif
 
     private var statusText: String {
         if let error = controller.generated.error { return "AI captions failed: \(error)" }
@@ -111,12 +162,14 @@ extension SubtitleController {
     }
 }
 
-/// The subtitle timing offset: a slider where there is one, steps on tvOS.
+/// The subtitle timing offset: a slider with fine steps either side of it
+/// where there is one (a tenth of a second, which is what a drifting file
+/// needs), steps on tvOS.
 struct SubtitleDelayControl: View {
     @Bindable var controller: SubtitleController
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(String(format: "Subtitle offset: %+.1f s", controller.delay)).font(.caption)
             #if os(tvOS)
             HStack {
@@ -125,10 +178,36 @@ struct SubtitleDelayControl: View {
                 Button("Reset") { controller.delay = 0 }
             }
             #else
-            Slider(value: $controller.delay, in: -10 ... 10, step: 0.1)
+            HStack(spacing: 8) {
+                Button { nudge(-0.1) } label: { Image(systemName: "minus") }
+                    .accessibilityLabel("Show subtitles earlier")
+                Slider(value: $controller.delay, in: -10 ... 10, step: 0.1)
+                    .frame(minWidth: 120)
+                Button { nudge(0.1) } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("Show subtitles later")
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.circle)
+            .controlSize(.small)
+            HStack {
+                Text("Earlier").font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Button("Reset") { controller.delay = 0 }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .disabled(controller.delay == 0)
+                Spacer()
+                Text("Later").font(.caption2).foregroundStyle(.secondary)
+            }
             #endif
         }
     }
+
+    #if !os(tvOS)
+    private func nudge(_ step: Double) {
+        controller.delay = min(max((controller.delay + step) * 10, -100), 100).rounded() / 10
+    }
+    #endif
 }
 
 struct SubtitleOverlay: View {

@@ -47,19 +47,19 @@ struct VideoAdjustmentsWindowView: View {
                         ) : nil
                     )
                     .padding(20)
+                    // The timing offset is in the player's Subtitles menu.
+                    #if os(visionOS)
                     if target.subtitles.selected != nil {
                         VStack(alignment: .leading, spacing: 12) {
-                            SubtitleDelayControl(controller: target.subtitles)
-                            #if os(visionOS)
                             if target.showsStereoPicture {
                                 StereoSubtitleSettings(subtitles: target.subtitles)
                             } else if !target.usesImmersiveStereo {
                                 FlatSubtitleSettings()
                             }
-                            #endif
                         }
                         .padding([.horizontal, .bottom], 20)
                     }
+                    #endif
                 }
                 .frame(minWidth: 340)
                 .navigationTitle(target.videoDisplayName)

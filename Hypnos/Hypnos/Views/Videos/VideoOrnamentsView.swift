@@ -162,13 +162,6 @@ struct VideoOrnamentsView: View {
             PlayerStepRow(title: "Convergence", value: String(format: "%.2f", convergence),
                           decrease: { nudgeConvergence(-0.05) }, increase: { nudgeConvergence(0.05) })
         }
-        if windowModel.subtitles.selected != nil {
-            PlayerStepRow(title: "Subtitle Timing",
-                          value: String(format: "%+.1f s", windowModel.subtitles.delay),
-                          decrease: { windowModel.subtitles.delay -= 0.5 },
-                          increase: { windowModel.subtitles.delay += 0.5 },
-                          reset: windowModel.subtitles.delay == 0 ? nil : { windowModel.subtitles.delay = 0 })
-        }
         adjustmentsButton(close: {})
 
         Divider()
@@ -222,7 +215,7 @@ struct VideoOrnamentsView: View {
 
     @ViewBuilder
     private var subtitleMenu: some View {
-        if !windowModel.subtitles.tracks.isEmpty || windowModel.subtitles.canGenerate {
+        if windowModel.subtitles.offersMenu {
             SubtitleMenu(controller: windowModel.subtitles, onOpenChanged: { chromeMenu("Subtitles", opened: $0) })
         }
     }
