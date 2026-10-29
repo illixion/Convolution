@@ -1,6 +1,6 @@
 import CoreGraphics
-// Offline diagnostic only. Replays the production mesh shader using a display
-// depth PNG; its normalized 8-bit values cannot reproduce raw shot-space depth.
+// Offline diagnostic. Prefers depth.f32 + depth.json for a faithful depth
+// replay. Falls back to a normalized display PNG, which is approximate.
 // Usage: swiftc -O scripts/stereo-edge-lab.swift -o /tmp/stereo-edge-lab
 // /tmp/stereo-edge-lab CAPTURE_DIR NEW_OUTPUT_DIR [StereoShaders.metal]
 import Foundation
@@ -46,23 +46,67 @@ let loader = MTKTextureLoader(device: device)
 let source = try loader.newTexture(
   URL: input.appendingPathComponent("source.png"),
   options: [.SRGB: false, .origin: MTKTextureLoader.Origin.topLeft])
-let depthImage = try require(
-  CGImageSourceCreateImageAtIndex(
-    try require(
-      CGImageSourceCreateWithURL(input.appendingPathComponent("depth.png") as CFURL, nil)), 0, nil))
-let dw = depthImage.width
-let dh = depthImage.height
-var gray = [UInt8](repeating: 0, count: dw * dh)
-let graySpace = try require(CGColorSpace(name: CGColorSpace.genericGrayGamma2_2))
-gray.withUnsafeMutableBytes { bytes in
-  let c = CGContext(
-    data: bytes.baseAddress, width: dw, height: dh, bitsPerComponent: 8, bytesPerRow: dw,
-    space: graySpace, bitmapInfo: 0)!
-  c.draw(depthImage, in: CGRect(x: 0, y: 0, width: dw, height: dh))
+struct DepthMetadata: Decodable {
+  let width: Int, height: Int
+  let format: String, origin: String
+  let uvScale: [Float], uvOffset: [Float], depthBudget: [Float]
+  let valueScale: Float, valueBias: Float, strength: Float, convergence: Float
 }
-// This is a normalized display PNG, not raw floating-point depth. Invert its
-// display gamma; range/shot mapping are intentionally approximate.
-let depthValues = gray.map { pow(Float($0) / 255, 2.2) }
+var mapping = Uniforms()
+let dw: Int
+let dh: Int
+let depthValues: [Float]
+let rawURL = input.appendingPathComponent("depth.f32")
+let faithfulDepth = FileManager.default.fileExists(atPath: rawURL.path)
+if faithfulDepth {
+  let meta = try JSONDecoder().decode(
+    DepthMetadata.self,
+    from: Data(contentsOf: input.appendingPathComponent("depth.json")))
+  guard meta.width > 0, meta.height > 0, meta.width <= 16384, meta.height <= 16384,
+    meta.format == "float32-little-endian", meta.origin == "top-left",
+    meta.uvScale.count == 2, meta.uvOffset.count == 2, meta.depthBudget.count == 2
+  else {
+    throw NSError(domain: "Invalid depth metadata", code: 1)
+  }
+  dw = meta.width
+  dh = meta.height
+  let raw = try Data(contentsOf: rawURL)
+  guard raw.count == dw * dh * 4 else { throw NSError(domain: "Invalid depth plane size", code: 1) }
+  depthValues = raw.withUnsafeBytes { bytes in
+    (0..<(dw * dh)).map {
+      Float(
+        bitPattern: UInt32(
+          littleEndian:
+            bytes.loadUnaligned(fromByteOffset: $0 * 4, as: UInt32.self)))
+    }
+  }
+  mapping.uvScale = SIMD2(meta.uvScale[0], meta.uvScale[1])
+  mapping.uvOffset = SIMD2(meta.uvOffset[0], meta.uvOffset[1])
+  mapping.valueScale = meta.valueScale
+  mapping.valueBias = meta.valueBias
+  mapping.budget = SIMD2(meta.depthBudget[0], meta.depthBudget[1])
+  mapping.depthStrength = meta.strength
+  mapping.convergence = meta.convergence
+  print("Using floating-point depth and recorded warp mapping")
+} else {
+  let image = try require(
+    CGImageSourceCreateImageAtIndex(
+      try require(
+        CGImageSourceCreateWithURL(input.appendingPathComponent("depth.png") as CFURL, nil)), 0, nil
+    ))
+  dw = image.width
+  dh = image.height
+  var gray = [UInt8](repeating: 0, count: dw * dh)
+  let space = try require(CGColorSpace(name: CGColorSpace.genericGrayGamma2_2))
+  gray.withUnsafeMutableBytes { bytes in
+    let c = CGContext(
+      data: bytes.baseAddress, width: dw, height: dh, bitsPerComponent: 8,
+      bytesPerRow: dw, space: space, bitmapInfo: 0)!
+    c.draw(image, in: CGRect(x: 0, y: 0, width: dw, height: dh))
+  }
+  depthValues = gray.map { pow(Float($0) / 255, 2.2) }
+  print("Approximate replay: normalized display PNG, original depth range unavailable")
+}
 func texture(_ format: MTLPixelFormat, _ w: Int, _ h: Int, _ samples: Int = 1) throws -> MTLTexture
 {
   let d = MTLTextureDescriptor.texture2DDescriptor(
@@ -183,7 +227,7 @@ for v in variants where device.supportsTextureSampleCount(v.samples) {
       pass.depthAttachment.storeAction = .dontCare
       let cmd = try require(queue.makeCommandBuffer())
       let enc = try require(cmd.makeRenderCommandEncoder(descriptor: pass))
-      var u = Uniforms()
+      var u = mapping
       u.eyeSign = eye
       enc.setRenderPipelineState(pipeline)
       enc.setDepthStencilState(state)
