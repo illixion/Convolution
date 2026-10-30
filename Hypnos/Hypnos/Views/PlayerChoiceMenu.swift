@@ -49,12 +49,12 @@ struct PlayerChoiceMenu<Items: View>: View {
             Button { showsPopover.toggle() } label: {
                 Label(badge.map { "\(title): \($0)" } ?? title, systemImage: systemImage)
             }
-            .popover(isPresented: $showsPopover, arrowEdge: .trailing) { popoverRows }
+            .ravePlayerPopover(isPresented: $showsPopover, arrowEdge: .trailing) { popoverRows }
             .onDisappear { showsPopover = false }
             .help(help ?? title)
         } else {
             Button { showsPopover.toggle() } label: { barLabel }
-                .popover(isPresented: $showsPopover, arrowEdge: .bottom) {
+                .ravePlayerPopover(isPresented: $showsPopover, arrowEdge: .bottom) {
                     popoverRows
                         // Taps reach the window, so one on the picture closes it.
                         .presentationBackgroundInteraction(.enabled)

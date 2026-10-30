@@ -15,6 +15,7 @@
  server's fuller account replaces it when it arrives.
  */
 
+import RAVEUI
 import SwiftUI
 
 /// Where a title's details come from.
@@ -218,7 +219,7 @@ struct PlayerTitleButton: View {
                 PlayerDetailsView(details: details).frame(width: 1100)
             }
             #else
-            .popover(isPresented: $showsDetails, arrowEdge: .top) {
+            .ravePlayerPopover(isPresented: $showsDetails, arrowEdge: .top) {
                 PlayerDetailsView(details: details)
                     .frame(idealWidth: 460, maxWidth: 520, maxHeight: 640)
                     .presentationCompactAdaptation(.sheet)

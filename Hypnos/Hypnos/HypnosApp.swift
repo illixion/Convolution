@@ -286,7 +286,7 @@ struct HypnosApp: App {
         // head and, for Big Screen, a picture on a screen further and larger
         // than a window may go (see Views/Cinema/Cinema.swift).
         ImmersiveSpace(id: Cinema.spaceID) {
-            CinemaSpaceView()
+            CinemaSpaceView().environment(appModel)
         }
         .immersionStyle(selection: .constant(.mixed), in: .mixed)
         .immersiveEnvironmentBehavior(.coexist)

@@ -63,6 +63,7 @@ struct FilmPlayerView: View {
     @Environment(SceneDelegate.self) private var sceneDelegate
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
+    @DismissWindowProxy private var dismissWindow
     private var cinema: Cinema { .shared }
     @State private var stereoSource: SampleBufferFrameSource?
     /// Set while a 3D film plays as real 3D (eyes cropped from the frame);
@@ -606,12 +607,13 @@ struct FilmPlayerView: View {
     #if os(visionOS)
     /// The subtitles to hang under a stereo picture, if set to show there.
     private var bandSubtitles: SubtitleController? {
-        session.subtitles.selected != nil
+        session.subtitles.selected != nil && !cinema.hidesPicture(for: .film)
             && (stereoSource != nil ? stereoSubtitleStyle : flatSubtitleStyle) == .belowPicture
             ? session.subtitles : nil
     }
 
     private func installHUDControls() {
+        cinema.hudCloseAction = { dismissWindow() }
         cinema.hudFilmChromeVisible = chromeVisible
         cinema.hudControlsView = AnyView(
             VStack(alignment: .leading) {

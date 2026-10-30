@@ -133,6 +133,7 @@ final class Cinema {
     var pictureWidth: Float { mode == .hud ? hudWidth : screenWidth }
     weak var hudVideoModel: VideoWindowModel?
     var hudControlsView: AnyView?
+    var hudCloseAction: (@MainActor () -> Void)?
     var hudFilmChromeVisible = true
 
     /// The sound turns with the head (see the header).
@@ -299,6 +300,7 @@ final class Cinema {
         screenSubtitles = nil
         hudVideoModel = nil
         hudControlsView = nil
+        hudCloseAction = nil
         screenPose = nil
     }
 
@@ -468,22 +470,48 @@ private extension SIMD4 where Scalar == Float {
 
 // MARK: - The space
 
-/// Controls travel with the HUD; the grab bar below moves its head-relative offset.
+/// The controls and the window chrome are separate attachments so the
+/// grab bar can sit beside the close button without overlapping the strip.
 private struct CinemaHUDControls: View {
-    let returnToWindow: () -> Void
     @Bindable private var cinema = Cinema.shared
+    let presentation: RAVEImmersivePlayerPresentation
 
     var body: some View {
-        VStack(spacing: 8) {
-            if let controls = cinema.hudControlsView { controls }
-            HStack {
-                Button("Recenter", systemImage: "scope") { cinema.hudOffset = SIMD3(0, 0, -2) }
-                Button("Window", systemImage: "macwindow", action: returnToWindow)
-            }
-            .labelStyle(.iconOnly)
-            .padding(10)
-            .glassBackgroundEffect()
+        Group { if let controls = cinema.hudControlsView { controls } }
+            .environment(\.raveImmersivePlayerPresentation, presentation)
+            .coordinateSpace(name: RAVEImmersivePlayerPresentation.coordinateSpace)
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { presentation.controlsSize = $0 }
+    }
+}
+
+private struct CinemaHUDClose: View {
+    let closePlayer: () -> Void
+    var body: some View {
+        Button("Close Player", systemImage: "xmark", action: closePlayer)
+            .labelStyle(.iconOnly).buttonStyle(.bordered).buttonBorderShape(.circle)
+    }
+}
+
+private struct CinemaHUDUtilities: View {
+    let returnToWindow: () -> Void
+    @Bindable private var cinema = Cinema.shared
+    var body: some View {
+        HStack(spacing: 12) {
+            Button("Recenter", systemImage: "scope") { cinema.hudOffset = SIMD3(0, 0, -2) }
+            Button("Window", systemImage: "macwindow", action: returnToWindow)
         }
+        .labelStyle(.iconOnly).buttonStyle(.bordered).buttonBorderShape(.circle)
+    }
+}
+
+private struct CinemaHUDMenuAttachment: View {
+    let presentation: RAVEImmersivePlayerPresentation
+
+    var body: some View {
+        presentation.content
+            .frame(width: 360)
+            .fixedSize(horizontal: false, vertical: true)
+            .glassBackgroundEffect()
     }
 }
 
@@ -492,6 +520,7 @@ private struct CinemaHUDControls: View {
 struct CinemaSpaceView: View {
     @Environment(\.openImmersiveSpace) private var open
     @Environment(\.dismissImmersiveSpace) private var dismiss
+    @Environment(AppModel.self) private var appModel
     @Bindable private var cinema = Cinema.shared
     private let session = FilmSession.shared
     @State private var screen = Entity()
@@ -499,6 +528,12 @@ struct CinemaSpaceView: View {
     @State private var headAnchor = AnchorEntity(.head)
     @State private var hudHandle = Entity()
     @State private var hudControls = Entity()
+    @State private var hudClose = Entity()
+    @State private var hudUtilities = Entity()
+    @State private var presentationEntity = Entity()
+    @State private var presentation = RAVEImmersivePlayerPresentation()
+    @State private var chromeOpacity: Float = 0
+    @State private var chromeLastUpdate = CACurrentMediaTime()
     @State private var leftEdge = Entity()
     @State private var rightEdge = Entity()
     @State private var dragStart: SIMD3<Float>?
@@ -524,7 +559,7 @@ struct CinemaSpaceView: View {
                 content.add(sceneRoot)
                 sceneRoot.addChild(screen)
                 content.add(headAnchor)
-                hudHandle.components.set(ModelComponent(mesh: .generateBox(width: 0.18, height: 0.014, depth: 0.008, cornerRadius: 0.007), materials: [SimpleMaterial(color: .white, isMetallic: false)]))
+                hudHandle.components.set(ModelComponent(mesh: .generateBox(width: 0.18, height: 0.014, depth: 0.008, cornerRadius: 0.007), materials: [UnlitMaterial(color: .white)]))
                 hudHandle.components.set(CollisionComponent(shapes: [.generateBox(width: 0.28, height: 0.07, depth: 0.04)]))
                 hudHandle.components.set(InputTargetComponent())
                 for edge in [leftEdge, rightEdge] {
@@ -532,13 +567,21 @@ struct CinemaSpaceView: View {
                     edge.components.set(InputTargetComponent())
                     edge.components.set(HoverEffectComponent())
                 }
-                hudControls.components.set(ViewAttachmentComponent(rootView: CinemaHUDControls {
+                hudControls.components.set(ViewAttachmentComponent(rootView: CinemaHUDControls(presentation: presentation)))
+                hudClose.components.set(ViewAttachmentComponent(rootView: CinemaHUDClose {
+                    guard let owner = cinema.owner else { return }
+                    cinema.hudCloseAction?()
+                    Task { await cinema.release(owner, dismiss: dismiss) }
+                }))
+                hudUtilities.components.set(ViewAttachmentComponent(rootView: CinemaHUDUtilities {
                     guard let owner = cinema.owner else { return }
                     Task { await cinema.setMode(.window, for: owner, open: open, dismiss: dismiss) }
                 }))
             }
             .gesture(SpatialTapGesture().targetedToAnyEntity().onEnded { value in
-                if value.entity !== hudHandle { cinema.noteScreenTap() }
+                if value.entity === playerPicture || value.entity === session.player.video.videoEntity {
+                    cinema.noteScreenTap()
+                }
             })
             .simultaneousGesture(DragGesture().targetedToEntity(hudHandle)
                 .onChanged { value in
@@ -565,7 +608,13 @@ struct CinemaSpaceView: View {
         }
         .preferredSurroundingsEffect(cinema.mode == .bigScreen && cinema.dimsSurroundings ? .systemDark : nil)
         .onAppear { cinema.spaceAppeared() }
-        .onDisappear { cinema.spaceDisappeared() }
+        .onChange(of: presentation.isPresented) { _, shown in
+            AppLogger.videoWindow.info("HUD menu requested: \(shown, privacy: .public)")
+        }
+        .onDisappear {
+            presentation.dismiss()
+            cinema.spaceDisappeared()
+        }
         // Placed in a loop rather than RealityView's update: the window's
         // plane view may still lay the entity out once after it moves here.
         .task {
@@ -590,6 +639,12 @@ struct CinemaSpaceView: View {
         guard cinema.mode.showsPicture, let owner = cinema.owner else {
             hudHandle.removeFromParent()
             hudControls.removeFromParent()
+            hudClose.removeFromParent()
+            hudUtilities.removeFromParent()
+            presentationEntity.components.remove(ViewAttachmentComponent.self)
+            presentationEntity.removeFromParent()
+            presentation.dismiss()
+            chromeOpacity = 0
             leftEdge.removeFromParent()
             rightEdge.removeFromParent()
             releaseSubtitles()
@@ -606,6 +661,9 @@ struct CinemaSpaceView: View {
             screen.transform = Transform(rotation: simd_quatf(from: SIMD3<Float>(0, 0, 1), to: direction), translation: cinema.hudOffset)
             if hudHandle.parent !== screen { screen.addChild(hudHandle) }
             if hudControls.parent !== screen { screen.addChild(hudControls) }
+            if hudClose.parent !== screen { screen.addChild(hudClose) }
+            if hudUtilities.parent !== screen { screen.addChild(hudUtilities) }
+            if presentationEntity.parent !== screen { screen.addChild(presentationEntity) }
             if leftEdge.parent !== screen { screen.addChild(leftEdge) }
             if rightEdge.parent !== screen { screen.addChild(rightEdge) }
         } else {
@@ -617,6 +675,12 @@ struct CinemaSpaceView: View {
             }
             hudHandle.removeFromParent()
             hudControls.removeFromParent()
+            hudClose.removeFromParent()
+            hudUtilities.removeFromParent()
+            presentationEntity.components.remove(ViewAttachmentComponent.self)
+            presentationEntity.removeFromParent()
+            presentation.dismiss()
+            chromeOpacity = 0
             leftEdge.removeFromParent()
             rightEdge.removeFromParent()
             screen.setTransformMatrix(pose, relativeTo: nil)
@@ -651,23 +715,54 @@ struct CinemaSpaceView: View {
         }
         // The video component's mesh is aspect × 1 m, so its scale is its height.
         let height = cinema.pictureWidth / max(aspect, 0.1)
-        // Fit the complete SwiftUI attachment to the picture rather than
-        // keeping it at a fixed physical size while the picture is resized.
-        if let bounds = hudControls.components[ViewAttachmentComponent.self]?.bounds,
+        let controlsVisible = presentation.isPresented || (owner == .film ? cinema.hudFilmChromeVisible : !(cinema.hudVideoModel?.isUIHidden ?? false))
+        let now = CACurrentMediaTime()
+        let step = Float(min(max(now - chromeLastUpdate, 0), 0.1)) / 0.22
+        chromeLastUpdate = now
+        chromeOpacity = controlsVisible ? min(1, chromeOpacity + step) : max(0, chromeOpacity - step)
+        let slide = (1 - chromeOpacity) * 0.04
+        if controlsVisible { hudControls.isEnabled = true; hudClose.isEnabled = true; hudUtilities.isEnabled = true }
+        if cinema.mode == .hud, hudControls.isEnabled,
+           let bounds = hudControls.components[ViewAttachmentComponent.self]?.bounds,
            bounds.extents.x > 1e-4 {
             let scale = cinema.pictureWidth / bounds.extents.x
             let controlsHeight = bounds.extents.y * scale
             hudControls.scale = SIMD3(repeating: scale)
-            hudControls.position = SIMD3(0, -height / 2 - 0.05 - controlsHeight / 2, 0.02)
-            hudHandle.position = SIMD3(0, -height / 2 - 0.05 - controlsHeight - 0.08, 0.02)
+            hudControls.position = SIMD3(0, -height / 2 - 0.05 - controlsHeight / 2 - slide, 0.02)
+            let chromeY = -height / 2 - 0.05 - controlsHeight - 0.12 - slide
+            hudHandle.position = SIMD3(0, chromeY, 0.02)
+            hudClose.position = SIMD3(-0.18, chromeY, 0.025)
+            hudUtilities.position = SIMD3(0.25, chromeY, 0.025)
+        }
+        if cinema.mode == .hud, hudClose.isEnabled, hudUtilities.isEnabled {
+            if let bounds = hudClose.components[ViewAttachmentComponent.self]?.bounds, bounds.extents.x > 1e-4 {
+                hudClose.scale = SIMD3(repeating: 0.085 / bounds.extents.x)
+            }
+            if let bounds = hudUtilities.components[ViewAttachmentComponent.self]?.bounds, bounds.extents.x > 1e-4 {
+                hudUtilities.scale = SIMD3(repeating: 0.19 / bounds.extents.x)
+            }
+        }
+        if cinema.mode == .hud {
+            reconcilePresentation()
+            if let bounds = presentationEntity.components[ViewAttachmentComponent.self]?.bounds,
+               let controlsBounds = hudControls.components[ViewAttachmentComponent.self]?.bounds,
+               let source = presentation.sourceFrame, presentation.controlsSize.width > 0 {
+                let scale = hudControls.scale.x
+                let pointScale = controlsBounds.extents.x * scale / Float(presentation.controlsSize.width)
+                let x = Float(source.midX - presentation.controlsSize.width / 2) * pointScale
+                let y = hudControls.position.y + Float(presentation.controlsSize.height / 2 - source.minY) * pointScale
+                presentationEntity.scale = SIMD3(repeating: scale)
+                presentationEntity.position = SIMD3(x, y + 0.015 + bounds.extents.y * scale / 2, 0.1)
+            }
         }
         leftEdge.position = SIMD3(-cinema.pictureWidth / 2, 0, 0.02)
         rightEdge.position = SIMD3(cinema.pictureWidth / 2, 0, 0.02)
         leftEdge.scale.y = max(height / 0.6, 0.2)
         rightEdge.scale.y = leftEdge.scale.y
-        let controlsVisible = owner == .film ? cinema.hudFilmChromeVisible : !(cinema.hudVideoModel?.isUIHidden ?? false)
-        hudControls.isEnabled = controlsVisible
-        hudHandle.isEnabled = controlsVisible
+        for entity in [hudControls, hudClose, hudUtilities, hudHandle] {
+            entity.components.set(OpacityComponent(opacity: chromeOpacity))
+            entity.isEnabled = chromeOpacity > 0
+        }
         leftEdge.isEnabled = controlsVisible
         rightEdge.isEnabled = controlsVisible
         let transform = Transform(scale: SIMD3(repeating: height))
@@ -684,6 +779,21 @@ struct CinemaSpaceView: View {
         }
         placeSubtitles(aspect: aspect)
         cinema.noteScreenAttached(cinema.mode != .hud || headAnchor.isAnchored)
+    }
+
+    /// Immersive spaces reject modal presentations, including ones created
+    /// by PresentationComponent. Draw the menu as a head-relative attachment.
+    private func reconcilePresentation() {
+        guard presentation.isPresented else {
+            presentationEntity.components.remove(ViewAttachmentComponent.self)
+            return
+        }
+        if presentationEntity.components[ViewAttachmentComponent.self] == nil {
+            AppLogger.videoWindow.info("HUD menu: installing view attachment")
+            presentationEntity.components.set(ViewAttachmentComponent(
+                rootView: CinemaHUDMenuAttachment(presentation: presentation).environment(appModel)
+            ))
+        }
     }
 
     /// The aspect the picture was last scaled for, from its collision box.
@@ -837,6 +947,7 @@ struct CinemaButton: View {
 struct CinemaVideoWindowHook: ViewModifier {
     let windowModel: VideoWindowModel
     let hudControls: AnyView
+    let closePlayer: @MainActor () -> Void
     private var cinema: Cinema { .shared }
     private var owner: CinemaOwner { .video(ObjectIdentifier(windowModel)) }
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
@@ -878,6 +989,7 @@ struct CinemaVideoWindowHook: ViewModifier {
                             for: owner)
         cinema.hudVideoModel = windowModel
         cinema.hudControlsView = hudControls
+        cinema.hudCloseAction = closePlayer
         if windowModel.pseudo3DEnabled { windowModel.disablePseudo3D() }
         if windowModel.stereoscopicOverride == true { windowModel.stereoscopicOverride = false }
         if windowModel.playbackRenderer == .webKit,

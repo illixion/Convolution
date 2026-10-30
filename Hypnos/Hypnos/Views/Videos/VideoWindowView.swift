@@ -94,6 +94,7 @@ struct VideoWindowView: View {
     /// they are set to show there rather than in the picture.
     private var bandSubtitles: SubtitleController? {
         windowModel.subtitles.selected != nil && !appModel.allWindowsHidden && !windowModel.usesImmersiveStereo
+            && !cinemaShowsScreen
             && (windowModel.showsStereoPicture ? stereoSubtitleStyle : flatSubtitleStyle) == .belowPicture
             ? windowModel.subtitles : nil
     }
@@ -373,7 +374,7 @@ struct VideoWindowView: View {
                     // A stereo picture has them drawn into it instead (see
                     // StereoSubtitleFeeder).
                     if !appModel.allWindowsHidden, !windowModel.usesImmersiveStereo, !windowModel.showsStereoPicture,
-                       !flatSubtitlesBelow {
+                       !cinemaShowsScreen, !flatSubtitlesBelow {
                         SubtitleOverlay(controller: windowModel.subtitles,
                                         pictureAspect: windowModel.videoAspectRatio) { windowModel.currentTime }
                             .offset(y: -subtitleLift)
@@ -384,7 +385,7 @@ struct VideoWindowView: View {
                     .frame(height: ornamentBottomPadding)
             }
             #if os(visionOS)
-            .modifier(CinemaVideoWindowHook(windowModel: windowModel, hudControls: AnyView(VStack(alignment: .leading) { titleButton; videoOrnament }.environment(appModel))))
+            .modifier(CinemaVideoWindowHook(windowModel: windowModel, hudControls: AnyView(VStack(alignment: .leading) { titleButton; videoOrnament }.environment(appModel)), closePlayer: { dismissWindow() }))
             #endif
 
             #if os(visionOS)
