@@ -653,7 +653,7 @@ struct CinemaButton: View {
     var bigScreenAvailable = true
     /// Whether this Cinema menu belongs to a video window (as opposed to Film).
     var offersHeadLockedHUD = false
-    @AppStorage("immersiveVideoHeadLocked") private var headLockedHUD = false
+    @Environment(AppModel.self) private var appModel
     /// Bumped by the host to close the popover (a tap on the picture).
     var dismissal = 0
     var onOpenChanged: (Bool) -> Void = { _ in }
@@ -684,8 +684,11 @@ struct CinemaButton: View {
             }
             if offersHeadLockedHUD {
                 Divider()
-                Toggle(isOn: $headLockedHUD) {
-                    PlayerChoiceRow("Head-Locked HUD", isChecked: headLockedHUD)
+                Toggle(isOn: Binding(
+                    get: { appModel.isImmersiveVideoHeadLocked },
+                    set: { appModel.isImmersiveVideoHeadLocked = $0 }
+                )) {
+                    PlayerChoiceRow("Head-Locked HUD", isChecked: appModel.isImmersiveVideoHeadLocked)
                 }
                 .help("Keep the immersive video screen in front of you as you move")
             }

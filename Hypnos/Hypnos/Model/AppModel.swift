@@ -164,7 +164,9 @@ class AppModel {
     var isStereoscopicImmersiveSpaceShown: Bool = false
 
     /// Whether the immersive video screen follows the user's head as a HUD.
-    var isImmersiveVideoHeadLocked: Bool = UserDefaults.standard.bool(forKey: "immersiveVideoHeadLocked")
+    var isImmersiveVideoHeadLocked: Bool {
+        didSet { UserDefaults.standard.set(isImmersiveVideoHeadLocked, forKey: "immersiveVideoHeadLocked") }
+    }
 
     /// The video currently being played in immersive mode
     var immersiveVideo: GalleryVideo?
@@ -1321,6 +1323,7 @@ class AppModel {
     // MARK: - Initialization
 
     init() {
+        isImmersiveVideoHeadLocked = UserDefaults.standard.bool(forKey: "immersiveVideoHeadLocked")
         // Vergence's depth cache has no notion of this app's cache budget, so
         // it never evicts until told how much disk it may hold. Wired before
         // anything can enqueue a conversion; without it the depth cache grows
