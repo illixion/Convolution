@@ -130,6 +130,19 @@ final class Cinema {
     private(set) var status = "Closed"
     var hudOffset = SIMD3<Float>(0, 0, -2)
     var hudWidth: Float = 2 * 2 * tanf(55 * .pi / 360)
+    func moveHUD(to offset: SIMD3<Float>) {
+        guard offset.x.isFinite, offset.y.isFinite, offset.z.isFinite else { return }
+        let candidate = SIMD3(offset.x, offset.y, min(-0.3, offset.z))
+        let distance = simd_length(candidate)
+        guard distance.isFinite else { return }
+        hudOffset = candidate * (min(6, max(1.5, distance)) / distance)
+    }
+
+    func recenterHUD() {
+        hudOffset = SIMD3(0, 0, -2)
+        hudWidth = 4 * tanf(55 * .pi / 360)
+    }
+
     var pictureWidth: Float { mode == .hud ? hudWidth : screenWidth }
     weak var hudVideoModel: VideoWindowModel?
     var hudControlsView: AnyView?
@@ -497,7 +510,7 @@ private struct CinemaHUDUtilities: View {
     @Bindable private var cinema = Cinema.shared
     var body: some View {
         HStack(spacing: 12) {
-            Button("Recenter", systemImage: "scope") { cinema.hudOffset = SIMD3(0, 0, -2) }
+            Button("Recenter", systemImage: "scope") { cinema.recenterHUD() }
             Button("Window", systemImage: "macwindow", action: returnToWindow)
         }
         .labelStyle(.iconOnly).buttonStyle(.bordered).buttonBorderShape(.circle)
@@ -589,10 +602,7 @@ struct CinemaSpaceView: View {
                     let movement = value.convert(value.translation3D, from: .local, to: headAnchor)
                     if let dragStart {
                         let candidate = dragStart + movement
-                        let radius = max(simd_length(dragStart), 0.4)
-                        if simd_length(candidate) > 0.01 {
-                            cinema.hudOffset = simd_normalize(candidate) * radius
-                        }
+                        cinema.moveHUD(to: candidate)
                     }
                 }
                 .onEnded { _ in dragStart = nil })
@@ -878,7 +888,7 @@ struct CinemaBigScreenCard: View {
             Text(Cinema.shared.screenAttached ? "Playing in \(Cinema.shared.mode.title)" : "Opening \(Cinema.shared.mode.title)…").font(.title2)
             HStack(spacing: 12) {
                 Button("Place in Front of Me", systemImage: "scope") {
-                    if Cinema.shared.mode == .hud { Cinema.shared.hudOffset = SIMD3(0, 0, -2) }
+                    if Cinema.shared.mode == .hud { Cinema.shared.recenterHUD() }
                     else { Cinema.shared.placeScreenInFront() }
                 }
                 Button("Back to Window", systemImage: "macwindow") {
