@@ -74,6 +74,7 @@ struct VideoOrnamentsView: View {
         #if os(visionOS)
         AnyView(CinemaButton(owner: .video(ObjectIdentifier(windowModel)),
                              bigScreenAvailable: windowModel.playbackRenderer == .nativeMetal || windowModel.canUseTranscodedStream,
+                             offersHeadLockedHUD: true,
                              dismissal: windowModel.menuDismissals,
                              onOpenChanged: { windowModel.ornamentMenu("Cinema", opened: $0) }))
         #else

@@ -22,6 +22,9 @@ import SwiftUI
 
 #if os(visionOS)
 
+import ARKit
+import AVFoundation
+
 struct ImmersiveVideoView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
@@ -31,6 +34,12 @@ struct ImmersiveVideoView: View {
     @State private var videoEntity: Entity?
     @State private var endOfPlayObserver: NSObjectProtocol?
     @State private var isLoaded: Bool = false
+    @State private var deviceAnchor: AnchorEntity?
+    @State private var trackingSession: SpatialTrackingSession?
+    @State private var realityContent: RealityViewContent?
+    @State private var lastSpaceDisplacement: SIMD3<Float>?
+    @State private var subtitleEntity: Entity?
+    @Environment(\.immersiveSpaceDisplacement) private var immersiveSpaceDisplacement
     /// Width / height of the picture the subtitles are laid out over.
     @State private var subtitleAspect: CGFloat = 16 / 9
     @Environment(\.physicalMetrics) private var physicalMetrics
@@ -42,9 +51,11 @@ struct ImmersiveVideoView: View {
     private static let subtitleLayoutWidth: CGFloat = 1920
     /// Eye height above the immersive origin (the floor) the screen is seen from.
     private static let assumedEyeHeight: Float = 1.5
+    private static let headLockedScreenDistance: Float = 2.0
 
     var body: some View {
         RealityView { content, attachments in
+            realityContent = content
             guard let videoURL = appModel.immersiveVideoURL else {
                 AppLogger.immersiveVideo.warning("No video URL available")
                 return
@@ -81,14 +92,45 @@ struct ImmersiveVideoView: View {
             // Create entity with video mesh and material
             let entity = Entity()
             entity.components.set(ModelComponent(mesh: mesh, materials: [material]))
-            entity.transform = transform
+            if appModel.isImmersiveVideoHeadLocked {
+                await ensureTrackingAuthorized()
+                if videoInfo.projectionType == .equirectangular || videoInfo.projectionType == .halfEquirectangular {
+                    entity.transform = transform
+                } else {
+                    let distance = Self.headLockedScreenDistance
+                    let fov = (videoInfo.horizontalFieldOfView ?? 65) * .pi / 180
+                    let width = 2 * distance * tan(fov / 2)
+                    entity.transform = Transform(
+                        scale: SIMD3(width, 1, width),
+                        rotation: .init(angle: Float.pi / 2, axis: .init(x: 1, y: 0, z: 0)),
+                        translation: SIMD3(0, 0, -distance)
+                    )
+                }
+            } else {
+                entity.transform = transform
+            }
             videoEntity = entity
-            content.add(entity)
+            if appModel.isImmersiveVideoHeadLocked {
+                let anchor = AnchorEntity(.head)
+                anchor.addChild(entity)
+                content.add(anchor)
+                deviceAnchor = anchor
+            } else {
+                content.add(entity)
+            }
 
             subtitleAspect = videoInfo.size.height > 0 ? videoInfo.size.width / videoInfo.size.height : 16 / 9
             if let subtitles = attachments.entity(for: "subtitles") {
-                placeSubtitles(subtitles, screen: transform, videoInfo: videoInfo)
-                content.add(subtitles)
+                subtitleEntity = subtitles
+                if appModel.isImmersiveVideoHeadLocked {
+                    let screenWidth = 2 * Self.headLockedScreenDistance * tan((videoInfo.horizontalFieldOfView ?? 65) * .pi / 360)
+                    subtitles.position = SIMD3(0, 0, -Self.headLockedScreenDistance * 0.92)
+                    subtitles.scale = SIMD3(repeating: screenWidth * 0.92 / Float(physicalMetrics.convert(Self.subtitleLayoutWidth, to: .meters)))
+                    deviceAnchor?.addChild(subtitles)
+                } else {
+                    placeSubtitles(subtitles, screen: transform, videoInfo: videoInfo)
+                    content.add(subtitles)
+                }
             }
 
             // Start playback
@@ -128,6 +170,10 @@ struct ImmersiveVideoView: View {
             player.replaceCurrentItem(with: nil)
             videoMaterial = nil
             videoEntity = nil
+            deviceAnchor = nil
+            trackingSession = nil
+            realityContent = nil
+            subtitleEntity = nil
         }
         .onChange(of: appModel.immersiveVideoOwner?.playbackSpeed) { _, speed in
             player.defaultRate = Float(speed ?? 1)
@@ -142,9 +188,30 @@ struct ImmersiveVideoView: View {
                 material.controller.preferredViewingMode = .stereo
             }
         }
+        .onChange(of: immersiveSpaceDisplacement) { _, _ in
+            guard appModel.isImmersiveVideoHeadLocked,
+                  let entity = videoEntity,
+                  let oldAnchor = deviceAnchor,
+                  let content = realityContent else { return }
+            entity.removeFromParent()
+            oldAnchor.removeFromParent()
+            let newAnchor = AnchorEntity(.head)
+            newAnchor.addChild(entity)
+            if let subtitleEntity { newAnchor.addChild(subtitleEntity) }
+            content.add(newAnchor)
+            deviceAnchor = newAnchor
+        }
     }
 
     // MARK: - Subtitles
+
+    @MainActor
+    private func ensureTrackingAuthorized() async {
+        guard trackingSession == nil else { return }
+        let session = SpatialTrackingSession()
+        _ = await session.run(SpatialTrackingSession.Configuration(tracking: [.world]))
+        trackingSession = session
+    }
 
     /// Puts the subtitle attachment on the line from the eye to the screen's
     /// centre, `subtitleDistance` away, scaled to the screen's angular width.

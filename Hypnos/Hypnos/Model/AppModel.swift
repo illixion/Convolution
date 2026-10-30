@@ -163,6 +163,9 @@ class AppModel {
     /// Whether the stereoscopic video immersive space is currently shown
     var isStereoscopicImmersiveSpaceShown: Bool = false
 
+    /// Whether the immersive video screen follows the user's head as a HUD.
+    var isImmersiveVideoHeadLocked: Bool = UserDefaults.standard.bool(forKey: "immersiveVideoHeadLocked")
+
     /// The video currently being played in immersive mode
     var immersiveVideo: GalleryVideo?
 

@@ -542,6 +542,13 @@ struct VideoWindowView: View {
                 filmTime: { windowModel.currentTime }
             ) { videoOrnament }
         }
+        .onChange(of: windowModel.usesImmersiveStereo) { _, immersive in
+            if immersive {
+                windowModel.isWindowControlsHidden = false
+            } else {
+                windowModel.startAutoHideTimer()
+            }
+        }
         .onChange(of: ornamentBottomPadding) { old, new in
             resizeWindowHeight(by: new - old)
         }
