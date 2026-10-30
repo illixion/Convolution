@@ -180,9 +180,16 @@ struct FilmPlayerView: View {
             // AI 3D draws in the window, so the big screen plays 2D.
             .onChange(of: cinema.mode(for: .film)) { _, mode in
                 guard mode.showsPicture else { return }
+                if mode == .hud { installHUDControls() }
                 stopStereo()
                 let player = player
                 cinema.setSubtitles(CinemaSubtitles(controller: session.subtitles, time: { player.currentTime }), for: .film)
+            }
+            .onChange(of: chromeVisible, initial: true) { _, visible in
+                if cinema.owner == .film { cinema.hudFilmChromeVisible = visible }
+            }
+            .onChange(of: menuDismissals) { _, _ in
+                if cinema.mode(for: .film) == .hud { installHUDControls() }
             }
             .onChange(of: cinema.screenTaps) {
                 if cinema.owner == .film { toggleChrome() }
@@ -477,7 +484,7 @@ struct FilmPlayerView: View {
         .persistentSystemOverlays(chromeVisible ? .visible : .hidden)
         // The strip rises into place and sinks away (`playerChromeOrnament`).
         .playerChromeOrnament(
-            isPresented: chromeVisible,
+            isPresented: chromeVisible && cinema.mode(for: .film) != .hud,
             keepsMounted: PlayerOrnamentStack<EmptyView>.keepsMounted(
                 subtitles: bandSubtitles, hasPrompt: prompt(controlsVisible: chromeVisible) != nil),
             attachmentAnchor: .scene(.bottom), contentAlignment: .top
@@ -501,7 +508,7 @@ struct FilmPlayerView: View {
             }
         }
         // The title over the window's top-left corner, with the controls.
-        .playerChromeOrnament(isPresented: chromeVisible,
+        .playerChromeOrnament(isPresented: chromeVisible && cinema.mode(for: .film) != .hud,
                               attachmentAnchor: .scene(.topLeading), contentAlignment: .topLeading) { shown in
             titleButton.padding(20)
                 .modifier(PlayerChromeReveal(shown: shown, edge: .top))
@@ -602,6 +609,22 @@ struct FilmPlayerView: View {
         session.subtitles.selected != nil
             && (stereoSource != nil ? stereoSubtitleStyle : flatSubtitleStyle) == .belowPicture
             ? session.subtitles : nil
+    }
+
+    private func installHUDControls() {
+        cinema.hudFilmChromeVisible = chromeVisible
+        cinema.hudControlsView = AnyView(
+            VStack(alignment: .leading) {
+            titleButton
+            FilmTransport(player: player, markedRanges: skipper.markedRanges, width: 1000,
+                          onModalChanged: { name, open in holdChrome(name, open) },
+                          menuDismissal: menuDismissals,
+                          onInteraction: { revealChrome() },
+                          onHold: { holdChrome(Self.scrubHold, $0) })
+                .environment(appModel)
+                .environment(\.playerChoiceDismissal, menuDismissals)
+            }.environment(appModel)
+        )
     }
 
     // MARK: Chrome auto-hide

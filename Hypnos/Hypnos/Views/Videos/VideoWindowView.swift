@@ -384,7 +384,7 @@ struct VideoWindowView: View {
                     .frame(height: ornamentBottomPadding)
             }
             #if os(visionOS)
-            .modifier(CinemaVideoWindowHook(windowModel: windowModel))
+            .modifier(CinemaVideoWindowHook(windowModel: windowModel, hudControls: AnyView(VStack(alignment: .leading) { titleButton; videoOrnament }.environment(appModel))))
             #endif
 
             #if os(visionOS)
@@ -529,7 +529,7 @@ struct VideoWindowView: View {
         // Both auto-hide together (`isUIHidden` / `isWindowControlsHidden`);
         // the strip rises into place and sinks away (`playerChromeOrnament`).
         .playerChromeOrnament(
-            isPresented: !windowModel.isUIHidden && !appModel.allWindowsHidden,
+            isPresented: !windowModel.isUIHidden && !appModel.allWindowsHidden && Cinema.shared.mode(for: .video(ObjectIdentifier(windowModel))) != .hud,
             keepsMounted: !appModel.allWindowsHidden && PlayerOrnamentStack<EmptyView>.keepsMounted(
                 subtitles: bandSubtitles, hasPrompt: ornamentPrompt != nil),
             attachmentAnchor: .scene(.bottom),
@@ -554,7 +554,7 @@ struct VideoWindowView: View {
         }
         // The title over the window's top-left corner, with the controls.
         .playerChromeOrnament(
-            isPresented: !windowModel.isUIHidden && !appModel.allWindowsHidden,
+            isPresented: !windowModel.isUIHidden && !appModel.allWindowsHidden && Cinema.shared.mode(for: .video(ObjectIdentifier(windowModel))) != .hud,
             attachmentAnchor: .scene(.topLeading),
             contentAlignment: .topLeading
         ) { shown in

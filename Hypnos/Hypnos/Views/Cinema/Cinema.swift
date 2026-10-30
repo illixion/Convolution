@@ -52,6 +52,7 @@
 
 #if os(visionOS)
 import ARKit
+import AudioToolbox
 import AVFoundation
 import DebugTrace
 import QuartzCore
@@ -128,7 +129,11 @@ final class Cinema {
     private(set) var screenTaps = 0
     private(set) var status = "Closed"
     var hudOffset = SIMD3<Float>(0, 0, -2)
-    var pictureWidth: Float { mode == .hud ? 2 * 2 * tanf(screenWidthDegrees * .pi / 360) : screenWidth }
+    var hudWidth: Float = 2 * 2 * tanf(55 * .pi / 360)
+    var pictureWidth: Float { mode == .hud ? hudWidth : screenWidth }
+    weak var hudVideoModel: VideoWindowModel?
+    var hudControlsView: AnyView?
+    var hudFilmChromeVisible = true
 
     /// The sound turns with the head (see the header).
     private(set) var headLocked = false
@@ -292,6 +297,8 @@ final class Cinema {
         screenAttached = false
         screenPlayer = nil
         screenSubtitles = nil
+        hudVideoModel = nil
+        hudControlsView = nil
         screenPose = nil
     }
 
@@ -408,6 +415,13 @@ final class Cinema {
             return
         }
         let position = head.columns.3.xyz
+        if mode == .hud {
+            // Keep the film's object stage facing the HUD as the wearer moves.
+            let direction = simd_make_float3(head * SIMD4(hudOffset, 0))
+            listener = position
+            roomPose = Self.pose(at: position, forward: direction, fallback: -head.columns.2.xyz)
+            return
+        }
         let k = 1 - expf(-max(dt, 0) / Self.followSeconds)
         let centre = listener.map { $0 + (position - $0) * k } ?? position
         listener = centre
@@ -460,24 +474,16 @@ private struct CinemaHUDControls: View {
     @Bindable private var cinema = Cinema.shared
 
     var body: some View {
-        HStack {
-            Button("Play or Pause", systemImage: "playpause") {
-                switch cinema.owner {
-                case .film:
-                    let player = FilmSession.shared.player
-                    if player.isPlaying { player.pause() } else { player.play() }
-                case .video:
-                    guard let player = cinema.screenPlayer else { return }
-                    if player.rate == 0 { player.play() } else { player.pause() }
-                case nil: break
-                }
+        VStack(spacing: 8) {
+            if let controls = cinema.hudControlsView { controls }
+            HStack {
+                Button("Recenter", systemImage: "scope") { cinema.hudOffset = SIMD3(0, 0, -2) }
+                Button("Window", systemImage: "macwindow", action: returnToWindow)
             }
-            Button("Recenter", systemImage: "scope") { cinema.hudOffset = SIMD3(0, 0, -2) }
-            Button("Window", systemImage: "macwindow", action: returnToWindow)
+            .labelStyle(.iconOnly)
+            .padding(10)
+            .glassBackgroundEffect()
         }
-        .labelStyle(.iconOnly)
-        .padding(10)
-        .glassBackgroundEffect()
     }
 }
 
@@ -493,7 +499,10 @@ struct CinemaSpaceView: View {
     @State private var headAnchor = AnchorEntity(.head)
     @State private var hudHandle = Entity()
     @State private var hudControls = Entity()
+    @State private var leftEdge = Entity()
+    @State private var rightEdge = Entity()
     @State private var dragStart: SIMD3<Float>?
+    @State private var resizeStart: Float?
     /// A video window's picture: a `VideoPlayerComponent` on its player.
     @State private var playerPicture = Entity()
     @State private var playerPictureSource: ObjectIdentifier?
@@ -518,6 +527,11 @@ struct CinemaSpaceView: View {
                 hudHandle.components.set(ModelComponent(mesh: .generateBox(width: 0.18, height: 0.014, depth: 0.008, cornerRadius: 0.007), materials: [SimpleMaterial(color: .white, isMetallic: false)]))
                 hudHandle.components.set(CollisionComponent(shapes: [.generateBox(width: 0.28, height: 0.07, depth: 0.04)]))
                 hudHandle.components.set(InputTargetComponent())
+                for edge in [leftEdge, rightEdge] {
+                    edge.components.set(CollisionComponent(shapes: [.generateBox(width: 0.08, height: 0.6, depth: 0.05)]))
+                    edge.components.set(InputTargetComponent())
+                    edge.components.set(HoverEffectComponent())
+                }
                 hudControls.components.set(ViewAttachmentComponent(rootView: CinemaHUDControls {
                     guard let owner = cinema.owner else { return }
                     Task { await cinema.setMode(.window, for: owner, open: open, dismiss: dismiss) }
@@ -531,12 +545,23 @@ struct CinemaSpaceView: View {
                     if dragStart == nil { dragStart = cinema.hudOffset }
                     let movement = value.convert(value.translation3D, from: .local, to: headAnchor)
                     if let dragStart {
-                        var offset = dragStart + movement
-                        offset.z = min(-0.4, max(-4, offset.z))
-                        cinema.hudOffset = offset
+                        let candidate = dragStart + movement
+                        let radius = max(simd_length(dragStart), 0.4)
+                        if simd_length(candidate) > 0.01 {
+                            cinema.hudOffset = simd_normalize(candidate) * radius
+                        }
                     }
                 }
                 .onEnded { _ in dragStart = nil })
+            .simultaneousGesture(DragGesture().targetedToAnyEntity()
+                .onChanged { value in
+                    guard value.entity === leftEdge || value.entity === rightEdge else { return }
+                    if resizeStart == nil { resizeStart = cinema.hudWidth }
+                    let movement = value.convert(value.translation3D, from: .local, to: screen)
+                    let sign: Float = value.entity === rightEdge ? 1 : -1
+                    if let resizeStart { cinema.hudWidth = min(4, max(0.4, resizeStart + sign * 2 * movement.x)) }
+                }
+                .onEnded { _ in resizeStart = nil })
         }
         .preferredSurroundingsEffect(cinema.mode == .bigScreen && cinema.dimsSurroundings ? .systemDark : nil)
         .onAppear { cinema.spaceAppeared() }
@@ -565,15 +590,24 @@ struct CinemaSpaceView: View {
         guard cinema.mode.showsPicture, let owner = cinema.owner else {
             hudHandle.removeFromParent()
             hudControls.removeFromParent()
+            leftEdge.removeFromParent()
+            rightEdge.removeFromParent()
             releaseSubtitles()
             cinema.noteScreenAttached(false)
             return
         }
         if cinema.mode == .hud {
+            if !cinema.headLocked, let player = cinema.screenPlayer,
+               !(player.intendedSpatialAudioExperience is AutomaticSpatialAudio) {
+                player.intendedSpatialAudioExperience = AutomaticSpatialAudio.automatic
+            }
             if screen.parent !== headAnchor { headAnchor.addChild(screen) }
-            screen.transform = Transform(translation: cinema.hudOffset)
+            let direction = simd_normalize(-cinema.hudOffset)
+            screen.transform = Transform(rotation: simd_quatf(from: SIMD3<Float>(0, 0, 1), to: direction), translation: cinema.hudOffset)
             if hudHandle.parent !== screen { screen.addChild(hudHandle) }
             if hudControls.parent !== screen { screen.addChild(hudControls) }
+            if leftEdge.parent !== screen { screen.addChild(leftEdge) }
+            if rightEdge.parent !== screen { screen.addChild(rightEdge) }
         } else {
             guard let pose = cinema.screenPose else { cinema.noteScreenAttached(false); return }
             if screen.parent === headAnchor {
@@ -583,6 +617,8 @@ struct CinemaSpaceView: View {
             }
             hudHandle.removeFromParent()
             hudControls.removeFromParent()
+            leftEdge.removeFromParent()
+            rightEdge.removeFromParent()
             screen.setTransformMatrix(pose, relativeTo: nil)
         }
 
@@ -615,8 +651,25 @@ struct CinemaSpaceView: View {
         }
         // The video component's mesh is aspect × 1 m, so its scale is its height.
         let height = cinema.pictureWidth / max(aspect, 0.1)
-        hudHandle.position = SIMD3(0, -height / 2 - 0.12, 0.02)
-        hudControls.position = SIMD3(0, -height / 2 - 0.06, 0.02)
+        // Fit the complete SwiftUI attachment to the picture rather than
+        // keeping it at a fixed physical size while the picture is resized.
+        if let bounds = hudControls.components[ViewAttachmentComponent.self]?.bounds,
+           bounds.extents.x > 1e-4 {
+            let scale = cinema.pictureWidth / bounds.extents.x
+            let controlsHeight = bounds.extents.y * scale
+            hudControls.scale = SIMD3(repeating: scale)
+            hudControls.position = SIMD3(0, -height / 2 - 0.05 - controlsHeight / 2, 0.02)
+            hudHandle.position = SIMD3(0, -height / 2 - 0.05 - controlsHeight - 0.08, 0.02)
+        }
+        leftEdge.position = SIMD3(-cinema.pictureWidth / 2, 0, 0.02)
+        rightEdge.position = SIMD3(cinema.pictureWidth / 2, 0, 0.02)
+        leftEdge.scale.y = max(height / 0.6, 0.2)
+        rightEdge.scale.y = leftEdge.scale.y
+        let controlsVisible = owner == .film ? cinema.hudFilmChromeVisible : !(cinema.hudVideoModel?.isUIHidden ?? false)
+        hudControls.isEnabled = controlsVisible
+        hudHandle.isEnabled = controlsVisible
+        leftEdge.isEnabled = controlsVisible
+        rightEdge.isEnabled = controlsVisible
         let transform = Transform(scale: SIMD3(repeating: height))
         if picture.transform != transform { picture.transform = transform }
         if picture.components[OpacityComponent.self]?.opacity != 1 {
@@ -783,10 +836,12 @@ struct CinemaButton: View {
 /// renderer and no in-window 3D, and the window's player goes to the screen.
 struct CinemaVideoWindowHook: ViewModifier {
     let windowModel: VideoWindowModel
+    let hudControls: AnyView
     private var cinema: Cinema { .shared }
     private var owner: CinemaOwner { .video(ObjectIdentifier(windowModel)) }
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
+    @Environment(SceneDelegate.self) private var sceneDelegate: SceneDelegate?
 
     private var onBigScreen: Bool { cinema.mode(for: owner).showsPicture }
 
@@ -799,7 +854,8 @@ struct CinemaVideoWindowHook: ViewModifier {
             .onChange(of: windowModel.playbackRenderer) {
                 if onBigScreen { prepare() }
             }
-            .onChange(of: windowModel.nativePlayerGeneration) { lendPlayer() }
+            .onChange(of: windowModel.nativePlayerGeneration) { lendPlayer(); routeAudio() }
+            .onChange(of: cinema.mode(for: owner), initial: true) { _, _ in routeAudio() }
             // AI 3D, live 3D and the immersive player draw elsewhere: picking
             // one ends Big Screen.
             .onChange(of: windowModel.showsStereoPicture || windowModel.usesImmersiveStereo) { _, stereo in
@@ -820,6 +876,8 @@ struct CinemaVideoWindowHook: ViewModifier {
         let model = windowModel
         cinema.setSubtitles(CinemaSubtitles(controller: model.subtitles, time: { [weak model] in model?.currentTime ?? 0 }),
                             for: owner)
+        cinema.hudVideoModel = windowModel
+        cinema.hudControlsView = hudControls
         if windowModel.pseudo3DEnabled { windowModel.disablePseudo3D() }
         if windowModel.stereoscopicOverride == true { windowModel.stereoscopicOverride = false }
         if windowModel.playbackRenderer == .webKit,
@@ -838,6 +896,22 @@ struct CinemaVideoWindowHook: ViewModifier {
     private func lendPlayer() {
         guard cinema.owner == owner else { return }
         cinema.setScreenPlayer(windowModel.playbackRenderer == .nativeMetal ? windowModel.nativePlayer : nil, for: owner)
+    }
+
+    private func routeAudio() {
+        guard let player = windowModel.nativePlayer, let item = player.currentItem,
+              let asset = item.asset as? AVURLAsset else { return }
+        if cinema.mode(for: owner) == .hud {
+            // Let AVPlayer follow its VideoPlayerComponent in the immersive scene
+            // instead of the window whose scene was named by the Metal renderer.
+            item.allowedAudioSpatializationFormats = .monoStereoAndMultichannel
+            player.intendedSpatialAudioExperience = cinema.headLocked
+                ? .fixed(soundStageSize: .automatic) : AutomaticSpatialAudio.automatic
+        } else {
+            let identifier = sceneDelegate?.spatialAudioSceneIdentifier
+            item.applySpatialAudioPolicy(sceneIdentifier: identifier)
+            player.applySpatialAudioPolicy(for: asset, sceneIdentifier: identifier)
+        }
     }
 }
 
