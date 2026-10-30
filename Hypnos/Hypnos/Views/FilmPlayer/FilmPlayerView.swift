@@ -179,7 +179,7 @@ struct FilmPlayerView: View {
             }
             // AI 3D draws in the window, so the big screen plays 2D.
             .onChange(of: cinema.mode(for: .film)) { _, mode in
-                guard mode == .bigScreen else { return }
+                guard mode.showsPicture else { return }
                 stopStereo()
                 let player = player
                 cinema.setSubtitles(CinemaSubtitles(controller: session.subtitles, time: { player.currentTime }), for: .film)
@@ -489,7 +489,7 @@ struct FilmPlayerView: View {
                 filmTime: { player.currentTime }
             ) {
             FilmTransport(player: player, stereoEnabled: stereoSource != nil,
-                          onToggle3D: cinema.mode(for: .film) == .bigScreen ? nil : { stereoSource == nil ? startStereo() : stopStereo() },
+                          onToggle3D: cinema.mode(for: .film).showsPicture ? nil : { stereoSource == nil ? startStereo() : stopStereo() },
                           markedRanges: skipper.markedRanges,
                           width: windowWidth > 0
                               ? min(max(windowWidth, VideoWindowView.minimumStripWidth), 1180) : nil,
@@ -689,7 +689,7 @@ struct FilmPlayerView: View {
     }
 
     private func startStereo() {
-        guard stereoSource == nil, cinema.mode(for: .film) != .bigScreen else { return }
+        guard stereoSource == nil, !cinema.mode(for: .film).showsPicture else { return }
         // A 3D film already has both eyes; only a flat one needs depth.
         let layout = session.stereoFormat?.packedLayout(eyesReversed: false)
         guard layout != nil || CoreMLDepthProvider.hasAvailableModel(role: .realtime) else {

@@ -1323,7 +1323,7 @@ class AppModel {
     // MARK: - Initialization
 
     init() {
-        isImmersiveVideoHeadLocked = UserDefaults.standard.bool(forKey: "immersiveVideoHeadLocked")
+        isImmersiveVideoHeadLocked = false
         // Vergence's depth cache has no notion of this app's cache budget, so
         // it never evicts until told how much disk it may hold. Wired before
         // anything can enqueue a conversion; without it the depth cache grows

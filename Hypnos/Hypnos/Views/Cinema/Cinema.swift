@@ -69,6 +69,9 @@ enum CinemaMode: String, CaseIterable, Identifiable {
     case roomSound
     /// The picture on a screen in the space.
     case bigScreen
+    case hud
+
+    var showsPicture: Bool { self == .bigScreen || self == .hud }
 
     var id: String { rawValue }
 
@@ -77,6 +80,7 @@ enum CinemaMode: String, CaseIterable, Identifiable {
         case .window: "Window"
         case .roomSound: "Room Sound"
         case .bigScreen: "Big Screen"
+        case .hud: "HUD"
         }
     }
 }
@@ -95,7 +99,7 @@ enum CinemaOwner: Equatable {
     var modes: [CinemaMode] {
         switch self {
         case .film: CinemaMode.allCases
-        case .video: [.window, .bigScreen]
+        case .video: [.window, .bigScreen, .hud]
         }
     }
 }
@@ -123,6 +127,8 @@ final class Cinema {
     /// Taps on the screen, for the owner's window to toggle its controls.
     private(set) var screenTaps = 0
     private(set) var status = "Closed"
+    var hudOffset = SIMD3<Float>(0, 0, -2)
+    var pictureWidth: Float { mode == .hud ? 2 * 2 * tanf(screenWidthDegrees * .pi / 360) : screenWidth }
 
     /// The sound turns with the head (see the header).
     private(set) var headLocked = false
@@ -195,7 +201,7 @@ final class Cinema {
     /// flashes back into the window between players.
     func hidesPicture(for owner: CinemaOwner) -> Bool {
         guard self.owner == owner else { return false }
-        if case .video = owner { return mode == .bigScreen }
+        if case .video = owner { return mode.showsPicture }
         return screenAttached
     }
 
@@ -205,7 +211,7 @@ final class Cinema {
     private var needsSpace: Bool {
         switch owner {
         case .film: mode != .window || headLocked
-        case .video: mode == .bigScreen
+        case .video: mode.showsPicture
         case nil: false
         }
     }
@@ -218,7 +224,7 @@ final class Cinema {
         guard newMode != mode else { return }
         logger.info("Cinema: \(self.mode.rawValue, privacy: .public) → \(newMode.rawValue, privacy: .public)")
         // The window takes the picture back before anything closes.
-        if newMode != .bigScreen { screenAttached = false }
+        if !newMode.showsPicture { screenAttached = false }
         mode = newMode
         if newMode == .bigScreen, let headPose { placeScreen(facing: headPose) }
         await sync(open: open, dismiss: dismiss)
@@ -448,12 +454,46 @@ private extension SIMD4 where Scalar == Float {
 
 // MARK: - The space
 
+/// Controls travel with the HUD; the grab bar below moves its head-relative offset.
+private struct CinemaHUDControls: View {
+    let returnToWindow: () -> Void
+    @Bindable private var cinema = Cinema.shared
+
+    var body: some View {
+        HStack {
+            Button("Play or Pause", systemImage: "playpause") {
+                switch cinema.owner {
+                case .film:
+                    let player = FilmSession.shared.player
+                    if player.isPlaying { player.pause() } else { player.play() }
+                case .video:
+                    guard let player = cinema.screenPlayer else { return }
+                    if player.rate == 0 { player.play() } else { player.pause() }
+                case nil: break
+                }
+            }
+            Button("Recenter", systemImage: "scope") { cinema.hudOffset = SIMD3(0, 0, -2) }
+            Button("Window", systemImage: "macwindow", action: returnToWindow)
+        }
+        .labelStyle(.iconOnly)
+        .padding(10)
+        .glassBackgroundEffect()
+    }
+}
+
 /// The cinema space's content: the film's object-audio stage and, for Big
 /// Screen, the owner's picture on a screen.
 struct CinemaSpaceView: View {
+    @Environment(\.openImmersiveSpace) private var open
+    @Environment(\.dismissImmersiveSpace) private var dismiss
     @Bindable private var cinema = Cinema.shared
     private let session = FilmSession.shared
     @State private var screen = Entity()
+    @State private var sceneRoot = Entity()
+    @State private var headAnchor = AnchorEntity(.head)
+    @State private var hudHandle = Entity()
+    @State private var hudControls = Entity()
+    @State private var dragStart: SIMD3<Float>?
     /// A video window's picture: a `VideoPlayerComponent` on its player.
     @State private var playerPicture = Entity()
     @State private var playerPictureSource: ObjectIdentifier?
@@ -472,9 +512,31 @@ struct CinemaSpaceView: View {
                 screen.name = "cinema-screen"
                 playerPicture.name = "cinema-player-picture"
                 subtitles.name = "cinema-subtitles"
-                content.add(screen)
+                content.add(sceneRoot)
+                sceneRoot.addChild(screen)
+                content.add(headAnchor)
+                hudHandle.components.set(ModelComponent(mesh: .generateBox(width: 0.18, height: 0.014, depth: 0.008, cornerRadius: 0.007), materials: [SimpleMaterial(color: .white, isMetallic: false)]))
+                hudHandle.components.set(CollisionComponent(shapes: [.generateBox(width: 0.28, height: 0.07, depth: 0.04)]))
+                hudHandle.components.set(InputTargetComponent())
+                hudControls.components.set(ViewAttachmentComponent(rootView: CinemaHUDControls {
+                    guard let owner = cinema.owner else { return }
+                    Task { await cinema.setMode(.window, for: owner, open: open, dismiss: dismiss) }
+                }))
             }
-            .gesture(SpatialTapGesture().targetedToAnyEntity().onEnded { _ in cinema.noteScreenTap() })
+            .gesture(SpatialTapGesture().targetedToAnyEntity().onEnded { value in
+                if value.entity !== hudHandle { cinema.noteScreenTap() }
+            })
+            .simultaneousGesture(DragGesture().targetedToEntity(hudHandle)
+                .onChanged { value in
+                    if dragStart == nil { dragStart = cinema.hudOffset }
+                    let movement = value.convert(value.translation3D, from: .local, to: headAnchor)
+                    if let dragStart {
+                        var offset = dragStart + movement
+                        offset.z = min(-0.4, max(-4, offset.z))
+                        cinema.hudOffset = offset
+                    }
+                }
+                .onEnded { _ in dragStart = nil })
         }
         .preferredSurroundingsEffect(cinema.mode == .bigScreen && cinema.dimsSurroundings ? .systemDark : nil)
         .onAppear { cinema.spaceAppeared() }
@@ -493,19 +555,36 @@ struct CinemaSpaceView: View {
         let filmPicture = session.player.video.videoEntity
         // A film picture left here by a previous owner goes back to its
         // window, which re-adds it once it shows it again.
-        if cinema.owner != .film || cinema.mode != .bigScreen, filmPicture.parent === screen {
+        if cinema.owner != .film || !cinema.mode.showsPicture, filmPicture.parent === screen {
             filmPicture.removeFromParent()
         }
         // A video window between players keeps the last one's picture.
-        if cinema.owner == .film || cinema.owner == nil || cinema.mode != .bigScreen {
+        if cinema.owner == .film || cinema.owner == nil || !cinema.mode.showsPicture {
             releasePlayerPicture()
         }
-        guard cinema.mode == .bigScreen, let owner = cinema.owner, let pose = cinema.screenPose else {
+        guard cinema.mode.showsPicture, let owner = cinema.owner else {
+            hudHandle.removeFromParent()
+            hudControls.removeFromParent()
             releaseSubtitles()
             cinema.noteScreenAttached(false)
             return
         }
-        screen.setTransformMatrix(pose, relativeTo: nil)
+        if cinema.mode == .hud {
+            if screen.parent !== headAnchor { headAnchor.addChild(screen) }
+            screen.transform = Transform(translation: cinema.hudOffset)
+            if hudHandle.parent !== screen { screen.addChild(hudHandle) }
+            if hudControls.parent !== screen { screen.addChild(hudControls) }
+        } else {
+            guard let pose = cinema.screenPose else { cinema.noteScreenAttached(false); return }
+            if screen.parent === headAnchor {
+                screen.removeFromParent()
+                // Reparent through the scene root retained by the RealityView.
+                sceneRoot.addChild(screen)
+            }
+            hudHandle.removeFromParent()
+            hudControls.removeFromParent()
+            screen.setTransformMatrix(pose, relativeTo: nil)
+        }
 
         let picture: Entity
         let aspect: Float
@@ -535,7 +614,9 @@ struct CinemaSpaceView: View {
             AppLogger.filmPlayer.info("Cinema: picture moved to the big screen")
         }
         // The video component's mesh is aspect × 1 m, so its scale is its height.
-        let height = cinema.screenWidth / max(aspect, 0.1)
+        let height = cinema.pictureWidth / max(aspect, 0.1)
+        hudHandle.position = SIMD3(0, -height / 2 - 0.12, 0.02)
+        hudControls.position = SIMD3(0, -height / 2 - 0.06, 0.02)
         let transform = Transform(scale: SIMD3(repeating: height))
         if picture.transform != transform { picture.transform = transform }
         if picture.components[OpacityComponent.self]?.opacity != 1 {
@@ -549,7 +630,7 @@ struct CinemaSpaceView: View {
             picture.components.set(InputTargetComponent())
         }
         placeSubtitles(aspect: aspect)
-        cinema.noteScreenAttached(true)
+        cinema.noteScreenAttached(cinema.mode != .hud || headAnchor.isAnchored)
     }
 
     /// The aspect the picture was last scaled for, from its collision box.
@@ -578,7 +659,7 @@ struct CinemaSpaceView: View {
         // measured width to the screen's.
         guard let bounds = subtitles.components[ViewAttachmentComponent.self]?.bounds,
               bounds.extents.x > 1e-4 else { return }
-        let scale = cinema.screenWidth / bounds.extents.x
+        let scale = cinema.pictureWidth / bounds.extents.x
         let transform = Transform(scale: SIMD3(repeating: scale), translation: SIMD3(0, 0, 0.05))
         if subtitles.transform != transform { subtitles.transform = transform }
     }
@@ -631,9 +712,12 @@ struct CinemaBigScreenCard: View {
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "sparkles.tv").font(.system(size: 44))
-            Text(Cinema.shared.screenAttached ? "Playing on the Big Screen" : "Opening the Big Screen…").font(.title2)
+            Text(Cinema.shared.screenAttached ? "Playing in \(Cinema.shared.mode.title)" : "Opening \(Cinema.shared.mode.title)…").font(.title2)
             HStack(spacing: 12) {
-                Button("Place in Front of Me", systemImage: "scope") { Cinema.shared.placeScreenInFront() }
+                Button("Place in Front of Me", systemImage: "scope") {
+                    if Cinema.shared.mode == .hud { Cinema.shared.hudOffset = SIMD3(0, 0, -2) }
+                    else { Cinema.shared.placeScreenInFront() }
+                }
                 Button("Back to Window", systemImage: "macwindow") {
                     Task { await Cinema.shared.setMode(.window, for: owner, open: openImmersiveSpace, dismiss: dismissImmersiveSpace) }
                 }
@@ -651,9 +735,6 @@ struct CinemaButton: View {
     let owner: CinemaOwner
     /// Big Screen can be had (a video that can reach the AVFoundation renderer).
     var bigScreenAvailable = true
-    /// Whether this Cinema menu belongs to a video window (as opposed to Film).
-    var offersHeadLockedHUD = false
-    @Environment(AppModel.self) private var appModel
     /// Bumped by the host to close the popover (a tap on the picture).
     var dismissal = 0
     var onOpenChanged: (Bool) -> Void = { _ in }
@@ -680,17 +761,7 @@ struct CinemaButton: View {
                 } label: {
                     PlayerChoiceRow(mode.title, isChecked: mode == cinema.mode(for: owner))
                 }
-                .disabled(mode == .bigScreen && !bigScreenAvailable)
-            }
-            if offersHeadLockedHUD {
-                Divider()
-                Toggle(isOn: Binding(
-                    get: { appModel.isImmersiveVideoHeadLocked },
-                    set: { appModel.isImmersiveVideoHeadLocked = $0 }
-                )) {
-                    PlayerChoiceRow("Head-Locked HUD", isChecked: appModel.isImmersiveVideoHeadLocked)
-                }
-                .help("Keep the immersive video screen in front of you as you move")
+                .disabled(mode.showsPicture && !bigScreenAvailable)
             }
             Divider()
             Button {
@@ -717,7 +788,7 @@ struct CinemaVideoWindowHook: ViewModifier {
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
 
-    private var onBigScreen: Bool { cinema.mode(for: owner) == .bigScreen }
+    private var onBigScreen: Bool { cinema.mode(for: owner).showsPicture }
 
     func body(content: Content) -> some View {
         content
@@ -752,13 +823,13 @@ struct CinemaVideoWindowHook: ViewModifier {
         if windowModel.pseudo3DEnabled { windowModel.disablePseudo3D() }
         if windowModel.stereoscopicOverride == true { windowModel.stereoscopicOverride = false }
         if windowModel.playbackRenderer == .webKit,
-           !windowModel.switchToTranscodedStream(reason: "Big Screen needs the AVFoundation renderer") {
+           !windowModel.switchToTranscodedStream(reason: "The immersive screen needs the AVFoundation renderer") {
             let owner = owner
             Task {
-                await cinema.fail("This video can't play on the Big Screen: the server has no transcode this device can decode.",
+                await cinema.fail("This video can't play on the immersive screen: the server has no transcode this device can decode.",
                                   for: owner, dismiss: dismissImmersiveSpace)
             }
-            windowModel.showQualityNotice("This video can't play on the Big Screen.")
+            windowModel.showQualityNotice("This video can't play on the immersive screen.")
             return
         }
         lendPlayer()
