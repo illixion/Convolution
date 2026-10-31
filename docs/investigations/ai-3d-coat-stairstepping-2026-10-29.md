@@ -649,3 +649,18 @@ and HDR behaviour still require validation. The flag remains off by default
 until those checks support enabling it. Research artifacts and exact fixtures
 are retained under `build/edge-comparison/`; generated previews are not source
 control assets.
+
+
+Headset result for H: **worse**, with similar distortion plus new dither-like
+artifacts around the chins in the coat scene. H is rejected and remains off;
+the analytic stripe improvement did not transfer to this real-source case.
+The user then reopened the head scene. Live captures at 909.3667083333333 s
+with directional off/on have identical raw source and depth SHA-256 hashes,
+retained in `heads-live-H-rejected-{baseline,enabled}-2026-10-31/` under
+`build/edge-comparison/`. No depth recomputation was requested. Directional
+was disabled again and a fresh redraw requested afterward.
+
+G remains the best reported improvement. Its semantic/image-guided coverage
+and completed background must be isolated in further experiments before
+another realtime approximation is considered. Do not promote H based on the
+synthetic benchmark or profile it as a candidate for shipping.
