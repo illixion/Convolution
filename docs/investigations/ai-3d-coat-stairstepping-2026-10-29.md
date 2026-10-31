@@ -596,3 +596,56 @@ runs at 800×800 and returns RGB in **0–255**, unlike the 512×512 Torch model
 conversion success are not evidence of a realtime AVP budget. Current work
 tests completion constrained by observed background first, rather than pasting
 observations over an independently generated background afterward.
+
+
+### Structured-background continuation (2026-10-31)
+
+Further headset comparisons narrow the remaining defect:
+
+- In `Heads-halo-review-2.spatial.mov`, D (completion without temporal joins)
+  beat C and the learned-matte E. The shade still bends.
+- In `Heads-geometry-check.spatial.mov`, F (the same texture and coverage with
+  constant far-layer depth) still bends similarly to D. Correcting depth alone
+  does not straighten the completed shade texture.
+- In `Heads-coats-structure.spatial.mov`, G continues observed background texture
+  along its local structure direction, with completion as fallback. The user
+  reports **G improves both scenes**. This confirms an improvement, not that
+  the remaining artifact is acceptable.
+
+G uses an offline semantic foreground mask and image-guided coverage. Its
+quality cannot be attributed to a fast depth-only implementation without a
+separate comparison. The next clip, `Heads-coats-GPU.spatial.mov`, compares
+original layered A with GPU candidate H: heads A/H at 0–10/10–20 seconds,
+coats A/H at 20–30/30–40 seconds. These are static spatial-video previews.
+
+H uses the existing source and depth. A local RGB structure tensor estimates
+texture direction using only samples consistent with the far-layer depth.
+It transports observed colour along that direction, gated by structure
+coherence, available support and depth agreement. Weak evidence retains the
+existing normalized-convolution background. A bounded premultiplied residual
+preserves source reconstruction for SDR; the bounds correction is skipped for
+out-of-range radiance rather than clipping HDR. This is an experimental shader
+path, off by default, exposed as `stereoEdges directional=true` with
+`layered=true`. Captures record the flag for reproducible replay.
+
+An independent analytic test renders a soft-edged disc over striped background
+with known layer depths. Both eyes must match the independently translated
+layers within 5 RGB code values RMS in the edge annulus, at four stripe angles.
+The production shader passes. A broader local sweep over three depth softnesses
+and four stripe angles improves all 12 cases; for vertical stripes with the
+middle softness, RMS falls from about 13.9 to 3.7 code values. This is evidence
+for texture continuation, not evidence of real-video temporal stability or
+headset acceptance. Existing silhouette tests also pass. The full package run
+passes 210 tests; all four app platforms compile with and without YouTube.
+
+The optimized Release build was installed and launched on AVP (build id
+`7e7ee52c707742e9b0858c12be0a2cf3`, no injection). Its live endpoint reports
+`directional=0`, `layered=1`, with snap/fill/separated/holes off. The first
+post-launch memory sample, before opening video, is about 590 MB footprint;
+it is only a baseline, not a playback measurement.
+
+The real-source review, optimized AVP playback cost, moving-video stability
+and HDR behaviour still require validation. The flag remains off by default
+until those checks support enabling it. Research artifacts and exact fixtures
+are retained under `build/edge-comparison/`; generated previews are not source
+control assets.
