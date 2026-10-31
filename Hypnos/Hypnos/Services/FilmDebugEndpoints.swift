@@ -160,6 +160,22 @@ enum FilmDebugEndpoints {
                 throw CocoaError(.featureUnsupported)
                 #endif
             },
+            .raw("stereoFrame", kind: .query,
+                 "Lossless retained stereo capture for offline replay: tightly packed BGRA source, float32 "
+                 + "depth, mapping, budget, grid, tone, disparity and both eye PNGs. Binary planes are base64 "
+                 + "inside JSON; float32 is little endian. Uses the last stereoEyes capture without advancing "
+                 + "playback or recomputing depth; requests a fresh capture only if none exists.",
+                 sensitivity: .screenCapture) { _ in
+                #if os(visionOS)
+                let frame: StereoEyeCapture.Frame
+                if let last = StereoEyeCapture.latest { frame = last }
+                else { frame = try await StereoEyeImages.capture() }
+                return .binary(try StereoEyeImages.replayData(of: frame), contentType: "application/json",
+                               filename: "stereo-frame.json")
+                #else
+                throw CocoaError(.featureUnsupported)
+                #endif
+            },
             .query("stereoDepth", "How AI 3D's realtime depth is spread over the picture (0 far … 1 near, after the "
                    + "depth budget): the last frame, the shot playing and the last 40 shots (split at cuts), each with the "
                    + "strength multiplier the shot-adaptive policy would choose (measured only, not applied). Also the "

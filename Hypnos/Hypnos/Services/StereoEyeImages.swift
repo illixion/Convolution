@@ -32,6 +32,43 @@ enum StereoEyeImages {
 
     private static let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
 
+    /// A lossless replay fixture. Image/depth bytes are base64 in the JSON payload.
+    static func replayData(of frame: StereoEyeCapture.Frame) throws -> Data {
+        guard let depth = frame.depth,
+              CVPixelBufferGetPixelFormatType(frame.source) == kCVPixelFormatType_32BGRA else {
+            throw Failure.render
+        }
+        struct Replay: Encodable {
+            let version = 1
+            let width: Int
+            let height: Int
+            let depthWidth: Int
+            let depthHeight: Int
+            let itemSeconds: Double
+            let strength: Float
+            let convergence: Float
+            let warp: StereoEyeCapture.WarpMetadata
+            let sourceBGRA: Data
+            let depthFloat32: Data
+            let leftPNG: Data
+            let rightPNG: Data
+        }
+        let source = frame.source
+        let width = CVPixelBufferGetWidth(source), height = CVPixelBufferGetHeight(source)
+        CVPixelBufferLockBaseAddress(source, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(source, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(source) else { throw Failure.render }
+        let stride = CVPixelBufferGetBytesPerRow(source)
+        var pixels = Data(capacity: width * height * 4)
+        for row in 0..<height { pixels.append(base.advanced(by: row * stride).assumingMemoryBound(to: UInt8.self), count: width * 4) }
+        let floats = depth.values.withUnsafeBytes { Data($0) }
+        return try JSONEncoder().encode(Replay(
+            width: width, height: height, depthWidth: depth.width, depthHeight: depth.height,
+            itemSeconds: frame.itemSeconds, strength: frame.depthStrength, convergence: frame.convergence,
+            warp: frame.warp, sourceBGRA: pixels, depthFloat32: floats,
+            leftPNG: try png(.left, of: frame, crop: nil), rightPNG: try png(.right, of: frame, crop: nil)))
+    }
+
     /// A fresh capture, waiting up to two seconds for the pump to draw one.
     static func capture(recomputingDepth: Bool = false) async throws -> StereoEyeCapture.Frame {
         let generation = StereoEyeCapture.request(recomputingDepth: recomputingDepth)

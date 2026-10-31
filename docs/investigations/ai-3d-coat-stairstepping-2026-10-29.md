@@ -521,3 +521,78 @@ into the rendering window. The guard now checks for paused playback instead
 of requiring an empty rendering backlog. After deployment, fresh paused
 captures, the exact-frame A/B and restoration redraw all completed without
 advancing playback. The capture remains gated by screen-capture approval.
+
+### Outer silhouettes and the shade regression case (2026-10-31)
+
+The user's corrected eye/edge report at **740.3229166666666 s** is: left eye,
+left edge of the yellow garment; right eye, right edge of the yellow garment
+and right edge of the beige jacket. This supersedes the earlier focus on only
+the inner yellow edge. Lossless device inputs and both eyes are retained under
+`build/edge-comparison/coat-whole-740-lossless-2026-10-31/`. The mesh-only fixture
+in `coat-whole-740-mesh-2026-10-31/` has identical source/depth hashes and time.
+
+A clearer second regression is `/Users/ixion/Downloads/House_S03E06.mkv`, at
+15:09. The paused device capture is **909.325 s**, 1920×1080, depth 896×504,
+strength 0.008, convergence 1, layered on and experimental corrected matte off.
+The user sees halos around the heads, with the window shade bending behind
+them. `build/edge-comparison/heads-1509-lossless-2026-10-31/` retains raw BGRA,
+float32 depth, mapping and both eye PNGs. The shade provides a structured
+background test in addition to the soft coat edge.
+
+The `stereoFrame` endpoint exports the retained capture without recomputing
+depth or advancing playback, under the usual screen-capture grant. Export it
+after a fresh `stereoEyes` capture:
+
+```sh
+python scripts/export-stereo-frame.py --out /path/to/new-capture
+```
+
+The replay harness prefers `source.bgra` when present and reads mirror, tone
+and grid metadata. This avoids an image decode or a fresh depth inference
+changing the experiment's inputs.
+
+Rejected experiments remain rejected: covariance-based local colour fitting
+and guided coverage changed the faint band into a distinct line on the
+headset; the user did not accept that as a fix. Those production experiments
+were removed. Isolated lab trials of physically bounded radiance, BT.709
+linear-light matting, confidence changes and opaque patch composition also
+leave visible shade distortion. Widening the local seed margin introduces
+additional shade discontinuities. None of these is a validated replacement.
+
+Further offline research separates three problems: locating actual coverage,
+preserving source radiance, and obtaining background hidden by the subject.
+Image-guided and Vision-assisted mattes improve parts of the head silhouettes
+but do not by themselves recover the shade's hidden stripes. Local inpainting
+still leaves errors. Registered neighbouring frames supply observed background
+for some exposed strips; a visible-background agreement check rejects other
+shots. This is research evidence, not a general renderer, a realtime budget,
+or headset acceptance. The original layered candidate remains on the device.
+
+An offline stereo review is now in the device's `Documents/Videos/` as
+`Heads-halo-review.spatial.mov`: A (0–10 s) is the current layered renderer;
+B (10–20 s) uses a narrow image-guided matte and registered observations;
+C (20–30 s) adds LaMa completion for unobserved background. Both candidates
+preserve the source through a bounded premultiplied decomposition and blend
+back to the original renderer outside the experimental boundary region. The
+user's result: **C looks best, but warping remains visible, less than B**.
+This is improvement evidence, not acceptance of a suitable solution.
+
+The review is a 30-second still-frame MV-HEVC clip (two labelled 1920×1080
+views, BT.709, 24 fps), not a moving-video or realtime implementation. Local
+files live in `build/edge-comparison/stereo-review-2026-10-31/`; preserved
+research scripts/results are under `build/edge-comparison/research-2026-10-31/`.
+Raw replay fixtures remain the authoritative inputs.
+
+A broad local affine background-depth fit was also rejected: measured median
+horizontal deviation from straight visible background lines in the head frame
+rose from 0.012 px with C's background depth to 0.032 px with the fit (33 source
+segments). The two qualifying coat segments worsened too. This diagnostic
+does not measure hidden pixels and is not a ground-truth stereo benchmark.
+
+Model experiments run locally. The compact palettized LaMa Core ML conversion
+produced purple masked regions and was rejected. A full-precision conversion
+runs at 800×800 and returns RGB in **0–255**, unlike the 512×512 Torch model's
+0–1 output; treating it as 0–1 makes the preview white. Mac timings and model
+conversion success are not evidence of a realtime AVP budget. Current work
+tests completion constrained by observed background first, rather than pasting
+observations over an independently generated background afterward.
