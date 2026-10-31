@@ -496,3 +496,28 @@ the headset, both paused and moving, and measure warp cost and memory there.
 Test stronger disparity, scene cuts, thin structures, ambiguous backgrounds and
 HDR. Adaptive reach and a colour-variance gate are possible follow-ups, not
 implemented fixes for these remaining limits.
+
+### First headset check and paused-capture regression (2026-10-31)
+
+The merged candidate was installed on the AVP in an optimized Release build.
+The user reports a faint translucent warp outside the coat and selected 12:15
+as a clearer demonstration. Captures at **735.4430416666667 s**, 1920×1080,
+depth 896×504, strength 0.008 and convergence 1 retain that residual band.
+The layered renderer remains a candidate with a visible defect, not a completed
+silhouette fix.
+
+Local evidence is in `build/edge-comparison/coat-1215-2026-10-31/`: both eyes,
+source and depth for layered and original mesh, `capture.json`, and
+`coat-edge-comparison.png`. The A/B has identical timestamps, disparity settings,
+source PNG hashes and depth PNG hashes. Depth was retained, not recomputed.
+Layering was restored and the paused frame redrawn after comparison. These
+display-depth exports do not replace a lossless raw-depth fixture.
+
+Capturing initially timed out even with the existing paused-redraw endpoint.
+The pump's capture guard required every buffered frame to have rendered eyes;
+the depth-lookahead reserve now deliberately leaves future eyes unrendered
+until they approach presentation. A paused clock never brings those frames
+into the rendering window. The guard now checks for paused playback instead
+of requiring an empty rendering backlog. After deployment, fresh paused
+captures, the exact-frame A/B and restoration redraw all completed without
+advancing playback. The capture remains gated by screen-capture approval.
