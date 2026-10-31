@@ -131,12 +131,22 @@ final class Cinema {
     private(set) var status = "Closed"
     var hudOffset = SIMD3<Float>(0, 0, -2)
     var hudWidth: Float = 2 * 2 * tanf(55 * .pi / 360)
+    /// The picture's aspect, reported by the space each frame so the framing
+    /// knows how tall it is.
+    @ObservationIgnored var hudAspect: Float = 16 / 9
+
+    /// Moves the HUD to `offset`, held where the whole picture stays in view
+    /// (`HUDFraming`).
     func moveHUD(to offset: SIMD3<Float>) {
         guard offset.x.isFinite, offset.y.isFinite, offset.z.isFinite else { return }
-        let candidate = SIMD3(offset.x, offset.y, min(-0.3, offset.z))
-        let distance = simd_length(candidate)
-        guard distance.isFinite else { return }
-        hudOffset = candidate * (min(6, max(1.5, distance)) / distance)
+        hudOffset = HUDFraming.clamp(offset: offset, requestedWidth: hudWidth, aspect: hudAspect)
+    }
+
+    /// Pulls the offset back inside the view after the picture's size or shape
+    /// changed (a resize, a new aspect), writing only when it moved.
+    func refitHUD() {
+        let fitted = HUDFraming.clamp(offset: hudOffset, requestedWidth: hudWidth, aspect: hudAspect)
+        if simd_distance(fitted, hudOffset) > 1e-4 { hudOffset = fitted }
     }
 
     func recenterHUD() {
@@ -144,7 +154,19 @@ final class Cinema {
         hudWidth = 4 * tanf(55 * .pi / 360)
     }
 
-    var pictureWidth: Float { mode == .hud ? hudWidth : screenWidth }
+    /// How far the HUD's smoothed head may lag the real one right now.
+    var hudLagLimits: (rotation: Float, position: Float) {
+        HUDFraming.lagLimits(offset: hudOffset, requestedWidth: hudWidth, aspect: hudAspect)
+    }
+
+    /// The width the picture is drawn at. The HUD keeps the width it was given
+    /// until it is near enough to fill too much of the view, then keeps its
+    /// angular size instead, so a close picture shrinks rather than overflows.
+    var pictureWidth: Float {
+        mode == .hud
+            ? HUDFraming.pictureWidth(requested: hudWidth, aspect: hudAspect, distance: simd_length(hudOffset))
+            : screenWidth
+    }
     weak var hudVideoModel: VideoWindowModel?
     var hudControlsView: AnyView?
     var hudCloseAction: (@MainActor () -> Void)?
@@ -494,7 +516,10 @@ private extension SIMD4 where Scalar == Float {
 
 /// The HUD hangs from a smoothed copy of the head, placed in the world every
 /// frame, rather than from `AnchorEntity(.head)`: rigidly head-locked content
-/// shakes with every step, and the lag lets the picture settle instead.
+/// shakes with every step, and the lag lets the picture settle instead. The lag
+/// is bounded (`HUDFraming.lagLimits`): however fast the wearer turns or moves,
+/// the smoothed head stays close enough to the real one for the picture to
+/// stay in view.
 @MainActor
 final class CinemaHUDFollow {
     static let shared = CinemaHUDFollow()
@@ -554,6 +579,11 @@ final class CinemaHUDFollow {
         smoothedPosition.z += (targetPosition.z - smoothedPosition.z) * horizontal
         smoothedPosition.y += (targetPosition.y - smoothedPosition.y) * blend(verticalSeconds)
         smoothedRotation = simd_slerp(smoothedRotation, targetRotation, blend(rotationSeconds))
+        // The smoothing may soften a movement but never leave the picture
+        // behind it: the lag is held to what the picture leaves free of the view.
+        let limits = cinema.hudLagLimits
+        smoothedPosition = HUDFraming.limit(smoothedPosition, near: targetPosition, by: limits.position)
+        smoothedRotation = HUDFraming.limit(smoothedRotation, toward: targetRotation, by: limits.rotation)
         position = smoothedPosition
         rotation = smoothedRotation
         head.transform = Transform(rotation: smoothedRotation, translation: smoothedPosition)
@@ -688,7 +718,8 @@ struct CinemaSpaceView: View {
             .simultaneousGesture(DragGesture().targetedToAnyEntity()
                 .onChanged { value in
                     guard value.entity === leftEdge || value.entity === rightEdge else { return }
-                    if resizeStart == nil { resizeStart = cinema.hudWidth }
+                    // From the width drawn, which a close picture holds below the one asked for.
+                    if resizeStart == nil { resizeStart = cinema.pictureWidth }
                     let movement = value.convert(value.translation3D, from: .local, to: screen)
                     let sign: Float = value.entity === rightEdge ? 1 : -1
                     if let resizeStart { cinema.hudWidth = min(4, max(0.4, resizeStart + sign * 2 * movement.x)) }
@@ -805,6 +836,12 @@ struct CinemaSpaceView: View {
         if picture.parent !== screen {
             screen.addChild(picture)
             AppLogger.filmPlayer.info("Cinema: picture moved to the big screen")
+        }
+        // The framing needs the picture's shape; a new one (or a resize) may
+        // leave the HUD's offset outside the view, so it is pulled back first.
+        if cinema.mode == .hud {
+            cinema.hudAspect = max(aspect, 0.1)
+            cinema.refitHUD()
         }
         // The video component's mesh is aspect × 1 m, so its scale is its height.
         let height = cinema.pictureWidth / max(aspect, 0.1)
