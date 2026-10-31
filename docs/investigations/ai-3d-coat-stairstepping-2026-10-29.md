@@ -367,3 +367,132 @@ matching the slow reference. It does not solve the still-open problem: producing
 stable, physically plausible foreground coverage and uncontaminated background
 layers on the GPU across hair, thin structures, overlapping subjects, motion
 and cuts. No production renderer, setting, build or device was changed.
+
+## GPU candidate: confidence-aware layered silhouettes (2026-10-31)
+
+The follow-up implements `StereoLayeredWarp` in Vergence and connects it to the
+visionOS video pump behind **`DepthRefinement.layersSilhouettes = false`**.
+Convolution's `stereoEdges` debug endpoint accepts `layered=true` to opt in and
+`layered=false` to return to the mesh. The disconnected-boundary switch takes
+precedence, so use `separated=false` for this comparison. No default or persisted
+setting changes, and no device deployment or headset validation is claimed.
+
+### Method
+
+The renderer replaces the CPU prototype's global depth partition with a local
+near/far pair. A quarter-resolution table finds local depth extrema and seeds
+inside each side of a discontinuity. Normalized Gaussian convolution extends
+their colours and depth plateaus. Trust combines seed support, colour contrast,
+within-layer depth variance and differential disparity. This is a local
+two-layer hypothesis, not an arbitrary multilayer scene reconstruction.
+
+Colour-line projection estimates coverage. The near contribution remains the
+unclipped premultiplied residual `P = C - (1 - alpha) B`, while clean background
+pixels transition back to the source. Per-eye ray/segment intersection chooses
+the nearest hit in each layer, composites them, and blends the patch over the
+mesh in the same MSAA pass. Where trust is zero the mesh remains the result.
+Mirroring reverses both source coordinates and the patch's displacement sign.
+
+Composition is capped at 2048 pixels wide and sampled up for larger sources;
+the seed table is a quarter of that size in each dimension. Maximum shifts
+below two composition pixels skip the split. The default seed margin is two
+table texels, Gaussian sigma 1.25 texels, cutoff four sigmas, and support gate
+`2e-6` to `2e-5`. These are experimental parameters, not validated segmentation
+constants. No coat colour or evaluation crop enters the renderer.
+
+### Evidence
+
+The final defaults were replayed on all twelve retained floating-point captures
+with the real Metal shaders. Strength is 0.008 and convergence is 1. The existing
+measurement script uses the same rows 580–670 and normalization as the CPU table
+above; values below are means of per-frame measurements.
+
+| Image | Transition width | Contour residual RMS |
+| --- | ---: | ---: |
+| Source | 7.95 px | 0.478 px |
+| Connected mesh left | 2.31 px | 0.321 px |
+| GPU layered left | 6.98 px | 0.342 px |
+| Connected mesh right | 15.73 px | 1.245 px |
+| GPU layered right | 7.79 px | 0.414 px |
+
+Both eyes recover source-like softness, and the right-eye fringe is reduced.
+Left-eye contour RMS is slightly higher than the mesh's; the improvement is
+balanced width and appearance, not a lower value in every metric. The earlier
+CPU prototype's corresponding widths were 6.10/6.15 px. Neither prototype has a
+ground-truth second camera view, and these are shot-specific diagnostics.
+
+The replay can also export the connected mesh, checking that candidate and
+baseline use identical inputs. Across the twelve frames and both eyes, that
+mesh replay has mean code-value RMS 0.038 and maximum 0.052 against the retained
+eyes (including the PNG alpha channel). Synthetic tests use a soft diagonal
+foreground
+against a striped background with a softer, low-resolution depth transition.
+They check width and position in both eyes and foreground orientations, source
+sizes above the composition cap (2304 and 3840 pixels), flat depth, low contrast,
+a thin bar and mirror symmetry. Removing the mirror displacement reversal was
+confirmed to fail the mirror test during implementation.
+
+Four additional episode captures (nominal 10:00, 15:00, 25:00 and 30:00) were
+replayed and visually reviewed during implementation, covering pale clothing,
+faces, hair, medical leads and bedding. Changes are localized around outlines;
+this small sample does not establish general quality. A short streak near the
+end of a trusted band in capture 0900 remains; it was also present in the mesh.
+
+### Limits and rejected alternatives
+
+- A narrow far strip can borrow the next surface's colour when the seed margin
+  extends beyond it. Thin structures without clean interior seeds retain the
+  mesh's defects. A confidence gate reduces uncertainty; it does not guarantee
+  a physically correct matte or hidden background.
+- Twice the normal stereo strength moves content beyond the trusted band's
+  useful reach. The uncovered strip then partly retains the connected mesh.
+  The composition cap is not the cause of this strength limit.
+- Wider seed margins, broader Gaussian tails and smaller support thresholds
+  exposed notches or neighbouring-surface contamination. Narrower trusted bands
+  ended before the exposed background strip. A row-wise colour extension gave
+  no useful improvement and was removed. No per-shot colour tuning was adopted.
+- All reviewed captures are SDR. HDR, wide gamut, long motion, cuts, low-contrast
+  outlines and the older horse/corral footage remain unvalidated. Twelve frames
+  cover only half a second. There is no AVP cost or memory measurement yet.
+
+### Reproduction and validation
+
+From the worktree's Hypnos directory, with the sibling Vergence clone:
+
+```sh
+swift test --package-path ../vergence --filter StereoLayeredWarpTests
+VERGENCE_LAYER_LAB=/path/to/lossless-captures \
+VERGENCE_LAYER_OUTPUT=/path/to/new-render VERGENCE_LAYER_MESH=1 \
+swift test --package-path ../vergence \
+  --filter StereoLayeredLabTests/replayCaptures
+python scripts/measure-stereo-matte.py /path/to/lossless-captures \
+  /path/to/new-render /path/to/new-metrics.json
+```
+
+Each capture needs `source.png`, `depth.f32` and `depth.json`; a directory of
+captures is accepted. Output must not exist. `VERGENCE_LAYER_DEBUG=1` exports
+decomposition planes. Optional `VERGENCE_LAYER_TUNING` accepts semicolon-joined
+`seed`, `support`, `contrast`, `spread`, `separation` low/high pairs and scalar
+`radius`, `sigma`, `kernel` values. The normal grid is dense; use
+`VERGENCE_LAYER_GRID=moderate` only for a deliberate coarse-grid comparison.
+
+The new GPU regression cases pass. The prior complete-suite runs excluding
+the known hang-prone `SampleBufferFrameSourceTests` found one unrelated failure:
+`SpatialVideoMakerTests.streamSegmentsFromTwoRunsJoinIntoTheWholeVideo` expects
+fixed keyframe positions that fail under concurrent load. It also failed in an
+unchanged baseline copy and passed alone. This is retained as a validation
+limitation rather than attributed to the silhouette change.
+
+The continuation reran the suite with parallel execution disabled: **209 tests
+pass across four bundles**, excluding `SampleBufferFrameSourceTests`; the
+keyframe test passes in this run. The new GPU tests and twelve-frame replay
+also pass independently, and the measured edge table above is reproduced.
+Hypnos builds pass for visionOS, iOS Simulator, macOS and tvOS, both with and
+without `YOUTUBE_CONDITION=HYPNOS_YOUTUBE`. All builds use the worktree's local
+package clones. No app was installed on a device.
+
+Before considering a default, compare identical source/depth/playhead states on
+the headset, both paused and moving, and measure warp cost and memory there.
+Test stronger disparity, scene cuts, thin structures, ambiguous backgrounds and
+HDR. Adaptive reach and a colour-variance gate are possible follow-ups, not
+implemented fixes for these remaining limits.

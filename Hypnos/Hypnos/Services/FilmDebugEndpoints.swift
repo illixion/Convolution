@@ -79,12 +79,16 @@ enum FilmDebugEndpoints {
                      + "background beside it instead of stretching the outline across it. gaps: squeeze the empty depth between a near "
                      + "subject and a far background out of each shot. separated: experimental disconnected "
                      + "mesh with explicit background hole fill (off by default). holes: show its holes in magenta. "
+                     + "layered: draw a near subject's outline from a near and a far layer over the mesh, instead of "
+                     + "the mesh folding it in one eye and stretching it in the other (opt-in; the mesh stays wherever "
+                     + "the split isn't well founded). "
                      + "omitted ones keep their state. Not saved.",
                      parameters: [.boolean("snap", "snap soft depth outlines to the picture"),
                                   .boolean("fill", "fill uncovered strips with background"),
                                   .boolean("gaps", "squeeze empty depth between subject and background"),
                                   .boolean("separated", "use experimental disconnected surfaces and hole fill"),
                                   .boolean("holes", "highlight uncovered pixels in the prototype"),
+                                  .boolean("layered", "draw outlines from near and far layers over the mesh"),
                                   .number("gapFloor", "share of an empty range's depth kept (0…1)", range: 0 ... 1),
                                   .number("gapEmpty", "density (of an even spread) at or below which a range is empty", range: 0 ... 2),
                                   .number("gapFull", "density at or above which a range is occupied", range: 0 ... 4)]) { args in
@@ -94,6 +98,7 @@ enum FilmDebugEndpoints {
                 if let gaps = args.bool("gaps") { DepthRefinement.compressesGaps = gaps }
                 if let v = args.bool("separated") { DepthRefinement.separatesBoundaries = v }
                 if let v = args.bool("holes") { DepthRefinement.showsBoundaryHoles = v }
+                if let v = args.bool("layered") { DepthRefinement.layersSilhouettes = v }
                 if let v = args.double("gapFloor") { DepthGapCompressor.tuning.floorSlope = Float(v) }
                 if let v = args.double("gapEmpty") { DepthGapCompressor.tuning.emptyDensity = Float(v) }
                 if let v = args.double("gapFull") { DepthGapCompressor.tuning.fullDensity = Float(v) }
@@ -101,7 +106,8 @@ enum FilmDebugEndpoints {
                 return ["snap": DepthRefinement.snapsEdges ? 1 : 0, "fill": DepthRefinement.fillsUncoveredEdges ? 1 : 0,
                         "gaps": DepthRefinement.compressesGaps ? 1 : 0,
                         "separated": DepthRefinement.separatesBoundaries ? 1 : 0,
-                        "holes": DepthRefinement.showsBoundaryHoles ? 1 : 0, "gapFloor": Double(t.floorSlope),
+                        "holes": DepthRefinement.showsBoundaryHoles ? 1 : 0,
+                        "layered": DepthRefinement.layersSilhouettes ? 1 : 0, "gapFloor": Double(t.floorSlope),
                         "gapEmpty": Double(t.emptyDensity), "gapFull": Double(t.fullDensity)] as [String: Double]
                 #else
                 return ["snap": 0.0, "fill": 0.0, "gaps": 0.0]
