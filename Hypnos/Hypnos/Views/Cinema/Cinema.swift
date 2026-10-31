@@ -54,6 +54,7 @@
 import ARKit
 import AudioToolbox
 import AVFoundation
+import Combine
 import DebugTrace
 import QuartzCore
 import RAVEFilm
@@ -414,6 +415,14 @@ final class Cinema {
 
     // MARK: Per-frame placement
 
+    /// The device's pose now, for the HUD's per-frame follow.
+    func hudDevicePose() -> simd_float4x4? {
+        guard let tracking = worldTracking, tracking.state == .running,
+              let anchor = tracking.queryDeviceAnchor(atTimestamp: CACurrentMediaTime()),
+              anchor.isTracked else { return nil }
+        return anchor.originFromAnchorTransform
+    }
+
     private func update(dt: Float) {
         guard let tracking = worldTracking, tracking.state == .running,
               let anchor = tracking.queryDeviceAnchor(atTimestamp: CACurrentMediaTime()),
@@ -479,6 +488,76 @@ final class Cinema {
 
 private extension SIMD4 where Scalar == Float {
     var xyz: SIMD3<Float> { SIMD3(x, y, z) }
+}
+
+// MARK: - HUD follow
+
+/// The HUD hangs from a smoothed copy of the head, placed in the world every
+/// frame, rather than from `AnchorEntity(.head)`: rigidly head-locked content
+/// shakes with every step, and the lag lets the picture settle instead.
+@MainActor
+final class CinemaHUDFollow {
+    static let shared = CinemaHUDFollow()
+
+    /// Time constants of the follow, in seconds, per axis: horizontal stays
+    /// tight so walking doesn't leave the picture behind, while the vertical
+    /// and rotation take out the bob and the jitter of each step.
+    var rotationSeconds: Float = 0.15
+    var verticalSeconds: Float = 0.2
+    var horizontalSeconds: Float = 0.08
+
+    /// The smoothed head; the screen hangs from it at `hudOffset`.
+    let head = Entity()
+    private var subscription: (any Cancellable)?
+    private weak var subscribedScene: RealityKit.Scene?
+    private var position: SIMD3<Float>?
+    private var rotation: simd_quatf?
+
+    var hasPose: Bool { position != nil }
+
+    init() { head.name = "cinema-hud-follow" }
+
+    /// Parents the smoothed head and steps it on every scene update. Screens
+    /// a previous space left on the shared head go, so only `screen` shows.
+    func attach(to root: Entity, keeping screen: Entity) {
+        if head.parent !== root { root.addChild(head) }
+        for child in Array(head.children) where child !== screen { child.removeFromParent() }
+        guard let scene = root.scene, scene !== subscribedScene else { return }
+        subscription?.cancel()
+        subscribedScene = scene
+        subscription = scene.subscribe(to: SceneEvents.Update.self) { [weak self] event in
+            MainActor.assumeIsolated { self?.step(dt: Float(event.deltaTime)) }
+        }
+    }
+
+    func step(dt: Float) {
+        let cinema = Cinema.shared
+        guard cinema.mode == .hud else {
+            position = nil
+            rotation = nil
+            return
+        }
+        guard let pose = cinema.hudDevicePose() else { return }
+        let targetPosition = pose.columns.3.xyz
+        let targetRotation = simd_quatf(pose)
+        guard var smoothedPosition = position, var smoothedRotation = rotation else {
+            position = targetPosition
+            rotation = targetRotation
+            head.transform = Transform(rotation: targetRotation, translation: targetPosition)
+            return
+        }
+        func blend(_ seconds: Float) -> Float {
+            seconds > 0 ? 1 - expf(-max(dt, 0) / seconds) : 1
+        }
+        let horizontal = blend(horizontalSeconds)
+        smoothedPosition.x += (targetPosition.x - smoothedPosition.x) * horizontal
+        smoothedPosition.z += (targetPosition.z - smoothedPosition.z) * horizontal
+        smoothedPosition.y += (targetPosition.y - smoothedPosition.y) * blend(verticalSeconds)
+        smoothedRotation = simd_slerp(smoothedRotation, targetRotation, blend(rotationSeconds))
+        position = smoothedPosition
+        rotation = smoothedRotation
+        head.transform = Transform(rotation: smoothedRotation, translation: smoothedPosition)
+    }
 }
 
 // MARK: - The space
@@ -599,7 +678,7 @@ struct CinemaSpaceView: View {
             .simultaneousGesture(DragGesture().targetedToEntity(hudHandle)
                 .onChanged { value in
                     if dragStart == nil { dragStart = cinema.hudOffset }
-                    let movement = value.convert(value.translation3D, from: .local, to: headAnchor)
+                    let movement = value.convert(value.translation3D, from: .local, to: screen.parent ?? headAnchor)
                     if let dragStart {
                         let candidate = dragStart + movement
                         cinema.moveHUD(to: candidate)
@@ -666,7 +745,11 @@ struct CinemaSpaceView: View {
                !(player.intendedSpatialAudioExperience is AutomaticSpatialAudio) {
                 player.intendedSpatialAudioExperience = AutomaticSpatialAudio.automatic
             }
-            if screen.parent !== headAnchor { headAnchor.addChild(screen) }
+            // Until the follow has its first pose, the head anchor holds the screen.
+            let follow = CinemaHUDFollow.shared
+            follow.attach(to: sceneRoot, keeping: screen)
+            let parent = follow.hasPose ? follow.head : headAnchor
+            if screen.parent !== parent { parent.addChild(screen) }
             let direction = simd_normalize(-cinema.hudOffset)
             screen.transform = Transform(rotation: simd_quatf(from: SIMD3<Float>(0, 0, 1), to: direction), translation: cinema.hudOffset)
             if hudHandle.parent !== screen { screen.addChild(hudHandle) }
@@ -678,7 +761,7 @@ struct CinemaSpaceView: View {
             if rightEdge.parent !== screen { screen.addChild(rightEdge) }
         } else {
             guard let pose = cinema.screenPose else { cinema.noteScreenAttached(false); return }
-            if screen.parent === headAnchor {
+            if screen.parent !== sceneRoot {
                 screen.removeFromParent()
                 // Reparent through the scene root retained by the RealityView.
                 sceneRoot.addChild(screen)
