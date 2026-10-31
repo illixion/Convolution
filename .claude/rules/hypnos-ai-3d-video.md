@@ -16,6 +16,16 @@ Moved out of `CLAUDE.md`. The pipeline itself lives in RAVEMedia (`~/Projects/RA
 
 ## Where the code lives
 
+- **Layered silhouettes (experiment):** Vergence's `StereoLayeredWarp` overlays a
+  confidence-gated local near/far split on the video mesh. Opt in through
+  `DepthRefinement.layersSilhouettes` or `stereoEdges layered=true`; separated
+  boundaries take precedence. Mirroring must reverse the patch's eye sign as
+  well as its source coordinates. Do not add shot-specific colour heuristics or
+  enable this by default without headset quality/performance checks. Reviewed
+  only at normal strength (0.008 at 1080p); twice that can exceed the trusted
+  band's reach. Evidence and limits:
+  `docs/investigations/ai-3d-coat-stairstepping-2026-10-29.md`.
+
 **The fake-3D pipeline now lives in `RAVEMedia`** (`~/Projects/RAVESDK`), linked as a local
 Swift package: `Pseudo3DStereoEngine`, `StereoPump`, `PumpDepthSource` and its two
 implementations, `CoreMLDepthProvider`, the whole `Depth*` family, `Pseudo3DSettings`, and
