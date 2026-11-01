@@ -4,7 +4,8 @@ Status: plan (2026-11-01). Direction revised the same day: **option E (neural fl
 motion field) is the recommendation**; B is the VideoToolbox-only fallback. Phases E0 (convert and
 time the models on the headset) and E1 (quality on real 3D Blu-ray footage) are done: RIFE 4.25 lite
 at 480×288 is the flow model, and VideoToolbox's interpolator turned out at least as good per eye, so
-E's case rests on binocular consistency and 4×, not on picture quality. Smooth Motion today covers flat 2D in the video window
+E's case rests on binocular consistency and 4×, not on picture quality. E2 (the right eye from the left eye's field, on the Mac) confirms it: a
+third of per-eye rivalry, real-pair level on the slow pan, the most faithful depth; fire and smoke stay open. Smooth Motion today covers flat 2D in the video window
 (`NativeMetalVideoPlayerView`, SDR, visionOS) and AI 3D (the stereo pump, mono frames before depth).
 A packed stereo pair (`PackedStereoLayout`: 3D Blu-ray, SBS/TAB files) is deliberately passed through
 unchanged. This is the plan for changing that.
@@ -118,10 +119,14 @@ that is a cheap shader. Both eyes take their motion from the same field.
 3. **Disparity is sideways flow.** The same network, run on (L, R) of a real pair, gives the dense
    disparity B needed, without a separate stereo matcher. One estimate per real pair, reused by both
    in-between spans that touch it.
-4. **Right eye from the shared field.** The right eye's motion is the left eye's motion carried across
-   by disparity (`F_R(x) ≈ F_L(x − D(x))`, plus the change in D between the real pairs). R(t) warps
-   the *real right eyes* along that field, so right-eye-only content comes from right-eye pixels, and
-   any motion error is the same error in both eyes: one slightly wrong object in 3D, not rivalry.
+4. **Right eye from the shared field.** The right eye's motion is the left eye's motion read across
+   by disparity, `F_R(x) = F_L(x + D_t(x))`, with `D_t` the right→left disparity mixed in place between
+   the real pairs. R(t) warps the *real right eyes* along that field (with RIFE's mask read the same
+   way), so right-eye-only content comes from right-eye pixels, and any motion error is the same
+   error in both eyes: one slightly wrong object in 3D, not rivalry. Do **not** add the change in
+   disparity over the span: that means reading disparity a second time at the moved position, and
+   near a silhouette either read lands on the other depth layer (measured in E2: 7 dB lost and a
+   doubled outline).
 5. **Fallback.** Where L→R and R→L disagree by more than ~1 px, or the flow's forward/backward check
    fails, blend the real frames by phase there. VideoToolbox (`VTMidFrameInterpolator`) stays the
    2D default until E beats it on the headset.
@@ -264,9 +269,60 @@ What this means for option E:
   as a rivalry measure because blur lowers it (VT's in-between pairs scored *better* than the real
   ones); the disparity estimator itself is unreliable in fire, smoke and dark motion blur.
 
-Next: B/E step 4 on the Mac with these clips. Make the right eye from the left eye's field (and from
-VT's left eye, as B), then measure the same vertical/horizontal disparity table. The bar is the
-real pairs' 0.1–1%.
+### E2: the right eye from the left eye's field (Mac, 2026-11-01)
+
+`scripts/stereo-shared-field.py`, the same six clips, every 4th triplet (100 in-between pairs at
+t = ½). The left eye is RIFE 4.25 lite at 480×288 throughout. Disparity is NeuFlow 512×288, run once
+in both directions per real pair (14 ms on the headset), and only its horizontal part is used,
+because a Blu-ray pair is rectified. The measurement is E1's: NeuFlow at full size, on pixels where
+the real pair's two directions agree. It is also counted on **detailed pixels only** (local luma
+standard deviation ≥ 4 of 255). Black sky, smoke and night tarmac otherwise dominate the vertical
+count with the estimator's own guesses: every clip's worst E1 "rivalry" region turned out to be one
+of those, flat in all candidates. Rivalry can't be seen there anyway.
+
+| Method | Vertical disparity > 1 px (detailed pixels) | Horizontal off the real pair's by > 1 px | Median horizontal error | Right-eye PSNR (dB) |
+| --- | --- | --- | --- | --- |
+| Real pair (the estimator's noise) | 0.6% | – | – | – |
+| A: VideoToolbox per eye | 9.3% | 16.6% | 1.51 px | **37.0** |
+| A: RIFE per eye | 13.0% | 23.0% | 1.13 px | 36.4 |
+| **E: shared field** | **4.1%** | **12.3%** | **0.43 px** | 36.0 |
+| B: VT's left eye moved across by disparity | 4.1% | 21.2% | 0.47 px | 32.9 |
+| B: RIFE's left eye moved across | **2.8%** | 20.7% | 0.46 px | 32.9 |
+
+Per clip, vertical > 1 px on detailed pixels:
+
+| Method | Car | Garage | Handheld | Crowd pan | Fire pan | Robot fight |
+| --- | --- | --- | --- | --- | --- | --- |
+| Real | 1.1% | 0.2% | 0.3% | 0.1% | 1.0% | 0.7% |
+| A: VT | 2.2% | 5.3% | 8.4% | 0.5% | 14.2% | 25.3% |
+| E | 1.7% | 2.0% | 3.7% | 0.3% | 12.2% | 4.6% |
+| B: RIFE | 1.3% | 1.4% | 7.3% | 0.4% | 2.5% | 3.8% |
+
+What this means:
+- **E is the design.** It reaches the real pairs' level on the slow pan (the actual use case: 0.3%
+  against 0.1%) and on the car shot. On everything else it is a half to a fifth of per-eye
+  interpolation's rivalry. Its depth is the most faithful of all (0.43 px median, a third of per-eye).
+  The right eye costs 0.4 dB against its own RIFE run, and it needs one RIFE run plus one disparity
+  run per pair, not two RIFE runs.
+- **B is the most consistent pair and the worst picture.** It is a horizontally shifted copy of the
+  left eye, so the eyes can't disagree vertically, but the right eye is 3 dB worse (left-eye pixels
+  where only the right eye can see, and the picture edge), and its depth is off by more than a pixel
+  on a fifth of pixels. It wins on fire (2.5% against E's 12%), where flow is meaningless.
+- **None of these extras earns its cost:**
+  - sharpening the quarter-size disparity per pixel (a 25-tap best-match pick): +0.1 dB;
+  - a second RIFE run for content only the right eye sees: +0.2 dB, rivalry unchanged;
+  - the right eye's own horizontal motion with the left's vertical: rivalry back up to 7.5%;
+  - blending the real right eyes where the eyes don't match: −0.9 dB;
+  - switching to B wherever E's and B's right eyes disagree: −2.6 dB, because they disagree where B
+    is the broken one.
+  The quarter-size disparity is enough.
+- **Open: fire, smoke, non-rigid motion.** There, E's shared field is a wrong field for both eyes,
+  and warping two different real right frames along it doesn't stay consistent. The candidate is a
+  per-scene switch to B (or to no interpolation) when the flow's confidence drops. RIFE's
+  forward/backward agreement or the left eye's own error against the next real frame could drive
+  it, and the governor already has the shape for it. To be measured, not designed blind.
+- One film, six clips, 100 pairs. The detail-only count is the one to trust for "is it visible";
+  the all-pixels count is in the script's output.
 
 The phases below were written for option B; under E, phase 3 becomes "flow, disparity transfer, warp
 and fallback shaders" and phase 0's disparity work is the flow network's.
