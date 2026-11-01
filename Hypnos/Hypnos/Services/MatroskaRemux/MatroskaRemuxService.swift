@@ -18,7 +18,8 @@
    magic in its first bytes);
  - the remuxer declines it (VP8, Vorbis-only audio, an encrypted track, a
    server file without Cues whose clusters have no sizes…, see
-   `RemuxError`);
+   `RemuxError`; DTS- or TrueHD-only audio, except in the sideload edition,
+   which decodes those to ALAC: `FFmpegRemuxDecoding.swift`);
  - the device has no decoder for the video (`canDecode`, which asks
    VideoToolbox with the remux's own sample entry: AV1 on a chip without
    it, VP9 before the supplemental decoder is registered);
@@ -209,7 +210,11 @@ final class MatroskaRemuxService: Sendable {
         }
         let session: RemuxSession
         do {
-            session = try await RemuxSession.open(source: bytes)
+            var options = RemuxOptions()
+            #if HYPNOS_FFMPEG
+            options.audioDecoding = FFmpegRemuxDecoder.decoding
+            #endif
+            session = try await RemuxSession.open(source: bytes, options: options)
         } catch let error as RemuxError {
             if error != .notMatroska {
                 AppLogger.remux.info("Not remuxed: \(error.description, privacy: .public)")

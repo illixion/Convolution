@@ -17,6 +17,7 @@
 		AA09000000000000000000F3 /* RAVESlideshow in Frameworks */ = {isa = PBXBuildFile; productRef = AA09000000000000000000F2 /* RAVESlideshow */; };
 		AA10000000000000000000A3 /* NextcloudMedia in Frameworks */ = {isa = PBXBuildFile; productRef = AA10000000000000000000A2 /* NextcloudMedia */; };
 		AA13000000000000000000A3 /* MatroskaRemux in Frameworks */ = {isa = PBXBuildFile; productRef = AA13000000000000000000A2 /* MatroskaRemux */; };
+		AA15000000000000000000A3 /* FFmpegDecoders in Frameworks */ = {isa = PBXBuildFile; productRef = AA15000000000000000000A2 /* FFmpegDecoders */; };
 		AA14000000000000000000A3 /* GeneratedCaptions in Frameworks */ = {isa = PBXBuildFile; productRef = AA14000000000000000000A2 /* GeneratedCaptions */; };
 		AA11000000000000000000A3 /* RAVEFilm in Frameworks */ = {isa = PBXBuildFile; productRef = AA11000000000000000000A2 /* RAVEFilm */; };
 		AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */ = {isa = PBXBuildFile; productRef = AA12000000000000000000A2 /* RAVEDeviceSetup */; };
@@ -73,6 +74,7 @@
 				AA09000000000000000000F3 /* RAVESlideshow in Frameworks */,
 				AA10000000000000000000A3 /* NextcloudMedia in Frameworks */,
 				AA13000000000000000000A3 /* MatroskaRemux in Frameworks */,
+				AA15000000000000000000A3 /* FFmpegDecoders in Frameworks */,
 				AA11000000000000000000A3 /* RAVEFilm in Frameworks */,
 				AA14000000000000000000A3 /* GeneratedCaptions in Frameworks */,
 				AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */,
@@ -152,6 +154,7 @@
 				077865162D811C5500BCF113 /* Sources */,
 				077865172D811C5500BCF113 /* Frameworks */,
 				077865182D811C5500BCF113 /* Resources */,
+				AA16000000000000000000A1 /* Embed FFmpeg decoders (sideload only) */,
 			);
 			buildRules = (
 			);
@@ -169,6 +172,7 @@
 				AA09000000000000000000F2 /* RAVESlideshow */,
 				AA10000000000000000000A2 /* NextcloudMedia */,
 				AA13000000000000000000A2 /* MatroskaRemux */,
+				AA15000000000000000000A2 /* FFmpegDecoders */,
 				AA11000000000000000000A2 /* RAVEFilm */,
 				AA12000000000000000000A2 /* RAVEDeviceSetup */,
 				AA14000000000000000000A2 /* GeneratedCaptions */,
@@ -238,6 +242,7 @@
 				AA05000000000000000000B1 /* XCLocalSwiftPackageReference "../../RAVEEngine" */,
 				AA10000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/NextcloudMedia" */,
 				AA13000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/MatroskaRemux" */,
+				AA15000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/FFmpegDecoders" */,
 				AA14000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/GeneratedCaptions" */,
 				FF53DB263485AD6DE8BF39A4 /* XCLocalSwiftPackageReference "../../DebugTrace" */,
 				C3D000000000000000000A01 /* XCLocalSwiftPackageReference "../../vergence" */,
@@ -268,6 +273,29 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		AA16000000000000000000A1 /* Embed FFmpeg decoders (sideload only) */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Embed FFmpeg decoders (sideload only)";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Embeds HypnosFFmpeg.framework (FFmpeg's DTS and TrueHD decoders) in\n# sideload builds only, those with HYPNOS_FFMPEG, and removes one an earlier\n# sideload build left in this build folder. Nothing links the framework: the\n# FFmpegDecoders package dlopens it, so an App Store build carries no FFmpeg\n# code (CLAUDE.md, \"An App Store build never does Dolby processing itself\").\n# Not sandboxed: a sandboxed phase must declare the xcframework as an input,\n# and a declared input that is missing (every checkout that never built it)\n# fails the build.\ndest=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/HypnosFFmpeg.framework\"\ncase \" ${SWIFT_ACTIVE_COMPILATION_CONDITIONS} \" in\n  *\" HYPNOS_FFMPEG \"*) ;;\n  *) rm -rf \"$dest\"; exit 0 ;;\nesac\nxcf=\"${PROJECT_DIR}/../Packages/FFmpegDecoders/HypnosFFmpeg.xcframework\"\ncase \"${PLATFORM_NAME}\" in\n  iphoneos) slice=ios-arm64 ;;\n  iphonesimulator) slice=ios-arm64-simulator ;;\n  xros) slice=xros-arm64 ;;\n  xrsimulator) slice=xros-arm64-simulator ;;\n  appletvos) slice=tvos-arm64 ;;\n  appletvsimulator) slice=tvos-arm64-simulator ;;\n  macosx) slice=macos-arm64_x86_64 ;;\n  *) echo \"error: no HypnosFFmpeg slice for ${PLATFORM_NAME}\"; exit 1 ;;\nesac\nif [ ! -d \"$xcf/$slice/HypnosFFmpeg.framework\" ]; then\n  echo \"error: HYPNOS_FFMPEG is set but $xcf is missing: run scripts/build-ffmpeg-decoders.sh\"\n  exit 1\nfi\nrm -rf \"$dest\"\nmkdir -p \"$(dirname \"$dest\")\"\ncp -R \"$xcf/$slice/HypnosFFmpeg.framework\" \"$dest\"\nif [ \"${CODE_SIGNING_ALLOWED}\" = YES ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY}\" ]; then\n  codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" --timestamp=none \"$dest\"\nfi\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		077865162D811C5500BCF113 /* Sources */ = {
@@ -307,7 +335,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(TARGET_NAME)/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Convolution;
@@ -347,7 +375,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(TARGET_NAME)/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Convolution;
@@ -601,6 +629,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../Packages/MatroskaRemux;
 		};
+		AA15000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/FFmpegDecoders" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../Packages/FFmpegDecoders;
+		};
 		AA14000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/GeneratedCaptions" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../Packages/GeneratedCaptions;
@@ -655,6 +687,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AA13000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/MatroskaRemux" */;
 			productName = MatroskaRemux;
+		};
+		AA15000000000000000000A2 /* FFmpegDecoders */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA15000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/FFmpegDecoders" */;
+			productName = FFmpegDecoders;
 		};
 		AA14000000000000000000A2 /* GeneratedCaptions */ = {
 			isa = XCSwiftPackageProductDependency;

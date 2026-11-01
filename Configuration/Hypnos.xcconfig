@@ -28,4 +28,13 @@ PRIVATE_API_CONDITION =
 // gitignored scripts/build-signing.conf / LocalSigning.xcconfig.
 YOUTUBE_CONDITION =
 
-SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(PRIVATE_API_CONDITION) $(YOUTUBE_CONDITION)
+// FFmpeg's DTS and TrueHD decoders, for sideload builds only (CLAUDE.md, "An
+// App Store build never does Dolby processing itself"): the on-device MKV
+// remux then plays those tracks as lossless ALAC instead of dropping them.
+// Needs `scripts/build-ffmpeg-decoders.sh` run first (the FFmpegDecoders
+// package is a stub without it). Opt in with
+// `~/bin/build-and-sign --set FFMPEG_CONDITION=HYPNOS_FFMPEG`, or in the
+// gitignored scripts/build-signing.conf / LocalSigning.xcconfig.
+FFMPEG_CONDITION =
+
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(PRIVATE_API_CONDITION) $(YOUTUBE_CONDITION) $(FFMPEG_CONDITION)
