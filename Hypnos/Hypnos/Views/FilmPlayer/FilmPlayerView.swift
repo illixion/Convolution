@@ -483,7 +483,13 @@ struct FilmPlayerView: View {
                     }
                 }
                 if stereoSource == nil, flatSubtitleStyle == .inPicture, !cinema.showsScreen(for: .film) {
+                    // The picture's plane claims the window's depth and is pulled
+                    // back by `viewRecess` to sit on the glass; a plain 2D sibling
+                    // lands at the front of that depth, ~9 cm proud of the picture
+                    // and close to the viewer's face. The same offset puts the
+                    // subtitles back on the picture.
                     subtitleOverlay
+                        .offset(z: RAVEVideoPlane.viewRecess)
                 }
             }
         }
