@@ -45,3 +45,6 @@ build/
 
 # ncbench writes a live Nextcloud app password here — never commit it
 .ncbench-credentials.json
+
+# FFmpeg decoders for the sideload edition, built by scripts/build-ffmpeg-decoders.sh
+Packages/FFmpegDecoders/HypnosFFmpeg.xcframework/

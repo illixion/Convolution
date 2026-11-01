@@ -7,7 +7,8 @@ import PackageDescription
 // It turns a Matroska or WebM file into fragmented-MP4 HLS on demand: the
 // file's Cues become the segment index, each segment's clusters are read and
 // muxed into a media segment when the player asks for it, and the playlists
-// are plain text. No re-encoding, no ffmpeg, no temp files. The app serves the
+// are plain text. No re-encoding (except DTS/TrueHD to ALAC with a decoder
+// the caller supplies, `AudioTranscode.swift`), no temp files. The app serves the
 // result from a loopback HTTP server (`Hypnos/Services/MatroskaRemux/`), so
 // AVFoundation plays MKV and WebM the way it plays any HLS stream.
 //
@@ -28,16 +29,22 @@ let package = Package(
     products: [
         .library(name: "MatroskaRemux", targets: ["MatroskaRemux"]),
     ],
+    // Only the tool and the tests use it, to check DTS/TrueHD transcoding
+    // (`AudioTranscode.swift`) against real decoders; the library takes a
+    // decoder from its caller and never links FFmpeg itself.
+    dependencies: [.package(path: "../FFmpegDecoders")],
     targets: [
         .target(name: "MatroskaRemux"),
         .testTarget(
             name: "MatroskaRemuxTests",
-            dependencies: ["MatroskaRemux"],
+            dependencies: ["MatroskaRemux", .product(name: "FFmpegDecoders", package: "FFmpegDecoders")],
             resources: [.copy("Fixtures")]
         ),
         // Writes a file's HLS (playlists, init and media segments) to a
         // folder, for checking a remux with ffmpeg or a browser without the
         // app. Not a product, so the app never builds it.
-        .executableTarget(name: "mkvremux", dependencies: ["MatroskaRemux"]),
+        .executableTarget(name: "mkvremux", dependencies: [
+            "MatroskaRemux", .product(name: "FFmpegDecoders", package: "FFmpegDecoders"),
+        ]),
     ]
 )

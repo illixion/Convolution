@@ -12,6 +12,10 @@
  while it plays). `--still` writes the one-keyframe MP4 the app makes
  thumbnails from (`VideoStill`).
 
+ DTS and TrueHD tracks are decoded to ALAC renditions when the FFmpeg
+ decoders are built (`scripts/build-ffmpeg-decoders.sh`); without them they
+ are dropped, as in the App Store app.
+
  Writes master.m3u8, the media playlists, and every init and media segment,
  at the paths the app serves them on, then prints the summary. Serve the
  folder (`python3 -m http.server`) and point ffmpeg, Safari or the
@@ -107,7 +111,9 @@ let output = URL(fileURLWithPath: arguments[2], isDirectory: true)
 
 do {
     let started = Date()
-    let session = try await RemuxSession.open(source: try source(arguments[1]))
+    var options = RemuxOptions()
+    options.audioDecoding = FFmpegRemuxDecoder.decoding
+    let session = try await RemuxSession.open(source: try source(arguments[1]), options: options)
     let opened = Date().timeIntervalSince(started)
     let summary = session.summary
     print("opened in \(String(format: "%.3f", opened)) s: \(summary.docType) \(summary.video.codec) \(summary.width)x\(summary.height) \(summary.videoRange), \(summary.segmentCount) segments, \(String(format: "%.3f", summary.durationSeconds)) s\(summary.scannedClusters ? " (scanned)" : "")")

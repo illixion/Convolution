@@ -62,6 +62,10 @@ public struct RemuxOptions: Sendable {
     /// and by bytes (lossless 5.1 is 3 MB a segment).
     public var cachedAudioSegments = 16
     public var cachedAudioBytes = 24 << 20
+    /// Decoders for audio MP4 can't carry (DTS, TrueHD): a track one of
+    /// them decodes is offered as ALAC instead of dropped
+    /// (`AudioTranscode.swift`).
+    public var audioDecoding: RemuxAudioDecoding?
 
     public init() {}
 }
@@ -270,8 +274,9 @@ public actor RemuxSession {
         var dropped: [RemuxSummary.DroppedTrack] = []
         var candidates: [MatroskaTrack] = []
         let audioTracks = header.tracks.filter { $0.kind == .audio && $0.isEnabled }
+        let decoding = options.audioDecoding
         for track in audioTracks {
-            if !SupportedCodecs.isAudioSupported(track.codecID) {
+            if !SupportedCodecs.isAudioSupported(track.codecID), decoding?.decodes(track.codecID) != true {
                 dropped.append(.init(number: track.number, codecID: track.codecID, reason: "codec"))
             } else if let encoding = track.unreadableEncoding {
                 dropped.append(.init(number: track.number, codecID: track.codecID, reason: encoding))
@@ -316,8 +321,15 @@ public actor RemuxSession {
                 dropped.append(.init(number: track.number, codecID: track.codecID, reason: "no frames near the start"))
                 continue
             }
-            switch AudioPlan.make(track: track, firstFrame: first.data, firstTicks: first.blockTimestamp,
-                                  timestampScale: header.timestampScale, offsetNanoseconds: offsetNanoseconds) {
+            let planned = if !SupportedCodecs.isAudioSupported(track.codecID), let decoding {
+                AudioPlan.makeTranscoded(track: track, firstFrame: first.data, firstTicks: first.blockTimestamp,
+                                         timestampScale: header.timestampScale,
+                                         offsetNanoseconds: offsetNanoseconds, decoding: decoding)
+            } else {
+                AudioPlan.make(track: track, firstFrame: first.data, firstTicks: first.blockTimestamp,
+                               timestampScale: header.timestampScale, offsetNanoseconds: offsetNanoseconds)
+            }
+            switch planned {
             case .success(let plan): audio.append(plan)
             case .failure(let error): dropped.append(.init(number: track.number, codecID: track.codecID,
                                                            reason: error.description))
@@ -735,6 +747,16 @@ public actor RemuxSession {
         // a frame read twice (the previous segment's spill) is kept once.
         var seen = Set<Int64>()
         frames = frames.sorted { $0.time < $1.time }.filter { seen.insert($0.time).inserted }
+        if let transcode = plan.transcode, !frames.isEmpty {
+            var priming: [AudioFrame] = []
+            if transcode.primingSeconds > 0, k > 0 {
+                let from = frames[0].time - Int64(transcode.primingSeconds * Double(plan.sampleRate))
+                priming = ((try await audioOf(k - 1)).audio[number] ?? [])
+                    .filter { $0.time >= from && $0.time < frames[0].time }
+                    .sorted { $0.time < $1.time }
+            }
+            frames = Self.transcoded(frames, priming: priming, with: transcode, channels: plan.channels)
+        }
 
         func placeholder(_ duration: Int64) -> FragmentSample {
             FragmentSample(duration: UInt32(clamping: max(1, duration)), isSync: true, data: plan.placeholder)
@@ -774,6 +796,51 @@ public actor RemuxSession {
             samples[samples.count - 1].duration = UInt32(clamping: Int64(samples[samples.count - 1].duration) + target - runEnd)
         }
         return [Fragment(baseDecodeTime: UInt64(max(0, base)), samples: samples)]
+    }
+
+    /// A segment's frames decoded and cut into ALAC packets over the same
+    /// span (`AudioTranscode.swift`). A decoder that fails leaves the span
+    /// silent rather than short, so the timeline holds.
+    static func transcoded(_ frames: [AudioFrame], priming: [AudioFrame], with transcode: AudioTranscode,
+                           channels: Int) -> [AudioFrame] {
+        let start = frames[0].time
+        let last = frames[frames.count - 1]
+        let span = Int(last.time + Int64(last.samples) - start)
+        guard span > 0 else { return [] }
+        var pcm = [Int32](repeating: 0, count: span * channels)
+        if let decoder = transcode.decoding.make(transcode.codecID, transcode.codecPrivate) {
+            for frame in priming { decoder.feed(frame.data) }
+            for frame in frames { decoder.feed(frame.data) }
+            decoder.finish()
+            let decodedChannels = decoder.speakers.count
+            if decodedChannels >= channels {
+                let order = transcode.order
+                decoder.withSamples { decoded in
+                    let available = decoded.count / max(1, decodedChannels)
+                    // Lined up at the end: whatever came before the span
+                    // (priming) or is missing from it (a frame that didn't
+                    // decode) is at the front.
+                    let take = min(span, available)
+                    let from = available - take, to = span - take
+                    for i in 0 ..< take {
+                        let s = (from + i) * decodedChannels, d = (to + i) * channels
+                        for c in 0 ..< channels { pcm[d + c] = decoded[s + order[c]] }
+                    }
+                }
+            }
+        }
+        var out: [AudioFrame] = []
+        out.reserveCapacity(span / ALACEscape.frameLength + 1)
+        pcm.withUnsafeBufferPointer { buffer in
+            var offset = 0
+            while offset < span {
+                let n = min(ALACEscape.frameLength, span - offset)
+                out.append(AudioFrame(time: start + Int64(offset), samples: n,
+                                      data: ALACEscape.frame(buffer, from: offset, frames: n, channels: channels)))
+                offset += n
+            }
+        }
+        return out
     }
 
     // MARK: - Parsing a segment's clusters
@@ -923,7 +990,7 @@ public actor RemuxSession {
                 let samples = plan.samples(in: frame.data)
                 let time: Int64
                 if frame.laceIndex == 0 {
-                    time = plan.blockTime(ticks: frame.blockTimestamp)
+                    time = plan.frameTime(ticks: frame.blockTimestamp, data: frame.data)
                 } else {
                     time = laceBase[frame.track] ?? plan.blockTime(ticks: frame.blockTimestamp)
                 }

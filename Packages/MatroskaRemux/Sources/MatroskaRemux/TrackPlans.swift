@@ -3,10 +3,12 @@
 
  The first enabled video track is the variant's video; it has to be a codec
  MP4 carries (H.264, HEVC, VP9, AV1) or the file is declined. Every audio
- track whose codec MP4 carries becomes an audio rendition; the others
- (TrueHD, DTS, Vorbis, PCM, anything encrypted or compressed) are dropped,
- and a file whose audio is all dropped is declined, since playing it silent
- would be worse than the caller's fallback.
+ track whose codec MP4 carries becomes an audio rendition; so does one the
+ caller can decode (DTS, TrueHD: `AudioTranscode.swift`), as ALAC. The
+ others (Vorbis, PCM, DTS and TrueHD without a decoder, anything encrypted
+ or compressed) are dropped, and a file whose audio is all dropped is
+ declined, since playing it silent would be worse than the caller's
+ fallback.
 
  Timing. Matroska block timestamps are presentation times, in ticks of the
  file's TimestampScale (a millisecond, usually). Both renditions keep the
@@ -226,8 +228,11 @@ struct AudioPlan: Sendable {
     let placeholderIsSilent: Bool
     let timestampScale: Int64
     let offsetNanoseconds: Int64
+    /// Set for a track decoded and re-encoded as ALAC: `codec` describes
+    /// the output, this the source.
+    var transcode: AudioTranscode? = nil
 
-    var gridSamples: Int? { codec.constantFrameSamples }
+    var gridSamples: Int? { transcode.map { $0.constantFrameSamples } ?? codec.constantFrameSamples }
 
     /// A block's time in samples, snapped to the codec's frame grid. The
     /// track's CodecDelay comes off: Matroska block times include it (a
@@ -243,12 +248,24 @@ struct AudioPlan: Sendable {
         return Int64(raw.rounded())
     }
 
+    /// A stored frame's time in samples: `blockTime`, or for a decoded
+    /// TrueHD track the time its own sample counter gives (`AudioTranscode`).
+    func frameTime(ticks: Int64, data: [UInt8]) -> Int64 {
+        if let transcode {
+            let ns = ticks * timestampScale - Int64(clamping: track.codecDelay) + offsetNanoseconds
+            let raw = Int64((Double(ns) * Double(sampleRate) / 1e9).rounded())
+            if let exact = transcode.time(raw: raw, origin: originSamples, frame: data) { return exact }
+        }
+        return blockTime(ticks: ticks)
+    }
+
     /// The time in samples a segment boundary falls at.
     func boundary(ticks: Int64) -> Int64 {
         Int64((Double(ticks * timestampScale + offsetNanoseconds) * Double(sampleRate) / 1e9).rounded())
     }
 
     func samples(in frame: [UInt8]) -> Int {
+        if let transcode { return transcode.samples(in: frame) }
         if let n = codec.samples(in: frame), n > 0 { return n }
         if let n = codec.constantFrameSamples { return n }
         if let duration = track.defaultDuration {
@@ -376,6 +393,57 @@ struct AudioPlan: Sendable {
                                   averageBitrate: bitrate, originSamples: Int64(rawOrigin.rounded()),
                                   placeholder: silence ?? firstFrame, placeholderIsSilent: silence != nil,
                                   timestampScale: timestampScale, offsetNanoseconds: offsetNanoseconds))
+    }
+}
+
+extension AudioPlan {
+    /// The plan for a track the caller decodes (`AudioTranscode`): its
+    /// first frame is decoded to learn the rate and channels.
+    static func makeTranscoded(track: MatroskaTrack, firstFrame: [UInt8], firstTicks: Int64,
+                               timestampScale: Int64, offsetNanoseconds: Int64,
+                               decoding: RemuxAudioDecoding) -> Result<AudioPlan, RemuxError> {
+        if let encoding = track.unreadableEncoding { return .failure(.declined("\(track.codecID) is \(encoding)")) }
+        let id = track.codecID
+        guard let decoder = decoding.make(id, track.codecPrivate) else {
+            return .failure(.declined("no decoder for \(id)"))
+        }
+        decoder.feed(firstFrame)
+        decoder.finish()
+        let decoded = decoder.frameCount, sampleRate = decoder.sampleRate
+        guard decoded > 0, sampleRate > 0 else { return .failure(.declined("\(id) first frame didn't decode")) }
+        let speakers = decoder.speakers
+        guard let order = AudioTranscode.alacOrder(for: speakers) else {
+            return .failure(.declined("\(id) with \(speakers.count) channels has no ALAC layout yet"))
+        }
+        let isTrueHD = id == "A_TRUEHD" || id == "A_MLP"
+        let source: AudioTranscode.Source
+        if isTrueHD {
+            let units = AudioTranscode.accessUnits(in: firstFrame)
+            guard units > 0, decoded % units == 0 else {
+                return .failure(.declined("\(id) first block's access units don't match its samples"))
+            }
+            source = .accessUnits(samplesPerUnit: decoded / units,
+                                  timingOrigin: AudioTranscode.inputTiming(firstFrame))
+        } else {
+            source = .constant(decoded)
+        }
+        let config = AudioTranscode.alacConfig(channels: speakers.count, sampleRate: sampleRate)
+        let transcode = AudioTranscode(decoding: decoding, codecID: id, codecPrivate: track.codecPrivate,
+                                       source: source, order: order, config: config,
+                                       primingSeconds: 0.25)
+        let entry = SampleEntries.audio("alac", channels: speakers.count, sampleSize: 24,
+                                        sampleRate: sampleRate) { w in
+            w.fullBox("alac", version: 0, flags: 0) { $0.bytes += config.config }
+        }
+        let firstNanoseconds = firstTicks * timestampScale - Int64(clamping: track.codecDelay) + offsetNanoseconds
+        let rawOrigin = Double(firstNanoseconds) * Double(sampleRate) / 1e9
+        return .success(AudioPlan(track: track, codec: .alac(config), codecName: isTrueHD ? "TrueHD" : "DTS",
+                                  sampleRate: sampleRate, channels: speakers.count, sampleEntry: entry,
+                                  codecs: "alac", averageBitrate: speakers.count * 24 * sampleRate,
+                                  originSamples: Int64(rawOrigin.rounded()),
+                                  placeholder: ALACEscape.silence(channels: speakers.count),
+                                  placeholderIsSilent: true, timestampScale: timestampScale,
+                                  offsetNanoseconds: offsetNanoseconds, transcode: transcode))
     }
 }
 

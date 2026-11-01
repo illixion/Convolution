@@ -35,6 +35,18 @@
    "type": "audio"
   }
  ],
+ "dts-51.mkv": [
+  {
+   "codec": "h264",
+   "packets": 225,
+   "type": "video"
+  },
+  {
+   "codec": "dts",
+   "packets": 844,
+   "type": "audio"
+  }
+ ],
  "eac3-51.mkv": [
   {
    "codec": "h264",
@@ -178,6 +190,18 @@
    "codec": "hdmv_pgs_subtitle",
    "packets": 4,
    "type": "subtitle"
+  }
+ ],
+ "truehd-51.mkv": [
+  {
+   "codec": "h264",
+   "packets": 225,
+   "type": "video"
+  },
+  {
+   "codec": "truehd",
+   "packets": 10800,
+   "type": "audio"
   }
  ],
  "two-audio.mkv": [

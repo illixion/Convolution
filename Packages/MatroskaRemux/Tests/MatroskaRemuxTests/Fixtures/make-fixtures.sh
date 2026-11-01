@@ -157,6 +157,19 @@ mkvmerge -q -o subtitles.mkv "$tmp/av.mkv" \
 mkvmerge -q -o subtitles-unindexed.mkv "$tmp/av.mkv" \
    --language 0:en --cues 0:none --compression 0:zlib "$tmp/subs.srt" --cues 0:none "$tmp/subs.ass"
 
+# DTS and TrueHD 5.1, which MP4 can't carry: dropped without a decoder,
+# ALAC renditions with one (AudioTranscode). Each channel has its own tone
+# so the tests can tell where each one lands: FL 500, FR 700, FC 300, LFE 60,
+# SL 900, SR 1100 Hz (`join` puts the first three sines in that order, not
+# the order listed; any decoder reads them back so, FLAC too). 9 s so they
+# span two segments (segments are 4 s at least). ffmpeg's own encoders, both
+# experimental; dca opens only at 768k here.
+tones="sine=f=300:d=9[a];sine=f=500:d=9[b];sine=f=700:d=9[c];sine=f=60:d=9[d];sine=f=900:d=9[e];sine=f=1100:d=9[f];[a][b][c][d][e][f]join=inputs=6:channel_layout=5.1(side),volume=0.05[s]"
+ff -f lavfi -i "$(src 160x90 25 9)" -filter_complex "$tones" -map 0:v -map "[s]" -ar 48000 \
+   -c:v libx264 -preset veryfast -crf 40 -g 25 -c:a dca -strict -2 -b:a 768k dts-51.mkv
+ff -f lavfi -i "$(src 160x90 25 9)" -filter_complex "$tones" -map 0:v -map "[s]" -ar 48000 -sample_fmt s16p \
+   -c:v libx264 -preset veryfast -crf 40 -g 25 -c:a truehd -strict -2 truehd-51.mkv
+
 write_expected
 
 ls -l ./*.mkv ./*.webm
