@@ -99,9 +99,13 @@ enum HUDFraming {
 
     /// How far the smoothed head may be from the real one: a turn (radians)
     /// and a move (metres), from what the picture leaves free of the view.
-    static func lagLimits(offset: SIMD3<Float>, requestedWidth: Float, aspect: Float) -> (rotation: Float, position: Float) {
+    /// `stabilization` (0 ... 1) scales that range of motion: 1 is all the
+    /// view leaves free, less shrinks it, and 0 locks the picture to the head.
+    static func lagLimits(offset: SIMD3<Float>, requestedWidth: Float, aspect: Float,
+                          stabilization: Float = 1) -> (rotation: Float, position: Float) {
+        let scale = stabilization.isFinite ? min(1, max(0, stabilization)) : 1
         let length = simd_length(offset)
-        guard length.isFinite, length > 1e-4 else { return (minimumSlack * rotationShare, 0) }
+        guard length.isFinite, length > 1e-4 else { return (minimumSlack * rotationShare * scale, 0) }
         let distance = min(maxDistance, max(minDistance, length))
         let width = pictureWidth(requested: requestedWidth, aspect: aspect, distance: distance)
         let half = halfExtents(width: width, aspect: aspect, distance: distance)
@@ -110,7 +114,7 @@ enum HUDFraming {
         let elevation = abs(asin(min(1, max(-1, direction.y))))
         let slack = max(minimumSlack,
                         min(halfFieldOfView.x - half.x - azimuth, halfFieldOfView.y - half.y - elevation))
-        return (slack * rotationShare, slack * (1 - rotationShare) * distance)
+        return (slack * scale * rotationShare, slack * scale * (1 - rotationShare) * distance)
     }
 
     /// `smoothed` pulled back toward `target` until it is no more than `maxAngle` from it.

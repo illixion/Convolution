@@ -159,7 +159,18 @@ final class Cinema {
 
     /// How far the HUD's smoothed head may lag the real one right now.
     var hudLagLimits: (rotation: Float, position: Float) {
-        HUDFraming.lagLimits(offset: hudOffset, requestedWidth: hudWidth, aspect: hudAspect)
+        HUDFraming.lagLimits(offset: hudOffset, requestedWidth: hudWidth, aspect: hudAspect,
+                             stabilization: hudStabilization)
+    }
+
+    /// How much of the follow's range of motion the HUD keeps, 0 ... 1. Less
+    /// holds the picture closer to the head (0 locks it); persisted.
+    var hudStabilization: Float = 1 {
+        didSet {
+            let clamped = hudStabilization.isFinite ? min(1, max(0, hudStabilization)) : 1
+            if clamped != hudStabilization { hudStabilization = clamped; return }
+            save()
+        }
     }
 
     /// The width the picture is drawn at. The HUD keeps the width it was given
@@ -219,6 +230,8 @@ final class Cinema {
         var dimsSurroundings: Bool
         /// Optional: settings saved before it existed decode as off.
         var headLocked: Bool?
+        /// Optional: settings saved before it existed decode as full.
+        var hudStabilization: Float?
     }
 
     private init() {
@@ -228,13 +241,15 @@ final class Cinema {
             screenWidthDegrees = settings.screenWidthDegrees
             dimsSurroundings = settings.dimsSurroundings
             headLocked = settings.headLocked ?? false
+            hudStabilization = min(1, max(0, settings.hudStabilization ?? 1))
         }
         RAVEMediaPolicy.headLockedSurround = headLocked
     }
 
     private func save() {
         let settings = Settings(screenDistance: screenDistance, screenWidthDegrees: screenWidthDegrees,
-                                dimsSurroundings: dimsSurroundings, headLocked: headLocked)
+                                dimsSurroundings: dimsSurroundings, headLocked: headLocked,
+                                hudStabilization: hudStabilization)
         if let data = try? JSONEncoder().encode(settings) {
             UserDefaults.standard.set(data, forKey: Self.defaultsKey)
         }
@@ -1202,8 +1217,40 @@ struct CinemaButton: View {
                 PlayerChoiceRow("Head-Locked Sound", isChecked: cinema.headLocked)
             }
             .help("The sound turns with your head instead of staying in the room")
+            if cinema.mode(for: owner) == .hud {
+                Divider()
+                HUDStabilizationControl()
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+            }
         }
         .accessibilityIdentifier("player.cinema")
+    }
+}
+
+/// The HUD's Stabilization slider, in the Cinema menu while the HUD is up:
+/// how much range of motion the picture keeps against the head. Less holds it
+/// closer; the far left locks it to the head.
+struct HUDStabilizationControl: View {
+    @Bindable private var cinema = Cinema.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Stabilization: \(Int((cinema.hudStabilization * 100).rounded()))%").font(.caption)
+            Slider(value: $cinema.hudStabilization, in: 0 ... 1, step: 0.05)
+                .frame(minWidth: 120)
+                .accessibilityIdentifier("player.cinema.hudStabilization")
+            HStack {
+                Text("Locked").font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Button("Reset") { cinema.hudStabilization = 1 }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .disabled(cinema.hudStabilization == 1)
+                Spacer()
+                Text("Smooth").font(.caption2).foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
