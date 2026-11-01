@@ -900,10 +900,15 @@ final class VideoWindowModel {
     /// pulls decoded frames); a WebKit-only source goes to the immersive
     /// conversion instead (`usesImmersiveStereo`).
     var liveStereoLayout: PackedStereoLayout? {
-        guard PlatformCapabilities.supportsStereoVideo, shouldUse3DMode, !immersiveStereoRequested,
-              !pictureNeedsSystemRenderer,
-              playbackRenderer == .nativeMetal else { return nil }
+        guard wantsLiveStereo, playbackRenderer == .nativeMetal else { return nil }
         return (video3DSettings ?? Video3DSettings.from(video: video) ?? .defaults(for: .sideBySide)).packedLayout
+    }
+
+    /// Everything `liveStereoLayout` asks for but the renderer: a stereo
+    /// video that would play live if AVFoundation could decode it.
+    var wantsLiveStereo: Bool {
+        PlatformCapabilities.supportsStereoVideo && shouldUse3DMode && !immersiveStereoRequested
+            && !pictureNeedsSystemRenderer
     }
 
     /// A stereo video converted to MV-HEVC and played in the immersive space,
@@ -1507,6 +1512,11 @@ final class VideoWindowModel {
                 // play its sound) on the way to the transcode.
                 if !isPlayable, self.holdsBigScreen,
                    self.switchToTranscodedStream(reason: "the Big Screen needs the AVFoundation renderer") { return }
+                // A stereo file plays live in the window from the transcode
+                // rather than downloading the whole film for the immersive
+                // conversion (a 3D MKV with DTS only, which the remux declines).
+                if !isPlayable, self.wantsLiveStereo,
+                   self.switchToTranscodedStream(reason: "live 3D needs the AVFoundation renderer") { return }
                 self.playbackRenderer = isPlayable ? .nativeMetal : .webKit
                 // A fake-3D engage waiting on the transcode swap resolves here.
                 if self.pendingPseudo3DEngage != nil {
