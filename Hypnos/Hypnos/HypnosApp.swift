@@ -41,6 +41,7 @@ struct HypnosApp: App {
         FilmDebugEndpoints.register()
         VideoPlayerDebugEndpoints.register()
         PhotoStereoDebugEndpoints.register()
+        InterpolationDebugEndpoints.register()
         #if DEBUG
         UITestingConfiguration.applyIfNeeded()
         DevJellyfinSignIn.performIfRequested()
