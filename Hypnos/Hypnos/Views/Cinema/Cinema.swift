@@ -21,8 +21,8 @@
    still mounted, and a WebKit-decoded source (WebM) first switches to the
    server's transcode as AI 3D does. The surroundings dim as in Apple's
    players, the window shows a card with the way back, and the film's room
-   has the screen as its front wall. AI 3D and live 3D draw in the window, so
-   Big Screen ends them, and choosing them ends Big Screen.
+   has the screen as its front wall. Live 3D and AI 3D move their stereo
+   plane onto the screen the same way (the engine lends it and takes it back).
  - **Head-Locked Sound** (`headLocked`, one setting for every player): the
    sound turns with the head instead of staying in the room. A video window's
    5.1/7.1 becomes `.fixed` spatial audio (`RAVEMediaPolicy.headLockedSurround`,
@@ -124,6 +124,9 @@ final class Cinema {
     private(set) var screenPose: simd_float4x4?
     /// A video window's player, shown on the screen through a `VideoPlayerComponent`.
     private(set) var screenPlayer: AVPlayer?
+    /// A video window's stereo picture (live 3D or AI 3D), whose plane the
+    /// screen borrows from the engine; preferred over `screenPlayer`.
+    private(set) var screenStereo: Pseudo3DStereoEngine?
     /// The owner's subtitles, drawn on the screen.
     private(set) var screenSubtitles: CinemaSubtitles?
     /// Taps on the screen, for the owner's window to toggle its controls.
@@ -298,7 +301,15 @@ final class Cinema {
         screenPlayer = player
     }
 
-    func setSubtitles(_ subtitles: CinemaSubtitles, for owner: CinemaOwner) {
+    /// A video window lends its stereo engine's picture (nil to go back to
+    /// its player's).
+    func setScreenStereo(_ engine: Pseudo3DStereoEngine?, for owner: CinemaOwner) {
+        guard self.owner == owner, screenStereo !== engine else { return }
+        screenStereo = engine
+    }
+
+    /// Nil when the picture draws its own (a stereo picture's are in it).
+    func setSubtitles(_ subtitles: CinemaSubtitles?, for owner: CinemaOwner) {
         guard self.owner == owner else { return }
         screenSubtitles = subtitles
     }
@@ -318,6 +329,7 @@ final class Cinema {
         mode = .window
         screenAttached = false
         screenPlayer = nil
+        screenStereo = nil
         if !needsSpace, isOpen { await dismiss() }
     }
 
@@ -333,6 +345,7 @@ final class Cinema {
         mode = .window
         screenAttached = false
         screenPlayer = nil
+        screenStereo = nil
         screenSubtitles = nil
         hudVideoModel = nil
         hudControlsView = nil
@@ -663,6 +676,8 @@ struct CinemaSpaceView: View {
     /// A video window's picture: a `VideoPlayerComponent` on its player.
     @State private var playerPicture = Entity()
     @State private var playerPictureSource: ObjectIdentifier?
+    /// The stereo engine whose plane is on the screen, given back when it isn't.
+    @State private var stereoPictureEngine: Pseudo3DStereoEngine?
     /// The subtitles over the picture, a view attachment.
     @State private var subtitles = Entity()
     @State private var subtitlesSource: ObjectIdentifier?
@@ -701,7 +716,8 @@ struct CinemaSpaceView: View {
                 }))
             }
             .gesture(SpatialTapGesture().targetedToAnyEntity().onEnded { value in
-                if value.entity === playerPicture || value.entity === session.player.video.videoEntity {
+                if value.entity === playerPicture || value.entity === session.player.video.videoEntity
+                    || (stereoPictureEngine != nil && value.entity === stereoPictureEngine?.videoEntity) {
                     cinema.noteScreenTap()
                 }
             })
@@ -755,6 +771,13 @@ struct CinemaSpaceView: View {
         // A video window between players keeps the last one's picture.
         if cinema.owner == .film || cinema.owner == nil || !cinema.mode.showsPicture {
             releasePlayerPicture()
+        }
+        // A stereo plane goes back to its window as soon as it isn't shown
+        // here, or another engine (or the flat player) takes over.
+        if stereoPictureEngine != nil,
+           !cinema.mode.showsPicture || cinema.owner == .film || cinema.owner == nil
+            || cinema.screenStereo !== stereoPictureEngine {
+            releaseStereoPicture()
         }
         guard cinema.mode.showsPicture, let owner = cinema.owner else {
             hudHandle.removeFromParent()
@@ -819,6 +842,18 @@ struct CinemaSpaceView: View {
             aspect = video.pictureAspect ?? 16 / 9
             video.pictureAttached = true
         case .video:
+            if let engine = cinema.screenStereo, let plane = engine.lendPicture() {
+                if stereoPictureEngine !== engine {
+                    stereoPictureEngine = engine
+                    // The flat player's plane would sit behind it.
+                    releasePlayerPicture()
+                    AppLogger.videoWindow.info("Cinema: stereo picture on the big screen")
+                }
+                picture = plane
+                aspect = engine.pictureAspect ?? lastAspect(of: plane)
+                engine.noteLentPlaneWidth(cinema.pictureWidth)
+                break
+            }
             if let player = cinema.screenPlayer, playerPictureSource != ObjectIdentifier(player) {
                 playerPicture.components.set(VideoPlayerComponent(avPlayer: player))
                 playerPictureSource = ObjectIdentifier(player)
@@ -964,6 +999,12 @@ struct CinemaSpaceView: View {
         subtitlesSource = nil
     }
 
+    private func releaseStereoPicture() {
+        guard let engine = stereoPictureEngine else { return }
+        stereoPictureEngine = nil
+        engine.reclaimPicture()
+    }
+
     private func releasePlayerPicture() {
         guard playerPictureSource != nil else { return }
         playerPicture.components.remove(VideoPlayerComponent.self)
@@ -1097,12 +1138,14 @@ struct CinemaVideoWindowHook: ViewModifier {
             }
             .onChange(of: windowModel.nativePlayerGeneration) { lendPlayer(); routeAudio() }
             .onChange(of: cinema.mode(for: owner), initial: true) { _, _ in routeAudio() }
-            // AI 3D, live 3D and the immersive player draw elsewhere: picking
-            // one ends Big Screen.
-            .onChange(of: windowModel.showsStereoPicture || windowModel.usesImmersiveStereo) { _, stereo in
-                guard stereo, onBigScreen else { return }
+            // AI 3D and live 3D lend their plane to the screen; the immersive
+            // player has its own space, so picking it ends Big Screen.
+            .onChange(of: windowModel.usesImmersiveStereo) { _, immersive in
+                guard immersive, onBigScreen else { return }
                 Task { await cinema.setMode(.window, for: owner, open: openImmersiveSpace, dismiss: dismissImmersiveSpace) }
             }
+            .onChange(of: windowModel.showsStereoPicture) { if onBigScreen { lendPlayer() } }
+            .onChange(of: windowModel.stereoEngine.map(ObjectIdentifier.init)) { if onBigScreen { lendPlayer() } }
             .onChange(of: cinema.screenTaps) {
                 if cinema.owner == owner { windowModel.toggleUIVisibility() }
             }
@@ -1114,16 +1157,12 @@ struct CinemaVideoWindowHook: ViewModifier {
     }
 
     private func prepare() {
-        let model = windowModel
-        cinema.setSubtitles(CinemaSubtitles(controller: model.subtitles, time: { [weak model] in model?.currentTime ?? 0 }),
-                            for: owner)
         cinema.hudVideoModel = windowModel
         cinema.hudControlsView = hudControls
         cinema.hudCloseAction = closePlayer
-        if windowModel.pseudo3DEnabled { windowModel.disablePseudo3D() }
-        // Live 3D draws in the window, whether chosen or found from the
-        // file's tags (the screen would get no player at all).
-        if windowModel.shouldUse3DMode { windowModel.stereoscopicOverride = false }
+        // The immersive player needs the space for itself; live 3D and AI 3D
+        // come along (their plane moves to the screen).
+        if windowModel.usesImmersiveStereo { windowModel.stereoscopicOverride = false }
         if windowModel.playbackRenderer == .webKit,
            !windowModel.switchToTranscodedStream(reason: "The immersive screen needs the AVFoundation renderer") {
             let owner = owner
@@ -1139,7 +1178,19 @@ struct CinemaVideoWindowHook: ViewModifier {
 
     private func lendPlayer() {
         guard cinema.owner == owner else { return }
-        cinema.setScreenPlayer(windowModel.playbackRenderer == .nativeMetal ? windowModel.nativePlayer : nil, for: owner)
+        let stereo = windowModel.showsStereoPicture ? windowModel.stereoEngine : nil
+        cinema.setScreenStereo(stereo, for: owner)
+        if stereo == nil {
+            cinema.setScreenPlayer(windowModel.playbackRenderer == .nativeMetal ? windowModel.nativePlayer : nil, for: owner)
+        }
+        // A stereo picture draws its subtitles into itself when set to.
+        let model = windowModel
+        let drawnInPicture = stereo != nil
+            && (UserDefaults.standard.string(forKey: StereoSubtitleStyle.key)
+                .flatMap(StereoSubtitleStyle.init(rawValue:)) ?? .inPicture) == .inPicture
+        cinema.setSubtitles(drawnInPicture ? nil
+                            : CinemaSubtitles(controller: model.subtitles, time: { [weak model] in model?.currentTime ?? 0 }),
+                            for: owner)
     }
 
     private func routeAudio() {

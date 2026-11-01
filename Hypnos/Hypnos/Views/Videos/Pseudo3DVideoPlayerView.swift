@@ -120,7 +120,12 @@ struct Pseudo3DVideoPlayerView: View {
                 engine.setSubtitles(subtitleFrame)
                 engine.interpolatesFrames = smoothMotion
                 engine.sharedFields = sharedFields
-                content.add(engine.makeVideoEntity())
+                // In a holder, so a plane lent to the big screen comes back
+                // to the same place (the engine re-adds it to its parent).
+                let home = Entity()
+                home.addChild(engine.makeVideoEntity())
+                content.add(home)
+                playbackModel?.noteStereoEngine(engine)
                 engine.observeVideoSize(content: content)
                 engine.load(url: videoURL, roomActive: isRoomActive, depthMode: depthMode,
                             startAt: playbackModel?.takeStreamSwitchStart(fallback: startAtSeconds) ?? startAtSeconds,
@@ -271,6 +276,7 @@ struct Pseudo3DVideoPlayerView: View {
             engine.setRoomActive(active)
         }
         .onDisappear {
+            if playbackModel?.stereoEngine === engine { playbackModel?.noteStereoEngine(nil) }
             engine.cleanup()
             playbackModel?.setStereoPicturePreparing(false)
         }

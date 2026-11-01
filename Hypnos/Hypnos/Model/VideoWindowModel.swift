@@ -207,6 +207,17 @@ final class VideoWindowModel {
     /// window, and a WebKit-only source goes straight to the transcode.
     var holdsBigScreen = false
 
+#if os(visionOS)
+    /// The stereo engine drawing this window's 3D picture (live 3D or AI
+    /// 3D), which Big Screen borrows the plane of. Set by the stereo player.
+    private(set) weak var stereoEngine: Pseudo3DStereoEngine?
+
+    func noteStereoEngine(_ engine: Pseudo3DStereoEngine?) {
+        guard stereoEngine !== engine else { return }
+        stereoEngine = engine
+    }
+    #endif
+
     func noteNativePlayer(_ player: AVPlayer?) {
         guard nativePlayer !== player else { return }
         nativePlayer = player
@@ -814,8 +825,9 @@ final class VideoWindowModel {
         pictureSize = nil
         pictureFrameRate = nil
 
-        // Reset per-window viewing state (2D on the big screen)
-        stereoscopicOverride = holdsBigScreen ? false : nil
+        // Reset per-window viewing state (a stereo episode plays 3D on the
+        // big screen too)
+        stereoscopicOverride = nil
         video3DSettings = nil
         pseudo3DEnabled = false
         pseudo3DDepthMode = .realtime
