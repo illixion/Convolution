@@ -5,7 +5,9 @@ motion field) is the recommendation**; B is the VideoToolbox-only fallback. Phas
 time the models on the headset) and E1 (quality on real 3D Blu-ray footage) are done: RIFE 4.25 lite
 at 480×288 is the flow model, and VideoToolbox's interpolator turned out at least as good per eye, so
 E's case rests on binocular consistency and 4×, not on picture quality. E2 (the right eye from the left eye's field, on the Mac) confirms it: a
-third of per-eye rivalry, real-pair level on the slow pan, the most faithful depth; fire and smoke stay open. Smooth Motion today covers flat 2D in the video window
+third of per-eye rivalry, real-pair level on the slow pan, the most faithful depth; fire and smoke stay open.
+E3 built the Mac producer (`vergence analyze`): it matches PyTorch, runs faster than real time, and
+stores about 25 KB a frame. Smooth Motion today covers flat 2D in the video window
 (`NativeMetalVideoPlayerView`, SDR, visionOS) and AI 3D (the stereo pump, mono frames before depth).
 A packed stereo pair (`PackedStereoLayout`: 3D Blu-ray, SBS/TAB files) is deliberately passed through
 unchanged. This is the plan for changing that.
@@ -323,6 +325,40 @@ What this means:
   it, and the governor already has the shape for it. To be measured, not designed blind.
 - One film, six clips, 100 pairs. The detail-only count is the one to trust for "is it visible";
   the all-pixels count is in the script's output.
+
+### E3: the producer on the Mac (2026-11-01)
+
+`vergence analyze` (Vergence `Sources/VergenceCLI/Analyze.swift`, with `SharedFieldAnalysis` in
+VergenceCore and `StereoFlowAnalyzer` in VergenceApple) writes an analysis track: per real frame
+pair, the left eye's RIFE flow and mask (`flowPair`); per real frame, the right→left NeuFlow
+disparity (`disparity`, right eye, horizontal only). It reads a disc, a clip pair, or raw packed
+frames from ffmpeg (`--raw 1920x1080`), so a server can feed it any stereo file.
+
+- **Storage.** Stored at a quarter of the model's size (flow 120×72, disparity 128×72): the
+  fields are smooth, and the in-between frames came out *better* (+0.05 dB left, +0.1 dB right, on
+  four clips). Int16 in steps of 1/32 of a stored pixel (half a pixel at 1080p), each row
+  delta-coded, then raw DEFLATE (the record format's 0x80 flag, so a Linux or Quest-side reader
+  only needs zlib). That comes to about 25 KB a frame: 6 Mbit/s live, 4 GB for a two-hour film.
+  Steps measured: 1/64 px ~31 KB and lossless, 1/16 ~20 KB and −0.15 dB on the slow pan, 1/4
+  ~12 KB and −0.9 dB.
+- **Checked against PyTorch** (`scripts/check-analysis-track.py`, a track made from every other
+  frame so each in-between has a real frame to score against). On the crowd pan the track renders
+  38.57 / 38.33 dB (left / right) against PyTorch's 38.51 / 38.00, and on the robot fight 27.81 /
+  27.71 against 27.80 / 27.69. The two renders agree to 41–47 dB, and the median flow difference is
+  0.3–1 px at 1080p. The Core ML fp16 conversions, the Swift resize (bilinear like
+  `F.interpolate`, straight from 4:2:0) and the storage cost nothing measurable.
+- **Speed on an M2 Max: 35–39 frames a second**, faster than the film, with RIFE on the Neural
+  Engine (13 ms) and NeuFlow on the GPU (10 ms) running side by side. Two conversion findings:
+  - The fp16 NeuFlow takes 100 ms on this Mac's Neural Engine (14 ms on the headset's) and
+    overflows to NaN on its GPU.
+  - The producer therefore uses a one-way **fp32** NeuFlow (`--one-way --precision fp32`) on the
+    GPU. One direction is all E reads.
+  - A model's NaN is stored as 0 rather than crashing the encoder.
+
+Next: the headset side. A Metal pass makes both in-between eyes from a real pair plus its
+records: flow upsample, flow reversal for t ≠ ½, disparity read-across, warp and blend. It plugs
+into the packed-stereo path of `InterpolatingFrameSource` as a second interpolator, reading a
+`.vgat` from disk first and the live RAVECompanion channel later.
 
 The phases below were written for option B; under E, phase 3 becomes "flow, disparity transfer, warp
 and fallback shaders" and phase 0's disparity work is the flow network's.
