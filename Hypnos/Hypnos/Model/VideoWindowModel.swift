@@ -163,6 +163,12 @@ final class VideoWindowModel {
     var smoothMotionOverride: Bool?
     /// Whether AI 3D interpolates this video's frames.
     var smoothMotion: Bool { smoothMotionOverride ?? appModel.smoothMotion }
+    /// A 3D Library title's analysis track (`SmoothMotionTracks`), which lets
+    /// live 3D get in-between frames for both eyes. Nil for anything else.
+    private(set) var sharedFields: AnalysisTrackFieldProvider?
+    @ObservationIgnored private var sharedFieldsTask: Task<Void, Never>?
+    /// The track, while live 3D plays (what the stereo player is handed).
+    var liveStereoSharedFields: SharedFieldProvider? { liveStereoLayout != nil ? sharedFields : nil }
     /// True while the user is dragging the scrubber — suppresses incoming
     /// timeupdate writes so the thumb doesn't fight the drag.
     var isScrubbing: Bool = false {
@@ -464,6 +470,21 @@ final class VideoWindowModel {
         armLoadStallWatch()
         armStartupQualityWatch()
         subtitles.load(SubtitleSource.forVideo(video))
+        loadSharedFields()
+    }
+
+    /// Looks for the analysis track of a 3D Library title: by its Jellyfin
+    /// item id, else its name.
+    private func loadSharedFields() {
+        sharedFieldsTask?.cancel()
+        sharedFields = nil
+        guard video.isStereoscopic, let itemId = libraryItemId else { return }
+        let identity = video.identity, name = video.title ?? ""
+        sharedFieldsTask = Task { [weak self] in
+            let fields = await SmoothMotionTracks.fields(name: name, id: itemId)
+            guard !Task.isCancelled, let self, self.video.identity == identity else { return }
+            self.sharedFields = fields
+        }
     }
 
     // MARK: - Library titles
@@ -716,6 +737,7 @@ final class VideoWindowModel {
         AI3DWarmup.shared.clearIntent(self)
         nextEpisodeTask?.cancel()
         audioTracksTask?.cancel()
+        sharedFieldsTask?.cancel()
         if popOutWindowValue != nil {
             appModel.unregisterVideoWindow(video: video, windowValueId: windowValueId)
         }
@@ -787,6 +809,7 @@ final class VideoWindowModel {
         }
         video = newVideo
         subtitles.load(SubtitleSource.forVideo(newVideo))
+        loadSharedFields()
         endHandled = false
         pictureSize = nil
         pictureFrameRate = nil
@@ -907,13 +930,14 @@ final class VideoWindowModel {
         pseudo3DEnabled && !shouldUse3DMode && playbackRenderer == .nativeMetal
     }
 
-    /// Smooth Motion has a picture to act on: AI 3D, or the flat native
-    /// Metal player (visionOS only; see `NativeMetalVideoPlayerView`'s
-    /// `rebuildFramePresenter`). Live 3D and the immersive player show the
-    /// source's own frames.
+    /// Smooth Motion has a picture to act on: AI 3D, the flat native Metal
+    /// player (visionOS only; see `NativeMetalVideoPlayerView`'s
+    /// `rebuildFramePresenter`), or live 3D with an analysis track. Otherwise
+    /// live 3D and the immersive player show the source's own frames.
     var smoothMotionApplies: Bool {
         #if os(visionOS)
         shouldUsePseudo3D || (playbackRenderer == .nativeMetal && !showsStereoPicture && !usesImmersiveStereo)
+            || (liveStereoLayout != nil && sharedFields != nil)
         #else
         false
         #endif

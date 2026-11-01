@@ -222,6 +222,7 @@ struct VideoWindowView: View {
                             startAtSeconds: liveLayout == nil ? windowModel.pseudo3DEngageResumeTime : nil,
                             startPaused: liveLayout == nil && windowModel.pseudo3DEngagePaused,
                             packedStereo: liveLayout,
+                            sharedFields: windowModel.liveStereoSharedFields,
                             isFlipped: windowModel.isFlipped,
                             loopController: windowModel.loopController,
                             playbackModel: windowModel,

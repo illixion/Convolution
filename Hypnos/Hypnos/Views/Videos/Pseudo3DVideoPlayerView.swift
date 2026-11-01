@@ -44,6 +44,8 @@ struct Pseudo3DVideoPlayerView: View {
     /// A stereo video that already holds both eyes: played live as real 3D,
     /// each eye cropped out, with no depth model. Nil warps a mono video.
     var packedStereo: PackedStereoLayout? = nil
+    /// A packed pair's analysis track: Smooth Motion for live 3D.
+    var sharedFields: SharedFieldProvider? = nil
     var isFlipped: Bool = false
     var loopController: VideoLoopController? = nil
     var playbackModel: VideoWindowModel? = nil
@@ -115,6 +117,8 @@ struct Pseudo3DVideoPlayerView: View {
                 engine.setContentOpacity(contentOpacity)
                 engine.setSquareCorners(!appModel.roundedCorners)
                 engine.setSubtitles(subtitleFrame)
+                engine.interpolatesFrames = smoothMotion
+                engine.sharedFields = sharedFields
                 content.add(engine.makeVideoEntity())
                 engine.observeVideoSize(content: content)
                 engine.load(url: videoURL, roomActive: isRoomActive, depthMode: depthMode,
@@ -217,7 +221,12 @@ struct Pseudo3DVideoPlayerView: View {
         // Smooth Motion is read when the frame source is built.
         .onChange(of: smoothMotion) { _, value in
             engine.interpolatesFrames = value
-            if packedStereo == nil { engine.reloadDepthPipeline() }
+            if packedStereo == nil || sharedFields != nil { engine.reloadDepthPipeline() }
+        }
+        // A track found after live 3D started: rebuild the pump with it.
+        .onChange(of: sharedFields.map(ObjectIdentifier.init)) { _, _ in
+            engine.sharedFields = sharedFields
+            if packedStereo != nil, smoothMotion { engine.reloadDepthPipeline() }
         }
         .onAppear {
             playbackModel?.stereoPictureStarted()
@@ -394,6 +403,7 @@ struct Pseudo3DVideoPlayerView: View {
     var startAtSeconds: Double? = nil
     var startPaused: Bool = false
     var packedStereo: PackedStereoLayout? = nil
+    var sharedFields: SharedFieldProvider? = nil
     var isFlipped: Bool = false
     var loopController: VideoLoopController? = nil
     var playbackModel: VideoWindowModel? = nil
