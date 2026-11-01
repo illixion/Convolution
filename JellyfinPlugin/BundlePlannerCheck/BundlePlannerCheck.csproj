@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <Compile Include="../Jellyfin.Plugin.AtmosObjects/BundlePlanner.cs" Link="BundlePlanner.cs" />
+    <Compile Include="../Jellyfin.Plugin.AtmosObjects/AacEncoders.cs" Link="AacEncoders.cs" />
   </ItemGroup>
 
 </Project>

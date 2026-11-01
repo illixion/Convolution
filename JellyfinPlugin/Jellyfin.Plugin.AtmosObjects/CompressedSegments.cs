@@ -290,7 +290,7 @@ public sealed partial class AtmosSceneService
             {
                 // AAC-LC at every rate: jellyfin-ffmpeg's libfdk_aac is built
                 // without HE-AAC ("Unable to set the AOT 5").
-                BundleCodec.Aac => ["-c:a", "libfdk_aac", "-b:a", rate, "-f", "ipod"],
+                BundleCodec.Aac => ["-c:a", AacEncoder(), "-b:a", rate, "-f", "ipod"],
                 _ => ["-c:a", "libopus", "-b:a", rate, "-application", "audio", "-f", "ogg"]
             });
             args.Add(Path.Combine(work, $"{batch[i].Channel}.{Extension(codec)}"));
@@ -341,6 +341,38 @@ public sealed partial class AtmosSceneService
         }
 
         return result;
+    }
+
+    private readonly object _aacEncoderGate = new();
+    private string? _aacEncoder;
+
+    /// <summary>The AAC encoder this server's ffmpeg has, asked once (<see cref="AacEncoders.Pick"/>).</summary>
+    private string AacEncoder()
+    {
+        lock (_aacEncoderGate)
+        {
+            if (_aacEncoder is not null)
+            {
+                return _aacEncoder;
+            }
+
+            var listing = string.Empty;
+            try
+            {
+                using var ffmpeg = StartProcess(_mediaEncoder.EncoderPath, ["-hide_banner", "-encoders"], redirectInput: false);
+                _ = ffmpeg.StandardError.ReadToEndAsync();
+                listing = ffmpeg.StandardOutput.ReadToEnd();
+                ffmpeg.WaitForExit(10_000);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
+            {
+                _logger.LogWarning(ex, "Could not list ffmpeg's encoders; AAC bundles use the built-in encoder");
+            }
+
+            _aacEncoder = AacEncoders.Pick(listing);
+            _logger.LogInformation("AAC bundles encode with {Encoder}", _aacEncoder);
+            return _aacEncoder;
+        }
     }
 
     private static string Extension(BundleCodec codec) => codec == BundleCodec.Aac ? "m4a" : "ogg";

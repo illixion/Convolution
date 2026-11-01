@@ -60,5 +60,12 @@ Check(Math.Abs(BundlePlanner.Activity(0) - 1) < 1e-6 && Math.Abs(BundlePlanner.A
 // 9. Pool never negative with an LFE and a tiny budget.
 p = BundlePlanner.Plan(withLfe, 64000, 64000);
 Check(p.TotalBitrate <= 64000, $"tiny budget: {p.Encode.Count} kept, total {p.TotalBitrate}");
+// 10. The AAC encoder follows what ffmpeg was built with.
+const string fdk = " A....D aac                  AAC (Advanced Audio Coding)\n A..... libfdk_aac           Fraunhofer FDK AAC (codec aac)\n A..... aac_at               aac (AudioToolbox) (codec aac)\n";
+const string mac = " A....D aac                  AAC (Advanced Audio Coding)\n A..... aac_at               aac (AudioToolbox) (codec aac)\n";
+Check(AacEncoders.Pick(fdk) == "aac_at", "AudioToolbox first, even with libfdk_aac built in");
+Check(AacEncoders.Pick(fdk.Replace(" A..... aac_at               aac (AudioToolbox) (codec aac)\n", "")) == "libfdk_aac", "libfdk_aac without AudioToolbox");
+Check(AacEncoders.Pick(mac) == "aac_at", "AudioToolbox on Jellyfin 12.2's macOS ffmpeg");
+Check(AacEncoders.Pick("") == "aac", "the built-in encoder when the listing is missing");
 Console.WriteLine(fails == 0 ? "ALL OK" : $"{fails} FAILED");
 return fails;
