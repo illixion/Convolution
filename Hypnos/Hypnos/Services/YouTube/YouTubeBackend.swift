@@ -34,14 +34,25 @@ final class YouTubeBackend {
         didSet { UserDefaults.standard.set(endpoint, forKey: Self.endpointKey) }
     }
 
-    /// Held in the keychain, read through on each request.
+    /// Held in the keychain and read from it once: a keychain read is an IPC
+    /// round trip, and `isAvailable`/`token` are asked on the main actor several
+    /// times per watch-history report (every 10 s while a video plays), which
+    /// stalled the HUD's follow for a moment each time. This type is the only
+    /// writer of the item, so the copy can't go stale.
     var token: String {
-        get { KeychainStore.string(for: .youtubeBackendToken) ?? "" }
+        get {
+            if let cachedToken { return cachedToken }
+            let loaded = KeychainStore.string(for: .youtubeBackendToken) ?? ""
+            cachedToken = loaded
+            return loaded
+        }
         set {
             _ = KeychainStore.set(newValue.isEmpty ? nil : newValue, for: .youtubeBackendToken)
+            cachedToken = newValue
             tokenRevision += 1
         }
     }
+    @ObservationIgnored private var cachedToken: String?
     /// Bumped on every token change so views reading `hasToken` refresh.
     private(set) var tokenRevision = 0
 

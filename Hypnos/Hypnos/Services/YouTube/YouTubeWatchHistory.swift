@@ -261,7 +261,8 @@ final class YouTubeWatchHistory {
                     // Merged into a start while this one was on its way.
                     outbox[report.id]?.event = .progress
                 }
-                if let id = YouTubeVideoID(report.id), entries[id] != nil || recent.contains(where: { $0.id == report.id }) {
+                if let id = YouTubeVideoID(report.id), entries[id] != reply.video,
+                   entries[id] != nil || recent.contains(where: { $0.id == report.id }) {
                     entries[id] = reply.video
                 }
                 saveOutbox()
