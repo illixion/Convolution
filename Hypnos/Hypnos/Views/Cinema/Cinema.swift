@@ -1121,7 +1121,9 @@ struct CinemaVideoWindowHook: ViewModifier {
         cinema.hudControlsView = hudControls
         cinema.hudCloseAction = closePlayer
         if windowModel.pseudo3DEnabled { windowModel.disablePseudo3D() }
-        if windowModel.stereoscopicOverride == true { windowModel.stereoscopicOverride = false }
+        // Live 3D draws in the window, whether chosen or found from the
+        // file's tags (the screen would get no player at all).
+        if windowModel.shouldUse3DMode { windowModel.stereoscopicOverride = false }
         if windowModel.playbackRenderer == .webKit,
            !windowModel.switchToTranscodedStream(reason: "The immersive screen needs the AVFoundation renderer") {
             let owner = owner
