@@ -95,7 +95,7 @@ final class LibraryPlayback {
     /// otherwise the player closes.
     func playNextEpisode() async {
         guard let finished = videoPresentation?.item, let library = LibraryService.current() else { return }
-        progressReporter?.finish()
+        progressReporter?.finish(playedToEnd: true)
         progressReporter = nil
         guard let next = try? await library.episode(after: finished) else {
             videoPresentation = nil
@@ -190,8 +190,8 @@ private struct LibraryPlaybackPresenter: ViewModifier {
             .fullScreenCover(item: $playback.videoPresentation, onDismiss: { playback.videoDismissed() }) { presentation in
                 TVVideoPlayerView(
                     video: presentation.video,
-                    onProgress: { position, _, isPaused in
-                        playback.progressReporter?.report(currentTime: position, isPaused: isPaused)
+                    onProgress: { position, duration, isPaused in
+                        playback.progressReporter?.report(currentTime: position, duration: duration, isPaused: isPaused)
                     },
                     startSeconds: presentation.startSeconds,
                     onPlayedToEnd: presentation.item.kind == .episode

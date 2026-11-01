@@ -686,7 +686,8 @@ struct VideoWindowView: View {
                 // Nil once the window has moved on to another video (the
                 // next episode), whose playhead says nothing about this one.
                 currentTime: { windowModel.video.identity == reported.identity ? windowModel.currentTime : nil },
-                isPaused: { windowModel.isPaused }
+                isPaused: { windowModel.isPaused },
+                playedToEnd: { windowModel.playedToEndDuration(forVideoIdentity: reported.identity) }
             )
             #if HYPNOS_YOUTUBE
             await followYouTubeProgress(reported)

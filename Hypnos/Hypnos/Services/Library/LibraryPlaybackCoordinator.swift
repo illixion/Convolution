@@ -17,6 +17,7 @@
  Stash/Nextcloud/Photos/Local video already flowing through the same window.
  */
 
+import DebugTrace
 import Foundation
 
 @MainActor
@@ -72,6 +73,7 @@ enum LibraryPlaybackCoordinator {
         video: GalleryVideo,
         currentTime: @escaping @MainActor () -> Double?,
         isPaused: @escaping @MainActor () -> Bool,
+        playedToEnd: @escaping @MainActor () -> Double? = { nil },
         interval: Duration = .seconds(10)
     ) async {
         guard let itemId = jellyfinItemId(fromVideoIdentity: video.identity),
@@ -81,15 +83,31 @@ enum LibraryPlaybackCoordinator {
         var started = false
         var lastPosition: Double = 0
         defer {
+            // The title played to its end: the stop is at its duration and the
+            // title is marked watched. After an autoplay the window already
+            // shows the next episode, so `currentTime` has nothing for this one
+            // and the last 10 s sample would be what the server heard. Jellyfin
+            // counts a stop as watched only past a share of the runtime it
+            // holds, which a title whose metadata runs long never reaches.
+            let endedAt = playedToEnd().flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
             // The position at close, not at the last 10 s sample.
             let current = currentTime().flatMap { $0.isFinite ? $0 : nil } ?? lastPosition
-            let position = FilmPlayerView.safeStopPosition(current: current, lastReported: lastPosition)
-            // A stop report also ends the server's transcode for this play;
-            // one that never started has to end it explicitly.
-            if started {
-                Task { await library.reportPlaybackStopped(itemId: itemId, positionSeconds: position) }
-            } else {
-                Task { await library.stopTranscoding(itemId: itemId) }
+            let position = endedAt ?? FilmPlayerView.safeStopPosition(current: current, lastReported: lastPosition)
+            let wasStarted = started
+            Task {
+                if wasStarted {
+                    await library.reportPlaybackStopped(itemId: itemId, positionSeconds: position)
+                } else {
+                    // A stop report also ends the server's transcode for this play;
+                    // one that never started has to end it explicitly.
+                    await library.stopTranscoding(itemId: itemId)
+                }
+                if endedAt != nil {
+                    // After the stop, so the server's last word is "watched, no resume point".
+                    do { try await library.setPlayed(itemId: itemId, played: true) } catch {
+                        AppLogger.library.error("Marking a finished title watched failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+                    }
+                }
             }
         }
 
@@ -125,6 +143,7 @@ final class GenericProgressReporter {
     private let library: JellyfinLibrary
     private var started = false
     private var lastPosition: Double = 0
+    private var lastDuration: Double = 0
 
     /// nil when `video` isn't Jellyfin-sourced or no server is configured —
     /// callers should just skip wiring `onProgress`/`finish()` in that case.
@@ -136,8 +155,9 @@ final class GenericProgressReporter {
         self.library = library
     }
 
-    func report(currentTime: Double, isPaused: Bool) {
+    func report(currentTime: Double, duration: Double = 0, isPaused: Bool) {
         lastPosition = currentTime
+        if duration.isFinite, duration > 0 { lastDuration = duration }
         Task {
             if !started, currentTime > 0 {
                 started = true
@@ -148,12 +168,23 @@ final class GenericProgressReporter {
         }
     }
 
-    func finish() {
+    /// - Parameter playedToEnd: the player ran to the end of the title (autoplay's
+    ///   trigger): the stop is at its duration, not at the last periodic
+    ///   sample, and the title is marked watched after it.
+    func finish(playedToEnd: Bool = false) {
+        let endedAt = playedToEnd && lastDuration > 0 ? lastDuration : nil
         guard started else {
-            Task { [library, itemId] in await library.stopTranscoding(itemId: itemId) }
+            Task { [library, itemId] in
+                await library.stopTranscoding(itemId: itemId)
+                if endedAt != nil { try? await library.setPlayed(itemId: itemId, played: true) }
+            }
             return
         }
         started = false
-        Task { await library.reportPlaybackStopped(itemId: itemId, positionSeconds: lastPosition) }
+        let position = endedAt ?? lastPosition
+        Task {
+            await library.reportPlaybackStopped(itemId: itemId, positionSeconds: position)
+            if endedAt != nil { try? await library.setPlayed(itemId: itemId, played: true) }
+        }
     }
 }

@@ -1525,6 +1525,9 @@ actor JellyfinLibrary: MediaServerLibrary {
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            if !(200..<300).contains(status) {
+                AppLogger.library.error("Progress report to \(path, privacy: .public) was refused (HTTP \(status, privacy: .public))")
+            }
             return (200..<300).contains(status)
         } catch {
             AppLogger.library.error("Progress report to \(path, privacy: .public) failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")

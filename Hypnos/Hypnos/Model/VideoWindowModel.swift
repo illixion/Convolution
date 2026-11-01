@@ -486,6 +486,17 @@ final class VideoWindowModel {
     /// The current title has reached its end and been handled.
     @ObservationIgnored private var endHandled = false
     @ObservationIgnored private var nextEpisodeTask: Task<Void, Never>?
+    /// The video that last played to its end, with its duration. It outlives
+    /// the switch to the next episode, which is what lets the progress
+    /// reporter, cancelled by that switch, still tell the server the episode
+    /// finished: by then the playhead belongs to the next one. Cleared when the
+    /// viewer scrubs back from the end.
+    @ObservationIgnored private var endedVideo: (identity: String, duration: Double)?
+
+    /// The duration of the video with `identity` if it played to its end, else nil.
+    func playedToEndDuration(forVideoIdentity identity: String) -> Double? {
+        endedVideo?.identity == identity ? endedVideo?.duration : nil
+    }
 
     /// How close to the end a stopped player counts as finished. Players
     /// park within a frame or two of the duration; the margin covers HLS
@@ -500,11 +511,13 @@ final class VideoWindowModel {
         // still resolving is called off.
         if endHandled, currentTime < duration - Self.endTolerance - 2 {
             endHandled = false
+            endedVideo = nil
             nextEpisodeTask?.cancel()
         }
         guard !endHandled, paused, !isScrubbing,
               currentTime >= duration - Self.endTolerance else { return }
         endHandled = true
+        endedVideo = (video.identity, duration)
         revealChrome()
         AppLogger.videoWindow.info("[\(self.videoDisplayName, privacy: .private(mask: .hash))] Library title ended")
         nextEpisodeTask = Task { [weak self] in await self?.playNextEpisode() }
@@ -513,7 +526,8 @@ final class VideoWindowModel {
     /// Autoplays the next episode in this window, the way the tvOS player
     /// does (`LibraryPlayback.playNextEpisode`). A film, the last episode, or
     /// a next episode that needs the object-audio player stays on its last
-    /// frame; the progress reporter has already told Jellyfin it was watched.
+    /// frame. The progress reporter tells Jellyfin it was watched when this
+    /// episode's task is cancelled, from `playedToEndDuration(forVideoIdentity:)`.
     /// The next episode carries on as this one ended (`EpisodeCarryOver`).
     private func playNextEpisode() async {
         guard let itemId = libraryItemId, let library = LibraryService.current() else { return }
