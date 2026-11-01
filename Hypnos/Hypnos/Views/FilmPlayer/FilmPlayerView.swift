@@ -476,6 +476,7 @@ struct FilmPlayerView: View {
                         squareCorners: !appModel.roundedCorners,
                         subtitles: stereoSubtitles,
                         interpolatesFrames: smoothMotion,
+                        speed: player.speed,
                         sharedFields: stereoLayout != nil ? session.sharedFields : nil,
                         onUnavailable: { failure in
                             guard stereoSource === source else { return }

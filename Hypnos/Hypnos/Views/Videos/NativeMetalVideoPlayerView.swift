@@ -444,6 +444,7 @@ struct NativeMetalVideoPlayerView {
             player.isMuted = startMuted
             player.volume = startVolume
             player.defaultRate = speed
+            updateDrawRate()
 
             self.player = player
             self.playerItem = item
@@ -611,11 +612,36 @@ struct NativeMetalVideoPlayerView {
 
         /// Now if playing, and from every later `play()` (the default rate);
         /// the item's time-pitch keeps the voice at its pitch.
+        /// Speed changes the frame rate: a 60 fps video at 2× shows all 120
+        /// frames a second, so the view draws faster and the display is asked
+        /// for the rate (`PlaybackFrameRate`).
         func setSpeed(_ speed: Float) {
+            let changed = self.speed != speed
             self.speed = speed
+            if changed {
+                updateDrawRate()
+                if dynamicRange != .unknown { updateDisplayCriteria() }
+            }
             guard let player else { return }
             player.defaultRate = speed
             if player.rate != 0 { player.rate = speed }
+        }
+
+        /// The view draws 60 times a second (96 with Smooth Motion's doubled
+        /// frames), and that many times more at a faster speed, up to 120.
+        private func updateDrawRate() {
+            let base = framePresenter != nil ? 96.0 : PlaybackFrameRate.normalDrawRate
+            mtkView?.preferredFramesPerSecond = Int(PlaybackFrameRate.drawRate(base: base, speed: Double(speed)).rounded())
+        }
+
+        /// The speed the display criteria follow: on tvOS the TV would switch
+        /// mode (and blank) at every speed change, so there it stays the film's.
+        private var criteriaSpeed: Double {
+            #if os(visionOS)
+            Double(speed)
+            #else
+            1
+            #endif
         }
 
         func setLoopBounds(a: Double?, b: Double?) {
@@ -1034,7 +1060,7 @@ struct NativeMetalVideoPlayerView {
                 }
             }
             let has = framePresenter != nil
-            mtkView?.preferredFramesPerSecond = has ? 96 : 60
+            updateDrawRate()
             if had != has {
                 AppLogger.videoWindow.info("Native player: Smooth Motion \(has ? "on" : "off", privacy: .public)")
                 if dynamicRange != .unknown { updateDisplayCriteria() }
@@ -1042,12 +1068,13 @@ struct NativeMetalVideoPlayerView {
             #endif
         }
 
-        /// HDR states its format so the picture doesn't dim; a doubled picture
-        /// states its doubled rate so the display can show it evenly. Plain
-        /// SDR leaves the display as it is.
+        /// HDR states its format so the picture doesn't dim; a doubled picture,
+        /// or one played at another speed, states the rate it shows so the
+        /// display can show it evenly. Plain SDR at normal speed leaves the
+        /// display as it is.
         private func updateDisplayCriteria() {
             #if os(tvOS) || os(visionOS)
-            if dynamicRange.isHDR || framePresenter != nil {
+            if dynamicRange.isHDR || framePresenter != nil || criteriaSpeed != 1 {
                 applyDisplayCriteria()
             } else {
                 criteriaTask?.cancel()
@@ -1064,23 +1091,25 @@ struct NativeMetalVideoPlayerView {
             criteriaTask = Task { @MainActor [weak self] in
                 // The asset's own track says Dolby Vision (dvh1) where a
                 // decoded frame can't; an HLS stream has none, so the frame.
+                // The track's nominal rate first: what the player measures
+                // (all HLS has) is the rate shown, which a speed multiplies.
                 var format = fallback
-                var rate: Float = 0
+                var rate: Double = 0
                 if let playerTrack = item?.tracks.first(where: { $0.assetTrack?.mediaType == .video }) {
-                    rate = playerTrack.currentVideoFrameRate
                     if let track = playerTrack.assetTrack {
                         if let described = try? await track.load(.formatDescriptions).first { format = described }
-                        if rate <= 0, let nominal = try? await track.load(.nominalFrameRate) { rate = nominal }
+                        if let nominal = try? await track.load(.nominalFrameRate), nominal > 0 { rate = Double(nominal) }
+                    }
+                    if rate <= 0, let player = self?.player, player.rate > 0 {
+                        rate = Double(playerTrack.currentVideoFrameRate) / Double(player.rate)
                     }
                 }
                 guard !Task.isCancelled, let self, self.playerItem === item, let format else { return }
-                let measured = Double(rate > 0 ? rate : 24)
-                let standard: [Double] = [24000.0 / 1001, 24, 25, 30000.0 / 1001, 30, 50, 60000.0 / 1001, 60]
-                let snapped = standard.min { abs($0 - measured) < abs($1 - measured) } ?? measured
+                let snapped = PlaybackFrameRate.snapped(rate > 0 ? rate : 24)
                 let doubled = self.framePresenter != nil && snapped < InterpolatingFrameSource.maxSourceFrameRate
-                self.host?.displayCriteria = AVDisplayCriteria(
-                    refreshRate: Float(doubled ? 2 * snapped : snapped), formatDescription: format
-                )
+                let shown = PlaybackFrameRate.shown(source: snapped, doubled: doubled, speed: self.criteriaSpeed)
+                self.host?.displayCriteria = AVDisplayCriteria(refreshRate: Float(shown), formatDescription: format)
+                AppLogger.videoWindow.info("Native player: display at \(shown, format: .fixed(precision: 3), privacy: .public) Hz")
             }
             #endif
         }
