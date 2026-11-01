@@ -128,7 +128,7 @@ struct Pseudo3DVideoPlayerView: View {
                 playbackModel?.noteStereoEngine(engine)
                 engine.observeVideoSize(content: content)
                 engine.load(url: videoURL, roomActive: isRoomActive, depthMode: depthMode,
-                            startAt: playbackModel?.takeStreamSwitchStart(fallback: startAtSeconds) ?? startAtSeconds,
+                            startAt: playbackModel?.stereoPlayerStart(fallback: startAtSeconds) ?? startAtSeconds,
                             startPaused: startPaused,
                             httpHeaderFields: MediaAuthorization.shared.headerFields(for: videoURL),
                             packedStereo: packedStereo,
@@ -201,7 +201,7 @@ struct Pseudo3DVideoPlayerView: View {
         }
         .onChange(of: videoURL) { _, newURL in
             engine.load(url: newURL, roomActive: isRoomActive, depthMode: depthMode,
-                        startAt: playbackModel?.takeStreamSwitchStart(),
+                        startAt: playbackModel?.stereoPlayerStart(),
                         startPaused: playbackModel?.isPaused ?? false,
                         httpHeaderFields: MediaAuthorization.shared.headerFields(for: newURL),
                         packedStereo: packedStereo)

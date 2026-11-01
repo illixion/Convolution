@@ -1966,6 +1966,29 @@ final class VideoWindowModel {
         return start
     }
 
+    /// Where a stereo player that mounts or reloads for this video starts:
+    /// a stream switch's target, else the caller's, else the position still
+    /// owed to a new renderer, else the playhead. Its view's identity follows
+    /// the 3D layout and the playback attempt, so it can be rebuilt mid-watch
+    /// (or just after a Library resume seek went to the player it replaced);
+    /// starting at 0 then lost the place in the film.
+    func stereoPlayerStart(fallback: Double? = nil) -> Double? {
+        let owed = carriedPosition?.time ?? (currentTime > 1 ? currentTime : nil)
+        let start = takeStreamSwitchStart(fallback: fallback) ?? owed
+        if start != nil { carriedPosition = nil }
+        AppLogger.videoWindow.info("Stereo player starts at \(start ?? 0, format: .fixed(precision: 2))s")
+        return start
+    }
+
+    /// The Library's Resume: owed to whichever player reports next, and
+    /// kept until one is there (or the user seeks), rather than a single
+    /// seek on the player of the moment, which a rebuild then discarded.
+    func resumeAtLibraryPosition(_ seconds: Double) {
+        carriedPosition = (seconds, false)
+        currentTime = seconds
+        AppLogger.videoWindow.info("Resuming the Library position at \(seconds, format: .fixed(precision: 2))s")
+    }
+
     /// A Jellyfin HLS remux (direct play has no segments to misplace).
     private var isRenewableJellyfinStream: Bool {
         LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity) != nil

@@ -739,10 +739,10 @@ struct VideoWindowView: View {
         })
     }
 
-    /// Seeks to `windowValue.startSeconds` (the Library's Resume) once the
-    /// renderer is ready to take a seek, for the video the window opened
-    /// with only. Gives up quietly after 30 s: a player that never became
-    /// ready has bigger problems than a missed resume point.
+    /// Resumes at `windowValue.startSeconds` (the Library's Resume), for the
+    /// video the window opened with only. The model holds the position until
+    /// a player reports in, so a player rebuilt meanwhile (live 3D) starts
+    /// there too.
     ///
     /// The value is a snapshot from when Play was pressed, and a restored
     /// window replays it long after: a Library title resumes from where the
@@ -762,14 +762,8 @@ struct VideoWindowView: View {
             }
             guard !Task.isCancelled, start > 0 else { return }
         }
-        for _ in 0..<120 {
-            if windowModel.duration > 0, let seek = windowModel.seekCommand {
-                seek(start)
-                return
-            }
-            try? await Task.sleep(for: .milliseconds(250))
-            if Task.isCancelled { return }
-        }
+        guard windowModel.video.identity == windowValue.video.identity else { return }
+        windowModel.resumeAtLibraryPosition(start)
     }
 
     // MARK: - Title
