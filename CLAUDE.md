@@ -213,7 +213,7 @@ Invariants that bite outside the files above, so they stay here:
 - **Every photo-viewer geometry request goes through `WindowResizeCoalescer`.** visionOS has no window-position API, so each granted resize is also an uncorrectable move.
 - **`AppModel.init` sets `RAVEMediaPolicy.depthCacheCap`.** Remove it and the depth cache never evicts.
 - **Fake-3D needs real depth.** No depth model and no cache means the flat 2D player, never a heuristic warp.
-- **The app never does Dolby processing itself** (decided 2026-10-10): only the OS codecs and renderers read a Dolby Vision RPU; when a picture needs converting, the server does it.
+- **An App Store build never does Dolby processing itself** (decided 2026-10-10, narrowed 2026-11-01): only the OS codecs and renderers read a Dolby Vision RPU or decode TrueHD; when a picture needs converting, the server does it. The sideload (GitHub) edition may decode TrueHD and DTS on the device with ffmpeg behind its own compilation condition, never compiled into a submission build.
 - **YouTube is sideload-only (`HYPNOS_YOUTUBE`).** Nothing YouTube may compile into a submission build; build all four platforms both with and without `YOUTUBE_CONDITION=HYPNOS_YOUTUBE` before committing.
 
 ### Memory Management
