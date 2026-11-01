@@ -14,7 +14,8 @@
 
  DTS and TrueHD tracks are decoded to ALAC renditions when the FFmpeg
  decoders are built (`scripts/build-ffmpeg-decoders.sh`); without them they
- are dropped, as in the App Store app.
+ are dropped, as in the App Store app. With MKVREMUX_STABLE=1 in the
+ environment, each also gets its Stable Audio rendition (`StableAudio.swift`).
 
  Writes master.m3u8, the media playlists, and every init and media segment,
  at the paths the app serves them on, then prints the summary. Serve the
@@ -113,6 +114,7 @@ do {
     let started = Date()
     var options = RemuxOptions()
     options.audioDecoding = FFmpegRemuxDecoder.decoding
+    if ProcessInfo.processInfo.environment["MKVREMUX_STABLE"] == "1" { options.stableAudio = .offered }
     let session = try await RemuxSession.open(source: try source(arguments[1]), options: options)
     let opened = Date().timeIntervalSince(started)
     let summary = session.summary

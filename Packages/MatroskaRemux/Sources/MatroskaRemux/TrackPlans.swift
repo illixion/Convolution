@@ -231,6 +231,16 @@ struct AudioPlan: Sendable {
     /// Set for a track decoded and re-encoded as ALAC: `codec` describes
     /// the output, this the source.
     var transcode: AudioTranscode? = nil
+    /// The Stable Audio copy of a decoded track (`StableAudio.swift`): the
+    /// same frames, processed, as a rendition of its own.
+    var stable = false
+
+    /// Set on a Stable Audio rendition's number, above any track number a
+    /// file has.
+    static let stableFlag: UInt64 = 1 << 40
+    /// The rendition's number in paths and the summary: the track's, or the
+    /// track's with `stableFlag` for its Stable Audio copy.
+    var renditionNumber: UInt64 { stable ? track.number | Self.stableFlag : track.number }
 
     var gridSamples: Int? { transcode.map { $0.constantFrameSamples } ?? codec.constantFrameSamples }
 

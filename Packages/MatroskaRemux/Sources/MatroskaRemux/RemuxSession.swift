@@ -66,8 +66,19 @@ public struct RemuxOptions: Sendable {
     /// them decodes is offered as ALAC instead of dropped
     /// (`AudioTranscode.swift`).
     public var audioDecoding: RemuxAudioDecoding?
+    /// Whether each decoded track is offered a second time levelled around
+    /// its dialogue (`StableAudio.swift`), and whether that copy plays first.
+    public var stableAudio: StableAudioMode = .off
 
     public init() {}
+}
+
+public enum StableAudioMode: Sendable, Equatable {
+    case off
+    /// A "(Stable)" rendition after each decoded track.
+    case offered
+    /// The same, listed first, so the player starts with it.
+    case preferred
 }
 
 /// What a session plays, for logging and for the caller's decisions.
@@ -82,6 +93,8 @@ public struct RemuxSummary: Sendable {
         public var name: String
         public var channels: Int?
         public var isDefault: Bool
+        /// A Stable Audio copy of a decoded track (`StableAudio.swift`).
+        public var isStable = false
     }
 
     public struct DroppedTrack: Sendable {
@@ -200,7 +213,8 @@ public actor RemuxSession {
         let renditions = Playlists.renditions(audio)
         audioRenditions = renditions
         let names = Dictionary(uniqueKeysWithValues: renditions.map { ($0.trackNumber, $0.name) })
-        let prefixes = ["video", "muxed"] + audio.map { "audio-\($0.track.number)" }
+        let defaultNumber = Playlists.defaultAudio(audio)?.renditionNumber
+        let prefixes = ["video", "muxed"] + audio.map { "audio-\($0.renditionNumber)" }
         if index.isComplete {
             fixedPlaylists = Dictionary(uniqueKeysWithValues: prefixes.map {
                 ($0, Playlists.media(index: index, timestampScale: header.timestampScale, prefix: $0))
@@ -212,7 +226,7 @@ public actor RemuxSession {
         }
         var audioInits: [UInt64: Data] = [:]
         for plan in audio {
-            audioInits[plan.track.number] = Data(FragmentWriter.initSegment(
+            audioInits[plan.renditionNumber] = Data(FragmentWriter.initSegment(
                 handler: .audio, timescale: UInt32(plan.sampleRate),
                 language: LanguageCodes.iso6392T(fromBCP47: plan.track.bcp47Language), sampleEntry: plan.sampleEntry))
         }
@@ -241,10 +255,10 @@ public actor RemuxSession {
                          codecs: video.codecs, language: nil, name: video.track.name ?? "", channels: nil,
                          isDefault: true),
             audio: audio.map { plan in
-                .init(number: plan.track.number, codecID: plan.track.codecID, codec: plan.codecName,
+                .init(number: plan.renditionNumber, codecID: plan.track.codecID, codec: plan.codecName,
                       codecs: plan.codecs, language: plan.track.bcp47Language,
-                      name: names[plan.track.number] ?? "", channels: plan.channels,
-                      isDefault: Playlists.defaultAudio(audio)?.track.number == plan.track.number)
+                      name: names[plan.renditionNumber] ?? "", channels: plan.channels,
+                      isDefault: defaultNumber == plan.renditionNumber, isStable: plan.stable)
             },
             dropped: dropped, segmentCount: index.count, durationSeconds: duration, videoRange: video.videoRange,
             width: video.displayWidth, height: video.displayHeight, framesPerSecond: video.framesPerSecond,
@@ -330,7 +344,13 @@ public actor RemuxSession {
                                timestampScale: header.timestampScale, offsetNanoseconds: offsetNanoseconds)
             }
             switch planned {
-            case .success(let plan): audio.append(plan)
+            case .success(let plan):
+                // A decoded track's Stable Audio copy goes beside it, first
+                // when it is to play first.
+                guard plan.transcode != nil, options.stableAudio != .off else { audio.append(plan); break }
+                var stable = plan
+                stable.stable = true
+                audio += options.stableAudio == .preferred ? [stable, plan] : [plan, stable]
             case .failure(let error): dropped.append(.init(number: track.number, codecID: track.codecID,
                                                            reason: error.description))
             }
@@ -666,7 +686,7 @@ public actor RemuxSession {
     }
 
     public func audioSegment(track number: UInt64, _ k: Int) async throws -> Data? {
-        guard let plan = audio.first(where: { $0.track.number == number }) else { return nil }
+        guard let plan = audio.first(where: { $0.renditionNumber == number }) else { return nil }
         let runs = try await audioFragments(plan, k, from: try await audioOf(k))
             .map { TrackRun(trackID: 1, fragment: $0, compositionOffsets: false) }
         return FragmentWriter.mediaSegment(sequenceNumber: Self.sequenceNumber(k), runs: runs)
@@ -749,13 +769,16 @@ public actor RemuxSession {
         frames = frames.sorted { $0.time < $1.time }.filter { seen.insert($0.time).inserted }
         if let transcode = plan.transcode, !frames.isEmpty {
             var priming: [AudioFrame] = []
-            if transcode.primingSeconds > 0, k > 0 {
-                let from = frames[0].time - Int64(transcode.primingSeconds * Double(plan.sampleRate))
+            let primingSeconds = plan.stable ? max(transcode.primingSeconds, StableAudio.primingSeconds)
+                : transcode.primingSeconds
+            if primingSeconds > 0, k > 0 {
+                let from = frames[0].time - Int64(primingSeconds * Double(plan.sampleRate))
                 priming = ((try await audioOf(k - 1)).audio[number] ?? [])
                     .filter { $0.time >= from && $0.time < frames[0].time }
                     .sorted { $0.time < $1.time }
             }
-            frames = Self.transcoded(frames, priming: priming, with: transcode, channels: plan.channels)
+            frames = Self.transcoded(frames, priming: priming, with: transcode, channels: plan.channels,
+                                     stable: plan.stable ? plan.sampleRate : nil)
         }
 
         func placeholder(_ duration: Int64) -> FragmentSample {
@@ -801,8 +824,10 @@ public actor RemuxSession {
     /// A segment's frames decoded and cut into ALAC packets over the same
     /// span (`AudioTranscode.swift`). A decoder that fails leaves the span
     /// silent rather than short, so the timeline holds.
+    /// With `stable` (the sample rate), the decoded audio, priming and
+    /// all, goes through `StableAudio` first.
     static func transcoded(_ frames: [AudioFrame], priming: [AudioFrame], with transcode: AudioTranscode,
-                           channels: Int) -> [AudioFrame] {
+                           channels: Int, stable: Int? = nil) -> [AudioFrame] {
         let start = frames[0].time
         let last = frames[frames.count - 1]
         let span = Int(last.time + Int64(last.samples) - start)
@@ -822,6 +847,22 @@ public actor RemuxSession {
                     // decode) is at the front.
                     let take = min(span, available)
                     let from = available - take, to = span - take
+                    if let sampleRate = stable {
+                        // Planar floats in ALAC order, processed whole (the
+                        // priming settles the envelopes), the span kept.
+                        var planar = (0 ..< channels).map { c in
+                            (0 ..< available).map { Float(decoded[$0 * decodedChannels + order[c]]) / 8_388_608 }
+                        }
+                        StableAudio.process(&planar, sampleRate: sampleRate)
+                        for i in 0 ..< take {
+                            let d = (to + i) * channels
+                            for c in 0 ..< channels {
+                                let v = (planar[c][from + i] * 8_388_608).rounded()
+                                pcm[d + c] = Int32(max(-8_388_608, min(8_388_607, v)))
+                            }
+                        }
+                        return
+                    }
                     for i in 0 ..< take {
                         let s = (from + i) * decodedChannels, d = (to + i) * channels
                         for c in 0 ..< channels { pcm[d + c] = decoded[s + order[c]] }

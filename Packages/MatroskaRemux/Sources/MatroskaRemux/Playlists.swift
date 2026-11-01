@@ -108,7 +108,7 @@ enum Playlists {
     /// layout, then by number), and the LANGUAGE that makes the player show
     /// something sensible (see the top of this file).
     static func renditions(_ audio: [AudioPlan]) -> [AudioRendition] {
-        let defaultTrack = defaultAudio(audio)?.track.number
+        let defaultTrack = defaultAudio(audio)?.renditionNumber
         func describe(_ plan: AudioPlan) -> String {
             let objects = if case .eac3(let info) = plan.codec, info.objectComplexity != nil { " with object audio" } else { "" }
             return "\(plan.codecName) \(layout(plan.channels))\(objects)"
@@ -117,49 +117,65 @@ enum Playlists {
         var described: Set<UInt64> = []
         for plan in audio {
             if let name = plan.track.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
-                base[plan.track.number] = name
+                base[plan.renditionNumber] = name
             } else if let language = plan.track.bcp47Language,
                       let display = Locale.current.localizedString(forLanguageCode: language) {
-                base[plan.track.number] = display.prefix(1).uppercased() + display.dropFirst()
+                base[plan.renditionNumber] = display.prefix(1).uppercased() + display.dropFirst()
             } else {
-                base[plan.track.number] = describe(plan)
-                described.insert(plan.track.number)
+                base[plan.renditionNumber] = describe(plan)
+                described.insert(plan.renditionNumber)
+            }
+        }
+        // A Stable Audio copy is its track's name, marked; when it plays
+        // first (listed before its track), the track is marked as the
+        // original instead of taking the plain name.
+        for (i, plan) in audio.enumerated() where plan.stable {
+            base[plan.renditionNumber]! += " (Stable)"
+            if let original = audio[i...].first(where: { !$0.stable && $0.track.number == plan.track.number }) {
+                base[original.renditionNumber]! += " (Original)"
             }
         }
         var names = base
-        for (name, plans) in Dictionary(grouping: audio, by: { base[$0.track.number]! }) where plans.count > 1 {
-            for plan in plans where !described.contains(plan.track.number) {
-                names[plan.track.number] = "\(name) (\(layout(plan.channels)))"
+        for (name, plans) in Dictionary(grouping: audio, by: { base[$0.renditionNumber]! }) where plans.count > 1 {
+            for plan in plans where !described.contains(plan.renditionNumber) {
+                names[plan.renditionNumber] = "\(name) (\(layout(plan.channels)))"
             }
         }
         var seen: [String: Int] = [:]
         for plan in audio {
-            let name = names[plan.track.number]!
+            let name = names[plan.renditionNumber]!
             seen[name, default: 0] += 1
-            if seen[name]! > 1 { names[plan.track.number] = "\(name) \(seen[name]!)" }
+            if seen[name]! > 1 { names[plan.renditionNumber] = "\(name) \(seen[name]!)" }
         }
 
         // LANGUAGE: the track's, for the default first; else what to show.
         var tagged: Set<String> = []
         var languages: [UInt64: String] = [:]
-        for plan in audio.sorted(by: { ($0.track.number == defaultTrack ? 0 : 1) < ($1.track.number == defaultTrack ? 0 : 1) }) {
-            let name = names[plan.track.number]!
+        // The default rendition first: of a track and its Stable Audio copy,
+        // the one that plays first gets the language, which is also what
+        // the player's own choice by preferred language lands on.
+        func rank(_ plan: AudioPlan) -> Int {
+            plan.renditionNumber == defaultTrack ? 0 : plan.track.number == defaultAudio(audio)?.track.number ? 1 : 2
+        }
+        for plan in audio.sorted(by: { rank($0) < rank($1) }) {
+            let name = names[plan.renditionNumber]!
             if let language = plan.track.bcp47Language, tagged.insert(language.lowercased()).inserted {
-                languages[plan.track.number] = language
+                languages[plan.renditionNumber] = language
             } else if Locale.current.localizedString(forLanguageCode: name) != nil {
-                languages[plan.track.number] = "\(name) (\(layout(plan.channels)))"
+                languages[plan.renditionNumber] = "\(name) (\(layout(plan.channels)))"
             } else {
-                languages[plan.track.number] = name
+                languages[plan.renditionNumber] = name
             }
         }
         return audio.map { plan in
             var objects = false
             if case .eac3(let info) = plan.codec { objects = info.objectComplexity != nil }
-            return AudioRendition(trackNumber: plan.track.number, name: names[plan.track.number]!,
-                                  language: plan.track.bcp47Language, playlistLanguage: languages[plan.track.number]!,
+            return AudioRendition(trackNumber: plan.renditionNumber, name: names[plan.renditionNumber]!,
+                                  language: plan.track.bcp47Language, playlistLanguage: languages[plan.renditionNumber]!,
                                   codec: plan.codecName, codecs: plan.codecs, channels: plan.channels,
                                   layout: layout(plan.channels), hasObjectAudio: objects,
-                                  isDefault: plan.track.number == defaultTrack, uri: "audio-\(plan.track.number).m3u8")
+                                  isDefault: plan.renditionNumber == defaultTrack, isStable: plan.stable,
+                                  uri: "audio-\(plan.renditionNumber).m3u8")
         }
     }
 
@@ -243,6 +259,9 @@ public struct AudioRendition: Sendable, Equatable {
     public var hasObjectAudio: Bool
     /// The rendition the player starts with (DEFAULT=YES).
     public var isDefault: Bool
+    /// A Stable Audio copy of a decoded track (`StableAudio.swift`);
+    /// `trackNumber` is then the track's with `stableFlag` set.
+    public var isStable: Bool = false
     /// The rendition's media playlist, relative to the master.
     public var uri: String
 }

@@ -64,6 +64,8 @@ final class MatroskaRemuxService: Sendable {
         let prefix: String
         let session: RemuxSession
         let baseURL: URL
+        /// Settings → Videos → Stable Audio when it was opened.
+        let stableAudio: StableAudioMode
         var lastUse: Date
         /// Its parsed segments were let go while nobody played it.
         var idleTrimmed = false
@@ -146,12 +148,23 @@ final class MatroskaRemuxService: Sendable {
     func playlistURL(for source: URL, fileName: String? = nil, form: Form = .automatic) async -> URL? {
         guard Self.isCandidate(source, fileName: fileName) else { return nil }
         let key = source.absoluteString
+        let stableAudio = Self.stableAudioMode
+        var retired: Entry?
         if let entry = state.withLock({ state -> Entry? in
+            guard let entry = state.entries[key] else { return nil }
+            // Opened before Stable Audio was changed: opened again, unless a
+            // player is still reading it (a segment within half a minute).
+            if entry.stableAudio != stableAudio, Date().timeIntervalSince(entry.lastUse) > 30 {
+                state.entries[key] = nil
+                retired = entry
+                return nil
+            }
             state.entries[key]?.lastUse = .now
-            return state.entries[key]
+            return entry
         }) {
             return Self.url(for: entry, form: form)
         }
+        if let retired { LoopbackHTTPServer.shared.unregister(prefix: retired.prefix) }
         let task: Task<Entry?, Never>? = state.withLock { state in
             if state.declined.contains(key) { return nil }
             if let task = state.opening[key] { return task }
@@ -201,6 +214,7 @@ final class MatroskaRemuxService: Sendable {
 
     private func makeEntry(_ source: URL, key: String) async -> Entry? {
         let started = ContinuousClock.now
+        let stableAudio = Self.stableAudioMode
         let bytes: any ByteSource
         do {
             bytes = source.isFileURL ? try FileByteSource(url: source) : RemoteByteSource(url: source)
@@ -211,9 +225,8 @@ final class MatroskaRemuxService: Sendable {
         let session: RemuxSession
         do {
             var options = RemuxOptions()
-            #if HYPNOS_FFMPEG
-            options.audioDecoding = FFmpegRemuxDecoder.decoding
-            #endif
+            options.audioDecoding = Self.audioDecoding
+            options.stableAudio = stableAudio
             session = try await RemuxSession.open(source: bytes, options: options)
         } catch let error as RemuxError {
             if error != .notMatroska {
@@ -250,7 +263,8 @@ final class MatroskaRemuxService: Sendable {
             }
         }
         guard let base = await LoopbackHTTPServer.shared.register(prefix: prefix, handler: handler) else { return nil }
-        let entry = Entry(prefix: prefix, session: session, baseURL: base, lastUse: .now, idleTrimmed: false)
+        let entry = Entry(prefix: prefix, session: session, baseURL: base, stableAudio: stableAudio, lastUse: .now,
+                          idleTrimmed: false)
 
         // The player's own answer, on the form this device will play.
         let probeURL = Self.url(for: entry, form: .automatic)

@@ -192,6 +192,7 @@ struct PhotoSettingsPage: View {
 
 struct VideoSettingsPage: View {
     @Environment(AppModel.self) private var appModel
+    @AppStorage(StableAudioSetting.key) private var stableAudio = StableAudioSetting.offered
 
     var body: some View {
         @Bindable var appModel = appModel
@@ -206,6 +207,15 @@ struct VideoSettingsPage: View {
                 Toggle("Pinch to Zoom Videos", isOn: $appModel.pinchToZoomVideos)
             }
             #endif
+            if MatroskaRemuxService.offersStableAudio {
+                Section {
+                    Picker("Stable Audio", selection: $stableAudio) {
+                        ForEach(StableAudioSetting.allCases) { Text($0.title).tag($0) }
+                    }
+                } footer: {
+                    Text("Keeps dialogue clear at a steady volume: quiet speech comes up, effects and music make room for it, and loud scenes are brought down. Made on this device for DTS and TrueHD sound in MKV files, as an extra track named \u{201C}Stable\u{201D}. Use by Default also applies it in 3D, which has no track menu.")
+                }
+            }
             #if os(visionOS)
             Section {
                 Toggle("Smooth Motion", isOn: $appModel.smoothMotion)

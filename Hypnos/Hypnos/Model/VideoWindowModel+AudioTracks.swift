@@ -121,6 +121,9 @@ extension VideoWindowModel {
         let titleItem = AVMetadataItem.metadataItems(from: option.commonMetadata, filteredByIdentifier: .commonIdentifierTitle)
             .first
         let name = try? await titleItem?.load(.stringValue)
+        // A name that already starts with the language ("English (Stable)")
+        // stands alone.
+        if let language, let name, !language.isEmpty, name.hasPrefix(language) { return name }
         let named = [language, name == language ? nil : name].compactMap { $0 }.filter { !$0.isEmpty }
         return named.isEmpty ? "Track \(number)" : named.joined(separator: ", ")
     }
