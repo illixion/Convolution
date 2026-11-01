@@ -47,6 +47,9 @@ struct Pseudo3DVideoPlayerView: View {
     var isFlipped: Bool = false
     var loopController: VideoLoopController? = nil
     var playbackModel: VideoWindowModel? = nil
+    /// The window's Smooth Motion choice, else the Settings default (slideshows,
+    /// quick look).
+    private var smoothMotion: Bool { playbackModel?.smoothMotion ?? appModel.smoothMotion }
     /// Initial mute state applied when a video loads (autoplay always starts
     /// playback; this only controls whether it opens with audio).
     var startMuted: Bool = true
@@ -211,8 +214,14 @@ struct Pseudo3DVideoPlayerView: View {
                 engine.reloadDepthPipeline()
             }
         }
+        // Smooth Motion is read when the frame source is built.
+        .onChange(of: smoothMotion) { _, value in
+            engine.interpolatesFrames = value
+            if packedStereo == nil { engine.reloadDepthPipeline() }
+        }
         .onAppear {
             playbackModel?.stereoPictureStarted()
+            engine.interpolatesFrames = smoothMotion
             engine.startMuted = startMuted
             engine.startVolume = Float(playbackModel?.volume ?? 1)
             engine.startRate = Float(playbackModel?.playbackSpeed ?? 1)

@@ -66,6 +66,9 @@ struct FilmPlayerView: View {
     @DismissWindowProxy private var dismissWindow
     private var cinema: Cinema { .shared }
     @State private var stereoSource: SampleBufferFrameSource?
+    /// This film's Smooth Motion choice in AI 3D; nil follows Settings → Videos.
+    @State private var smoothMotionOverride: Bool?
+    private var smoothMotion: Bool { smoothMotionOverride ?? appModel.smoothMotion }
     /// Set while a 3D film plays as real 3D (eyes cropped from the frame);
     /// nil while a flat film plays as fake-3D.
     @State private var stereoLayout: PackedStereoLayout?
@@ -216,8 +219,15 @@ struct FilmPlayerView: View {
                     startStereo()
                 }
             }
-            // Stable Depth is read when the realtime source is built.
+            // Stable Depth is read when the realtime source is built,
+            // Smooth Motion when the source attaches.
             .onChange(of: appModel.stableDepth) { _, _ in
+                if stereoSource != nil, stereoLayout == nil {
+                    stopStereo(keepingPosition: false)
+                    startStereo()
+                }
+            }
+            .onChange(of: smoothMotion) { _, _ in
                 if stereoSource != nil, stereoLayout == nil {
                     stopStereo(keepingPosition: false)
                     startStereo()
@@ -450,6 +460,7 @@ struct FilmPlayerView: View {
                         packedStereo: stereoLayout,
                         squareCorners: !appModel.roundedCorners,
                         subtitles: stereoSubtitles,
+                        interpolatesFrames: smoothMotion,
                         onUnavailable: { failure in
                             guard stereoSource === source else { return }
                             stopStereo()
@@ -498,6 +509,8 @@ struct FilmPlayerView: View {
             ) {
             FilmTransport(player: player, stereoEnabled: stereoSource != nil,
                           onToggle3D: cinema.mode(for: .film).showsPicture ? nil : { stereoSource == nil ? startStereo() : stopStereo() },
+                          smoothMotion: stereoSource != nil && stereoLayout == nil ? smoothMotion : nil,
+                          onToggleSmoothMotion: { smoothMotionOverride = !smoothMotion },
                           markedRanges: skipper.markedRanges,
                           width: windowWidth > 0
                               ? min(max(windowWidth, VideoWindowView.minimumStripWidth), 1180) : nil,
@@ -907,6 +920,9 @@ struct FilmTransport: View {
     let player: FilmPlayer
     var stereoEnabled = false
     var onToggle3D: (() -> Void)?
+    /// Smooth Motion's state while AI 3D plays (nil hides the row).
+    var smoothMotion: Bool?
+    var onToggleSmoothMotion: () -> Void = {}
     /// Skippable stretches, marked under the scrubber.
     var markedRanges: [ClosedRange<Double>] = []
     /// The strip's width on visionOS (the window's, within limits).
@@ -1023,6 +1039,15 @@ struct FilmTransport: View {
                     if stereo != stereoEnabled { toggle() }
                 } label: {
                     PlayerChoiceRow(stereo ? stereoMode : "2D", isChecked: stereo == stereoEnabled)
+                }
+            }
+            if let smoothMotion {
+                Divider()
+                Button {
+                    close()
+                    onToggleSmoothMotion()
+                } label: {
+                    PlayerChoiceRow("Smooth Motion", isChecked: smoothMotion)
                 }
             }
         }

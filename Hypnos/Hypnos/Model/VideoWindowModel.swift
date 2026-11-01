@@ -158,6 +158,11 @@ final class VideoWindowModel {
     /// for this window, through every renderer change and the next video;
     /// a new window starts at 1×.
     private(set) var playbackSpeed: Double = 1
+    /// This video's Smooth Motion choice in AI 3D, from the View Mode menu;
+    /// nil follows Settings → AI 3D. Reset with each new video.
+    var smoothMotionOverride: Bool?
+    /// Whether AI 3D interpolates this video's frames.
+    var smoothMotion: Bool { smoothMotionOverride ?? appModel.smoothMotion }
     /// True while the user is dragging the scrubber — suppresses incoming
     /// timeupdate writes so the thumb doesn't fight the drag.
     var isScrubbing: Bool = false {
@@ -783,6 +788,7 @@ final class VideoWindowModel {
         progressiveEngageTask = nil
         dismissDepthReadyPrompt()
         pseudo3DSettings = .default
+        smoothMotionOverride = nil
         pendingPseudo3DEngage = nil
         // A different video starts from its own beginning.
         streamRenewalGeneration += 1
@@ -885,6 +891,18 @@ final class VideoWindowModel {
     /// AVPlayerItemVideoOutput.
     var shouldUsePseudo3D: Bool {
         pseudo3DEnabled && !shouldUse3DMode && playbackRenderer == .nativeMetal
+    }
+
+    /// Smooth Motion has a picture to act on: AI 3D, or the flat native
+    /// Metal player (visionOS only; see `NativeMetalVideoPlayerView`'s
+    /// `rebuildFramePresenter`). Live 3D and the immersive player show the
+    /// source's own frames.
+    var smoothMotionApplies: Bool {
+        #if os(visionOS)
+        shouldUsePseudo3D || (playbackRenderer == .nativeMetal && !showsStereoPicture && !usesImmersiveStereo)
+        #else
+        false
+        #endif
     }
 
     func set2DMode() {

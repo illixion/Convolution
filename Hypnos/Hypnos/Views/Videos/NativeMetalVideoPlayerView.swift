@@ -187,6 +187,9 @@ struct NativeMetalVideoPlayerView {
     /// parks on its last frame, reported as paused at the end so the window
     /// can go on to the next episode.
     var loops: Bool = true
+    /// Smooth Motion: an in-between frame for each pair of a 24-30 fps SDR
+    /// picture (visionOS; see the coordinator's `rebuildFramePresenter`).
+    var interpolatesFrames: Bool = false
     var onPlaybackError: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
@@ -228,6 +231,7 @@ struct NativeMetalVideoPlayerView {
         coordinator.startVolume = Float(playbackModel?.volume ?? 1)
         coordinator.speed = Float(playbackModel?.playbackSpeed ?? 1)
         coordinator.loops = loops
+        coordinator.interpolatesFrames = interpolatesFrames
         coordinator.resumesAfterInterruptions = playbackModel == nil
         coordinator.maximumResolution = playbackModel?.maximumPictureResolution ?? .zero
 
@@ -320,9 +324,20 @@ struct NativeMetalVideoPlayerView {
         /// Metal. The app does no Dolby processing of its own.
         private var needsSystemRenderer = false
         private var usesSystemLayer = false
-        /// The first HDR frame, for display criteria when the stream has no
-        /// asset track to describe it (HLS).
-        private var firstHDRFrameFormat: CMVideoFormatDescription?
+        /// The first frame's format, for display criteria when the stream has
+        /// no asset track to describe it (HLS).
+        private var firstFrameFormat: CMVideoFormatDescription?
+        /// What the frame output decodes to: BGRA for SDR, half float for HDR
+        /// drawn by Metal.
+        private var outputPixelFormat: OSType = kCVPixelFormatType_32BGRA
+        /// Smooth Motion. Takes effect at once: the presenter is rebuilt over
+        /// the same frame output, no reload.
+        var interpolatesFrames = false {
+            didSet { if oldValue != interpolatesFrames { rebuildFramePresenter() } }
+        }
+        /// Doubles a 24-30 fps picture while Smooth Motion is on (nil: frames
+        /// straight from the output).
+        private var framePresenter: InterpolatedFramePresenter?
         private var presentationSizeObservation: NSKeyValueObservation?
         private var criteriaTask: Task<Void, Never>?
         private var frameRateTask: Task<Void, Never>?
@@ -412,7 +427,7 @@ struct NativeMetalVideoPlayerView {
             guard let renderer else { return }
             dynamicRange = .unknown
             needsSystemRenderer = false
-            firstHDRFrameFormat = nil
+            firstFrameFormat = nil
             configureMetalView(for: .sdr)
 
             let asset = MediaAuthorization.shared.asset(for: url)
@@ -433,9 +448,11 @@ struct NativeMetalVideoPlayerView {
             self.player = player
             self.playerItem = item
             self.videoOutput = output
+            outputPixelFormat = kCVPixelFormatType_32BGRA
             onPlayerChanged?(player)
             usesSystemLayer = false
             showSystemLayer(false)
+            rebuildFramePresenter()
 
             // The Metal path learns the size from the frames it pulls; while
             // the system layer shows, nothing is pulled.
@@ -578,6 +595,7 @@ struct NativeMetalVideoPlayerView {
 
         func seek(to seconds: Double) {
             let time = CMTime(seconds: seconds, preferredTimescale: 600)
+            framePresenter?.reset()
             player?.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
         }
 
@@ -688,6 +706,7 @@ struct NativeMetalVideoPlayerView {
             statusObservation = nil
             presentationSizeObservation?.invalidate()
             presentationSizeObservation = nil
+            framePresenter = nil
             criteriaTask?.cancel()
             criteriaTask = nil
             host?.systemView.playerLayer.player = nil
@@ -768,11 +787,18 @@ struct NativeMetalVideoPlayerView {
                 return
             }
 
-            let itemTime = output.itemTime(forHostTime: CACurrentMediaTime())
-            if output.hasNewPixelBuffer(forItemTime: itemTime),
-               let buffer = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil) {
-                lastPixelBuffer = buffer
-                needsPictureRedraw = true
+            if let framePresenter {
+                if let frame = framePresenter.frame(forHostTime: CACurrentMediaTime()) {
+                    lastPixelBuffer = frame.pixelBuffer
+                    needsPictureRedraw = true
+                }
+            } else {
+                let itemTime = output.itemTime(forHostTime: CACurrentMediaTime())
+                if output.hasNewPixelBuffer(forItemTime: itemTime),
+                   let buffer = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil) {
+                    lastPixelBuffer = buffer
+                    needsPictureRedraw = true
+                }
             }
             guard needsPictureRedraw else { return }
             guard let pixelBuffer = lastPixelBuffer,
@@ -888,16 +914,17 @@ struct NativeMetalVideoPlayerView {
             let hasRPU = CVBufferCopyAttachment(pixelBuffer, "DolbyVisionRPUData" as CFString, nil) != nil
             let hasPrimaries = CVBufferCopyAttachment(pixelBuffer, kCVImageBufferColorPrimariesKey, nil) != nil
             needsSystemRenderer = hasRPU && !hasPrimaries
+            var format: CMVideoFormatDescription?
+            CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: pixelBuffer, formatDescriptionOut: &format)
+            firstFrameFormat = format
             if dynamicRange.isHDR {
-                var format: CMVideoFormatDescription?
-                CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: pixelBuffer, formatDescriptionOut: &format)
-                firstHDRFrameFormat = format
                 AppLogger.videoWindow.info(
                     "Native player: \(self.dynamicRange == .pq ? "PQ" : "HLG", privacy: .public) picture\(self.needsSystemRenderer ? " (Dolby Vision profile 5)" : "", privacy: .public)"
                 )
             }
             updatePresentation()
-            if dynamicRange.isHDR { applyDisplayCriteria() }
+            rebuildFramePresenter()
+            updateDisplayCriteria()
         }
 
         /// HDR plays through the system's video layer, which shows it (and
@@ -920,6 +947,7 @@ struct NativeMetalVideoPlayerView {
             } else {
                 useOutput(pixelFormat: dynamicRange.isHDR ? kCVPixelFormatType_64RGBAHalf : kCVPixelFormatType_32BGRA)
             }
+            rebuildFramePresenter()
         }
 
         /// The Metal view stays in the window under the system layer, with
@@ -972,13 +1000,67 @@ struct NativeMetalVideoPlayerView {
             ])
             playerItem.add(output)
             videoOutput = output
+            outputPixelFormat = pixelFormat
+        }
+
+        // MARK: Smooth Motion
+
+        /// Puts Vergence's interpolator between the frame output and the draw
+        /// loop: a 24-30 fps picture plays at twice its rate, each in-between
+        /// frame shown when it is due (`InterpolatedFramePresenter`), with the
+        /// display asked for a matching refresh (48 fps on 96 Hz). It sits
+        /// before the adjustments and sharpening, which then apply to every
+        /// frame alike.
+        ///
+        /// SDR only: VideoToolbox's interpolator takes 8-bit 4:2:0, so an HDR
+        /// picture (the system layer, or half-float frames with adjustments
+        /// on) plays its own frames. visionOS only: the motion sickness this
+        /// is for is a headset's, and other displays (60/120 Hz) can't show
+        /// 48 fps evenly. Nothing else uses the Neural Engine here, so it keeps
+        /// up where AI 3D's depth model sharing it couldn't; the governor
+        /// (`.flat` thresholds) still backs off if frames come late.
+        private func rebuildFramePresenter() {
+            #if os(visionOS)
+            let had = framePresenter != nil
+            framePresenter = nil
+            if interpolatesFrames, !usesSystemLayer, !dynamicRange.isHDR,
+               outputPixelFormat == kCVPixelFormatType_32BGRA,
+               let videoOutput, let playerItem {
+                let source = InterpolatingFrameSource.wrappingIfSupported(
+                    AVPlayerFrameSource(output: videoOutput, item: playerItem), thresholds: .flat
+                )
+                if source is InterpolatingFrameSource {
+                    framePresenter = InterpolatedFramePresenter(source: source)
+                }
+            }
+            let has = framePresenter != nil
+            mtkView?.preferredFramesPerSecond = has ? 96 : 60
+            if had != has {
+                AppLogger.videoWindow.info("Native player: Smooth Motion \(has ? "on" : "off", privacy: .public)")
+                if dynamicRange != .unknown { updateDisplayCriteria() }
+            }
+            #endif
+        }
+
+        /// HDR states its format so the picture doesn't dim; a doubled picture
+        /// states its doubled rate so the display can show it evenly. Plain
+        /// SDR leaves the display as it is.
+        private func updateDisplayCriteria() {
+            #if os(tvOS) || os(visionOS)
+            if dynamicRange.isHDR || framePresenter != nil {
+                applyDisplayCriteria()
+            } else {
+                criteriaTask?.cancel()
+                host?.displayCriteria = nil
+            }
+            #endif
         }
 
         private func applyDisplayCriteria() {
             #if os(tvOS) || os(visionOS)
             criteriaTask?.cancel()
             let item = playerItem
-            let fallback = firstHDRFrameFormat
+            let fallback = firstFrameFormat
             criteriaTask = Task { @MainActor [weak self] in
                 // The asset's own track says Dolby Vision (dvh1) where a
                 // decoded frame can't; an HLS stream has none, so the frame.
@@ -995,7 +1077,10 @@ struct NativeMetalVideoPlayerView {
                 let measured = Double(rate > 0 ? rate : 24)
                 let standard: [Double] = [24000.0 / 1001, 24, 25, 30000.0 / 1001, 30, 50, 60000.0 / 1001, 60]
                 let snapped = standard.min { abs($0 - measured) < abs($1 - measured) } ?? measured
-                self.host?.displayCriteria = AVDisplayCriteria(refreshRate: Float(snapped), formatDescription: format)
+                let doubled = self.framePresenter != nil && snapped < InterpolatingFrameSource.maxSourceFrameRate
+                self.host?.displayCriteria = AVDisplayCriteria(
+                    refreshRate: Float(doubled ? 2 * snapped : snapped), formatDescription: format
+                )
             }
             #endif
         }

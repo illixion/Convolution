@@ -206,6 +206,13 @@ struct VideoSettingsPage: View {
                 Toggle("Pinch to Zoom Videos", isOn: $appModel.pinchToZoomVideos)
             }
             #endif
+            #if os(visionOS)
+            Section {
+                Toggle("Smooth Motion", isOn: $appModel.smoothMotion)
+            } footer: {
+                Text("Adds an in-between frame to 24–30 fps videos, in 2D and AI 3D, so slow pans move in smaller steps. Works up to 1080p, and in 2D for non-HDR videos; cuts and seeks are never blended. Each video can change it in its View Mode menu.")
+            }
+            #endif
         }
     }
 }

@@ -535,6 +535,21 @@ struct VideoOrnamentsView: View {
                 }
                 .disabled(!windowModel.pseudo3DAvailable)
 
+                // Smooth Motion for this video, the Settings choice its default.
+                if windowModel.smoothMotionApplies {
+                    Button {
+                        close()
+                        windowModel.smoothMotionOverride = !windowModel.smoothMotion
+                    } label: {
+                        PlayerChoiceRow(isChecked: windowModel.smoothMotion) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Smooth Motion")
+                                Text("In-between frames for 24–30 fps").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+
                 // Background depth conversion for THIS video: status + cancel.
                 // Isolated in its own view so its observation of the (continuously
                 // updating) DepthConversionManager doesn't re-run this menu's body.

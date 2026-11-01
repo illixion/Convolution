@@ -988,6 +988,20 @@ class AppModel {
         }
     }
 
+    /// Smooth Motion: AI 3D puts an interpolated frame between each two of a
+    /// 24-30 fps video (Vergence's `InterpolatingFrameSource`, up to 1080p), so
+    /// slow pans move in half the steps. Read when a 3D picture starts, so the
+    /// players reload their pipeline on change. Off by default while it's
+    /// being measured on the headset.
+    var smoothMotion: Bool {
+        didSet {
+            if smoothMotion != oldValue {
+                UserDefaults.standard.set(smoothMotion, forKey: Self.smoothMotionKey)
+            }
+        }
+    }
+    static let smoothMotionKey = "smoothMotion"
+
     /// When true (default), videos open with audio muted; autoplay always
     /// starts playback either way. Off = videos open with sound. Applies to
     /// the video player windows and the gallery long-press quick look.
@@ -1486,6 +1500,7 @@ class AppModel {
         let loadedPreprocessDepthModelName = UserDefaults.standard.string(forKey: "preprocessDepthModelName") ?? legacyDepthModelName
         let loadedDefaultRealtimePseudo3D = loadBool("defaultRealtimePseudo3D", default: false)
         let loadedStableDepth = loadBool(DepthRefinement.enabledDefaultsKey, default: true)
+        let loadedSmoothMotion = loadBool(Self.smoothMotionKey, default: false)
         let loadedVideoAutoplayMuted = loadBool("videoAutoplayMuted", default: true)
 
         // Load default image viewing mode (default: 2D / mono)
@@ -1604,6 +1619,7 @@ class AppModel {
         self.preprocessDepthModelName = loadedPreprocessDepthModelName
         self.defaultRealtimePseudo3D = loadedDefaultRealtimePseudo3D
         self.stableDepth = loadedStableDepth
+        self.smoothMotion = loadedSmoothMotion
         self.videoAutoplayMuted = loadedVideoAutoplayMuted
         self.rememberImageEnhancements = loadedRememberImageEnhancements
         self.autoRestoreSpatial3D = loadedAutoRestoreSpatial3D
@@ -2420,6 +2436,7 @@ class AppModel {
             preprocessDepthModelName: preprocessDepthModelName,
             defaultRealtimePseudo3D: defaultRealtimePseudo3D,
             stableDepth: stableDepth,
+            smoothMotion: smoothMotion,
             videoAutoplayMuted: videoAutoplayMuted,
             useLossyTextureCompression: useLossyTextureCompression,
             globalPseudo3DSettings: try? JSONEncoder().encode(globalPseudo3DSettings),
@@ -2469,6 +2486,7 @@ class AppModel {
         if let v = backup.preprocessDepthModelName { preprocessDepthModelName = v }
         if let v = backup.defaultRealtimePseudo3D { defaultRealtimePseudo3D = v }
         if let v = backup.stableDepth { stableDepth = v }
+        if let v = backup.smoothMotion { smoothMotion = v }
         if let v = backup.videoAutoplayMuted { videoAutoplayMuted = v }
         if let v = backup.useLossyTextureCompression { useLossyTextureCompression = v }
         if let data = backup.globalPseudo3DSettings,

@@ -98,6 +98,7 @@ struct SettingsBackup: Codable {
     var preprocessDepthModelName: String?
     var defaultRealtimePseudo3D: Bool?
     var stableDepth: Bool?
+    var smoothMotion: Bool?
     var videoAutoplayMuted: Bool?
     var useLossyTextureCompression: Bool?
     var globalPseudo3DSettings: Data?
