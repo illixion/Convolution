@@ -9,10 +9,11 @@ third of per-eye rivalry, real-pair level on the slow pan, the most faithful dep
 E3 built the Mac producer (`vergence analyze`): it matches PyTorch, runs faster than real time, and
 stores about 25 KB a frame. E4 built the player's half (`SharedFieldInterpolator`, one Metal pass,
 ~2 ms a pair on an M2 Max, identical to the reference) and wired it into the film player's 3D
-picture through a track file; it has not run on the headset yet. Smooth Motion today covers flat 2D in the video window
-(`NativeMetalVideoPlayerView`, SDR, visionOS) and AI 3D (the stereo pump, mono frames before depth).
-A packed stereo pair (`PackedStereoLayout`: 3D Blu-ray, SBS/TAB files) is deliberately passed through
-unchanged. This is the plan for changing that.
+picture through a track file. On the headset (Bumblebee's disc, 2026-11-01) it made ~23 in-between
+pairs a second at 3–9 ms each; the user liked the result. The video window's live 3D (a Jellyfin
+SBS/TAB title, half or full) takes a track the same way since then. Smooth Motion also covers flat 2D
+in the video window (`NativeMetalVideoPlayerView`, SDR, visionOS) and AI 3D (the stereo pump, mono
+frames before depth). A packed pair without a track still passes through unchanged.
 
 ## Why stereo is not "interpolate each eye"
 
@@ -384,8 +385,34 @@ player's 3D picture passes it to the stereo engine (`Pseudo3DStereoEngine.shared
 Smooth Motion toggle appears for a 3D disc only when a track exists. `vergence analyze` now times
 a disc's records on the playlist's own clock, the film player's.
 
-Next: run it on the headset with a disc's track (watch the `interp` line for its timings and
-misses), then the per-scene fallback for fire and smoke, then the live channel from a paired Mac.
+On the headset (2026-11-01): a disc's packed pump paused for "reserve low" under the depth
+pump's thresholds, though no depth model runs and the pump takes frames only 40–80 ms ahead; a
+packed pair now uses `.flat`. Then ~23 in-between pairs a second, 3–9 ms median, 13 ms worst.
+
+Since then:
+- **Half-resolution packing** (half SBS/TAB) is interpolated too: the fields scale to each
+  eye's stored size, and the track is made from those eyes (crop the halves, stack them, `--raw`
+  at the half eye's size; see the README's `analyze` section).
+- **The video window** looks for a Library 3D title's track (by item id, else name) and hands it
+  to live 3D, which rebuilds its pump when the track arrives (`VideoWindowModel.sharedFields`).
+- **Cuts no longer read as dropped frames.** With the doubled spacing learned, every real frame
+  passed through without its in-between frame counted as a drop ("3D picture dropping frames: 73%
+  of 48 fps"), which could step the picture down. Such frames are marked
+  (`PumpFrame.standsInForMidFrame`) and the delivery report counts each as both.
+- **96 Hz.** The stereo engine publishes doubled display criteria while it interpolates and the
+  video window's 3D picture states them; the film player doubles its own criteria in 3D.
+- **A miss says how far off the clock is**: the track's first miss (and every 240th) logs the
+  distance to the nearest pair, which is the `timeOffset` a player's clock would need.
+- **`analyze` held every input frame** (autoreleased reads, never drained): a whole film ran out of
+  memory 38,000 frames in. It now stays at ~195 MB.
+- A half-SBS MKV with an H.264 frame-packing SEI (and Matroska's StereoMode) made Homebrew's
+  ffmpeg 8.1.2 fail every filter graph with "File exists" (-17). Stripping the SEI in a copy remux
+  first (`-bsf:v filter_units=remove_types=6 -c:v copy -f matroska -`, piped into the decoding
+  ffmpeg) works around it.
+
+Next: a whole film on the headset (Ready Player One 3D, half SBS, analysed on the M2 Max at
+~35 fps), then the per-scene fallback for fire and smoke, then getting tracks to the headset
+without the Files app (served by the plugin, or a paired Mac).
 
 The phases below were written for option B; under E, phase 3 becomes "flow, disparity transfer, warp
 and fallback shaders" and phase 0's disparity work is the flow network's.
@@ -416,8 +443,9 @@ and fallback shaders" and phase 0's disparity work is the flow network's.
      disparity must lie between the neighbours', with no vertical disparity.
    - On fixtures: the left/right residual of the in-between pair must be no worse than the real pairs'.
 4. **Presentation.**
-   - Display criteria for 47.952 fps (96 Hz) on the stereo window. Neither the AI 3D window nor the
-     film player's stereo plane sets it yet; the flat video window now does.
+   - Display criteria for 47.952 fps (96 Hz) on the stereo window: done for live 3D and the
+     film player (2026-11-01); whether visionOS honours them for a RealityKit video plane is not
+     yet seen on the headset.
    - Governor thresholds for a packed pump: no depth model, so the pump's reserve fills faster; start
      from `.depthPump` and tune from the `interp` log line.
 5. **2D Blu-ray (cheap, independent).** The film player's 2D picture of a disc is the decoded left eye
