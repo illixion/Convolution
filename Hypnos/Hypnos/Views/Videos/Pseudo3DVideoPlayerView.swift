@@ -12,6 +12,7 @@
  `VideoWindowModel` / `VideoLoopController`.
  */
 
+import AVKit
 import RealityKit
 import RAVEMedia
 import RAVEUI
@@ -185,6 +186,9 @@ struct Pseudo3DVideoPlayerView: View {
                 StereoSubtitleFeeder(controller: subtitles, filmTime: { [engine] in engine.currentTime },
                                      frame: $subtitleFrame)
             }
+        }
+        .background {
+            StereoDisplayCriteriaHost(criteria: engine.displayCriteria).frame(width: 0, height: 0)
         }
         .onChange(of: subtitleFrame) { _, frame in engine.setSubtitles(frame) }
         .onChange(of: playbackModel?.maximumPictureResolution ?? .zero) { _, cap in
@@ -377,6 +381,58 @@ private struct AnimatableSceneOpacity: ViewModifier, Animatable {
     func body(content: Content) -> some View { content }
 }
 
+
+/// States the stereo engine's display criteria (`Pseudo3DStereoEngine
+/// .displayCriteria`) to the window while the 3D picture is in it, and
+/// takes them back when it leaves.
+private struct StereoDisplayCriteriaHost: UIViewRepresentable {
+    let criteria: AVDisplayCriteria?
+
+    func makeUIView(context: Context) -> CriteriaView { CriteriaView() }
+
+    func updateUIView(_ view: CriteriaView, context: Context) {
+        view.criteria = criteria
+    }
+
+    static func dismantleUIView(_ view: CriteriaView, coordinator: ()) {
+        view.criteria = nil
+    }
+
+    final class CriteriaView: UIView {
+        var criteria: AVDisplayCriteria? {
+            didSet { apply() }
+        }
+        private weak var criteriaWindow: UIWindow?
+        /// What this view stated, so taking it back never clears criteria
+        /// another player in the window stated since (the flat player's).
+        private var stated: AVDisplayCriteria?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            apply()
+        }
+
+        private func apply() {
+            if let criteriaWindow, criteriaWindow !== window { takeBack(from: criteriaWindow) }
+            criteriaWindow = window
+            guard let window else { return }
+            if let criteria {
+                window.avDisplayManager.preferredDisplayCriteria = criteria
+                stated = criteria
+            } else {
+                takeBack(from: window)
+            }
+        }
+
+        private func takeBack(from window: UIWindow) {
+            guard let stated else { return }
+            if window.avDisplayManager.preferredDisplayCriteria == stated {
+                window.avDisplayManager.preferredDisplayCriteria = nil
+            }
+            self.stated = nil
+        }
+    }
+}
 #endif
 
 #if !os(visionOS)

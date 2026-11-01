@@ -236,6 +236,11 @@ struct FilmPlayerView: View {
                     startStereo()
                 }
             }
+            // 48 fps in 3D asks the display for 96 Hz rather than landing
+            // unevenly on 90.
+            .onChange(of: stereoSource != nil && smoothMotion && smoothMotionApplies, initial: true) { _, doubled in
+                player.video.doublesFrameRate = doubled
+            }
             // A disc's track can be indexed after 3D started.
             .onChange(of: session.sharedFields.map(ObjectIdentifier.init)) { _, _ in
                 if stereoSource != nil, stereoLayout != nil, smoothMotion {
