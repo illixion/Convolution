@@ -1,8 +1,10 @@
 # Smooth Motion for 3D Blu-ray (true stereo)
 
 Status: plan (2026-11-01). Direction revised the same day: **option E (neural flow, one shared
-motion field) is the recommendation**; B is the VideoToolbox-only fallback. Phase E0 (convert and
-time the models on the headset) is done; E1 (quality) is next. Smooth Motion today covers flat 2D in the video window
+motion field) is the recommendation**; B is the VideoToolbox-only fallback. Phases E0 (convert and
+time the models on the headset) and E1 (quality on real 3D Blu-ray footage) are done: RIFE 4.25 lite
+at 480×288 is the flow model, and VideoToolbox's interpolator turned out at least as good per eye, so
+E's case rests on binocular consistency and 4×, not on picture quality. Smooth Motion today covers flat 2D in the video window
 (`NativeMetalVideoPlayerView`, SDR, visionOS) and AI 3D (the stereo pump, mono frames before depth).
 A packed stereo pair (`PackedStereoLayout`: 3D Blu-ray, SBS/TAB files) is deliberately passed through
 unchanged. This is the plan for changing that.
@@ -180,6 +182,91 @@ What this means:
   24 fps clip, predict it from its neighbours, and compare RIFE ½-size, NeuFlow ½-size and
   `VTLowLatencyFrameInterpolation` against the real frame (PSNR/SSIM, plus a look at pans and
   occlusion edges); for stereo, the in-between pair's left/right residual against the real pairs'.
+
+**E1. Quality at the working sizes** (done 2026-11-01). `scripts/interp-quality.py` (with
+`scripts/vt-interp-helper.swift` for VideoToolbox) on six 3-second clips of the Bumblebee 3D
+Blu-ray, decoded losslessly with `vergence decode` (both eyes): two slow pans (a crowd behind two
+people; a face against fire), a car interior, a dark garage with a car body sliding past the
+camera (occlusion), a handheld junkyard shot with a hand moving, and a dark robot fight with motion
+blur. For each frame i+1 we predicted it from i and i+2 and compared it with the real one, at
+1920×1080. The small runs mirror the planned shader: the frames are scaled to the working size, the
+model's flow and mask are scaled back up, and the warp and blend run at 1080p. PyTorch on the Mac;
+the Core ML fp16 models from E0 give the same pictures (within 0.1 dB on spot checks).
+
+2×, t = ½, 210 held-out frames, left eye (PSNR on luma in dB, higher is better; "moving" is the
+pixels moving at least 4 px per 24 fps frame):
+
+| Candidate | PSNR | SSIM | Moving PSNR | Headset cost |
+| --- | --- | --- | --- | --- |
+| Repeat the frame (no interpolation) | 27.6 | 0.886 | 23.9 | – |
+| 50/50 blend | 31.0 | 0.910 | 26.7 | – |
+| `VTLowLatencyFrameInterpolation`, 1080p | **37.1** | **0.957** | **31.5** | an eye: 15 ms on the Mac, 17–34 ms on the headset beside AI 3D |
+| RIFE 4.25 lite, 480×288 | 36.5 | 0.948 | 31.3 | 12 ms a pair |
+| RIFE 4.25 lite, 640×384 | 36.8 | 0.950 | 31.4 | 22 ms |
+| RIFE 4.25 lite, full 1920×1088 (ceiling) | 36.7 | 0.949 | 31.2 | doesn't fit |
+| NeuFlow v2, 512×288, 4 iterations, flow reversal | 36.0 | 0.951 | 30.7 | 14 ms |
+| the same with a forward/backward occlusion weighting | 34.6 | 0.948 | 29.6 | |
+
+Per clip, PSNR: the pans 38.5–40.2 (crowd) and 36.2–36.3 (fire), the car 42–44, the garage 38.8–40.2,
+handheld 31.7–34.5 and the robot fight 27.6–28.6 for every flow method; blend sits 7–9 dB below the
+best elsewhere, and only 3 dB on the fire and the fight, where nothing does well. VT leads on the pans and the fight, RIFE on the garage occlusion and the
+handheld shot, NeuFlow on the car interior.
+
+4× stress test, from (i, i+4) predict i+1, i+2, i+3 (PSNR at t = ¼ / ½ / ¾). Four frames apart is
+far more motion than 24→96 really asks for, so only the ranking means anything:
+
+| Candidate | t = ¼ | t = ½ | t = ¾ |
+| --- | --- | --- | --- |
+| Nearest real frame | 27.6 | 24.3 | 27.7 |
+| VT (one call, 3 phases; 44 ms on the Mac) | **33.8** | **32.5** | **33.9** |
+| RIFE 480×288 once at ½, other t by flow reversal | 33.5 | 32.3 | 33.3 |
+| RIFE 480×288 run at each t (3× the cost) | 33.4 | 32.3 | 33.5 |
+| RIFE 640×384 once, reversal | 33.5 | 32.5 | 33.2 |
+| NeuFlow 512×288, reversal | 32.9 | 31.5 | 33.2 |
+
+Stereo: left and right eyes interpolated separately (option A), the in-between pair's disparity
+measured with NeuFlow at full size, on the pixels where the real pair's left→right and right→left
+matches agree within 1 px. A rectified Blu-ray pair has no vertical disparity, so vertical disparity
+in an in-between pair is pure rivalry, and it is the cleanest measure here (the real pairs show it
+on 0.1–1.2% of pixels, which is the estimator's own noise):
+
+| Clips | Real pair | VT per eye | RIFE 480 per eye | NeuFlow 512 per eye (with occlusion weighting) |
+| --- | --- | --- | --- | --- |
+| Crowd pan, car, garage, handheld: pixels with vertical disparity > 1 px | 0.1–1.0% | 0.8–10.6% | 2.6–17.6% | 0.6–9.5% |
+| the same: horizontal disparity off the real pair's by > 1 px | – | 2.5–14% | 7–22% | 2.4–13% |
+| Fire pan and robot fight: vertical > 1 px | 0.6–1.2% | 25–29% | 35–40% | 22–23% |
+
+What this means for option E:
+- **Quarter size is good enough.** RIFE at the full 1920×1088 is no better than at 480×288
+  (36.7 against 36.5 dB, and worse on the occlusion clip), so the working size is not what limits
+  quality; the model is. **RIFE 4.25 lite at 480×288 is the flow model.**
+- **640×384 is not worth its 22 ms**: +0.3 dB overall, +0.1 dB on moving pixels, nothing visible in
+  the crops. Spend the ANE time on the disparity run instead.
+- **RIFE once per pair covers 4×.** Flows derived from the t = ½ run lose at most 0.25 dB against a
+  run per t, and only at ¾. NeuFlow's bidirectional output is up to 0.9 dB worse, so it has
+  no edge left; keep it in mind only as the disparity estimator.
+- **The surprise: VideoToolbox's low-latency interpolator is at least as good per eye** (+0.6 dB
+  over RIFE 480 at 2×, though only +0.1 dB on moving pixels; best at 4× too), and its independently interpolated eyes disagree less than
+  RIFE's. So option E cannot be sold on picture quality. What it buys is one motion field for both
+  eyes, arbitrary t for 4× at one model run, and 12 ms on the ANE instead of 2×16 ms.
+- **Per-eye interpolation is not safe on hard scenes, whichever model does it.** On calm shots the
+  eyes disagree vertically by more than a pixel on 1–18% of pixels; on fire and fast motion on
+  25–40%. That is the rivalry the plan's opening section predicted, now measured, and it is why the
+  shared field (E step 4) or B's disparity transfer matters. Option A alone would only be acceptable
+  on slow pans, and even there VT is the better per-eye engine.
+- Failure modes look different in the worst-region crops (`build/interp-quality/crops/`): VT smears
+  into blocky mush where it gives up, RIFE fades the moving object into a ghost, NeuFlow tears it into
+  sharp broken pieces. RIFE's soft failure is the kindest of the three to show for 10 ms.
+- The occlusion weighting from NeuFlow's forward/backward check made things worse in both readings
+  of it (down-weighting or preferring the unmatched side). At 512×288 the check fails too widely to
+  steer the blend; RIFE's learned mask does that job better.
+- Caveats: one film, six clips, 210 frames; the photometric left/right residual turned out useless
+  as a rivalry measure because blur lowers it (VT's in-between pairs scored *better* than the real
+  ones); the disparity estimator itself is unreliable in fire, smoke and dark motion blur.
+
+Next: B/E step 4 on the Mac with these clips. Make the right eye from the left eye's field (and from
+VT's left eye, as B), then measure the same vertical/horizontal disparity table. The bar is the
+real pairs' 0.1–1%.
 
 The phases below were written for option B; under E, phase 3 becomes "flow, disparity transfer, warp
 and fallback shaders" and phase 0's disparity work is the flow network's.
