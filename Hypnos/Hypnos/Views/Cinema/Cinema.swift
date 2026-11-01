@@ -179,8 +179,11 @@ final class Cinema {
     private(set) var headLocked = false
     /// Metres from the head to the screen.
     var screenDistance: Float = 15 {
-        didSet { save(); refitScreen() }
+        didSet { save(); if !draggingScreen { refitScreen() } }
     }
+    /// The distances the grab bar can take the screen to (the slider's are narrower).
+    static let screenDistanceRange: ClosedRange<Float> = 2 ... 80
+    @ObservationIgnored private var draggingScreen = false
     /// How much of the view the screen's width takes, in degrees.
     var screenWidthDegrees: Float = 55 {
         didSet { save() }
@@ -496,6 +499,40 @@ final class Cinema {
         logger.info("Cinema: screen placed \(self.screenDistance, format: .fixed(precision: 1), privacy: .public) m ahead, \(self.screenWidth, format: .fixed(precision: 1), privacy: .public) m wide")
     }
 
+    /// Moves the screen by the grab bar the way visionOS moves a window: the
+    /// hand's motion across the view, at about arm's length, moves the
+    /// screen in proportion to its distance, and pushing or pulling changes
+    /// the distance exponentially (`depthGain` per metre), so a short pull
+    /// covers 15 m as well as 3. The screen keeps its angular size, as a
+    /// window does, and turns to face the head.
+    /// - Parameters:
+    ///   - start: the screen's centre when the drag began.
+    ///   - hand: the drag's translation so far, in the space's metres.
+    func dragScreen(from start: SIMD3<Float>, by hand: SIMD3<Float>) {
+        guard let head = headPose?.columns.3.xyz else { return }
+        let toStart = start - head
+        let startDistance = simd_length(toStart)
+        guard startDistance > 0.1 else { return }
+        let direction = toStart / startDistance
+        let depth = simd_dot(hand, direction)
+        let across = hand - direction * depth
+        let moved = start + across * (startDistance / Self.armLength)
+        let distance = min(max(startDistance * expf(depth * Self.depthGain), Self.screenDistanceRange.lowerBound),
+                           Self.screenDistanceRange.upperBound)
+        let toMoved = moved - head
+        guard simd_length(toMoved) > 1e-3 else { return }
+        let position = head + simd_normalize(toMoved) * distance
+        screenPose = Self.pose(at: position, forward: position - head, fallback: direction)
+        draggingScreen = true
+        screenDistance = distance
+        draggingScreen = false
+    }
+
+    /// How far from the head a pinching hand is, roughly (metres).
+    private static let armLength: Float = 0.5
+    /// The distance's growth per metre the hand pushes (e⁴: ×1.5 for 10 cm).
+    private static let depthGain: Float = 4
+
     /// A changed distance moves the screen along its own heading from the listener.
     private func refitScreen() {
         guard let screenPose, let centre = listener else { return }
@@ -672,6 +709,8 @@ struct CinemaSpaceView: View {
     @State private var leftEdge = Entity()
     @State private var rightEdge = Entity()
     @State private var dragStart: SIMD3<Float>?
+    /// The Big Screen's centre when its grab bar's drag began.
+    @State private var screenDragStart: SIMD3<Float>?
     @State private var resizeStart: Float?
     /// A video window's picture: a `VideoPlayerComponent` on its player.
     @State private var playerPicture = Entity()
@@ -723,6 +762,12 @@ struct CinemaSpaceView: View {
             })
             .simultaneousGesture(DragGesture().targetedToEntity(hudHandle)
                 .onChanged { value in
+                    if cinema.mode == .bigScreen {
+                        if screenDragStart == nil { screenDragStart = cinema.screenPose?.columns.3.xyz }
+                        let movement = value.convert(value.translation3D, from: .local, to: sceneRoot)
+                        if let screenDragStart { cinema.dragScreen(from: screenDragStart, by: movement) }
+                        return
+                    }
                     if dragStart == nil { dragStart = cinema.hudOffset }
                     let movement = value.convert(value.translation3D, from: .local, to: screen.parent ?? headAnchor)
                     if let dragStart {
@@ -730,7 +775,7 @@ struct CinemaSpaceView: View {
                         cinema.moveHUD(to: candidate)
                     }
                 }
-                .onEnded { _ in dragStart = nil })
+                .onEnded { _ in dragStart = nil; screenDragStart = nil })
             .simultaneousGesture(DragGesture().targetedToAnyEntity()
                 .onChanged { value in
                     guard value.entity === leftEdge || value.entity === rightEdge else { return }
@@ -820,7 +865,8 @@ struct CinemaSpaceView: View {
                 // Reparent through the scene root retained by the RealityView.
                 sceneRoot.addChild(screen)
             }
-            hudHandle.removeFromParent()
+            // The grab bar stays, under the screen (placed below).
+            if hudHandle.parent !== screen { screen.addChild(hudHandle) }
             hudControls.removeFromParent()
             hudClose.removeFromParent()
             hudUtilities.removeFromParent()
@@ -898,6 +944,15 @@ struct CinemaSpaceView: View {
             hudHandle.position = SIMD3(0, chromeY, 0.02)
             hudClose.position = SIMD3(-0.18, chromeY, 0.025)
             hudUtilities.position = SIMD3(0.25, chromeY, 0.025)
+        }
+        if cinema.mode == .hud, hudHandle.scale != SIMD3(repeating: 1) {
+            hudHandle.scale = SIMD3(repeating: 1)
+        }
+        if cinema.mode == .bigScreen {
+            // As large to the eye as the HUD's bar at its 2 m, under the picture.
+            let scale = cinema.screenDistance / 2
+            hudHandle.scale = SIMD3(repeating: scale)
+            hudHandle.position = SIMD3(0, -height / 2 - 0.06 * scale, 0.02 * scale)
         }
         if cinema.mode == .hud, hudClose.isEnabled, hudUtilities.isEnabled {
             if let bounds = hudClose.components[ViewAttachmentComponent.self]?.bounds, bounds.extents.x > 1e-4 {
@@ -1217,7 +1272,7 @@ struct CinemaSettings: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(String(format: "Screen distance: %.0f m", cinema.screenDistance)).font(.caption)
-            Slider(value: $cinema.screenDistance, in: 5 ... 40, step: 1)
+            Slider(value: $cinema.screenDistance, in: Cinema.screenDistanceRange, step: 1)
         }
         VStack(alignment: .leading, spacing: 2) {
             Text(String(format: "Screen size: %.0f° (%.1f m wide)", cinema.screenWidthDegrees, cinema.screenWidth))
