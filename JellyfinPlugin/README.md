@@ -556,6 +556,58 @@ again on a seek outside what has arrived, and once a run reaches the end
 fetches the stretch before it from 0 (`SubtitleController` in the app).
 Jellyfin's web player and other clients keep Jellyfin's own route.
 
+## Smooth Motion tracks (3D titles, Mac server)
+
+Convolution doubles a 3D picture's frame rate (Smooth Motion) from one
+motion field shared by both eyes, which needs flow and disparity fields
+computed ahead by `vergence analyze` with two Core ML models
+(`SmoothMotionService`; the design is Hypnos
+`docs/plans/blu-ray-3d-smooth-motion.md`). The plugin analyses each 3D
+title once and serves the result:
+
+    GET  /SmoothMotion/{id}                ready (chunkSeconds, chunks, frameRate, bytes), running (progress 0-1),
+                                           queued, failed or unsupported (reason), or none
+    POST /SmoothMotion/{id}/Analyze        analyse now, after any title already running (202; 409 with the reason)
+    GET  /SmoothMotion/{id}/Chunks/{n}     seconds [10n, 10n+10) as a track of its own (the header, then its records)
+    GET  /SmoothMotion/{id}/Track          the whole track, ranges supported (for downloads)
+
+- **What gets analysed:** a Blu-ray (ISO or folder; vergence reads the MVC
+  itself, on the playlist's clock) and a file Jellyfin marks as 3D
+  (`Video3DFormat`: half or full side-by-side or top-and-bottom, usually
+  from `3D.HSBS` and the like in its name). A packed file is decoded by
+  Jellyfin's ffmpeg, its eyes stacked left over right; an H.264 one is
+  first copied without its SEI, whose frame-packing message makes ffmpeg 8
+  and 9 fail every filter graph ("File exists", -17).
+- **When:** the scheduled task "Prepare Smooth Motion for 3D titles"
+  (category Convolution, nightly at 01:00) works through every 3D title
+  without a track, one at a time; `POST …/Analyze` puts one in the queue
+  now. A failed title is skipped by the task until its `failed.txt` is
+  removed (a POST tries it again). Cancelling the task stops the title
+  running, which starts over next time. Processes run below normal priority.
+- **Cost:** on servo's M1, 16 frames a second (53 ms of model time a frame),
+  so a two-hour film takes about 3.5 hours; an M2 Max does 28-39. The track
+  is about 20-25 KB a frame, 4 GB a film, in
+  `<cache>/smooth-motion/<item>/` with `chunks.json` (the byte range of each
+  10 s, built once by reading the records' headers). A track made on another
+  Mac can be copied there as `track.vgat`; its `chunks.json` is built on
+  first use. A chunk is about 4.4 MB
+  for a 1080p film, about 3.5 Mbit/s while playing.
+- **Needs:** a Mac server (Core ML), the `vergence` binary, and the models
+  in `smooth-motion-models` next to it (or `SmoothMotionModelsPath`):
+  `RIFE425lite_480x288.mlpackage` and `NeuFlowV2_512x288_1way_i4_fp32.mlpackage`,
+  converted by Hypnos `scripts/convert-interp-model.py`. `SmoothMotion=false`
+  turns analysis off. Elsewhere every title reports `unsupported` with the
+  reason.
+
+The player (`SmoothMotionTracks` in the app, Vergence's
+`StreamingAnalysisTrack`) keeps the chunk at the playhead, three after it
+and one before, fetching the nearest missing two at a time; a seek passes
+frames through un-interpolated until its chunk arrives. Checked on the dev
+instance (`scripts/dev-jellyfin.sh native`, Twin Horizon): analyse, status,
+chunks, the whole track and a range, and every pair read through the chunks
+equal to the whole file's (Vergence's `aServersChunksGiveTheWholeTracksFields`,
+`VERGENCE_TEST_CHUNKS`).
+
 ## Cache and sessions
 
 ```

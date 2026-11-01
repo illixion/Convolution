@@ -1405,6 +1405,36 @@ actor JellyfinLibrary: MediaServerLibrary {
         return (state.state, progress)
     }
 
+    /// What the plugin knows about an item's Smooth Motion track
+    /// (`GET SmoothMotion/{id}`): `ready` with its chunks, `running` with
+    /// progress, `queued`, `failed`, `none` or `unsupported` with a reason.
+    struct SmoothMotionServerTrack: Decodable, Sendable {
+        let state: String
+        let reason: String?
+        let progress: Double?
+        let chunkSeconds: Double?
+        let chunks: Int?
+        let frameRate: Double?
+    }
+
+    func smoothMotionTrack(itemId: String) async throws -> SmoothMotionServerTrack {
+        try await get("SmoothMotion/\(itemId)")
+    }
+
+    /// One chunk of an item's Smooth Motion track: the track's header and
+    /// `chunkSeconds` of its records, a track of its own.
+    func smoothMotionChunk(itemId: String, index: Int) async throws -> Data {
+        let path = "SmoothMotion/\(itemId)/Chunks/\(index)"
+        var request = JellyfinHTTP(baseURL: baseURL,
+            authorization: JellyfinClientIdentity.authorizationHeader(token: authHeaderToken))
+            .request(path, query: [])
+        request.timeoutInterval = 15
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard status == 200 else { throw JellyfinLibraryError.http(path: "SmoothMotion", status: status) }
+        return data
+    }
+
     /// Hands the server a download's watch state from the device. Jellyfin
     /// 10.9+ takes it in one call; older servers have the per-user path.
     func syncUserData(itemId: String, positionSeconds: Double, played: Bool, lastPlayed: Date?) async throws {

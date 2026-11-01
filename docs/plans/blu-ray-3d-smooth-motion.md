@@ -414,6 +414,22 @@ Next: a whole film on the headset (Ready Player One 3D, half SBS, analysed on th
 ~35 fps), then the per-scene fallback for fire and smoke, then getting tracks to the headset
 without the Files app (served by the plugin, or a paired Mac).
 
+### Tracks from the server (2026-11-01)
+
+The Jellyfin plugin analyses every 3D title once and serves the track in 10 s chunks
+(`SmoothMotionService`, `SmoothMotion/` routes; JellyfinPlugin/README.md, "Smooth Motion
+tracks"). A local file in Documents/Smooth Motion still wins; otherwise the app asks the
+server and streams the chunks around the playhead (`StreamingAnalysisTrack` in VergenceCore,
+`SmoothMotionTracks`). servo's M1 runs `analyze` at 16.3 fps on Ready Player One (53 ms of
+models a frame, against 28 on the M2 Max), so a film takes about 3.5 hours; the nightly task
+works through the library one title at a time.
+
+Deployed to servo the same day (vergence, the two models, the plugin; the nightly task fires at
+01:00). Ready Player One 3D's track, made on the M2 Max, was copied into the plugin's cache as an
+imported track. Not yet seen on the headset through the server. Next: downloads carrying the
+track, an app control to ask for a title now, and a live Mac for what the server can't analyse
+(Stash, local files; `RAVECompanion` is the transport).
+
 The phases below were written for option B; under E, phase 3 becomes "flow, disparity transfer, warp
 and fallback shaders" and phase 0's disparity work is the flow network's.
 

@@ -517,10 +517,12 @@ META
 }
 
 install_plugin_config() {
-    local truehdd=/truehdd/truehdd vergence=""
+    local truehdd=/truehdd/truehdd vergence="" models=""
     if (( native )); then
         truehdd="$repo_root/JellyfinPlugin/truehdd/checkout/target/release/truehdd"
         vergence="$root/vergence-build/release/vergence"
+        # Smooth Motion's Core ML models, converted by scripts/convert-interp-model.py.
+        [[ -d "$repo_root/build/interp-models" ]] && models="$repo_root/build/interp-models"
     fi
     mkdir -p "$root/config/plugins/configurations"
     cat > "$root/config/plugins/configurations/Jellyfin.Plugin.AtmosObjects.xml" <<XML
@@ -528,6 +530,7 @@ install_plugin_config() {
 <PluginConfiguration>
   <TruehddPath>$truehdd</TruehddPath>
   <Mvc3dPath>$vergence</Mvc3dPath>
+  <SmoothMotionModelsPath>$models</SmoothMotionModelsPath>
   <CacheDirectory />
   <SegmentSeconds>10</SegmentSeconds>
   <EncoderParallelism>4</EncoderParallelism>

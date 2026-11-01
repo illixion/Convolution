@@ -81,6 +81,12 @@ public class PluginConfiguration : MediaBrowser.Model.Plugins.BasePluginConfigur
 
     /// <summary>How many spatial videos convert at once on the server.</summary>
     public int SpatialRuns { get; set; } = 2;
+
+    /// <summary>Analyse 3D titles for Smooth Motion (a Mac server, vergence and the models needed).</summary>
+    public bool SmoothMotion { get; set; } = true;
+
+    /// <summary>Folder of the Smooth Motion Core ML models. Empty means smooth-motion-models beside vergence.</summary>
+    public string SmoothMotionModelsPath { get; set; } = string.Empty;
 }
 
 public class PluginServiceRegistrator : IPluginServiceRegistrator
@@ -91,5 +97,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<VideoSegmentService>();
         serviceCollection.AddSingleton<SpatialStreamService>();
         serviceCollection.AddSingleton<SubtitleStreamService>();
+        serviceCollection.AddSingleton<SmoothMotionService>();
     }
 }
