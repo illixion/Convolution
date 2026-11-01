@@ -184,6 +184,10 @@ final class Cinema {
     /// The distances the grab bar can take the screen to (the slider's are narrower).
     static let screenDistanceRange: ClosedRange<Float> = 2 ... 80
     @ObservationIgnored private var draggingScreen = false
+    /// Where the grab bar is taking the screen; `update` eases toward it.
+    @ObservationIgnored private var screenTarget: simd_float4x4?
+    /// The screen's up, chosen when it's placed (see `screenUp(for:)`).
+    @ObservationIgnored private var screenUp = SIMD3<Float>(0, 1, 0)
     /// How much of the view the screen's width takes, in degrees.
     var screenWidthDegrees: Float = 55 {
         didSet { save() }
@@ -354,6 +358,7 @@ final class Cinema {
         hudControlsView = nil
         hudCloseAction = nil
         screenPose = nil
+        screenTarget = nil
     }
 
     private func sync(open: OpenImmersiveSpaceAction, dismiss: DismissImmersiveSpaceAction) async {
@@ -442,6 +447,7 @@ final class Cinema {
         roomPose = nil
         windowPose = nil
         screenPose = nil
+        screenTarget = nil
         status = "Closed"
     }
 
@@ -469,6 +475,7 @@ final class Cinema {
         if headPose == nil { status = "Tracking" }
         headPose = head
         if mode == .bigScreen, screenPose == nil { placeScreen(facing: head) }
+        easeScreen(dt: dt)
 
         if headLocked {
             // The head's own pose: −z where it looks, so the room turns with it.
@@ -494,52 +501,84 @@ final class Cinema {
 
     private func placeScreen(facing head: simd_float4x4) {
         let position = head.columns.3.xyz
-        guard let forward = Self.horizontal(-head.columns.2.xyz) else { return }
-        screenPose = Self.pose(at: position + forward * screenDistance, forward: forward, fallback: forward)
-        logger.info("Cinema: screen placed \(self.screenDistance, format: .fixed(precision: 1), privacy: .public) m ahead, \(self.screenWidth, format: .fixed(precision: 1), privacy: .public) m wide")
+        screenUp = Self.screenUp(for: head)
+        // Upright, the screen goes level at eye height wherever the head
+        // looks; lying back, it goes where the eyes look, tilted to face them.
+        let look = -head.columns.2.xyz
+        let forward = screenUp.y > 0.99 ? (Self.horizontal(look) ?? look) : simd_normalize(look)
+        screenTarget = nil
+        screenPose = Self.pose(at: position + forward * screenDistance, facing: position, up: screenUp)
+        logger.info("Cinema: screen placed \(self.screenDistance, format: .fixed(precision: 1), privacy: .public) m ahead, \(self.screenWidth, format: .fixed(precision: 1), privacy: .public) m wide, upright \(self.screenUp.y > 0.99, privacy: .public)")
     }
 
-    /// Moves the screen by the grab bar the way visionOS moves a window: the
-    /// hand's motion across the view, at about arm's length, moves the
-    /// screen in proportion to its distance, and pushing or pulling changes
-    /// the distance exponentially (`depthGain` per metre), so a short pull
-    /// covers 15 m as well as 3. The screen keeps its angular size, as a
-    /// window does, and turns to face the head.
+    /// The screen's up: the room's while the head is roughly upright, the
+    /// head's own when it leans back past ~45° (lying down), so the picture
+    /// stays the right way up to the eyes.
+    private static func screenUp(for head: simd_float4x4) -> SIMD3<Float> {
+        let headUp = simd_normalize(head.columns.1.xyz)
+        return headUp.y > 0.7 ? SIMD3(0, 1, 0) : headUp
+    }
+
+    /// Moves the screen by the grab bar. visionOS already scales an
+    /// indirect drag by the target's distance, so the bar's own movement
+    /// (`start + movement`) is where the screen goes, kept within
+    /// `screenDistanceRange` and turned to face the head. The screen eases
+    /// toward it each frame (`dragEaseSeconds`), so hand jitter doesn't
+    /// jump it about. The screen keeps its angular size.
     /// - Parameters:
     ///   - start: the screen's centre when the drag began.
-    ///   - hand: the drag's translation so far, in the space's metres.
-    func dragScreen(from start: SIMD3<Float>, by hand: SIMD3<Float>) {
+    ///   - movement: the drag's translation so far, in the space's metres.
+    func dragScreen(from start: SIMD3<Float>, by movement: SIMD3<Float>) {
         guard let head = headPose?.columns.3.xyz else { return }
-        let toStart = start - head
-        let startDistance = simd_length(toStart)
-        guard startDistance > 0.1 else { return }
-        let direction = toStart / startDistance
-        let depth = simd_dot(hand, direction)
-        let across = hand - direction * depth
-        let moved = start + across * (startDistance / Self.armLength)
-        let distance = min(max(startDistance * expf(depth * Self.depthGain), Self.screenDistanceRange.lowerBound),
-                           Self.screenDistanceRange.upperBound)
-        let toMoved = moved - head
-        guard simd_length(toMoved) > 1e-3 else { return }
-        let position = head + simd_normalize(toMoved) * distance
-        screenPose = Self.pose(at: position, forward: position - head, fallback: direction)
+        let toMoved = start + movement - head
+        let length = simd_length(toMoved)
+        guard length > 0.1 else { return }
+        let distance = min(max(length, Self.screenDistanceRange.lowerBound), Self.screenDistanceRange.upperBound)
+        let position = head + toMoved / length * distance
+        screenTarget = Self.pose(at: position, facing: head, up: screenUp)
         draggingScreen = true
         screenDistance = distance
         draggingScreen = false
     }
 
-    /// How far from the head a pinching hand is, roughly (metres).
-    private static let armLength: Float = 0.5
-    /// The distance's growth per metre the hand pushes (e⁴: ×1.5 for 10 cm).
-    private static let depthGain: Float = 4
+    /// How long the screen takes to catch up with the grab bar (time constant).
+    private static let dragEaseSeconds: Float = 0.12
+
+    /// Eases the screen toward the grab bar's target.
+    private func easeScreen(dt: Float) {
+        guard let target = screenTarget else { return }
+        guard let current = screenPose else { screenPose = target; screenTarget = nil; return }
+        let k = 1 - expf(-max(dt, 0) / Self.dragEaseSeconds)
+        let from = current.columns.3.xyz, to = target.columns.3.xyz
+        let rotation = simd_slerp(simd_quatf(current), simd_quatf(target), k)
+        var pose = simd_float4x4(rotation)
+        pose.columns.3 = SIMD4(from + (to - from) * k, 1)
+        screenPose = pose
+        if simd_distance(from, to) < 0.002 { screenPose = target; screenTarget = nil }
+    }
 
     /// A changed distance moves the screen along its own heading from the listener.
     private func refitScreen() {
         guard let screenPose, let centre = listener else { return }
-        let forward = Self.horizontal(-screenPose.columns.2.xyz) ?? SIMD3(0, 0, -1)
+        screenTarget = nil
+        let forward = simd_normalize(-screenPose.columns.2.xyz)
         var position = centre + forward * screenDistance
-        position.y = screenPose.columns.3.y
-        self.screenPose = Self.pose(at: position, forward: forward, fallback: forward)
+        if screenUp.y > 0.99, abs(forward.y) < 1e-3 { position.y = screenPose.columns.3.y }
+        var pose = screenPose
+        pose.columns.3 = SIMD4(position, 1)
+        self.screenPose = pose
+    }
+
+    /// A pose at `position` whose +z points at `eye`, with +y as near `up` as that allows.
+    private static func pose(at position: SIMD3<Float>, facing eye: SIMD3<Float>, up: SIMD3<Float>) -> simd_float4x4 {
+        let toEye = eye - position
+        guard simd_length(toEye) > 1e-3 else { return pose(at: position, forward: -up, fallback: SIMD3(0, 0, -1)) }
+        let z = simd_normalize(toEye)
+        var x = simd_cross(up, z)
+        if simd_length(x) < 1e-3 { x = simd_cross(SIMD3(0, 0, 1), z) }
+        x = simd_normalize(x)
+        let y = simd_cross(z, x)
+        return simd_float4x4(columns: (SIMD4(x, 0), SIMD4(y, 0), SIMD4(z, 0), SIMD4(position, 1)))
     }
 
     /// A pose at `position` whose −z points along `forward` (level), +y up.
