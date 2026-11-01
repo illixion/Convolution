@@ -13,7 +13,7 @@ PyTorch reference of scripts/stereo-shared-field.py, on frames left out of the t
 
     ffmpeg -i CLIP.mkv -vf "select=not(mod(n\\,2))" -f rawvideo -pix_fmt yuv420p - \\
       | vergence analyze --raw 1920x1080 - --models build/interp-models -o CLIP.vgat
-    uv run scripts/check-analysis-track.py CLIP.mkv CLIP.vgat [--requantize 16]
+    uv run scripts/check-analysis-track.py CLIP.mkv CLIP.vgat [--requantize 16] [--metal MID.bgra]
 
 The track then holds every other frame, so each of its flow pairs (2k, 2k+2) has a real frame
 2k+1 in between. For each, the in-between pair is made the way the headset will (option E): the
@@ -25,6 +25,14 @@ storage and the quantisation cost together.
 
 --requantize N rounds the stored fields to 1/N of a stored pixel before rendering and reports the
 deflated size that would have, to choose the producer's step.
+
+--metal MID.bgra scores the player's own render too: Vergence's `SharedFieldInterpolator` (the
+Metal pass the headset runs), as `vergence interpolate` writes it from the same even frames:
+
+    ffmpeg -i CLIP.mkv -vf "select=not(mod(n\\,2)),SCALE" -fps_mode passthrough -f rawvideo -pix_fmt bgra - \\
+      | vergence interpolate --raw 1920x1080 - --fields CLIP.vgat -o MID.bgra
+
+(SCALE as `interp-quality.py`'s SCALE_FLAGS, so its frames are this script's.)
 """
 import argparse
 import importlib.util
@@ -75,10 +83,14 @@ def read_track(path):
 
 
 def up(field, dev, units=True):
-    """[c,h,w] stored field → [1,c,1080,1920] tensor, pixel units scaled to 1080p."""
+    """[c,h,w] stored field → [1,c,1080,1920] tensor; units: (x, y) pixel pairs scaled to 1080p."""
     t = torch.from_numpy(np.ascontiguousarray(field))[None].to(dev)
     out = F.interpolate(t, size=(H, W), mode="bilinear", align_corners=False)
-    return out * (W / field.shape[2]) if units else out
+    if not units:
+        return out
+    scale = torch.tensor([W / field.shape[2], H / field.shape[1]] * (field.shape[0] // 2) + [W / field.shape[2]]
+                         * (field.shape[0] % 2), device=dev, dtype=out.dtype).view(1, -1, 1, 1)
+    return out * scale
 
 
 def deflated_size(values, step):
@@ -95,6 +107,7 @@ def main():
     ap.add_argument("--neuflow", default="build/interp-spike/NeuFlow_v2")
     ap.add_argument("--requantize", type=float, default=0, help="round stored fields to 1/N stored px")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--metal", help="in-between frames from `vergence interpolate` (packed BGRA)")
     ap.add_argument("--device", default="mps" if torch.backends.mps.is_available() else "cpu")
     args = ap.parse_args()
     dev = torch.device(args.device)
@@ -110,7 +123,8 @@ def main():
     est = ssf.Disparity(models)
     rgb, _ = iq.read_clip(args.clip)
     p = lambda a, b: iq.psnr(((iq.luma(a) - iq.luma(b)) ** 2).mean().item())  # noqa: E731
-    rows, sizes = [], []
+    rows, sizes, metal_rows = [], [], []
+    metal = np.memmap(args.metal, np.uint8, "r").reshape(-1, 2 * H, W, 4) if args.metal else None
     for k, rec in enumerate(flows[:args.limit or None]):
         i = 2 * times.index(round(rec["time"], 4))  # track frame k is clip frame 2k
         L = [iq.tensor(rgb[j, 0], dev) for j in (i, i + 1, i + 2)]
@@ -143,11 +157,19 @@ def main():
             rows.append([p(L[1], left), p(L[1], ref_left), p(R[1], right), p(R[1], ref_right),
                          p(ref_left, left), p(ref_right, right),
                          (ft0 - g0).norm(dim=1).median().item(), (dd0 - e0).norm(dim=1).median().item()])
+            if metal is not None and k < len(metal) and metal[k].any():
+                bgr = torch.from_numpy(np.array(metal[k][..., [2, 1, 0]])).to(dev).permute(2, 0, 1)[None].float() / 255
+                ml, mr = bgr[:, :, :H], bgr[:, :, H:]
+                metal_rows.append([p(L[1], ml), p(R[1], mr), p(left, ml), p(right, mr)])
         print(f"   {k + 1}/{len(flows)}", end="\r", flush=True)
     r = np.mean(rows, 0)
     print(f"\nleft  PSNR: track {r[0]:.2f}, PyTorch {r[1]:.2f}  (track vs PyTorch render {r[4]:.2f})")
     print(f"right PSNR: track {r[2]:.2f}, PyTorch {r[3]:.2f}  (track vs PyTorch render {r[5]:.2f})")
     print(f"median field difference at 1080p: flow {r[6]:.2f} px, disparity {r[7]:.2f} px")
+    if metal_rows:
+        m = np.mean(metal_rows, 0)
+        print(f"Metal ({len(metal_rows)} frames): left {m[0]:.2f}, right {m[1]:.2f} dB against the real frame; "
+              f"against this script's track render {m[2]:.2f} / {m[3]:.2f} dB")
     if sizes:
         print(f"requantized to 1/{args.requantize:g} px: ~{np.mean(sizes) / 1024:.1f} KB a frame deflated")
 

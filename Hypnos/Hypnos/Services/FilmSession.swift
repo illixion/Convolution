@@ -73,7 +73,17 @@ final class FilmSession {
     }
 
     private(set) var searchResults: [FilmLibraryItem] = []
-    private(set) var loadedItem: FilmLibraryItem?
+    private(set) var loadedItem: FilmLibraryItem? {
+        didSet {
+            guard loadedItem?.id != oldValue?.id else { return }
+            loadSharedFields()
+        }
+    }
+    /// Smooth Motion's fields for the loaded film's 3D picture, from an
+    /// analysis track (`SmoothMotionTracks`); nil without one, and then a
+    /// packed 3D picture plays without in-between frames.
+    private(set) var sharedFields: AnalysisTrackFieldProvider?
+    @ObservationIgnored private var sharedFieldsTask: Task<Void, Never>?
     private(set) var isLoading = false
     private(set) var error: String?
     /// Whether the player window (or the iOS sheet) is showing.
@@ -378,6 +388,17 @@ final class FilmSession {
         stereoFormat = disc.isStereo ? .overUnder : nil
         AppLogger.filmPlayer.info("Loaded a local disc: \(disc.summary, privacy: .public); audio \(self.player.audioStatus, privacy: .public)")
         return true
+    }
+
+    private func loadSharedFields() {
+        sharedFieldsTask?.cancel()
+        sharedFields = nil
+        guard let item = loadedItem else { return }
+        sharedFieldsTask = Task { [weak self] in
+            let fields = await SmoothMotionTracks.fields(name: item.name, id: item.id)
+            guard !Task.isCancelled, let self, self.loadedItem?.id == item.id else { return }
+            self.sharedFields = fields
+        }
     }
 
     /// Plays the loaded disc's own 5.1 instead of the plugin's object audio,

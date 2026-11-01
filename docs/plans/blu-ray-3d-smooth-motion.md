@@ -7,7 +7,9 @@ at 480×288 is the flow model, and VideoToolbox's interpolator turned out at lea
 E's case rests on binocular consistency and 4×, not on picture quality. E2 (the right eye from the left eye's field, on the Mac) confirms it: a
 third of per-eye rivalry, real-pair level on the slow pan, the most faithful depth; fire and smoke stay open.
 E3 built the Mac producer (`vergence analyze`): it matches PyTorch, runs faster than real time, and
-stores about 25 KB a frame. Smooth Motion today covers flat 2D in the video window
+stores about 25 KB a frame. E4 built the player's half (`SharedFieldInterpolator`, one Metal pass,
+~2 ms a pair on an M2 Max, identical to the reference) and wired it into the film player's 3D
+picture through a track file; it has not run on the headset yet. Smooth Motion today covers flat 2D in the video window
 (`NativeMetalVideoPlayerView`, SDR, visionOS) and AI 3D (the stereo pump, mono frames before depth).
 A packed stereo pair (`PackedStereoLayout`: 3D Blu-ray, SBS/TAB files) is deliberately passed through
 unchanged. This is the plan for changing that.
@@ -355,10 +357,35 @@ frames from ffmpeg (`--raw 1920x1080`), so a server can feed it any stereo file.
     GPU. One direction is all E reads.
   - A model's NaN is stored as 0 rather than crashing the encoder.
 
-Next: the headset side. A Metal pass makes both in-between eyes from a real pair plus its
-records: flow upsample, flow reversal for t ≠ ½, disparity read-across, warp and blend. It plugs
-into the packed-stereo path of `InterpolatingFrameSource` as a second interpolator, reading a
-`.vgat` from disk first and the live RAVECompanion channel later.
+### E4: the player's pass (2026-11-01)
+
+`SharedFieldInterpolator` (Vergence `Sources/VergenceApple/Stereo/`) makes both in-between eyes
+of a packed pair in one compute pass: the stored fields sampled bilinearly (as
+`F.interpolate(align_corners=False)`), the left eye RIFE's own result at ½, the right eye the left
+eye's field read across by the mixed disparity, each frame read clamped to its own eye. It is a
+`MidFrameInterpolator`, so `InterpolatingFrameSource` drives it unchanged (cuts, gaps, the
+governor), now passing the frames' times so `AnalysisTrackFieldProvider` can find the pair's
+records (within a quarter frame; binary search, so a film's 340,000 records stay fast).
+
+- **Checked against the reference.** `vergence interpolate` runs the same pass on a Mac from
+  packed BGRA; `scripts/check-analysis-track.py --metal` scores it. On the crowd pan and the robot
+  fight the Metal frames agree with the script's own track render to 68 dB (8-bit rounding), so
+  they score the same against the real frames: 38.64 / 38.39 and 27.85 / 27.75 dB.
+- **Speed: ~1.7 ms a 1080p pair on an M2 Max**, lookup, upload and pass together. On the headset
+  it shares the GPU with the pump, not the Neural Engine with anything.
+- The check script scaled the vertical flow by the width ratio (16 instead of 15 at 120×72);
+  fixed, the track's own render gained ~0.05 dB.
+- Only t = ½ (the doubling `InterpolatingFrameSource` does). 4× needs flow reversal and a mask
+  for other phases, not measured.
+
+In Convolution: a disc's track is a file in Documents/Smooth Motion named after the film or its
+Jellyfin item id (`SmoothMotionTracks`). `FilmSession` indexes it when the film loads, the film
+player's 3D picture passes it to the stereo engine (`Pseudo3DStereoEngine.sharedFields`), and the
+Smooth Motion toggle appears for a 3D disc only when a track exists. `vergence analyze` now times
+a disc's records on the playlist's own clock, the film player's.
+
+Next: run it on the headset with a disc's track (watch the `interp` line for its timings and
+misses), then the per-scene fallback for fire and smoke, then the live channel from a paired Mac.
 
 The phases below were written for option B; under E, phase 3 becomes "flow, disparity transfer, warp
 and fallback shaders" and phase 0's disparity work is the flow network's.

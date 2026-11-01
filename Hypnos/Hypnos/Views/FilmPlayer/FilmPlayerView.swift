@@ -69,6 +69,9 @@ struct FilmPlayerView: View {
     /// This film's Smooth Motion choice in AI 3D; nil follows Settings → Videos.
     @State private var smoothMotionOverride: Bool?
     private var smoothMotion: Bool { smoothMotionOverride ?? appModel.smoothMotion }
+    /// The 3D picture can have in-between frames: a flat film made 3D
+    /// always, a 3D film's own pair only with a Smooth Motion track for it.
+    private var smoothMotionApplies: Bool { stereoLayout == nil || session.sharedFields != nil }
     /// Set while a 3D film plays as real 3D (eyes cropped from the frame);
     /// nil while a flat film plays as fake-3D.
     @State private var stereoLayout: PackedStereoLayout?
@@ -228,7 +231,14 @@ struct FilmPlayerView: View {
                 }
             }
             .onChange(of: smoothMotion) { _, _ in
-                if stereoSource != nil, stereoLayout == nil {
+                if stereoSource != nil, smoothMotionApplies {
+                    stopStereo(keepingPosition: false)
+                    startStereo()
+                }
+            }
+            // A disc's track can be indexed after 3D started.
+            .onChange(of: session.sharedFields.map(ObjectIdentifier.init)) { _, _ in
+                if stereoSource != nil, stereoLayout != nil, smoothMotion {
                     stopStereo(keepingPosition: false)
                     startStereo()
                 }
@@ -461,6 +471,7 @@ struct FilmPlayerView: View {
                         squareCorners: !appModel.roundedCorners,
                         subtitles: stereoSubtitles,
                         interpolatesFrames: smoothMotion,
+                        sharedFields: stereoLayout != nil ? session.sharedFields : nil,
                         onUnavailable: { failure in
                             guard stereoSource === source else { return }
                             stopStereo()
@@ -515,7 +526,7 @@ struct FilmPlayerView: View {
             ) {
             FilmTransport(player: player, stereoEnabled: stereoSource != nil,
                           onToggle3D: cinema.mode(for: .film).showsPicture ? nil : { stereoSource == nil ? startStereo() : stopStereo() },
-                          smoothMotion: stereoSource != nil && stereoLayout == nil ? smoothMotion : nil,
+                          smoothMotion: stereoSource != nil && smoothMotionApplies ? smoothMotion : nil,
                           onToggleSmoothMotion: { smoothMotionOverride = !smoothMotion },
                           markedRanges: skipper.markedRanges,
                           width: windowWidth > 0
