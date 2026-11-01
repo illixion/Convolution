@@ -118,7 +118,7 @@ extension VideoWindowModel {
 
     private var adaptsQuality: Bool {
         qualityPreference == .auto && offersQualityChoice && !isChangingQuality
-            && !usesImmersiveStereo && playbackFailure == nil
+            && playbackFailure == nil
     }
 
     private func evaluateStall() {

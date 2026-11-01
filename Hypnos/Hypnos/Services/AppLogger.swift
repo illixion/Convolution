@@ -34,9 +34,6 @@ enum AppLogger {
     /// Disk image cache operations
     static let diskCache = DebugLogger(subsystem: subsystem, category: "DiskCache")
 
-    /// Disk video cache operations
-    static let videoCache = DebugLogger(subsystem: subsystem, category: "VideoCache")
-
     /// Image enhancement tracking (3D conversion, background removal)
     static let enhancementTracker = DebugLogger(subsystem: subsystem, category: "EnhancementTracker")
 
@@ -66,9 +63,6 @@ enum AppLogger {
 
     /// Settings operations
     static let settings = DebugLogger(subsystem: subsystem, category: "Settings")
-
-    /// Immersive video view
-    static let immersiveVideo = DebugLogger(subsystem: subsystem, category: "ImmersiveVideo")
 
     /// General app lifecycle
     static let app = DebugLogger(subsystem: subsystem, category: "App")

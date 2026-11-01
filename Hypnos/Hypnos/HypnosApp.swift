@@ -253,7 +253,6 @@ struct HypnosApp: App {
         .defaultSize(width: 1400, height: 900)
         .defaultLaunchBehavior(.suppressed)
 
-        // Immersive space for stereoscopic 3D video playback
         // The debug server's "Allow debug access?" / "Allow code changes?"
         // prompt, in a window of its own: the system alert it would otherwise
         // use attaches to the frontmost window, where a 3D video's content
@@ -263,13 +262,7 @@ struct HypnosApp: App {
         // Every immersive space leaves a system environment (Mount Hood and
         // the rest) as it is rather than closing it (visionOS 26): mixed
         // spaces show around it, and the wearer is back in it after a full one.
-        ImmersiveSpace(id: "StereoscopicVideoSpace") {
-            ImmersiveVideoView()
-                .environment(appModel)
-        }
-        .immersionStyle(selection: .constant(.full), in: .full)
-        .immersiveEnvironmentBehavior(.coexist)
-
+        //
         // Mixed immersive space for the "Fully Immersive 3D" photo viewer mode.
         // Opened by PhotoDisplayView when AppModel.fullyImmersive3DMode is on
         // and the user enters Immersive 3D; passes the source image URL via

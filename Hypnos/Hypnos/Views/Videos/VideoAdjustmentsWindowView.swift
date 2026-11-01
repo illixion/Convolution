@@ -53,7 +53,7 @@ struct VideoAdjustmentsWindowView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             if target.showsStereoPicture {
                                 StereoSubtitleSettings(subtitles: target.subtitles)
-                            } else if !target.usesImmersiveStereo {
+                            } else {
                                 FlatSubtitleSettings()
                             }
                         }

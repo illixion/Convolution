@@ -396,10 +396,6 @@ case.
 Whole-file or whole-feature `#if !os(tvOS)` fences, mirroring the iOS
 pattern in the main CLAUDE.md:
 
-- **MV-HEVC stereoscopic conversion** — `MVHEVCConverter.swift`,
-  `ChunkBufferManager.swift`, `StereoscopicVideoPlayer.swift`. visionOS-immersive
-  only; their caller (`StereoscopicVideoView`) was already `#if os(visionOS)`
-  with an iOS stub, so nothing else needed to change.
 - **Settings → Backup** (`SettingsBackupDocument`'s `FileDocument`
   conformance, and the `fileExporter`/`fileImporter`/`.settingsBackupImport`
   call sites in `SettingsTabView.swift` and `SettingsBackupImport.swift`) —

@@ -158,27 +158,6 @@ class AppModel {
     /// Incremented on each loadInitialVideos; stale loadNextVideoPage results are discarded
     private var videoLoadGeneration: Int = 0
 
-    // MARK: - Stereoscopic Video Immersive State
-
-    /// Whether the stereoscopic video immersive space is currently shown
-    var isStereoscopicImmersiveSpaceShown: Bool = false
-
-    /// Whether the immersive video screen follows the user's head as a HUD.
-    var isImmersiveVideoHeadLocked: Bool {
-        didSet { UserDefaults.standard.set(isImmersiveVideoHeadLocked, forKey: "immersiveVideoHeadLocked") }
-    }
-
-    /// The video currently being played in immersive mode
-    var immersiveVideo: GalleryVideo?
-
-    /// URL of the converted MV-HEVC file for immersive playback
-    var immersiveVideoURL: URL?
-
-    /// The video window that opened the current immersive session, so the
-    /// immersive player can read that window's stereoscopic override. Only one
-    /// immersive space exists at a time on visionOS, so a single owner suffices.
-    weak var immersiveVideoOwner: VideoWindowModel?
-
     // MARK: - Filter State
 
     var currentFilter: ImageFilterCriteria = ImageFilterCriteria()
@@ -1336,8 +1315,22 @@ class AppModel {
 
     // MARK: - Initialization
 
+    /// What the removed immersive MV-HEVC player left on a device that ran it:
+    /// the converted-video cache and its metadata in Caches, and the head-lock
+    /// preference. Nothing reads them any more; removed on launch until they
+    /// are gone.
+    private nonisolated static func removeImmersiveVideoLeftovers() {
+        UserDefaults.standard.removeObject(forKey: "immersiveVideoHeadLocked")
+        let fileManager = FileManager.default
+        guard let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+        for name in ["VideoCache", "VideoCacheMetadata"] {
+            let directory = caches.appendingPathComponent(name, isDirectory: true)
+            if fileManager.fileExists(atPath: directory.path) { try? fileManager.removeItem(at: directory) }
+        }
+    }
+
     init() {
-        isImmersiveVideoHeadLocked = false
+        Task.detached(priority: .utility) { Self.removeImmersiveVideoLeftovers() }
         // Vergence's depth cache has no notion of this app's cache budget, so
         // it never evicts until told how much disk it may hold. Wired before
         // anything can enqueue a conversion; without it the depth cache grows

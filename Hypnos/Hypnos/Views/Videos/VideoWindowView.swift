@@ -93,7 +93,7 @@ struct VideoWindowView: View {
     /// The subtitles to hang under a stereo picture, if it has them on and
     /// they are set to show there rather than in the picture.
     private var bandSubtitles: SubtitleController? {
-        windowModel.subtitles.selected != nil && !appModel.allWindowsHidden && !windowModel.usesImmersiveStereo
+        windowModel.subtitles.selected != nil && !appModel.allWindowsHidden
             && !cinemaShowsScreen
             && (windowModel.showsStereoPicture ? stereoSubtitleStyle : flatSubtitleStyle) == .belowPicture
             ? windowModel.subtitles : nil
@@ -156,13 +156,12 @@ struct VideoWindowView: View {
     /// Pinch zoom of a flat picture (Settings → Pinch to Zoom Videos).
     @State private var zoom = ZoomPanState()
 
-    /// The stereo and immersive pictures are RealityKit planes a SwiftUI
-    /// scale can't reach, so zoom is for the flat renderers only.
+    /// The stereo picture is a RealityKit plane a SwiftUI scale can't reach,
+    /// so zoom is for the flat renderers only.
     private var isZoomAvailable: Bool {
         appModel.pinchToZoomVideos
             && !appModel.allWindowsHidden
             && !windowModel.showsStereoPicture
-            && !windowModel.usesImmersiveStereo
     }
 
     /// A new stereo player per video, attempt and mode: the engine takes its
@@ -187,19 +186,6 @@ struct VideoWindowView: View {
                 Group {
                     if appModel.allWindowsHidden {
                         Color.clear
-                    } else if windowModel.usesImmersiveStereo {
-                        StereoscopicVideoView(
-                            video: video,
-                            windowModel: windowModel,
-                            initialSettings: windowModel.video3DSettings,
-                            onRevertTo2D: {
-                                windowModel.stereoscopicOverride = false
-                            },
-                            onSettingsChanged: { newSettings in
-                                windowModel.video3DSettings = newSettings
-                            }
-                        )
-                        .id("\(video.id)_3d")
                     } else if windowModel.showsStereoPicture {
                         // Fake-3D of a mono video, or a stereo video live: the
                         // same player, warping or cropping each eye.
@@ -333,11 +319,8 @@ struct VideoWindowView: View {
                 // the RealityView container would invert the stereo pair too.
                 .scaleEffect(x: (windowModel.isFlipped && !windowModel.showsStereoPicture) ? -1 : 1, y: 1)
                 .zoomPanTransform(zoom)
-                .brightness(windowModel.usesImmersiveStereo ? windowModel.effectiveVideoAdjustments.brightness : 0)
-                .contrast(windowModel.usesImmersiveStereo ? windowModel.effectiveVideoAdjustments.contrast : 1)
-                .saturation(windowModel.usesImmersiveStereo ? windowModel.effectiveVideoAdjustments.saturation : 1)
                 .opacity(
-                    windowModel.usesImmersiveStereo || windowModel.playbackRenderer == .nativeMetal
+                    windowModel.playbackRenderer == .nativeMetal
                         ? windowModel.effectiveVideoAdjustments.opacity
                         : 1
                 )
@@ -352,13 +335,7 @@ struct VideoWindowView: View {
                     // The pseudo-3D RealityView can't be toggled by a 2D overlay
                     // (gaze targets the 3D plane), so it carries its own tap
                     // target via onToggleUI instead.
-                    //
-                    // Exclude 3D (MV-HEVC) mode too: its in-window content is only
-                    // progress/error/loading overlays (the video itself plays in the
-                    // immersive space). The error overlay carries interactive Retry /
-                    // Play as 2D buttons, and a tap target stacked above them would
-                    // swallow those taps into a UI toggle instead.
-                    if !appModel.allWindowsHidden, !windowModel.showsStereoPicture, !windowModel.usesImmersiveStereo {
+                    if !appModel.allWindowsHidden, !windowModel.showsStereoPicture {
                         Color.clear
                             .contentShape(.rect)
                             .onTapGesture {
@@ -371,11 +348,9 @@ struct VideoWindowView: View {
                 .zoomPanGestures($zoom, enabled: isZoomAvailable)
                 .onChange(of: video.id) { _, _ in zoom.reset() }
                 .overlay {
-                    // Subtitles for the flat renderers; the immersive player
-                    // draws its own in the immersive space.
-                    // A stereo picture has them drawn into it instead (see
-                    // StereoSubtitleFeeder).
-                    if !appModel.allWindowsHidden, !windowModel.usesImmersiveStereo, !windowModel.showsStereoPicture,
+                    // Subtitles for the flat renderers. A stereo picture has
+                    // them drawn into it instead (see StereoSubtitleFeeder).
+                    if !appModel.allWindowsHidden, !windowModel.showsStereoPicture,
                        !cinemaShowsScreen, !flatSubtitlesBelow {
                         SubtitleOverlay(controller: windowModel.subtitles,
                                         pictureAspect: windowModel.videoAspectRatio) { windowModel.currentTime }
@@ -398,7 +373,7 @@ struct VideoWindowView: View {
             }
             #endif
 
-            if !appModel.allWindowsHidden, !windowModel.usesImmersiveStereo,
+            if !appModel.allWindowsHidden,
                windowModel.playbackFailure != nil || windowModel.isLoadStalled {
                 loadStatusCard
                     .padding(.bottom, ornamentBottomPadding)
@@ -544,13 +519,6 @@ struct VideoWindowView: View {
                 gap: windowModel.showsStereoPicture ? Self.stereoControlsGap : 12,
                 filmTime: { windowModel.currentTime }
             ) { videoOrnament }
-        }
-        .onChange(of: windowModel.usesImmersiveStereo) { _, immersive in
-            if immersive {
-                windowModel.isWindowControlsHidden = false
-            } else {
-                windowModel.startAutoHideTimer()
-            }
         }
         .onChange(of: ornamentBottomPadding) { old, new in
             resizeWindowHeight(by: new - old)

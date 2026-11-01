@@ -23,7 +23,7 @@ struct CacheSettingsSection: View {
 
     /// Display order — biggest budget shares first.
     private static let domains: [CacheBudget.Domain] = [
-        .videos, .images, .depth, .autoEnhance, .backgroundRemoval,
+        .images, .depth, .autoEnhance, .backgroundRemoval,
         .gifHEVC, .thumbnails, .thumbnailDioramas
     ]
 
@@ -169,8 +169,6 @@ struct CacheSettingsSection: View {
         var fresh: [CacheBudget.Domain: DomainStats] = [:]
         let image = await DiskImageCache.shared.getCacheStats()
         fresh[.images] = DomainStats(fileCount: image.fileCount, totalSize: image.totalSize)
-        let video = await DiskVideoCache.shared.getCacheStats()
-        fresh[.videos] = DomainStats(fileCount: video.fileCount, totalSize: video.totalSize)
         let enhance = await AutoEnhanceCache.shared.getCacheStats()
         fresh[.autoEnhance] = DomainStats(fileCount: enhance.fileCount, totalSize: enhance.totalSize)
         let removal = await BackgroundRemovalCache.shared.getCacheStats()
@@ -192,8 +190,6 @@ struct CacheSettingsSection: View {
         case .images:
             await ImageLoader.shared.clearMemoryCache()
             await DiskImageCache.shared.clearCache()
-        case .videos:
-            await DiskVideoCache.shared.clearCache()
         case .autoEnhance:
             await AutoEnhanceCache.shared.clearCache()
         case .backgroundRemoval:
@@ -215,7 +211,6 @@ struct CacheSettingsSection: View {
     /// rather than waiting for the next write.
     private func enforceAllBudgets() async {
         await DiskImageCache.shared.enforceBudget()
-        await DiskVideoCache.shared.enforceBudget()
         await AutoEnhanceCache.shared.enforceBudget()
         await BackgroundRemovalCache.shared.enforceBudget()
         await DiskAnimatedHEVCCache.shared.enforceBudget()

@@ -34,8 +34,7 @@
  (`immersiveEnvironmentBehavior(.coexist)`, visionOS 26), so Mount Hood and
  the rest stay up around the screen. Our own windows stay visible in our
  mixed space; other apps' windows hide while it is open. An app has one
- immersive space at a time, so opening the cinema closes Spatial 3D or the
- immersive video player first.
+ immersive space at a time, so opening the cinema closes Spatial 3D first.
 
  The room follows the head's position slowly (1.5 s), so leaning gives a
  little parallax and walking re-centres it. Positions are set in scene
@@ -382,8 +381,8 @@ final class Cinema {
             return
         }
         guard !isOpen else { return }
-        // One immersive space at a time: Spatial 3D or the immersive video
-        // player closes first (a no-op when none is open).
+        // One immersive space at a time: Spatial 3D closes first (a no-op
+        // when none is open).
         await dismiss()
         status = "Opening"
         switch await open(id: Self.spaceID) {
@@ -1255,7 +1254,7 @@ struct HUDStabilizationControl: View {
 }
 
 /// A video window's half of the cinema: Big Screen needs the AVFoundation
-/// renderer and no in-window 3D, and the window's player goes to the screen.
+/// renderer, and the window's player goes to the screen.
 struct CinemaVideoWindowHook: ViewModifier {
     let windowModel: VideoWindowModel
     let hudControls: AnyView
@@ -1279,12 +1278,7 @@ struct CinemaVideoWindowHook: ViewModifier {
             }
             .onChange(of: windowModel.nativePlayerGeneration) { lendPlayer(); routeAudio() }
             .onChange(of: cinema.mode(for: owner), initial: true) { _, _ in routeAudio() }
-            // AI 3D and live 3D lend their plane to the screen; the immersive
-            // player has its own space, so picking it ends Big Screen.
-            .onChange(of: windowModel.usesImmersiveStereo) { _, immersive in
-                guard immersive, onBigScreen else { return }
-                Task { await cinema.setMode(.window, for: owner, open: openImmersiveSpace, dismiss: dismissImmersiveSpace) }
-            }
+            // AI 3D and live 3D lend their plane to the screen.
             .onChange(of: windowModel.showsStereoPicture) { if onBigScreen { lendPlayer() } }
             .onChange(of: windowModel.stereoEngine.map(ObjectIdentifier.init)) { if onBigScreen { lendPlayer() } }
             .onChange(of: cinema.screenTaps) {
@@ -1301,11 +1295,9 @@ struct CinemaVideoWindowHook: ViewModifier {
         cinema.hudVideoModel = windowModel
         cinema.hudControlsView = hudControls
         cinema.hudCloseAction = closePlayer
-        // The immersive player needs the space for itself; live 3D and AI 3D
-        // come along (their plane moves to the screen).
-        if windowModel.usesImmersiveStereo { windowModel.stereoscopicOverride = false }
+        // Live 3D and AI 3D come along (their plane moves to the screen).
         if windowModel.playbackRenderer == .webKit,
-           !windowModel.switchToTranscodedStream(reason: "The immersive screen needs the AVFoundation renderer") {
+           !windowModel.switchToTranscodedStream(reason: "The Big Screen needs the AVFoundation renderer") {
             let owner = owner
             Task {
                 await cinema.fail("This video can't play on the immersive screen: the server has no transcode this device can decode.",

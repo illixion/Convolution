@@ -56,7 +56,6 @@ enum CacheBudget {
     /// One entry per disk cache; `share` splits the preset's total allowance.
     /// Shares sum to 1.0.
     enum Domain: String, CaseIterable, Sendable {
-        case videos
         case images
         case depth
         case autoEnhance
@@ -67,9 +66,8 @@ enum CacheBudget {
 
         var share: Double {
             switch self {
-            case .videos: return 0.40
-            case .images: return 0.20
-            case .depth: return 0.20
+            case .images: return 0.40
+            case .depth: return 0.40
             case .autoEnhance: return 0.07
             case .backgroundRemoval: return 0.07
             case .gifHEVC: return 0.04
@@ -80,7 +78,6 @@ enum CacheBudget {
 
         var label: String {
             switch self {
-            case .videos: return "Videos"
             case .images: return "Images"
             case .depth: return "Converted 3D Videos"
             case .autoEnhance: return "Auto-Enhance"

@@ -1,7 +1,7 @@
 /*
  Hypnos - LRU Disk Cache Engine
 
- Shared engine behind every on-disk cache (images, videos, thumbnails,
+ Shared engine behind every on-disk cache (images, thumbnails,
  auto-enhance, background removal, GIF conversions, thumbnail dioramas). Each
  cache keeps its own key scheme and file formats; the engine owns the parts
  they used to copy-paste:
@@ -14,10 +14,8 @@
    eviction pass runs (which must enumerate anyway), so drift can't accumulate.
  - LRU eviction against CacheBudget's device-capacity-derived caps: oldest
    modification date first (reads touch mtime), trimming to 80% of the cap.
-   Hooks let a cache delete companion files alongside an entry (video
-   metadata), prioritize evicting entries that lost their reason to exist
-   (orphaned enhance renders), and account for bytes a pending download has
-   committed but not yet written.
+   A hook lets a cache prioritize evicting entries that lost their reason to
+   exist (orphaned enhance renders).
 
  Thread-safe via an internal lock — usable from actors and detached tasks
  alike. Eviction runs inline under the lock; it's rare (only when over cap)
@@ -34,16 +32,9 @@ final class LRUDiskCache: @unchecked Sendable {
     private let fileManager = FileManager.default
     private let lock = NSLock()
 
-    /// Files deleted alongside an evicted entry (e.g. sidecar metadata).
-    /// Their sizes are not counted by this engine (companion directories are
-    /// tracked by the owning cache if needed).
-    var companionURLs: (@Sendable (URL) -> [URL])?
     /// Entries reporting true are evicted before LRU order — e.g. derived
     /// renders whose source entry is gone.
     var evictsFirst: (@Sendable (URL) -> Bool)?
-    /// Bytes committed but not yet on disk (in-progress downloads), counted
-    /// against the cap so a large download starts making room immediately.
-    var pendingBytes: (@Sendable () -> Int64)?
 
     /// Incrementally tracked directory size; nil until first computed.
     private var trackedSize: Int64?
@@ -124,8 +115,7 @@ final class LRUDiskCache: @unchecked Sendable {
     }
 
     private func evictIfNeededLocked() {
-        let pending = pendingBytes?() ?? 0
-        let committed = (trackedSize ?? 0) + pending
+        let committed = trackedSize ?? 0
         guard committed > CacheBudget.cap(for: domain, currentSize: committed) else { return }
 
         // Over budget: enumerate once (also resyncing the counter — eviction
@@ -147,7 +137,7 @@ final class LRUDiskCache: @unchecked Sendable {
         }
         trackedSize = actualSize
 
-        let total = actualSize + pending
+        let total = actualSize
         let cap = CacheBudget.cap(for: domain, currentSize: total)
         guard total > cap else { return }
 
@@ -166,9 +156,6 @@ final class LRUDiskCache: @unchecked Sendable {
             do {
                 try fileManager.removeItem(at: file.url)
                 freed += file.size
-                for companion in companionURLs?(file.url) ?? [] {
-                    try? fileManager.removeItem(at: companion)
-                }
             } catch {
                 log.warning("Failed to evict cache file: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             }

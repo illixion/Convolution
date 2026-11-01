@@ -68,7 +68,7 @@ struct StashServerSection: View {
         Section {
             Toggle("Server-Side Transcoding", isOn: $appModel.enableStashTranscoding)
         } footer: {
-            Text("Keep the Stash server's HLS transcode in reserve. Scenes always play their original file first; the transcode is used only if that file can't be played here, or when a feature needs it (AI 3D, live and immersive 3D, depth pre-processing). Turn off to never transcode. Applies to newly loaded scenes.")
+            Text("Keep the Stash server's HLS transcode in reserve. Scenes always play their original file first; the transcode is used only if that file can't be played here, or when a feature needs it (AI 3D, live 3D, Big Screen, depth pre-processing). Turn off to never transcode. Applies to newly loaded scenes.")
         }
     }
 

@@ -53,7 +53,7 @@ enum PlatformCapabilities {
     #if os(visionOS)
     /// RealityKit's `ImagePresentationComponent` 2D→3D conversion.
     static let supportsSpatial3D = true
-    /// `ImmersiveSpace` scenes (immersive photo mode, MV-HEVC video).
+    /// `ImmersiveSpace` scenes (immersive photo mode, the cinema).
     static let supportsImmersiveSpaces = true
     /// Several independent windows that can be summoned, hidden and saved as
     /// groups. iOS has one window per scene and no summon.
@@ -461,8 +461,7 @@ struct ImagePresentationComponent: Component {
 extension AVPlayerItem {
     /// visionOS restricts stereo spatialisation so audio does not anchor to
     /// the wrong window. iOS plays through the device or headphones as-is.
-    /// `nonisolated` like the RAVEMedia original: callers run off the main
-    /// actor (`ChunkBufferManager`).
+    /// `nonisolated` like the RAVEMedia original, which off-main callers use.
     nonisolated func applySpatialAudioPolicy(sceneIdentifier: String? = nil) {}
 }
 

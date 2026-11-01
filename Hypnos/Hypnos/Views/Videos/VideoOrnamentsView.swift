@@ -16,8 +16,6 @@
  subtitle timing nudged in place, All Adjustments, Slideshow, Pop Out (pushed
  only) and Open in Safari. The title is the window's own, in its top-left
  corner (`PlayerTitleButton`, VideoWindowView).
- The immersive scene owns its own transport; under it the window keeps a
- plain bar of these buttons with a More Options menu.
  */
 
 import RAVEMedia
@@ -56,16 +54,9 @@ struct VideoOrnamentsView: View {
             .environment(\.playerChoiceDismissal, windowModel.menuDismissals)
     }
 
-    @ViewBuilder
     private var bar: some View {
-        if windowModel.usesImmersiveStereo {
-            // Immersive playback owns its own transport in the immersive scene.
-            HStack(spacing: RAVEChromeMetrics.spacing) { ornamentItems(isImmersive: true) }
-                .padding(12).glassBackgroundEffect()
-        } else {
-            VideoControlBar(windowModel: windowModel, pinned: cinemaButton, width: stripWidth) {
-                ornamentItems(isImmersive: false)
-            }
+        VideoControlBar(windowModel: windowModel, pinned: cinemaButton, width: stripWidth) {
+            ornamentItems
         }
     }
 
@@ -83,9 +74,9 @@ struct VideoOrnamentsView: View {
 
     /// The window's feature buttons: on the strip as far as it has room, and
     /// the rest as grouped rows in its More popover.
-    private func ornamentItems(isImmersive: Bool) -> some View {
+    private var ornamentItems: some View {
         PlayerAccessoryLayout { room in
-            barItems(room: room, isImmersive: isImmersive)
+            barItems(room: room)
         } menu: { room in
             menuSections(room: room)
         }
@@ -93,15 +84,8 @@ struct VideoOrnamentsView: View {
 
     /// On the strip: the choices that say what the picture is doing first,
     /// up to the priority the strip has room for (see the file comment).
-    /// `room` is `Int.max` on the immersive bar, which has no More of its
-    /// own and keeps prev/next and a More Options menu instead.
     @ViewBuilder
-    private func barItems(room: Int, isImmersive: Bool) -> some View {
-        if room == .max, windowModel.videoCount > 1 {
-            previousButton
-            videoCounter
-            nextButton
-        }
+    private func barItems(room: Int) -> some View {
         viewModeMenu
         qualityMenu
         if room >= 1 {
@@ -117,10 +101,7 @@ struct VideoOrnamentsView: View {
             ConversionStatusRow(videoIdentity: video.identity)
         }
         if room >= 2 {
-            // The immersive scene has its own transport, loop included.
-            if !isImmersive {
-                LoopControls(windowModel: windowModel)
-            }
+            LoopControls(windowModel: windowModel)
             // Info (rating & metadata) is Stash-only: the sheet fetches
             // scene detail by id and edits it through GraphQL, so there is
             // nothing for it to show for a local file or a stream.
@@ -131,9 +112,6 @@ struct VideoOrnamentsView: View {
         if room >= 3 {
             shareButton
             galleryButton
-        }
-        if room == .max {
-            moreMenu
         }
     }
 
@@ -184,33 +162,6 @@ struct VideoOrnamentsView: View {
         }
         .modifier(OrnamentButtonStyle())
         .help(windowModel.wasPushed ? "Videos" : "Show Gallery")
-    }
-
-    private var previousButton: some View {
-        Button {
-            windowModel.previousVideo()
-        } label: {
-            OrnamentGlyph(title: "Previous Video", systemImage: "chevron.left")
-        }
-        .modifier(OrnamentButtonStyle())
-        .disabled(!windowModel.hasPreviousVideo)
-    }
-
-    private var nextButton: some View {
-        Button {
-            windowModel.nextVideo()
-        } label: {
-            OrnamentGlyph(title: "Next Video", systemImage: "chevron.right")
-        }
-        .modifier(OrnamentButtonStyle())
-        .disabled(!windowModel.hasNextVideo)
-    }
-
-    private var videoCounter: some View {
-        Text("\(windowModel.currentVideoPosition) / \(windowModel.videoCount)")
-            .font(.callout)
-            .foregroundColor(.secondary)
-            .frame(minWidth: 60)
     }
 
     @ViewBuilder
@@ -373,26 +324,6 @@ struct VideoOrnamentsView: View {
 
     // MARK: - More Menu
 
-    /// The immersive bar's More Options: what the strip keeps in its More.
-    private var moreMenu: some View {
-        Menu {
-            Group {
-                flipButton
-                adjustmentsButton(close: {})
-                Divider()
-                windowItems(close: {})
-            }
-            .ravePlayerMenuReporting { chromeMenu("More Options", opened: $0) }
-        } label: {
-            OrnamentGlyph(title: "More Options", systemImage: "ellipsis.circle")
-                .padding(6)
-                .background(moreMenuHighlighted ? .white.opacity(0.3) : .clear, in: .rect(cornerRadius: 8))
-        }
-        .menuStyle(.button)
-        .raveChromeButtonStyle()
-        .help("More")
-    }
-
     /// Opens the standalone Adjustments window (repositionable, never
     /// overlaps the video). showAdjustments pauses auto-hide.
     private func adjustmentsButton(close: @escaping () -> Void) -> some View {
@@ -443,11 +374,6 @@ struct VideoOrnamentsView: View {
         return scheme == "http" || scheme == "https"
     }
 
-    /// Whether the More menu button should show a highlight
-    private var moreMenuHighlighted: Bool {
-        windowModel.effectiveVideoAdjustments.isModified || windowModel.isFlipped
-    }
-
     private func chromeMenu(_ name: String, opened: Bool) {
         windowModel.ornamentMenu(name, opened: opened)
     }
@@ -483,17 +409,12 @@ struct VideoOrnamentsView: View {
                 windowModel.set2DMode()
             }
 
-            if PlatformCapabilities.supportsImmersiveSpaces {
+            if PlatformCapabilities.supportsStereoVideo {
                 Divider()
 
-                // A stereo video plays live in the window; Immersive 3D
-                // downloads and converts it first for the immersive screen.
+                // A stereo video plays live in the window.
                 modeButton(ViewMode.stereoscopic.title, mode: .stereoscopic, close: close) {
                     Task { await windowModel.enable3DMode() }
-                }
-
-                modeButton(ViewMode.immersive.title, mode: .immersive, close: close) {
-                    Task { await windowModel.enable3DMode(immersive: true) }
                 }
 
                 if windowModel.shouldUse3DMode {
@@ -581,18 +502,17 @@ struct VideoOrnamentsView: View {
         }
     }
 
-    /// The three window viewing modes, mutually exclusive by construction
+    /// The window viewing modes, mutually exclusive by construction
     /// (shouldUsePseudo3D already excludes shouldUse3DMode).
     private enum ViewMode {
-        case flat, stereoscopic, immersive, ai3DRealtime, ai3DPreprocessed
+        case flat, stereoscopic, ai3DRealtime, ai3DPreprocessed
 
         /// The menu item's name. Variants go in parentheses after the
-        /// mode, as in the photo viewer's "RealityKit 3D (Immersive)".
+        /// mode, as in "AI 3D (Real-Time)".
         var title: String {
             switch self {
             case .flat: "2D"
             case .stereoscopic: "3D"
-            case .immersive: "3D (Immersive)"
             case .ai3DRealtime: "AI 3D (Real-Time)"
             case .ai3DPreprocessed: "AI 3D (Pre-Processed)"
             }
@@ -602,7 +522,6 @@ struct VideoOrnamentsView: View {
         var badge: String {
             switch self {
             case .flat, .stereoscopic: title
-            case .immersive: "Immersive"
             case .ai3DRealtime, .ai3DPreprocessed: "AI 3D"
             }
         }
@@ -611,14 +530,12 @@ struct VideoOrnamentsView: View {
             switch self {
             case .flat: "rectangle"
             case .stereoscopic: "view.3d"
-            case .immersive: "inset.filled.pano"
             case .ai3DRealtime, .ai3DPreprocessed: "wand.and.sparkles"
             }
         }
     }
 
     private var currentViewMode: ViewMode {
-        if windowModel.usesImmersiveStereo { return .immersive }
         if windowModel.shouldUse3DMode { return .stereoscopic }
         if windowModel.shouldUsePseudo3D {
             if case .cached = windowModel.pseudo3DDepthMode { return .ai3DPreprocessed }

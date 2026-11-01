@@ -48,8 +48,7 @@ Moved out of `CLAUDE.md` (the compile check and the "compile both platforms" rul
 - **Whole-file `#if os(visionOS)` gates** with iOS stubs where other files
   reference the type: `Pseudo3DVideoPlayerView` (stub calls
   `onPlaybackError` so callers fall back to the flat player),
-  `StereoscopicVideoView` (stub offers "Play as 2D"), `SlideshowSpatial3DLayer`
-  (empty), `ImmersiveVideoView`, `Spatial3DImmersiveView`, `ManagedWindows`,
+  `SlideshowSpatial3DLayer` (empty), `Spatial3DImmersiveView`, `ManagedWindows`,
   `TabBarOrnament`, `HypnosAppIntents`, and `LiftHoverEffect`/
   `ScaleHoverEffect` (degrade to the system pointer hover).
 - **`Views/MainTabCatalog.swift`** — which tabs are visible and what the

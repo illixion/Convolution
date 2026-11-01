@@ -12,7 +12,7 @@ It is one codebase with a single app target and platform-specific scene roots. T
 - **Four library sources** — your device **Photos** library (the default, no setup), **Local** files in the app's Documents folder, a **Stash** server, and a **Nextcloud** server. Switch between them from the tab bar
 - **Library tab for Jellyfin** — an Apple-TV-app-style home (hero, shelves, detail pages, seasons and episodes) with watch progress synced both ways
 - **Object-audio films** — with the companion Jellyfin plugin, a film's sound objects play as spatial sources in a virtual room around you, on the same clock as the picture. visionOS places them in space; Apple TV renders them through a head-tracked binaural stage; iOS and macOS use AirPods head tracking where available
-- **Real-time and pre-processed 3D video** — convert a flat video to windowed stereoscopic 3D with Depth Anything V2, either instantly at up to 60 fps or by pre-processing the depth in the background and caching it; side-by-side and over-under sources convert to MV-HEVC for immersive playback
+- **Real-time and pre-processed 3D video** — convert a flat video to windowed stereoscopic 3D with Depth Anything V2, either instantly at up to 60 fps or by pre-processing the depth in the background and caching it; side-by-side and over-under sources play in 3D live in the window
 - **Pictures grid** — square cells or the original aspect ratio in justified rows, laid out from metadata alone so it settles before any pixel loads
 - **Albums** — Photos albums, Stash galleries and Local folders through one browser
 - **Photo viewer** — brightness, contrast, saturation and sharpening, auto-enhance, background removal, flip, and a pop-out into its own window
@@ -78,7 +78,7 @@ The same app on iPhone, Apple TV and Mac, each with its own shell around the sha
 | Settings backup export and import | ✓ | ✓ | — no Files app | ✓ |
 | Cache manager and in-app debug console | ✓ | ✓ | ✓ | ✓ |
 | Spatial 3D photo conversion and immersive 3D | ✓ | — needs a stereoscopic display | — | — |
-| Pseudo-3D and MV-HEVC video with depth models | ✓ | — | — | ✓ |
+| Pseudo-3D and live stereo video with depth models | ✓ | — | — | ✓ |
 | Multiple windows | ✓ | — single-window shell | — single-window shell | ✓ real windows and menu bar |
 | Windows tab and saved window groups | ✓ | — | — | — |
 | Set up from another device (QR code) | sends | sends | receives | sends |
@@ -220,7 +220,7 @@ Browse your photos in a grid (square or original aspect ratio, set in Settings �
 Spatial 3D generation needs an Apple Vision Pro; the Simulator falls back to the flat photo.
 
 ### Videos tab
-Browse and play videos. The **view mode** button in the ornament switches between flat **2D**, **Convert to 3D (Beta)** and, for side-by-side or over-under sources, full immersive **Stereoscopic 3D**.
+Browse and play videos. The **view mode** button in the ornament switches between flat **2D**, **AI 3D** and, for side-by-side or over-under sources, **3D**.
 
 #### Converting flat video to 3D
 Windowed stereoscopic 3D from any flat video, using Core ML monocular depth (Depth Anything V2 Small):
@@ -231,7 +231,7 @@ Windowed stereoscopic 3D from any flat video, using Core ML monocular depth (Dep
 - **Real-Time 3D for All Videos** (Settings → AI 3D) opens eligible videos in 3D automatically, preferring cached depth when it exists
 
 #### Stereoscopic 3D
-Videos tagged side-by-side or over-under in Stash convert to MV-HEVC and play in a full immersive space.
+Videos tagged side-by-side or over-under play live in 3D in the window, with no conversion. A source only WebKit can play needs the server's transcode for that; without one it plays in 2D.
 
 #### Playback
 Custom controls (play/pause, scrubber with buffered range, ±10 s, A-B loop, mute) share one ornament in 2D and 3D, so all chrome stays on the video's depth plane. Window aspect ratio is locked to the video.
@@ -265,7 +265,6 @@ The app follows a SwiftUI architecture:
 - `Pseudo3DVideoPlayerView` + `StereoPump` + `CoreMLDepthProvider` (in `RAVEMedia`) for real-time windowed 2D→3D video, with all per-frame GPU work off the main thread
 - `DepthConverter`, `DepthCacheStore` and `DepthCacheReader` for the pre-processed pipeline, and `DepthConversionManager` for background jobs with progressive playback
 - `FilmPlayerView` on `RAVEFilm` for object-audio films
-- `StereoscopicVideoPlayer` + `MVHEVCConverter` for MV-HEVC immersive video
 - `SlideshowEngine` (in `RAVESlideshow`) and `RemoteViewerModel` for slideshows
 
 Platform notes live in [`CLAUDE.md`](CLAUDE.md) and `.claude/rules/`.
