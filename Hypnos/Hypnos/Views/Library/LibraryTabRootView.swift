@@ -24,6 +24,7 @@ struct LibraryTabRootView: View {
     @State private var model = LibraryHomeViewModel()
     @State private var playback = LibraryPlayback()
     @State private var path = NavigationPath()
+    @State private var showsMusic = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -40,6 +41,9 @@ struct LibraryTabRootView: View {
                 .navigationTitle("Library")
                 .moreTabBackButton()
                 .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { showsMusic = true } label: { Label("Music", systemImage: "music.note") }
+                    }
                     ToolbarItem(placement: .primaryAction) {
                         LibraryDownloadsToolbarButton { path.append(LibraryDownloadsRequest()) }
                     }
@@ -61,6 +65,7 @@ struct LibraryTabRootView: View {
                 #endif
         }
         .environment(\.libraryOpenDetail) { path.append($0) }
+        .sheet(isPresented: $showsMusic) { NavigationStack { LibraryMusicView() } }
         // Dark whatever the system appearance, like the Apple TV app: the
         // page is artwork, and a white page between backdrops glares.
         .environment(\.colorScheme, .dark)

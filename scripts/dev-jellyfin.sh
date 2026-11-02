@@ -69,6 +69,7 @@ spatial="${HYPNOS_DEV_JELLYFIN_SPATIAL:-$HOME/Downloads/IMG_0664.MOV}"
 base="http://127.0.0.1:$port"
 apikey_file="$root/config/dev-api-key.txt"
 demo="${HYPNOS_DEV_JELLYFIN_DEMO:-$HOME/Downloads/DolbyElement4K_VisionAtmos.mkv}"
+music_sample="${HYPNOS_DEV_JELLYFIN_MUSIC:-$HOME/Music/Library/El Presidente/El Presidente}"
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 image="jellyfin/jellyfin:12.2"
 devuser=dev
@@ -378,6 +379,14 @@ META
 
 seed_media() {
     mkdir -p "$root/data/movies"
+    # Optional real-world music fixture. It is copied into the disposable
+    # Jellyfin data tree (never modified) and mounted read-only with the rest.
+    if [[ -d "$music_sample" ]]; then
+        mkdir -p "$root/data/music"
+        if [[ ! -d "$root/data/music/El Presidente" ]]; then
+            ditto "$music_sample" "$root/data/music/El Presidente"
+        fi
+    fi
     if [[ ! -f "$demo" ]]; then
         echo "dev-jellyfin: demo file not found at $demo (set HYPNOS_DEV_JELLYFIN_DEMO)" >&2
         exit 1
@@ -723,6 +732,11 @@ setup_and_scan() {
         api -X POST "$base/Library/VirtualFolders?name=TV%20Shows&collectionType=tvshows&refreshLibrary=true" \
             -H "Authorization: MediaBrowser Token=\"$token\"" -H 'Content-Type: application/json' \
             -d '{"LibraryOptions":{"PathInfos":[{"Path":"'"$media"'/tvshows"}],"EnablePhotos":false,"EnableRealtimeMonitor":false,"EnableInternetProviders":false}}' >/dev/null
+        if [[ -d "$root/data/music/El Presidente" ]]; then
+            api -X POST "$base/Library/VirtualFolders?name=Music&collectionType=music&refreshLibrary=true" \
+                -H "Authorization: MediaBrowser Token=\"$token\"" -H 'Content-Type: application/json' \
+                -d '{"LibraryOptions":{"PathInfos":[{"Path":"'"$media"'/music"}],"EnableRealtimeMonitor":false,"EnableInternetProviders":false}}' >/dev/null
+        fi
 
         api -X POST "$base/Auth/Keys?App=hypnos-dev" -H "Authorization: MediaBrowser Token=\"$token\"" >/dev/null
         local key
@@ -735,6 +749,11 @@ setup_and_scan() {
     else
         local key
         key=$(cat "$apikey_file")
+        if [[ -d "$root/data/music/El Presidente" ]] && ! api "$base/Library/VirtualFolders" -H "Authorization: MediaBrowser Token=\"$key\"" | python3 -c 'import json,sys; sys.exit(0 if any(x.get("Name")=="Music" for x in json.load(sys.stdin)) else 1)'; then
+            api -X POST "$base/Library/VirtualFolders?name=Music&collectionType=music&refreshLibrary=true" \
+                -H "Authorization: MediaBrowser Token=\"$key\"" -H 'Content-Type: application/json' \
+                -d '{"LibraryOptions":{"PathInfos":[{"Path":"'"$media"'/music"}],"EnableRealtimeMonitor":false,"EnableInternetProviders":false}}' >/dev/null
+        fi
         api -X POST "$base/Library/Refresh" -H "Authorization: MediaBrowser Token=\"$key\"" >/dev/null
     fi
 
