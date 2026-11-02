@@ -156,6 +156,7 @@ enum ShareSheetHelper {
         do {
             try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
             try fm.copyItem(at: sourceURL, to: destURL)
+            stripExtendedAttributes(at: destURL)
         } catch {
             // Share the original rather than a path with nothing behind it.
             AppLogger.photoWindow.error("Could not stage the share file: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
@@ -165,6 +166,29 @@ enum ShareSheetHelper {
         let size = (try? fm.attributesOfItem(atPath: destURL.path)[.size] as? Int) ?? -1
         AppLogger.photoWindow.info("Share file ready: ext=\(destURL.pathExtension.lowercased(), privacy: .public) bytes=\(size, privacy: .public)")
         return destURL
+    }
+
+    /// Removes every extended attribute from the staged copy.
+    ///
+    /// A copy carries its source's attributes, and a container that
+    /// `containermanagerd` has marked (`com.apple.dataprotection.policy.exception-applied-by`
+    /// on every cache file) hands them to the share. A fresh install has no such
+    /// attributes on its files and shares fine; the marked one listed the item
+    /// and then ignored every action. Nothing the recipient needs is stored there.
+    private static func stripExtendedAttributes(at url: URL) {
+        let path = url.path
+        let length = listxattr(path, nil, 0, 0)
+        guard length > 0 else { return }
+        var buffer = [CChar](repeating: 0, count: length)
+        guard listxattr(path, &buffer, length, 0) > 0 else { return }
+        var names: [String] = []
+        var start = 0
+        for index in buffer.indices where buffer[index] == 0 {
+            if index > start { names.append(String(cString: Array(buffer[start...index]))) }
+            start = index + 1
+        }
+        for name in names { removexattr(path, name, 0) }
+        AppLogger.photoWindow.info("Share file: removed \(names.count, privacy: .public) extended attribute(s)")
     }
 
     /// A file name safe to hand to the share sheet: no path separators or
