@@ -124,7 +124,16 @@ photo's own peak instead of 1.0. An SDR photo decodes as before.
   blown out (device, 2026-10-28).
 - **Screenshots from the headset are SDR** (8-bit, sRGB transfer): they can compare relative
   brightness but cannot measure HDR.
-- Debug server: `photoHDR` (enabled, headroom, midGamma) and `photoHDRTest` (`dots`,
+- **AI 3D's HDR highlights come out muted** (device, 2026-11-02): the encoded HLG frame holds them
+  exactly (Mac read-back: 2.5x sits at signal 0.896 and decodes back to 2.5), but `VideoPlayerComponent`
+  rolls HLG off from its 4.9x nominal peak into the panel, so a highlight the flat view clips reads
+  weaker, with detail still showing. `highlightPower` (`aiPhotoHDRHighlightPower`, default 1 = off)
+  raises luminance above SDR white before encoding; 1.74-2.1 made the highlights visible but still
+  weaker than flat against about:blank. A guessed curve, not a fix: the player's response hasn't been
+  measured. In-app ReplayKit capture fails on visionOS 27 (`RPRecordingErrorDomain` -5833, "media
+  services failure"), and ScreenCaptureKit's HDR modes are `API_UNAVAILABLE(visionos)`, so there is no
+  HDR capture on the device.
+- Debug server: `photoHDR` (enabled, headroom, midGamma, highlightPower) and `photoHDRTest` (`dots`,
   `patches`, `dots3d`, `patches3d`, `flip`, `off`: a raw pattern through the flat EDR path
   or AI 3D's video path). Open item: the AI 3D picture's black looked grey beside the flat one
   on the PQ build; not re-checked on HLG.

@@ -37,10 +37,13 @@ enum PhotoStereoDebugEndpoints {
                     return reply()
                 },
             .command("photoHDR", "HDR photos: on/off, the display headroom highlights are tone mapped to, and the "
-                + "mid-tone curve of the AI 3D HDR frame. Reopen or reload a photo to see a change.", parameters: [
+                + "mid-tone curve and highlight expansion of the AI 3D HDR frame. AI 3D applies a curve change live; "
+                + "reopen or reload a photo for the others.", parameters: [
                     .boolean("enabled", "decode HDR photos as HDR (default on)"),
                     .number("headroom", "display headroom in multiples of SDR white; 0 restores the default (2.5)", range: 0 ... 16),
-                    .number("midGamma", "power on the AI 3D frame's linear picture; above 1 darkens mid-tones (default 1.09)", range: 0.5 ... 2)
+                    .number("midGamma", "power on the AI 3D frame's linear picture; above 1 darkens mid-tones (default 1.09)", range: 0.5 ... 2),
+                    .number("highlightPower", "power on the AI 3D frame's luminance above SDR white; above 1 brightens "
+                        + "highlights only, 1.74 takes 2.5x to HLG's peak (default 1, off)", range: 1 ... 3)
                 ]) { args in setHDR(args) },
             .command("photoAIHDR", "AI HDR on a photo window: an SDR photo gets a generated gain map (GMNet). "
                 + "Watch flatHeadroom / aiHeadroom in the reply; the log has the model's time.", parameters: [
@@ -78,6 +81,9 @@ enum PhotoStereoDebugEndpoints {
         }
         if let gamma = args.double("midGamma") {
             UserDefaults.standard.set(gamma, forKey: "aiPhotoHDRMidGamma")
+        }
+        if let power = args.double("highlightPower") {
+            UserDefaults.standard.set(power, forKey: "aiPhotoHDRHighlightPower")
         }
         return reply()
     }
@@ -203,6 +209,7 @@ enum PhotoStereoDebugEndpoints {
         let hdrEnabled: Bool
         let hdrHeadroom: Float
         let hdrMidGamma: Double
+        let hdrHighlightPower: Double
         let windows: [Window]
     }
     struct Window: Encodable {
@@ -224,6 +231,7 @@ enum PhotoStereoDebugEndpoints {
         Reply(separated: UserDefaults.standard.bool(forKey: "aiPhotoSeparateBoundaries"),
               hdrEnabled: HDRStills.isEnabled, hdrHeadroom: HDRStills.targetHeadroom,
               hdrMidGamma: UserDefaults.standard.object(forKey: "aiPhotoHDRMidGamma") as? Double ?? 1.09,
+              hdrHighlightPower: UserDefaults.standard.object(forKey: "aiPhotoHDRHighlightPower") as? Double ?? 1,
               windows: orderedWindows.map {
             Window(enabled: $0.isAIDepthMode, ready: $0.aiDepthPresentationReady, processingDepth: $0.isProcessingAIDepth,
                 sourceWidth: $0.aiDepthSource?.width ?? 0, sourceHeight: $0.aiDepthSource?.height ?? 0,
