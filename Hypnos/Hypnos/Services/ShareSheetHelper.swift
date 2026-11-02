@@ -5,6 +5,7 @@
  Presented via SwiftUI's .sheet to ensure proper hand tracking input.
  */
 
+import DebugTrace
 import SwiftUI
 
 // UIActivityViewController (the share sheet) doesn't exist on tvOS — there's
@@ -134,44 +135,72 @@ class ActivityHostController: UIViewController {
 @MainActor
 enum ShareSheetHelper {
     /// Prepare a shareable file URL with a human-readable name and correct extension.
-    /// Copies/hardlinks the source file to a temp directory with the given name.
+    ///
+    /// The file is a *copy* (an APFS clone, so no extra disk space) in a folder
+    /// of its own, never a hardlink to the cache entry. A hardlink shares the
+    /// cache file's inode, whose own name is a bare hash with no extension;
+    /// the system's share sheet resolves a file by identity as well as by path,
+    /// found no type for it, and listed the item with every action dead
+    /// ("is not shareable by client", Launch Services -10814). A folder per
+    /// share also means preparing the same image again cannot delete the file
+    /// a sheet still open from the last share is holding.
     static func prepareShareFile(from sourceURL: URL, title: String?, originalURL: URL) -> URL {
-        let fileName: String
+        let fm = FileManager.default
+        let shareRoot = fm.temporaryDirectory.appendingPathComponent("ShareItems", isDirectory: true)
+        removeStaleShares(in: shareRoot)
 
-        if let title, !title.isEmpty {
-            // Sanitize title for use as filename
-            var sanitized = title
-                .replacingOccurrences(of: "/", with: "-")
-                .replacingOccurrences(of: ":", with: "-")
+        let fileName = shareFileName(title: title, originalURL: originalURL, sourceURL: sourceURL)
+        let destDir = shareRoot.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let destURL = destDir.appendingPathComponent(fileName)
 
-            // If the title already has an extension, use it as-is.
-            // Otherwise, append the extension from the original URL if available.
-            let titleExt = (sanitized as NSString).pathExtension
-            if titleExt.isEmpty {
-                let urlExt = originalURL.pathExtension
-                if !urlExt.isEmpty {
-                    sanitized = "\(sanitized).\(urlExt)"
-                }
-            }
-            fileName = sanitized
-        } else {
-            // Fall back to the original URL's last path component
-            fileName = originalURL.lastPathComponent
-        }
-
-        let shareDir = FileManager.default.temporaryDirectory.appendingPathComponent("ShareItems", isDirectory: true)
-        try? FileManager.default.createDirectory(at: shareDir, withIntermediateDirectories: true)
-
-        let destURL = shareDir.appendingPathComponent(fileName)
-        try? FileManager.default.removeItem(at: destURL)
-
-        // Try hardlink first (no extra disk space), fall back to copy
         do {
-            try FileManager.default.linkItem(at: sourceURL, to: destURL)
+            try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+            try fm.copyItem(at: sourceURL, to: destURL)
         } catch {
-            try? FileManager.default.copyItem(at: sourceURL, to: destURL)
+            // Share the original rather than a path with nothing behind it.
+            AppLogger.photoWindow.error("Could not stage the share file: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+            return sourceURL
         }
 
+        let size = (try? fm.attributesOfItem(atPath: destURL.path)[.size] as? Int) ?? -1
+        AppLogger.photoWindow.info("Share file ready: ext=\(destURL.pathExtension.lowercased(), privacy: .public) bytes=\(size, privacy: .public)")
         return destURL
+    }
+
+    /// A file name safe to hand to the share sheet: no path separators or
+    /// control characters, a bounded length, and an extension whenever one is
+    /// known (the title's own, else the original URL's, else the source's).
+    private static func shareFileName(title: String?, originalURL: URL, sourceURL: URL) -> String {
+        var name = (title?.isEmpty == false ? title! : originalURL.lastPathComponent)
+        name = name.unicodeScalars
+            .map { "/:\\".unicodeScalars.contains($0) || CharacterSet.controlCharacters.contains($0) ? "-" : String($0) }
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty || name == "." || name == ".." { name = "image" }
+
+        if (name as NSString).pathExtension.isEmpty {
+            let ext = [originalURL, sourceURL].map(\.pathExtension).first { !$0.isEmpty } ?? ""
+            if !ext.isEmpty { name += ".\(ext)" }
+        }
+        // 255 bytes is the file system's limit; keep the extension when cutting.
+        if name.utf8.count > 200 {
+            let ext = (name as NSString).pathExtension
+            let stem = String((name as NSString).deletingPathExtension.prefix(150))
+            name = ext.isEmpty ? stem : "\(stem).\(ext)"
+        }
+        return name
+    }
+
+    /// Shares older than a day are no longer open in any sheet.
+    private static func removeStaleShares(in root: URL) {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: [.contentModificationDateKey]
+        ) else { return }
+        let cutoff = Date().addingTimeInterval(-24 * 3600)
+        for entry in entries {
+            let modified = (try? entry.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            if let modified, modified < cutoff { try? fm.removeItem(at: entry) }
+        }
     }
 }
