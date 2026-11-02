@@ -103,8 +103,10 @@ struct Pseudo3DVideoPlayerView: View {
                     isFlipped: isFlipped
                 )
                 engine.onVideoSizeKnown = onVideoSizeKnown
-                engine.onPlaybackError = { [engine, weak playbackModel] in
-                    if engine.failure == .needsSystemRenderer { playbackModel?.notePictureNeedsSystemRenderer() }
+                // Weak: the engine holds this, so a strong capture kept it
+                // (and its pump) alive whenever cleanup didn't run.
+                engine.onPlaybackError = { [weak engine, weak playbackModel] in
+                    if engine?.failure == .needsSystemRenderer { playbackModel?.notePictureNeedsSystemRenderer() }
                     onPlaybackError?()
                 }
                 engine.onDurationKnown = onDurationKnown

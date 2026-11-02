@@ -252,6 +252,14 @@ final class VideoWindowModel {
         sceneDisconnected = true
         Self.silence(nativePlayer)
         pauseCommand?()
+        #if os(visionOS)
+        // The stereo player's onDisappear doesn't run when the scene goes
+        // away in the background, and its pump kept ticking paused for the
+        // rest of the session (it even answered stereoEyes captures with the
+        // closed window's frame, device 2026-11-02).
+        stereoEngine?.cleanup()
+        stereoEngine = nil
+        #endif
         cleanup()
     }
 
