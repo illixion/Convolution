@@ -126,26 +126,25 @@ enum Playlists {
                 described.insert(plan.renditionNumber)
             }
         }
-        // A Stable Audio copy is its track's name, marked; when it plays
-        // first (listed before its track), the track is marked as the
-        // original instead of taking the plain name.
-        for (i, plan) in audio.enumerated() where plan.stable {
-            base[plan.renditionNumber]! += " (Stable)"
-            if let original = audio[i...].first(where: { !$0.stable && $0.track.number == plan.track.number }) {
-                base[original.renditionNumber]! += " (Original)"
-            }
-        }
+        // Tracks are told apart among themselves; a Stable Audio copy is
+        // then its track's name exactly, marked, whichever of the two plays
+        // first: a player pairs them by that (`AudioRendition.stableSuffix`)
+        // and lists only the track.
+        let tracks = audio.filter { !$0.stable }
         var names = base
-        for (name, plans) in Dictionary(grouping: audio, by: { base[$0.renditionNumber]! }) where plans.count > 1 {
+        for (name, plans) in Dictionary(grouping: tracks, by: { base[$0.renditionNumber]! }) where plans.count > 1 {
             for plan in plans where !described.contains(plan.renditionNumber) {
                 names[plan.renditionNumber] = "\(name) (\(layout(plan.channels)))"
             }
         }
         var seen: [String: Int] = [:]
-        for plan in audio {
+        for plan in tracks {
             let name = names[plan.renditionNumber]!
             seen[name, default: 0] += 1
             if seen[name]! > 1 { names[plan.renditionNumber] = "\(name) \(seen[name]!)" }
+        }
+        for plan in audio where plan.stable {
+            names[plan.renditionNumber] = names[plan.track.number]! + AudioRendition.stableSuffix
         }
 
         // LANGUAGE: the track's, for the default first; else what to show.
@@ -262,6 +261,10 @@ public struct AudioRendition: Sendable, Equatable {
     /// A Stable Audio copy of a decoded track (`StableAudio.swift`);
     /// `trackNumber` is then the track's with `stableFlag` set.
     public var isStable: Bool = false
+
+    /// Ends a Stable Audio copy's NAME (the track's own name before it),
+    /// which is how a player tells the copy from its track.
+    public static let stableSuffix = " (Stable)"
     /// The rendition's media playlist, relative to the master.
     public var uri: String
 }

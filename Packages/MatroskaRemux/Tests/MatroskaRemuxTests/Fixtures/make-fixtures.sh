@@ -170,6 +170,19 @@ ff -f lavfi -i "$(src 160x90 25 9)" -filter_complex "$tones" -map 0:v -map "[s]"
    -c:v libx264 -preset veryfast -crf 40 -g 25 -c:a dca -strict -2 -metadata:s:a:0 language=eng -b:a 768k dts-51.mkv
 ff -f lavfi -i "$(src 160x90 25 9)" -filter_complex "$tones" -map 0:v -map "[s]" -ar 48000 -sample_fmt s16p \
    -c:v libx264 -preset veryfast -crf 40 -g 25 -c:a truehd -strict -2 -metadata:s:a:0 language=eng truehd-51.mkv
+# The same tones in the codecs that play as they are, which Stable Audio
+# decodes with the system's decoders (SystemAudioDecoding).
+for codec in aac ac3 eac3; do
+    ff -f lavfi -i "$(src 160x90 25 9)" -filter_complex "$tones" -map 0:v -map "[s]" -ar 48000 \
+       -c:v libx264 -preset veryfast -crf 40 -g 25 -c:a $codec -b:a 384k -metadata:s:a:0 language=eng "$codec-51-tones.mkv"
+done
+# A click a second in every channel, so a test can tell whether a Stable
+# copy plays in time with its track.
+click="if(lt(mod(t\\,1)\\,0.002)\\,0.5\\,0)"
+for codec in aac eac3; do
+    ff -f lavfi -i "$(src 160x90 25 9)" -f lavfi -i "aevalsrc=$click|$click|$click|$click|$click|$click:s=48000:d=9:c=5.1(side)" \
+       -map 0:v -map 1:a -c:v libx264 -preset veryfast -crf 40 -g 25 -c:a $codec -b:a 384k "$codec-51-clicks.mkv"
+done
 
 write_expected
 

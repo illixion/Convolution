@@ -170,10 +170,11 @@ struct StableRenditionTests {
         let stableLine = try #require(session.masterPlaylist.split(separator: "\n").first { $0.contains("(Stable)") })
         #expect(stableLine.contains("DEFAULT=YES"))
         // The player's choice by language lands on the Stable copy; the
-        // original is named as such.
+        // track keeps its plain name (a player lists only the track).
         let renditions = session.audioRenditions
         #expect(renditions[0].playlistLanguage == "en")
-        #expect(renditions[1].name.hasSuffix("(Original)"))
+        #expect(renditions[0].name.hasSuffix(AudioRendition.stableSuffix))
+        #expect(!renditions[1].name.contains("("))
         #expect(renditions[1].playlistLanguage == renditions[1].name)
     }
 
@@ -235,6 +236,67 @@ struct StableRenditionTests {
             #expect(TranscodeTests.tone(processed, channel: c, frames: frames) == [300, 500, 700, 900, 1100, 60][c])
         }
         #expect(processed != plain)
+    }
+
+    /// Tracks that play as they are get a Stable copy decoded by the
+    /// system (`SystemAudioDecoding`), in every build; the track itself is
+    /// untouched.
+    @Test(arguments: ["aac-51-tones.mkv", "ac3-51-tones.mkv", "eac3-51-tones.mkv"])
+    func systemDecodedCopyPlaysWithEachChannelInPlace(_ name: String) async throws {
+        var options = RemuxOptions()
+        options.audioDecoding = SystemAudioDecoding.decoding
+        options.stableAudio = .offered
+        let session = try await Fixtures.open(name, options: options)
+        let tracks = session.summary.audio
+        #expect(tracks.map(\.isStable) == [false, true])
+        #expect(tracks[0].codec == tracks[1].codec)
+        let plain = try await Self.read(session, tracks[0].number)
+        let processed = try await Self.read(session, tracks[1].number)
+        // The whole 9 s (AVFoundation reads the AC-3 track itself a
+        // decoder's latency short, so it isn't the measure).
+        #expect(abs(processed.count / 6 - 9 * 48000) <= 4096, "\(processed.count / 6) samples")
+        let frames = min(plain.count, processed.count) / 6
+        #expect(frames > 48000)
+        for c in 0 ..< 6 {
+            #expect(TranscodeTests.tone(processed, channel: c, frames: frames) == [300, 500, 700, 900, 1100, 60][c],
+                    "channel \(c)")
+        }
+        // The same bytes every time.
+        let again = try await Fixtures.open(name, options: options)
+        for k in 0 ..< session.segmentCount {
+            let a = try await session.audioSegment(track: tracks[1].number, k)
+            let b = try await again.audioSegment(track: tracks[1].number, k)
+            #expect(a == b, "segment \(k)")
+        }
+    }
+
+    /// The copy plays in time with its track: a click a second, found at
+    /// the same samples in both as AVFoundation plays them. (The system's
+    /// AC-3 decoder holds 288 samples back and AAC's priming is trimmed
+    /// from the track by the player; both were off before.)
+    @Test(arguments: ["aac-51-clicks.mkv", "eac3-51-clicks.mkv"])
+    func systemDecodedCopyKeepsTime(_ name: String) async throws {
+        var options = RemuxOptions()
+        options.audioDecoding = SystemAudioDecoding.decoding
+        options.stableAudio = .offered
+        let session = try await Fixtures.open(name, options: options)
+        let tracks = session.summary.audio
+        let plain = Self.clicks(try await Self.read(session, tracks[0].number))
+        let processed = Self.clicks(try await Self.read(session, tracks[1].number))
+        #expect(plain.count >= 8)
+        #expect(plain == processed, "track \(plain), Stable copy \(processed)")
+    }
+
+    /// Where the left channel's clicks are: each first sample at a quarter
+    /// of the peak, half a second apart at least.
+    static func clicks(_ pcm: [Int32]) -> [Int] {
+        let frames = pcm.count / 6
+        let peak = (0 ..< frames).map { abs(Int(pcm[$0 * 6 + 1])) }.max() ?? 0
+        var out: [Int] = [], i = 0
+        while i < frames {
+            if abs(Int(pcm[i * 6 + 1])) * 4 >= peak, peak > 0 { out.append(i); i += 24000 } else { i += 1 }
+        }
+        return out
     }
 
     static func read(_ session: RemuxSession, _ number: UInt64) async throws -> [Int32] {

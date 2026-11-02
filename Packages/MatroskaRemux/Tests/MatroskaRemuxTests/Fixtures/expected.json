@@ -1,4 +1,40 @@
 {
+ "aac-51-clicks.mkv": [
+  {
+   "codec": "h264",
+   "packets": 225,
+   "type": "video"
+  },
+  {
+   "codec": "aac",
+   "packets": 423,
+   "type": "audio"
+  }
+ ],
+ "aac-51-tones.mkv": [
+  {
+   "codec": "h264",
+   "packets": 225,
+   "type": "video"
+  },
+  {
+   "codec": "aac",
+   "packets": 423,
+   "type": "audio"
+  }
+ ],
+ "ac3-51-tones.mkv": [
+  {
+   "codec": "h264",
+   "packets": 225,
+   "type": "video"
+  },
+  {
+   "codec": "ac3",
+   "packets": 282,
+   "type": "audio"
+  }
+ ],
  "ac3-51.mkv": [
   {
    "codec": "h264",
@@ -44,6 +80,30 @@
   {
    "codec": "dts",
    "packets": 844,
+   "type": "audio"
+  }
+ ],
+ "eac3-51-clicks.mkv": [
+  {
+   "codec": "h264",
+   "packets": 225,
+   "type": "video"
+  },
+  {
+   "codec": "eac3",
+   "packets": 282,
+   "type": "audio"
+  }
+ ],
+ "eac3-51-tones.mkv": [
+  {
+   "codec": "h264",
+   "packets": 225,
+   "type": "video"
+  },
+  {
+   "codec": "eac3",
+   "packets": 282,
    "type": "audio"
   }
  ],

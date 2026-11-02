@@ -51,9 +51,19 @@ struct VideoControlBar<Accessories: View>: View {
         )
     }
 
+    /// Frozen while a menu is open, except the sound: the volume popover
+    /// is one of those menus, and its slider and mute must show what they
+    /// set as they set it (they lagged a whole menu behind).
+    private var state: RAVEPlayerControlState {
+        guard var state = frozenState else { return liveState }
+        state.volume = windowModel.volume
+        state.isMuted = windowModel.isMuted
+        return state
+    }
+
     var body: some View {
         RAVEPlayerControls(
-            state: frozenState ?? liveState,
+            state: state,
             togglePlayback: { windowModel.togglePlayPause() },
             seek: { windowModel.endScrub(at: $0) },
             toggleMute: { windowModel.toggleMute() },
@@ -67,7 +77,9 @@ struct VideoControlBar<Accessories: View>: View {
             setVolume: { windowModel.setVolume($0) },
             menuDismissal: windowModel.menuDismissals,
             navigation: navigation,
-            pinned: pinned
+            pinned: pinned,
+            volumeAccessory: windowModel.offersStableAudio
+                ? AnyView(StableAudioToggle(windowModel: windowModel)) : nil
         ) {
             accessories
         }
@@ -101,5 +113,26 @@ struct LoopControls: View {
                 Label("Clear A-B Loop", systemImage: "xmark.circle").ravePlayerAccessoryLabel()
             }
         }
+    }
+}
+
+/// Stable Audio, under the volume slider: shown when what plays has the
+/// copies (`StableAudioSetting`).
+struct StableAudioToggle: View {
+    @Bindable var windowModel: VideoWindowModel
+
+    var body: some View {
+        Toggle(isOn: Binding(get: { windowModel.stableAudioOn },
+                             set: { windowModel.setStableAudio($0); windowModel.startAutoHideTimer() })) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Stable Audio")
+                Text("Clear dialogue, even volume")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        #if !os(tvOS)
+        .toggleStyle(.switch)
+        #endif
+        .accessibilityHint("Brings up quiet dialogue and evens out loud scenes")
     }
 }

@@ -153,6 +153,14 @@ final class VideoWindowModel {
     @ObservationIgnored var libraryAudioStreamIndex: (itemId: String, index: Int)?
     @ObservationIgnored var libraryAudioTracks: (itemId: String, tracks: [LibraryAudioTrack])?
     @ObservationIgnored var audioTracksTask: Task<Void, Never>?
+    /// Each listed track's option paired with its Stable Audio copy's
+    /// (`VideoWindowModel+AudioTracks`); empty when there are none.
+    var stableAudioPairs: [Int: Int] = [:]
+    /// The volume popover's Stable Audio switch (`StableAudioSetting`).
+    var stableAudioOn = StableAudioSetting.isOn
+    /// The stereo engine's player (live 3D, AI 3D), whose audio options the
+    /// Audio menu and Stable Audio pick from while it plays.
+    @ObservationIgnored private(set) weak var stereoAudioPlayer: AVPlayer?
 
     /// Playback speed (1 is normal), chosen from the bar's Speed menu. Kept
     /// for this window, through every renderer change and the next video;
@@ -225,6 +233,13 @@ final class VideoWindowModel {
         Self.withNativePlayers.add(self)
         // A restored window can be disconnected before its player exists.
         if sceneDisconnected { Self.silence(player) }
+        refreshAudioTracks()
+    }
+
+    func noteStereoAudioPlayer(_ player: AVPlayer?) {
+        guard stereoAudioPlayer !== player else { return }
+        stereoAudioPlayer = player
+        Self.withNativePlayers.add(self)
         refreshAudioTracks()
     }
 

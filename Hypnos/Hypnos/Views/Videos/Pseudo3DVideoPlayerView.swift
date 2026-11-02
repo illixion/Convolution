@@ -341,6 +341,7 @@ extension Pseudo3DStereoEngine {
                 playbackModel?.subtitles.bindAnalysisPlayer(player, buffering: { [weak self] held in
                     self?.setAnalysisBuffering(held)
                 })
+                playbackModel?.noteStereoAudioPlayer(player)
             }
             playbackModel.playCommand = { [weak self] in self?.play() }
             playbackModel.pauseCommand = { [weak self] in self?.pause() }

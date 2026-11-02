@@ -107,6 +107,15 @@ enum VideoPlayerDebugEndpoints {
                 try? await Task.sleep(for: .seconds(1))
                 return await reply()
             },
+            .command("videoStableAudio", "Turns Stable Audio on or off, as the volume popover's switch does, "
+                     + "for the first video window that offers it. Returns the windows' state after it.",
+                     parameters: [.boolean("on", "Stable Audio on", required: true)]) { args in
+                guard let model = VideoWindowModel.withNativePlayers.allObjects.first(where: \.offersStableAudio),
+                      let on = args.bool("on") else { return await reply() }
+                model.setStableAudio(on)
+                try? await Task.sleep(for: .seconds(1))
+                return await reply()
+            },
         ])
     }
 
@@ -126,6 +135,9 @@ enum VideoPlayerDebugEndpoints {
         /// The Audio menu: each entry's source and what labels it.
         var audioMenu: [MenuEntry]
         var audioMenuSelected: Int?
+        /// The volume popover's switch, and how many tracks have a copy.
+        var stableAudioOn: Bool
+        var stableAudioCopies: Int
         var timing: Timing
     }
 
@@ -158,7 +170,7 @@ enum VideoPlayerDebugEndpoints {
     private static func reply() async -> Reply {
         var windows: [Window] = []
         for model in VideoWindowModel.withNativePlayers.allObjects {
-            guard let player = model.nativePlayer, let item = player.currentItem else { continue }
+            guard let player = model.audioPlayer, let item = player.currentItem else { continue }
             var tracks: [Track] = []
             for itemTrack in item.tracks {
                 guard let track = itemTrack.assetTrack, track.mediaType == .audio,
@@ -197,6 +209,8 @@ enum VideoPlayerDebugEndpoints {
                 playing: player.timeControlStatus == .playing,
                 audioMenu: model.audioTracks.map(menuEntry),
                 audioMenuSelected: model.audioTracks.firstIndex { $0.id == model.selectedAudioTrack },
+                stableAudioOn: model.stableAudioOn,
+                stableAudioCopies: model.stableAudioPairs.count,
                 timing: Timing(
                     playerSeconds: player.currentTime().seconds.isFinite ? player.currentTime().seconds : nil,
                     modelSeconds: model.currentTime.isFinite ? model.currentTime : nil,

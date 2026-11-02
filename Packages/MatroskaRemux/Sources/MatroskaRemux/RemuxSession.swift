@@ -345,10 +345,29 @@ public actor RemuxSession {
             }
             switch planned {
             case .success(let plan):
-                // A decoded track's Stable Audio copy goes beside it, first
-                // when it is to play first.
-                guard plan.transcode != nil, options.stableAudio != .off else { audio.append(plan); break }
-                var stable = plan
+                // A track's Stable Audio copy goes beside it, first when it
+                // is to play first. A decoded track's is the same plan; one
+                // that plays as it is (AAC, AC-3) gets a decoded plan of its
+                // own, when something decodes it. A track that can't have
+                // one still plays.
+                guard options.stableAudio != .off else { audio.append(plan); break }
+                var copy: AudioPlan?
+                if plan.transcode != nil {
+                    copy = plan
+                } else if let decoding, decoding.decodes(track.codecID),
+                          case .success(let decoded) = AudioPlan.makeTranscoded(
+                            track: track, firstFrame: first.data, firstTicks: first.blockTimestamp,
+                            timestampScale: header.timestampScale, offsetNanoseconds: offsetNanoseconds,
+                            decoding: decoding, codecName: plan.codecName,
+                            sourceFrame: plan.gridSamples.map { ($0, plan.sampleRate) }) {
+                    var decoded = decoded
+                    decoded.sourceRate = plan.sampleRate
+                    if SystemAudioDecodingCodec.isAAC(track.codecID) {
+                        decoded.leadingSamples = Int64(2112 * decoded.sampleRate / max(1, plan.sampleRate))
+                    }
+                    copy = decoded
+                }
+                guard var stable = copy else { audio.append(plan); break }
                 stable.stable = true
                 audio += options.stableAudio == .preferred ? [stable, plan] : [plan, stable]
             case .failure(let error): dropped.append(.init(number: track.number, codecID: track.codecID,
@@ -750,7 +769,7 @@ public actor RemuxSession {
     private func audioFragments(_ plan: AudioPlan, _ k: Int, from segment: ParsedSegment) async throws -> [Fragment] {
         let number = plan.track.number
         let index = self.index
-        var frames = segment.audio[number] ?? []
+        var frames = (segment.audio[number] ?? []).map(plan.retimed)
         let isLast = index.isLast(k)
         let lower = k == 0 ? Int64.min : plan.boundary(ticks: index.startTime(k))
         let upper = isLast ? Int64.max : plan.boundary(ticks: index.startTime(k + 1))
@@ -761,7 +780,7 @@ public actor RemuxSession {
         let grid = Int64(plan.gridSamples ?? 1024)
         if k > 0, (frames.first?.time ?? Int64.max) > lower + grid + grid / 2 {
             let previous = try await audioOf(k - 1)
-            frames += (previous.spill[number] ?? []).filter { $0.time >= lower && $0.time < upper }
+            frames += (previous.spill[number] ?? []).map(plan.retimed).filter { $0.time >= lower && $0.time < upper }
         }
         // File order isn't time order where a muxer interleaved loosely;
         // a frame read twice (the previous segment's spill) is kept once.
@@ -773,7 +792,7 @@ public actor RemuxSession {
                 : transcode.primingSeconds
             if primingSeconds > 0, k > 0 {
                 let from = frames[0].time - Int64(primingSeconds * Double(plan.sampleRate))
-                priming = ((try await audioOf(k - 1)).audio[number] ?? [])
+                priming = ((try await audioOf(k - 1)).audio[number] ?? []).map(plan.retimed)
                     .filter { $0.time >= from && $0.time < frames[0].time }
                     .sorted { $0.time < $1.time }
             }
@@ -813,7 +832,7 @@ public actor RemuxSession {
         // track has nothing past this segment, to the segment's end.
         let last = frames[frames.count - 1]
         let runEnd = last.time + Int64(last.samples)
-        let next = (segment.spill[number] ?? []).map(\.time).min()
+        let next = (segment.spill[number] ?? []).map { plan.retimed($0).time }.min()
         let target = next ?? end
         if target - runEnd > tolerance, !samples.isEmpty {
             samples[samples.count - 1].duration = UInt32(clamping: Int64(samples[samples.count - 1].duration) + target - runEnd)
@@ -873,7 +892,8 @@ public actor RemuxSession {
         var out: [AudioFrame] = []
         out.reserveCapacity(span / ALACEscape.frameLength + 1)
         pcm.withUnsafeBufferPointer { buffer in
-            var offset = 0
+            // Nothing before zero (a copy moved earlier by its priming).
+            var offset = Int(max(0, min(Int64(span), -start)))
             while offset < span {
                 let n = min(ALACEscape.frameLength, span - offset)
                 out.append(AudioFrame(time: start + Int64(offset), samples: n,
@@ -994,7 +1014,9 @@ public actor RemuxSession {
         for plan in audio {
             modes[plan.track.number] = .frames
             stripped[plan.track.number] = plan.track.strippedHeader
-            plans[plan.track.number] = plan
+            // A Stable copy of a track reads the track's frames, timed as
+            // the track's (`AudioPlan.retimed`).
+            if !plan.stable || plans[plan.track.number] == nil { plans[plan.track.number] = plan }
         }
         // Subtitle frames come as stored: `SubtitleReading.decoded` undoes
         // their encodings.

@@ -234,6 +234,21 @@ struct AudioPlan: Sendable {
     /// The Stable Audio copy of a decoded track (`StableAudio.swift`): the
     /// same frames, processed, as a rendition of its own.
     var stable = false
+    /// A Stable Audio copy decoded from a track that plays as it is (AAC,
+    /// AC-3): the segments' frames are parsed on that track's timeline,
+    /// whose rate this is, and re-timed onto this plan's (`retimed`).
+    var sourceRate: Int?
+    /// Samples (at this plan's rate) the decoder puts out ahead of the
+    /// track's first: AAC's priming, which the player trims from the track
+    /// itself, so the copy lines up with the track rather than 2112 late.
+    var leadingSamples: Int64 = 0
+
+    /// A frame parsed on the source track's timeline, on this plan's.
+    func retimed(_ frame: RemuxSession.AudioFrame) -> RemuxSession.AudioFrame {
+        guard let sourceRate, sourceRate > 0 else { return frame }
+        let time = Int64((Double(frame.time) * Double(sampleRate) / Double(sourceRate)).rounded()) - leadingSamples
+        return RemuxSession.AudioFrame(time: time, samples: samples(in: frame.data), data: frame.data)
+    }
 
     /// Set on a Stable Audio rendition's number, above any track number a
     /// file has.
@@ -411,7 +426,9 @@ extension AudioPlan {
     /// first frame is decoded to learn the rate and channels.
     static func makeTranscoded(track: MatroskaTrack, firstFrame: [UInt8], firstTicks: Int64,
                                timestampScale: Int64, offsetNanoseconds: Int64,
-                               decoding: RemuxAudioDecoding) -> Result<AudioPlan, RemuxError> {
+                               decoding: RemuxAudioDecoding,
+                               codecName: String? = nil,
+                               sourceFrame: (samples: Int, rate: Int)? = nil) -> Result<AudioPlan, RemuxError> {
         if let encoding = track.unreadableEncoding { return .failure(.declined("\(track.codecID) is \(encoding)")) }
         let id = track.codecID
         guard let decoder = decoding.make(id, track.codecPrivate) else {
@@ -434,6 +451,11 @@ extension AudioPlan {
             }
             source = .accessUnits(samplesPerUnit: decoded / units,
                                   timingOrigin: AudioTranscode.inputTiming(firstFrame))
+        } else if let sourceFrame, sourceFrame.rate > 0 {
+            // A codec whose frames are a known length (AAC, AC-3): that,
+            // at the decoded rate. A decoder can put out less for its first
+            // frame (the system's AC-3 decoder holds back 288 samples).
+            source = .constant(max(1, sourceFrame.samples * sampleRate / sourceFrame.rate))
         } else {
             source = .constant(decoded)
         }
@@ -447,7 +469,7 @@ extension AudioPlan {
         }
         let firstNanoseconds = firstTicks * timestampScale - Int64(clamping: track.codecDelay) + offsetNanoseconds
         let rawOrigin = Double(firstNanoseconds) * Double(sampleRate) / 1e9
-        return .success(AudioPlan(track: track, codec: .alac(config), codecName: isTrueHD ? "TrueHD" : "DTS",
+        return .success(AudioPlan(track: track, codec: .alac(config), codecName: codecName ?? (isTrueHD ? "TrueHD" : "DTS"),
                                   sampleRate: sampleRate, channels: speakers.count, sampleEntry: entry,
                                   codecs: "alac", averageBitrate: speakers.count * 24 * sampleRate,
                                   originSamples: Int64(rawOrigin.rounded()),
