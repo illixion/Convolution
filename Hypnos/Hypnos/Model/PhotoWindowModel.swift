@@ -272,6 +272,8 @@ class PhotoWindowModel {
     var aiDepthHeadroom: Float = 1
     /// A debug test pattern is on screen in place of the photo (`photoHDRTest`); reloads leave it alone.
     var showsDebugPattern = false
+    /// `photoHDRTest dotsRK`: the test pattern on a RealityKit unlit plane over the picture.
+    var debugRealityKitPattern: CGImage? = nil
     /// AI HDR: an SDR photo gets a generated gain map (`GainMapHDR`), flat
     /// and in AI 3D. Per image (`restoreAIHDRPreference`), starting from the
     /// Settings default.

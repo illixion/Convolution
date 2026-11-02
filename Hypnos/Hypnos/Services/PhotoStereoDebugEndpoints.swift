@@ -14,6 +14,7 @@ enum PhotoStereoDebugEndpoints {
         guard !registered else { return }
         registered = true
         registerRenderDiagnostics()
+        registerTunables()
         DebugSurface.shared.register([
             .query("photoStereoState", "Photo AI 3D: dimensions, resolution limits, depth precision and preparation state. "
                 + "Windows are ordered by most recent interaction.") { _ in reply() },
@@ -36,14 +37,10 @@ enum PhotoStereoDebugEndpoints {
                     }
                     return reply()
                 },
-            .command("photoHDR", "HDR photos: on/off, the display headroom highlights are tone mapped to, and the "
-                + "mid-tone curve and highlight expansion of the AI 3D HDR frame. AI 3D applies a curve change live; "
-                + "reopen or reload a photo for the others.", parameters: [
+            .command("photoHDR", "HDR photos: on/off and the display headroom highlights are tone mapped to. "
+                + "Reopen or reload a photo to see a change.", parameters: [
                     .boolean("enabled", "decode HDR photos as HDR (default on)"),
-                    .number("headroom", "display headroom in multiples of SDR white; 0 restores the default (2.5)", range: 0 ... 16),
-                    .number("midGamma", "power on the AI 3D frame's linear picture; above 1 darkens mid-tones (default 1.09)", range: 0.5 ... 2),
-                    .number("highlightPower", "power on the AI 3D frame's luminance above SDR white; above 1 brightens "
-                        + "highlights only, 1.74 takes 2.5x to HLG's peak (default 1, off)", range: 1 ... 3)
+                    .number("headroom", "display headroom in multiples of SDR white; 0 restores the default (2.5)", range: 0 ... 16)
                 ]) { args in setHDR(args) },
             .command("photoAIHDR", "AI HDR on a photo window: an SDR photo gets a generated gain map (GMNet). "
                 + "Watch flatHeadroom / aiHeadroom in the reply; the log has the model's time.", parameters: [
@@ -66,9 +63,11 @@ enum PhotoStereoDebugEndpoints {
                         .command("photoHDRTest", "Show an HDR test pattern in place of a photo window's picture, drawn raw "
                 + "through the flat EDR path. Left to right: " + testValues.map { String($0) }.joined(separator: ", ")
                 + " times SDR white, each beside a 1.0 reference. dots: small dots over black (the ceiling); "
-                + "patches: window-filling bars (the panel's brightness limiter). dots3d and patches3d send the pattern through AI 3D's video path instead. off reloads the photo.", parameters: [
+                + "patches: window-filling bars (the panel's brightness limiter). dots3d and patches3d send the pattern through AI 3D's video path instead; "
+                + "dotsRK and patchesRK draw it on a RealityKit unlit plane (tunables ai3d.rkSemantic, ai3d.rkToneMap). "
+                + "flip alternates dots and dots3d, flipRK dots and dotsRK. off reloads the photo.", parameters: [
                     .integer("window", "window index, most recently used first", default: 0, range: 0 ... 64),
-                    .string("layout", "dots, patches, dots3d, patches3d, flip (dots and dots3d alternating) or off", required: true)
+                    .string("layout", "dots, patches, dots3d, patches3d, dotsRK, patchesRK, flip, flipRK or off", required: true)
                 ]) { args in await showHDRTest(args) }
         ])
     }
@@ -79,12 +78,7 @@ enum PhotoStereoDebugEndpoints {
             if headroom < 1 { UserDefaults.standard.removeObject(forKey: HDRStills.headroomKey) }
             else { UserDefaults.standard.set(Float(headroom), forKey: HDRStills.headroomKey) }
         }
-        if let gamma = args.double("midGamma") {
-            UserDefaults.standard.set(gamma, forKey: "aiPhotoHDRMidGamma")
-        }
-        if let power = args.double("highlightPower") {
-            UserDefaults.standard.set(power, forKey: "aiPhotoHDRHighlightPower")
-        }
+
         return reply()
     }
 
@@ -95,12 +89,13 @@ enum PhotoStereoDebugEndpoints {
         let layout = args.string("layout") ?? "off"
         HDRTestFlipper.shared.task?.cancel()
         HDRTestFlipper.shared.task = nil
-        if layout == "flip" {
-            // Alternates flat and AI 3D every five seconds until another layout or `off`.
+        if layout == "flip" || layout == "flipRK" {
+            // Alternates flat and AI 3D (or the RealityKit plane) every five seconds until another layout or `off`.
+            let other = layout == "flip" ? "dots3d" : "dotsRK"
             HDRTestFlipper.shared.task = Task { @MainActor in
                 var through3D = false
                 while !Task.isCancelled {
-                    await applyHDRTest(layout: through3D ? "dots3d" : "dots", to: model)
+                    await applyHDRTest(layout: through3D ? other : "dots", to: model)
                     through3D.toggle()
                     try? await Task.sleep(for: .seconds(5))
                 }
@@ -118,9 +113,12 @@ enum PhotoStereoDebugEndpoints {
 
     private static func applyHDRTest(layout: String, to model: PhotoWindowModel) async {
         if model.isAIDepthMode { await model.setAIDepthMode(false, trackChange: false) }
-        // `dots3d` / `patches3d` send the same pattern through AI 3D's video path.
+        model.debugRealityKitPattern = nil
+        // `dots3d` / `patches3d` send the same pattern through AI 3D's video path,
+        // `dotsRK` / `patchesRK` through a RealityKit unlit plane.
         let through3D = layout.hasSuffix("3d")
-        let shape = through3D ? String(layout.dropLast(2)) : layout
+        let throughRK = layout.hasSuffix("RK")
+        let shape = through3D || throughRK ? String(layout.dropLast(2)) : layout
         if shape == "dots" || shape == "patches",
            let pattern = testPattern(dots: shape == "dots") {
             model.showsDebugPattern = true
@@ -138,6 +136,7 @@ enum PhotoStereoDebugEndpoints {
                 model.aiDepthPresentationReady = false
                 await model.setAIDepthMode(true, trackChange: false)
             }
+            if throughRK { model.debugRealityKitPattern = pattern.image }
         } else {
             model.showsDebugPattern = false
             model.displayTexture = nil
@@ -201,6 +200,15 @@ enum PhotoStereoDebugEndpoints {
         ])
     }
 
+    /// The RealityKit test plane's tunables, registered up front so the
+    /// Panels page lists them before a test plane reads them.
+    private static func registerTunables() {
+        #if os(visionOS)
+        _ = HDRTestPlaneView.semantic
+        _ = HDRTestPlaneView.toneMap
+        #endif
+    }
+
     private static var orderedWindows: [PhotoWindowModel] {
         windows.allObjects.sorted { $0.lastInteractionTime > $1.lastInteractionTime }
     }
@@ -208,8 +216,6 @@ enum PhotoStereoDebugEndpoints {
         let separated: Bool
         let hdrEnabled: Bool
         let hdrHeadroom: Float
-        let hdrMidGamma: Double
-        let hdrHighlightPower: Double
         let windows: [Window]
     }
     struct Window: Encodable {
@@ -230,8 +236,6 @@ enum PhotoStereoDebugEndpoints {
     private static func reply() -> Reply {
         Reply(separated: UserDefaults.standard.bool(forKey: "aiPhotoSeparateBoundaries"),
               hdrEnabled: HDRStills.isEnabled, hdrHeadroom: HDRStills.targetHeadroom,
-              hdrMidGamma: UserDefaults.standard.object(forKey: "aiPhotoHDRMidGamma") as? Double ?? 1.09,
-              hdrHighlightPower: UserDefaults.standard.object(forKey: "aiPhotoHDRHighlightPower") as? Double ?? 1,
               windows: orderedWindows.map {
             Window(enabled: $0.isAIDepthMode, ready: $0.aiDepthPresentationReady, processingDepth: $0.isProcessingAIDepth,
                 sourceWidth: $0.aiDepthSource?.width ?? 0, sourceHeight: $0.aiDepthSource?.height ?? 0,

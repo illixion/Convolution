@@ -57,11 +57,9 @@ presentation; the old `RAVEAIDepthPhotoView` is retained for other consumers.
   (real-time fallback); they never borrow a thumbnail-cache map. Still refinement
   uses the shared edge-aware kernels without temporal state or luma snapping.
 - RAVEMedia serializes bakes across windows, uses half-float extended-P3 colour
-  through adjustment/warp, and presents a 10-bit stereo frame through
-  `VideoPlayerComponent`: tagged SDR (P3, BT.709 transfer) for an SDR photo, since
-  a PQ tag made it visibly brighter than the flat one (SDR white lands at 203
-  nits, shown as HDR); HLG (BT.2020, mid-tone power 1.09) for an HDR photo.
-  See "HDR photos" below. The usual flat image keeps sizing the window, remains
+  through adjustment/warp, and presents the two eyes as half-float textures on one
+  plane whose Shader Graph material picks a texture per eye (RAVESDK's `CLAUDE.md`,
+  stereo stills). SDR and HDR photos take that one path. See "HDR photos" below. The usual flat image keeps sizing the window, remains
   until stereo is ready, and reappears for failures and transitions. Stereo
   stays on while ornaments and popovers are shown: the old relief-mesh fade
   workaround is unnecessary for depth that stays behind the window.
@@ -91,8 +89,11 @@ a different path) and uploaded as an `rgba16Float` texture, whose headroom is re
 `MetalImageRenderer.headroom(of:)`. `MetalImageView` turns EDR on for such a texture
 (`wantsExtendedDynamicRangeContent`, extended linear Display P3) and the shaders clamp at the
 photo's own peak instead of 1.0. An SDR photo decodes as before.
-- **AI 3D** gets the same tone-mapped picture as half-float (`aiDepthHeadroom`) and
-  encodes it HLG (RAVESDK's `CLAUDE.md`, stereo stills, has why PQ failed).
+- **AI 3D** gets the same tone-mapped picture as half-float (`aiDepthHeadroom`) and draws
+  its eyes as `.hdrColor` textures through an unlit RealityKit material, which shows values
+  above SDR white exactly as the flat EDR view does: a perfect match on device (2026-11-02).
+  `VideoPlayerComponent` did not: PQ tone mapped to the declared peak, HLG muted the highlights
+  the flat view clips (RAVESDK's `CLAUDE.md`, stereo stills, has the history).
   Slideshow AI 3D, auto-enhance, background removal and RealityKit 3D still decode SDR.
 - **Many photos have no gain map**: the share sheet converts to JPEG unless Options is set
   to Current/Unmodified Original, and iPhones before the 12 never wrote one (an iPhone 11
@@ -124,19 +125,15 @@ photo's own peak instead of 1.0. An SDR photo decodes as before.
   blown out (device, 2026-10-28).
 - **Screenshots from the headset are SDR** (8-bit, sRGB transfer): they can compare relative
   brightness but cannot measure HDR.
-- **AI 3D's HDR highlights come out muted** (device, 2026-11-02): the encoded HLG frame holds them
-  exactly (Mac read-back: 2.5x sits at signal 0.896 and decodes back to 2.5), but `VideoPlayerComponent`
-  rolls HLG off from its 4.9x nominal peak into the panel, so a highlight the flat view clips reads
-  weaker, with detail still showing. `highlightPower` (`aiPhotoHDRHighlightPower`, default 1 = off)
-  raises luminance above SDR white before encoding; 1.74-2.1 made the highlights visible but still
-  weaker than flat against about:blank. A guessed curve, not a fix: the player's response hasn't been
-  measured. In-app ReplayKit capture fails on visionOS 27 (`RPRecordingErrorDomain` -5833, "media
-  services failure"), and ScreenCaptureKit's HDR modes are `API_UNAVAILABLE(visionos)`, so there is no
-  HDR capture on the device.
-- Debug server: `photoHDR` (enabled, headroom, midGamma, highlightPower) and `photoHDRTest` (`dots`,
-  `patches`, `dots3d`, `patches3d`, `flip`, `off`: a raw pattern through the flat EDR path
-  or AI 3D's video path). Open item: the AI 3D picture's black looked grey beside the flat one
-  on the PQ build; not re-checked on HLG.
+- **There is no HDR capture on the headset**: in-app ReplayKit capture fails on visionOS 27
+  (`RPRecordingErrorDomain` -5833, "media services failure"), and ScreenCaptureKit's HDR modes
+  are `API_UNAVAILABLE(visionos)`. A Mac doesn't stand in either: macOS composites HLG reference
+  white at 2.87x the UI's white (ScreenCaptureKit HDR capture on an XDR display), not at it.
+- Debug server: `photoHDR` (enabled, headroom) and `photoHDRTest` (`dots`, `patches`: a raw
+  pattern through the flat EDR path; `dots3d`, `patches3d` through AI 3D; `dotsRK`, `patchesRK`
+  on a plain RealityKit unlit plane, whose texture semantic and tone map are tunables
+  `ai3d.rkSemantic` / `ai3d.rkToneMap`; `flip` and `flipRK` alternate flat with AI 3D or the plane;
+  `off`). The appstore's Debug › Panels › "AI 3D HDR" panel has buttons for them.
 
 ## Spatial 3D Images
 Uses RealityKit's `ImagePresentationComponent` for 2D→3D conversion. States tracked via `Spatial3DImageState` enum: notGenerated → generating → generated. `ImagePresentationComponent` is a black-box component — it manages its own geometry and materials internally, so there's no direct access to its mesh or rendering pipeline.

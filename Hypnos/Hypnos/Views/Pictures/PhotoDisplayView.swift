@@ -253,6 +253,10 @@ struct PhotoDisplayView: View {
 
             #if os(visionOS)
             aiDepthLayer
+            if let pattern = windowModel.debugRealityKitPattern {
+                HDRTestPlaneView(image: pattern)
+                    .aspectRatio(windowModel.imageAspectRatio, contentMode: .fit)
+            }
             #endif
 
             // 3D restore prompt pill at the bottom
