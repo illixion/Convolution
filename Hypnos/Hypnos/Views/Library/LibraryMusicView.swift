@@ -2,85 +2,224 @@ import SwiftUI
 import RAVEUI
 
 struct LibraryMusicView: View {
-    @State private var music = JellyfinMusicSession.shared
+    @State private var section = MusicSection.recent
     @State private var search = ""
 
-    private var visibleTracks: [JellyfinMusicItem] { search.isEmpty ? music.tracks : music.searchResults }
+    private var request: MusicRequest {
+        MusicRequest(section: section, search: search.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
 
     var body: some View {
-        List {
-            Section {
-                HStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Search artists, albums, songs", text: $search)
-                        .autocorrectionDisabled()
-                        #if os(iOS) || os(visionOS)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                    if !search.isEmpty {
-                        Button { search = ""; music.clearSearch() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Clear search")
-                    }
-                }
-            }
-            if search.isEmpty, !music.albums.isEmpty {
-                Section("Recently Added Albums") {
-                    ForEach(music.albums) { album in
-                        NavigationLink { JellyfinMusicAlbumView(album: album, music: music) } label: {
-                            HStack(spacing: 14) {
-                                MusicArtwork(item: album, music: music).frame(width: 68, height: 68).clipShape(RoundedRectangle(cornerRadius: 8))
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(album.Name).font(.headline)
-                                    Text(album.artist).foregroundStyle(.secondary)
-                                    Text("\(music.tracks.filter { $0.Album == album.Name }.count) songs").font(.caption).foregroundStyle(.tertiary)
-                                }
-                            }
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                if geometry.size.width >= 700 {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Music Library").font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.bottom, 8)
+                        ForEach(MusicSection.allCases) { item in
+                            Button { section = item; search = "" } label: {
+                                Label(item.title, systemImage: item.symbol)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(12)
+                                    .background(section == item ? Color.accentColor.opacity(0.2) : .clear, in: RoundedRectangle(cornerRadius: 10))
+                            }.buttonStyle(.plain)
                         }
-                        .contextMenu { Button("Play Album", systemImage: "play.fill") { play(album) } }
+                        Spacer()
                     }
+                    .padding(16)
+                    .frame(width: 210)
+                    .background(.thinMaterial)
+                    Divider()
                 }
-            }
-            Section(search.isEmpty ? "Songs" : "Search Results") {
-                if !search.isEmpty && visibleTracks.isEmpty && !music.isLoading {
-                    ContentUnavailableView.search(text: search)
-                }
-                ForEach(visibleTracks) { track in
-                    if track.Album == nil {
-                        NavigationLink { JellyfinMusicAlbumView(album: track, music: music) } label: {
-                            HStack(spacing: 12) {
-                                MusicArtwork(item: track, music: music).frame(width: 48, height: 48).clipShape(RoundedRectangle(cornerRadius: 6))
-                                VStack(alignment: .leading) { Text(track.Name).foregroundStyle(.primary); Text(track.artist).font(.subheadline).foregroundStyle(.secondary) }
-                            }
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 12) {
+                        if geometry.size.width < 700 {
+                            Picker("Music Library", selection: $section) {
+                                ForEach(MusicSection.allCases) { item in Label(item.title, systemImage: item.symbol).tag(item) }
+                            }.pickerStyle(.menu)
+                        } else { Text(section.title).font(.title2.bold()) }
+                        Spacer(minLength: 0)
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Search Music", text: $search)
+                            .autocorrectionDisabled()
+                            #if os(iOS) || os(visionOS)
+                            .textInputAutocapitalization(.never)
+                            #endif
+                            .frame(maxWidth: 260)
+                        if !search.isEmpty {
+                            Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                                .buttonStyle(.plain).accessibilityLabel("Clear search")
                         }
-                    } else {
-                        Button { music.play(track) } label: {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(track.Name).foregroundStyle(.primary)
-                                Text("\(track.artist) · \(track.Album ?? "")").font(.subheadline).foregroundStyle(.secondary)
-                            }
-                        }.buttonStyle(.plain)
                     }
+                    .padding(20)
+                    MusicCollectionView(request: request)
+                        .id(request)
                 }
             }
         }
         .navigationTitle("Music")
-        .overlay {
-            if music.isLoading && music.tracks.isEmpty { ProgressView() }
-            else if let error = music.error { ContentUnavailableView("Music Unavailable", systemImage: "music.note", description: Text(error)) }
-        }
-        .task { await music.load() }
-        .task(id: search) {
-            guard !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { music.clearSearch(); return }
-            try? await Task.sleep(for: .milliseconds(250))
-            guard !Task.isCancelled else { return }
-            await music.search(search)
-        }
+    }
+}
+
+/// Every ForEach emits one stable row or tile. Playback time is observed only
+/// by the transport, never by this catalog view.
+private struct MusicCollectionView: View {
+    let request: MusicRequest
+    let container: JellyfinMusicItem?
+    @State private var listing: MusicListing
+    @State private var playTask: Task<Void, Never>?
+    @State private var preparingQueue = false
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    init(request: MusicRequest, container: JellyfinMusicItem? = nil) {
+        self.request = request
+        self.container = container
+        _listing = State(initialValue: MusicCatalog.shared.listing(for: request))
     }
 
-    private func play(_ album: JellyfinMusicItem) {
-        let list = music.tracks.filter { $0.Album == album.Name }
-        if let first = list.first { music.play(first, from: list) }
+    private var columns: [GridItem] {
+        #if os(iOS)
+        if sizeClass == .compact { return [GridItem(.flexible()), GridItem(.flexible())] }
+        #endif
+        return [GridItem(.adaptive(minimum: 170, maximum: 260), spacing: 24, alignment: .top)]
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 24) {
+                if let container {
+                    MusicCollectionHeader(item: container, preparing: preparingQueue) {
+                        preparingQueue = true
+                        playTask = Task {
+                            await listing.playAll(using: JellyfinMusicSession.shared)
+                            preparingQueue = false
+                        }
+                    }
+                }
+                ForEach(listing.groups) { group in
+                    VStack(alignment: .leading, spacing: 16) {
+                        if !group.items.isEmpty {
+                            Text(request.search.isEmpty ? group.title : "Albums").font(.title2.bold())
+                        }
+                        LazyVGrid(columns: columns, alignment: .leading, spacing: 26) {
+                            ForEach(group.items) { item in MusicAlbumTile(item: item) }
+                        }
+                    }
+                }
+                if !listing.songs.isEmpty {
+                    Text("Songs").font(.title2.bold())
+                    LazyVStack(spacing: 0) {
+                        ForEach(listing.songs) { song in
+                            MusicSongRow(song: song) {
+                                JellyfinMusicSession.shared.play(song, from: listing.songs)
+                            }
+                        }
+                    }
+                }
+                if let error = listing.error {
+                    Text(error).foregroundStyle(.secondary)
+                    Button("Try Again") { Task { await listing.loadMore() } }
+                } else if listing.isLoading {
+                    ProgressView().frame(maxWidth: .infinity)
+                } else if listing.items.isEmpty {
+                    ContentUnavailableView(request.search.isEmpty ? "No Music Yet" : "No Results", systemImage: "music.note", description: Text(request.search.isEmpty ? "Music from your Jellyfin library appears here." : "Try another artist, album or song."))
+                } else if listing.hasMore {
+                    Button("Load More") { Task { await listing.loadMore() } }
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(24)
+            .padding(.bottom, 24)
+        }
+        .task(id: LibraryService.configurationKey) {
+            if !request.search.isEmpty {
+                do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+            }
+            await listing.loadIfNeeded()
+        }
+        .onDisappear { playTask?.cancel() }
+    }
+}
+
+private struct MusicAlbumTile: View {
+    let item: JellyfinMusicItem
+    var body: some View {
+        NavigationLink { MusicDestinationView(item: item) } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                MusicArtwork(item: item, music: .shared)
+                    .aspectRatio(1, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                Text(item.Name).font(.headline).foregroundStyle(.primary).lineLimit(2)
+                Text(item.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                if let count = item.ChildCount, count > 0 {
+                    Text("\(count) items").font(.caption).foregroundStyle(.tertiary)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct MusicDestinationView: View {
+    let item: JellyfinMusicItem
+    private var request: MusicRequest {
+        switch item.Type {
+        case "MusicArtist": MusicRequest(section: .albums, artistID: item.id)
+        case "Playlist": MusicRequest(section: .songs, playlistID: item.id)
+        default: MusicRequest(section: .songs, albumID: item.id)
+        }
+    }
+    var body: some View {
+        MusicCollectionView(request: request, container: item)
+            .navigationTitle(item.Name)
+    }
+}
+
+private struct MusicCollectionHeader: View {
+    let item: JellyfinMusicItem
+    let preparing: Bool
+    let play: () -> Void
+    var body: some View {
+        HStack(alignment: .center, spacing: 24) {
+            MusicArtwork(item: item, music: .shared)
+                .frame(width: 140, height: 140)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 12) {
+                Text(item.Name).font(.title2.bold())
+                Text(item.artist).foregroundStyle(.secondary)
+                if item.Type != "MusicArtist" {
+                    Button(action: play) { Label(preparing ? "Preparing…" : "Play", systemImage: "play.fill") }
+                        .buttonStyle(.borderedProminent).disabled(preparing)
+                }
+            }
+        }
+    }
+}
+
+private struct MusicSongRow: View {
+    let song: JellyfinMusicItem
+    let play: () -> Void
+    var body: some View {
+        Button(action: play) {
+            HStack(spacing: 14) {
+                MusicArtwork(item: song, music: .shared)
+                    .frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 6))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(song.Name).foregroundStyle(.primary)
+                    Text(song.artist).font(.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let ticks = song.RunTimeTicks {
+                    let seconds = max(0, Int(ticks / 10_000_000))
+                    Text("\(seconds / 60):\(String(format: "%02d", seconds % 60))")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .overlay(alignment: .bottom) { Divider() }
     }
 }
 
@@ -109,7 +248,7 @@ struct MusicNowPlayingView: View {
                     Button { music.previous() } label: { Image(systemName: "backward.end.fill") }
                     Button { music.toggle() } label: { Image(systemName: music.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 34)) }
                     Button { music.next() } label: { Image(systemName: "forward.end.fill") }
-                    Button { music.toggleRepeat() } label: { Image(systemName: music.repeats ? "repeat.1" : "repeat").foregroundStyle(music.repeats ? Color.accentColor : .primary) }
+                    Button { music.toggleRepeat() } label: { Image(systemName: "repeat").foregroundStyle(music.repeats ? Color.accentColor : .primary) }
                 }.font(.title2).buttonStyle(.plain)
                 if !music.queue.isEmpty {
                     List { Section("Up Next") {
@@ -207,33 +346,6 @@ struct MusicMiniPlayerView: View {
             #endif
         }
     }
-}
-
-private struct JellyfinMusicAlbumView: View {
-    let album: JellyfinMusicItem
-    let music: JellyfinMusicSession
-    private var songs: [JellyfinMusicItem] { music.tracks.filter { $0.Album == album.Name } }
-    var body: some View {
-        List {
-            Section {
-                HStack(spacing: 16) {
-                    MusicArtwork(item: album, music: music).frame(width: 130, height: 130).clipShape(RoundedRectangle(cornerRadius: 12))
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(album.Name).font(.title2.bold())
-                        Text(album.artist).foregroundStyle(.secondary)
-                        Button { if let first = songs.first { music.play(first, from: songs) } } label: { Label("Play", systemImage: "play.fill") }.buttonStyle(.borderedProminent)
-                    }
-                }.padding(.vertical, 8)
-            }
-            Section("Songs") {
-                ForEach(songs) { track in Button { music.play(track, from: songs) } label: {
-                    HStack { Text(track.Name); Spacer(); if let ticks = track.RunTimeTicks { Text(timeLabel(Double(ticks) / 10_000_000)).foregroundStyle(.secondary).font(.caption) } }
-                }.buttonStyle(.plain) }
-            }
-        }
-        .navigationTitle(album.Name)
-    }
-    private func timeLabel(_ value: Double) -> String { let s = Int(value); return "\(s / 60):\(String(format: "%02d", s % 60))" }
 }
 
 struct MusicArtwork: View {

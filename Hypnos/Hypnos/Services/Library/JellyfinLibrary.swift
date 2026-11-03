@@ -278,6 +278,53 @@ actor JellyfinLibrary: MediaServerLibrary {
         self.cachedUserId = userId
     }
 
+    // MARK: - Music
+
+    /// Shares Library authentication, user resolution and HTTP status handling.
+    /// All DTO decoding stays on this actor, away from SwiftUI's main actor.
+    func musicPage(_ request: MusicRequest, start: Int, limit: Int = 60) async throws -> JellyfinMusicPage {
+        let userID = try await resolveUserId()
+        var path = "Users/\(userID)/Items"
+        var query: [URLQueryItem] = [
+            .init(name: "UserId", value: userID),
+            .init(name: "StartIndex", value: String(start)),
+            .init(name: "Limit", value: String(limit)),
+            .init(name: "EnableTotalRecordCount", value: "true"),
+            .init(name: "Fields", value: "DateCreated,ChildCount"),
+            .init(name: "Recursive", value: "true"),
+        ]
+        let searching = !request.search.isEmpty
+        var type = searching ? "Audio,MusicAlbum" : "MusicAlbum"
+        var sort = request.section == .recent && !searching ? "DateCreated" : "SortName"
+        var order = request.section == .recent && !searching ? "Descending" : "Ascending"
+        if searching { query.append(.init(name: "SearchTerm", value: request.search)) }
+        else if let playlistID = request.playlistID {
+            path = "Playlists/\(playlistID)/Items"
+            type = "Audio"
+            sort = "" // Preserve the server's playlist order.
+        } else if let albumID = request.albumID {
+            type = "Audio"
+            query.append(.init(name: "ParentId", value: albumID))
+            sort = "ParentIndexNumber,IndexNumber,SortName"
+            order = "Ascending"
+        } else if let artistID = request.artistID {
+            query.append(.init(name: "ArtistIds", value: artistID))
+        } else {
+            switch request.section {
+            case .songs: type = "Audio"
+            case .artists: path = "Artists/AlbumArtists"; type = "MusicArtist"
+            case .playlists: type = "Playlist"
+            case .recent, .albums: break
+            }
+        }
+        if path != "Artists/AlbumArtists" { query.append(.init(name: "IncludeItemTypes", value: type)) }
+        if !sort.isEmpty {
+            query.append(.init(name: "SortBy", value: sort))
+            query.append(.init(name: "SortOrder", value: order))
+        }
+        return try await get(path, query: query)
+    }
+
     // MARK: - Home
 
     func home() async throws -> LibraryHome {
