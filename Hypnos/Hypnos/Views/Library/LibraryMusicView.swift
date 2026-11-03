@@ -13,21 +13,30 @@ struct LibraryMusicView: View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
                 if geometry.size.width >= 700 {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Music Library").font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.bottom, 8)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Music Library").font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 12)
                         ForEach(MusicSection.allCases) { item in
                             Button { section = item; search = "" } label: {
-                                Label(item.title, systemImage: item.symbol)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(12)
+                                HStack(spacing: 12) {
+                                    Image(systemName: item.symbol)
+                                        .frame(width: 24, height: 24)
+                                    Text(item.title).lineLimit(1)
+                                    Spacer(minLength: 0)
+                                }
+                                    .font(.body)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .padding(.horizontal, 12)
                                     .background(section == item ? Color.accentColor.opacity(0.2) : .clear, in: RoundedRectangle(cornerRadius: 10))
                             }.buttonStyle(.plain)
                         }
                         Spacer()
                     }
-                    .padding(16)
-                    .frame(width: 210)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 20)
+                    .frame(width: 240, alignment: .leading)
+                    .frame(maxHeight: .infinity, alignment: .topLeading)
                     .background(.thinMaterial)
+                    .clipped()
                     Divider()
                 }
                 VStack(alignment: .leading, spacing: 0) {
@@ -87,13 +96,16 @@ private struct MusicCollectionView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 24) {
                 if let container {
-                    MusicCollectionHeader(item: container, preparing: preparingQueue) {
-                        preparingQueue = true
-                        playTask = Task {
-                            await listing.playAll(using: JellyfinMusicSession.shared)
-                            preparingQueue = false
-                        }
+                    MusicCollectionHeader(item: container, preparing: preparingQueue,
+                                          play: { startPlayback(shuffled: false) },
+                                          shuffle: { startPlayback(shuffled: true) })
+                } else {
+                    Button { startPlayback(shuffled: true) } label: {
+                        Label(preparingQueue ? "Preparing…" : "Shuffle", systemImage: "shuffle")
                     }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(preparingQueue)
+                    .accessibilityLabel("Shuffle \(request.search.isEmpty ? request.section.title : "search results")")
                 }
                 ForEach(listing.groups) { group in
                     VStack(alignment: .leading, spacing: 16) {
@@ -138,6 +150,16 @@ private struct MusicCollectionView: View {
         }
         .onDisappear { playTask?.cancel() }
     }
+
+    private func startPlayback(shuffled: Bool) {
+        guard !preparingQueue else { return }
+        preparingQueue = true
+        playTask = Task {
+            defer { preparingQueue = false }
+            if shuffled { await listing.shuffle(using: .shared) }
+            else { await listing.playAll(using: .shared) }
+        }
+    }
 }
 
 private struct MusicAlbumTile: View {
@@ -179,6 +201,7 @@ private struct MusicCollectionHeader: View {
     let item: JellyfinMusicItem
     let preparing: Bool
     let play: () -> Void
+    let shuffle: () -> Void
     var body: some View {
         HStack(alignment: .center, spacing: 24) {
             MusicArtwork(item: item, music: .shared)
@@ -186,11 +209,16 @@ private struct MusicCollectionHeader: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             VStack(alignment: .leading, spacing: 12) {
                 Text(item.Name).font(.title2.bold())
-                Text(item.artist).foregroundStyle(.secondary)
-                if item.Type != "MusicArtist" {
-                    Button(action: play) { Label(preparing ? "Preparing…" : "Play", systemImage: "play.fill") }
-                        .buttonStyle(.borderedProminent).disabled(preparing)
+                if item.Type == "MusicAlbum" { Text(item.artist).foregroundStyle(.secondary) }
+                HStack(spacing: 12) {
+                    if item.Type != "MusicArtist" {
+                        Button(action: play) { Label(preparing ? "Preparing…" : "Play", systemImage: "play.fill") }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    Button(action: shuffle) { Label("Shuffle", systemImage: "shuffle") }
+                        .buttonStyle(.bordered)
                 }
+                .disabled(preparing)
             }
         }
     }
@@ -297,54 +325,85 @@ struct MusicAudioOptionsMenu: View {
 }
 
 struct MusicMiniPlayerView: View {
+    let current: JellyfinMusicItem
     let music: JellyfinMusicSession
     let onShowNowPlaying: () -> Void
     var width: CGFloat?
 
     var body: some View {
-        if let current = music.current {
-            VStack(spacing: 2) {
-                Button(action: onShowNowPlaying) {
-                    HStack(spacing: 10) {
-                        MusicArtwork(item: current, music: music)
-                            .frame(width: 38, height: 38)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(current.Name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                            Text(current.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        }
+        VStack(spacing: 2) {
+            Button(action: onShowNowPlaying) {
+                HStack(spacing: 10) {
+                    MusicArtwork(item: current, music: music)
+                        .frame(width: 38, height: 38)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(current.Name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        Text(current.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                RAVEPlayerControls(
-                    state: RAVEPlayerControlState(
-                        currentTime: music.currentTime,
-                        duration: music.duration,
-                        isPlaying: music.isPlaying,
-                        isMuted: music.isMuted
-                    ),
-                    togglePlayback: { music.toggle() },
-                    seek: { music.seek(to: $0) },
-                    toggleMute: { music.toggleMute() },
-                    layout: .strip,
-                    navigation: RAVEPlayerNavigation(
-                        previous: { music.previous() },
-                        next: { music.next() }
-                    ),
-                    pinned: AnyView(MusicAudioOptionsMenu(music: music))
-                ) { EmptyView() }
-                .frame(width: width)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 8)
-            #if os(visionOS)
-            .glassBackgroundEffect(in: .rect(cornerRadius: 28))
-            #else
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
-            #endif
+            .buttonStyle(.plain)
+            RAVEPlayerControls(
+                state: RAVEPlayerControlState(
+                    currentTime: music.currentTime,
+                    duration: music.duration,
+                    isPlaying: music.isPlaying,
+                    isMuted: music.isMuted,
+                    volume: music.volume
+                ),
+                togglePlayback: { music.toggle() },
+                seek: { music.seek(to: $0) },
+                toggleMute: { music.toggleMute() },
+                layout: .strip,
+                setVolume: { music.setVolume($0) },
+                navigation: RAVEPlayerNavigation(
+                    previous: { music.previous() },
+                    next: { music.next() }
+                ),
+                pinned: AnyView(MusicMiniPlayerOptions(music: music)),
+                volumeAccessory: AnyView(MusicSoundCheckPlaceholder())
+            ) { EmptyView() }
+            .frame(width: width)
         }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 8)
+        .transition(.opacity)
+        #if os(visionOS)
+        .glassBackgroundEffect(in: .rect(cornerRadius: 28))
+        #else
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+        #endif
+        .allowsHitTesting(music.current != nil)
+    }
+}
+
+
+private struct MusicMiniPlayerOptions: View {
+    let music: JellyfinMusicSession
+    var body: some View {
+        HStack(spacing: 16) {
+            Button { music.toggleShuffle() } label: {
+                Image(systemName: "shuffle")
+                    .foregroundStyle(music.isShuffled ? Color.accentColor : .primary)
+            }
+            .accessibilityLabel(music.isShuffled ? "Turn Shuffle Off" : "Turn Shuffle On")
+            MusicAudioOptionsMenu(music: music)
+        }
+    }
+}
+
+private struct MusicSoundCheckPlaceholder: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Sound Check", isOn: .constant(false)).disabled(true)
+            Text("Even out song volume. Coming later.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(width: 220, alignment: .leading)
     }
 }
 

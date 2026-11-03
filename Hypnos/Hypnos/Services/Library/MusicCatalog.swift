@@ -30,6 +30,8 @@ struct MusicRequest: Hashable, Sendable {
     var artistID: String?
     var playlistID: String?
     var search = ""
+    var playbackSongs = false
+    var randomOrder = false
 }
 
 struct MusicAlbumGroup: Identifiable {
@@ -137,7 +139,7 @@ final class MusicListing {
 
     /// Full album/playlist queues are fetched only after an explicit Play action,
     /// in bounded requests, on JellyfinLibrary's actor.
-    func playAll(using music: JellyfinMusicSession) async {
+    func playAll(using music: JellyfinMusicSession, shuffled: Bool = false) async {
         await loadIfNeeded()
         while hasMore && error == nil && !Task.isCancelled {
             let previousOffset = offset
@@ -145,8 +147,35 @@ final class MusicListing {
             guard offset > previousOffset else { return }
         }
         guard !Task.isCancelled, error == nil, let first = songs.first else { return }
-        music.play(first, from: songs)
+        if shuffled { music.playShuffled(songs) }
+        else { music.play(first, from: songs) }
     }
+    func shuffle(using music: JellyfinMusicSession) async {
+        error = nil
+        if request.albumID != nil || request.playlistID != nil {
+            await playAll(using: music, shuffled: true)
+            return
+        }
+        // Ask the server for a random song page; never enumerate every album
+        // or limit shuffle to the browsing page that happens to be on screen.
+        guard let library = LibraryService.current() else {
+            error = "Configure Jellyfin in Settings first."
+            return
+        }
+        let key = LibraryService.configurationKey
+        var source = request
+        source.playbackSongs = true
+        source.randomOrder = true
+        do {
+            let page = try await library.musicPage(source, start: 0)
+            try Task.checkCancellation()
+            guard key == LibraryService.configurationKey else { return }
+            music.playRandomPage(page.Items, source: source, library: library)
+        } catch is CancellationError {
+        } catch let failure as URLError where failure.code == .cancelled {
+        } catch { self.error = error.localizedDescription }
+    }
+
 }
 
 @MainActor

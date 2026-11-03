@@ -13,6 +13,7 @@ import DebugTraceUI
 struct TabBarOrnament: View {
     @Environment(AppModel.self) private var appModel
     @Environment(MainWindowModel.self) private var windowModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var music = JellyfinMusicSession.shared
     @State private var showsNowPlaying = false
 
@@ -31,16 +32,17 @@ struct TabBarOrnament: View {
     }
 
     private var musicControlWidth: CGFloat? {
-        guard appModel.mainWindowSize.width > 0 else { return nil }
-        return min(max(appModel.mainWindowSize.width, 760), 1180)
+        guard appModel.mainWindowSize.width > 32 else { return nil }
+        return min(appModel.mainWindowSize.width - 32, 1180)
     }
 
     var body: some View {
         @Bindable var windowModel = windowModel
         VStack(spacing: 8) {
-            if music.current != nil {
-                MusicMiniPlayerView(music: music) { showsNowPlaying = true }
+            if let current = music.current {
+                MusicMiniPlayerView(current: current, music: music) { showsNowPlaying = true }
                     .frame(width: musicControlWidth)
+                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
             }
             RAVETabBar(
                 tabs: visibleTabs,
@@ -70,6 +72,7 @@ struct TabBarOrnament: View {
             .animation(.smooth(duration: 0.22), value: slideshowLaunch?.help)
             .animation(.smooth(duration: 0.22), value: appModel.effectiveLibrarySource)
         }
+        .animation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(response: 0.35, dampingFraction: 0.88), value: music.current != nil)
         .sheet(isPresented: $showsNowPlaying) {
             NavigationStack { MusicNowPlayingView(music: music).rebuildsOnPatch() }
         }

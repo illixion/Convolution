@@ -22,6 +22,7 @@ import SwiftUI
 import DebugTraceUI
 
 struct LibraryTabRootView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var model = LibraryHomeViewModel()
     @State private var playback = LibraryPlayback()
     @State private var path = NavigationPath()
@@ -80,10 +81,13 @@ struct LibraryTabRootView: View {
         .environment(\.libraryOpenDetail) { path.append($0) }
         #if !os(visionOS)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            MusicMiniPlayerView(music: music) { showsNowPlaying = true }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 6)
+            if let current = music.current {
+                MusicMiniPlayerView(current: current, music: music) { showsNowPlaying = true }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 6)
+            }
         }
+        .animation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(response: 0.35, dampingFraction: 0.88), value: music.current != nil)
         .sheet(isPresented: $showsNowPlaying) { NavigationStack { MusicNowPlayingView(music: music).rebuildsOnPatch() } }
         #endif
         // Dark whatever the system appearance, like the Apple TV app: the

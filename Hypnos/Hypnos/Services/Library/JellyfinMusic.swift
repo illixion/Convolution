@@ -11,6 +11,8 @@ struct JellyfinMusicItem: Decodable, Identifiable, Hashable, Sendable {
     let ChildCount: Int?
     let IndexNumber: Int?
     let AlbumPrimaryImageTag: String?
+    let NormalizationGain: Double?
+    let AlbumNormalizationGain: Double?
     let Album: String?
     let AlbumArtist: String?
     let Artists: [String]?
@@ -42,6 +44,7 @@ final class JellyfinMusicSession {
     private(set) var current: JellyfinMusicItem?
     private(set) var isPlaying = false
     private(set) var isMuted = false
+    private(set) var volume = min(1, max(0, UserDefaults.standard.object(forKey: "jellyfinMusic.volume") as? Double ?? 1))
     private(set) var currentTime: Double = 0
     private(set) var duration: Double = 0
     private(set) var audioMode = JellyfinMusicAudioMode(rawValue: UserDefaults.standard.string(forKey: "jellyfinMusic.audioMode") ?? "") ?? .speaker
@@ -49,6 +52,12 @@ final class JellyfinMusicSession {
     var isShuffled = false
     var repeats = false
     var error: String?
+    @ObservationIgnored private var orderedQueue: [JellyfinMusicItem] = []
+    @ObservationIgnored private var randomSource: MusicRequest?
+    @ObservationIgnored private var randomLibrary: JellyfinLibrary?
+    @ObservationIgnored private var randomConfiguration: String?
+    @ObservationIgnored private var refillTask: Task<Void, Never>?
+    @ObservationIgnored private var queueGeneration = UUID()
     private var player: AVPlayer?
     private var observation: NSKeyValueObservation?
     private var timeObserver: Any?
@@ -61,20 +70,77 @@ final class JellyfinMusicSession {
 
     func play(_ track: JellyfinMusicItem, from tracks: [JellyfinMusicItem]? = nil) {
         guard let (base, token) = connection() else { error = "Configure Jellyfin in Settings first."; return }
+        resetRandomSource()
+        isShuffled = false
         queue = tracks ?? [track]
+        orderedQueue = queue
         guard let index = queue.firstIndex(of: track) else { queue = [track]; start(track, base: base, token: token); return }
         start(queue[index], base: base, token: token)
     }
 
+    /// Shuffle a concrete album/playlist once, then walk it without repeating
+    /// tracks until the queue has completed (or Repeat wraps it).
+    func playShuffled(_ tracks: [JellyfinMusicItem]) {
+        guard !tracks.isEmpty, let (base, token) = connection() else { return }
+        resetRandomSource()
+        orderedQueue = tracks
+        queue = tracks.shuffled()
+        isShuffled = true
+        start(queue[0], base: base, token: token)
+    }
+
+    func playRandomPage(_ tracks: [JellyfinMusicItem], source: MusicRequest, library: JellyfinLibrary) {
+        guard !tracks.isEmpty else { return }
+        playShuffled(tracks)
+        randomSource = source
+        randomLibrary = library
+        randomConfiguration = LibraryService.configurationKey
+    }
+
     func next() {
         guard let current, let i = queue.firstIndex(where: { $0.id == current.id }), let (base, token) = connection() else { return }
-        let next = isShuffled && queue.count > 1 ? (i + Int.random(in: 1..<queue.count)) % queue.count : (i + 1 < queue.count ? i + 1 : (repeats ? 0 : -1))
-        guard next >= 0 else {
-            stop()
-            return
-        }
-        start(queue[next], base: base, token: token)
+        if i + 1 < queue.count {
+            start(queue[i + 1], base: base, token: token)
+        } else if let randomSource, let randomLibrary {
+            refillRandomQueue(source: randomSource, library: randomLibrary)
+        } else if repeats, let first = queue.first {
+            start(first, base: base, token: token)
+        } else { stop() }
     }
+
+    private func refillRandomQueue(source: MusicRequest, library: JellyfinLibrary) {
+        guard refillTask == nil else { return }
+        let ticket = queueGeneration
+        let lastID = current?.id
+        refillTask = Task {
+            defer { if ticket == queueGeneration { refillTask = nil } }
+            do {
+                let page = try await library.musicPage(source, start: 0)
+                try Task.checkCancellation()
+                guard ticket == queueGeneration, randomConfiguration == LibraryService.configurationKey else { return }
+                // Avoid an immediate repeat across random pages when possible.
+                let candidates = page.Items.filter { $0.id != lastID }
+                let tracks = candidates.isEmpty ? page.Items : candidates
+                guard !tracks.isEmpty else { stop(); return }
+                playRandomPage(tracks, source: source, library: library)
+            } catch is CancellationError {
+            } catch {
+                guard ticket == queueGeneration else { return }
+                self.error = error.localizedDescription
+                stop()
+            }
+        }
+    }
+
+    private func resetRandomSource() {
+        queueGeneration = UUID()
+        refillTask?.cancel()
+        refillTask = nil
+        randomSource = nil
+        randomLibrary = nil
+        randomConfiguration = nil
+    }
+
     func previous() {
         guard let current, let i = queue.firstIndex(where: { $0.id == current.id }), let (base, token) = connection() else { return }
         if currentTime > 3 { player?.seek(to: .zero); return }
@@ -82,8 +148,27 @@ final class JellyfinMusicSession {
         guard previous >= 0 else { player?.seek(to: .zero); return }
         start(queue[previous], base: base, token: token)
     }
-    func toggle() { guard let player else { return }; if isPlaying { player.pause(); isPlaying = false } else { player.play(); isPlaying = true }; publishNowPlaying() }
+    func pause() {
+        // A queued network result must not restart music after an explicit pause.
+        queueGeneration = UUID()
+        refillTask?.cancel()
+        refillTask = nil
+        player?.pause()
+        isPlaying = false
+        publishNowPlaying()
+    }
+    func toggle() {
+        guard let player else { return }
+        if isPlaying { pause() }
+        else { player.play(); isPlaying = true; publishNowPlaying() }
+    }
     func toggleMute() { isMuted.toggle(); player?.isMuted = isMuted }
+    func setVolume(_ value: Double) {
+        guard value.isFinite else { return }
+        volume = min(1, max(0, value))
+        player?.volume = Float(volume)
+        UserDefaults.standard.set(volume, forKey: "jellyfinMusic.volume")
+    }
     func seek(to seconds: Double) { player?.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)); currentTime = seconds; publishNowPlaying() }
     func artworkURL(for item: JellyfinMusicItem) -> URL? {
         guard let (base, token) = connection() else { return nil }
@@ -93,7 +178,17 @@ final class JellyfinMusicSession {
         c?.queryItems = [URLQueryItem(name: "tag", value: tag), URLQueryItem(name: "maxWidth", value: "360"), URLQueryItem(name: "ApiKey", value: token)]
         return c?.url
     }
-    func toggleShuffle() { isShuffled.toggle() }
+    func toggleShuffle() {
+        guard let current else { isShuffled.toggle(); return }
+        isShuffled.toggle()
+        if isShuffled {
+            orderedQueue = queue
+            queue = [current] + queue.filter { $0.id != current.id }.shuffled()
+        } else {
+            queue = orderedQueue
+            resetRandomSource()
+        }
+    }
     func toggleRepeat() { repeats.toggle() }
 
     func setAudioMode(_ mode: JellyfinMusicAudioMode) {
@@ -136,6 +231,7 @@ final class JellyfinMusicSession {
         #endif
         player = nextPlayer
         nextPlayer.isMuted = isMuted
+        nextPlayer.volume = Float(volume)
         applySpatialAudioPreference()
         configureRemoteCommands()
         nextPlayer.play(); isPlaying = true
@@ -161,6 +257,8 @@ final class JellyfinMusicSession {
 
     /// End playback before hiding its controls, including a manual Next on the last song.
     func stop() {
+        resetRandomSource()
+        orderedQueue = []
         stopReporting()
         releasePlayer()
         current = nil
@@ -231,7 +329,7 @@ final class JellyfinMusicSession {
         if !remoteCommandsConfigured {
             remoteCommandsConfigured = true
             center.playCommand.addTarget { [weak self] _ in MainActor.assumeIsolated { self?.player?.play(); self?.isPlaying = true; self?.publishNowPlaying() }; return .success }
-            center.pauseCommand.addTarget { [weak self] _ in MainActor.assumeIsolated { self?.player?.pause(); self?.isPlaying = false; self?.publishNowPlaying() }; return .success }
+            center.pauseCommand.addTarget { [weak self] _ in MainActor.assumeIsolated { self?.pause() }; return .success }
             center.togglePlayPauseCommand.addTarget { [weak self] _ in MainActor.assumeIsolated { self?.toggle() }; return .success }
             center.nextTrackCommand.addTarget { [weak self] _ in MainActor.assumeIsolated { self?.next() }; return .success }
             center.previousTrackCommand.addTarget { [weak self] _ in MainActor.assumeIsolated { self?.previous() }; return .success }

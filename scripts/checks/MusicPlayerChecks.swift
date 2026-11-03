@@ -23,12 +23,15 @@ enum AudioSessionConfig {
 actor JellyfinLibrary {
     private let prefix: String
     private var calls = 0
+    private var lastRequest: MusicRequest?
     init(prefix: String = "a") { self.prefix = prefix }
     func requestCount() -> Int { calls }
+    func latestRequest() -> MusicRequest? { lastRequest }
     func musicPage(_ request: MusicRequest, start: Int, limit: Int = 60) async throws -> JellyfinMusicPage {
         calls += 1
+        lastRequest = request
         try await Task.sleep(for: .milliseconds(30))
-        let itemType = request.section == .songs ? "Audio" : "MusicAlbum"
+        let itemType = request.section == .songs || request.playbackSongs ? "Audio" : "MusicAlbum"
         let items = try (start..<min(start + limit, 125)).map { index in
             try JSONDecoder().decode(JellyfinMusicItem.self, from: Data(
                 "{\"Id\":\"\(prefix)-\(index)\",\"Name\":\"Album \(index)\",\"Type\":\"\(itemType)\",\"ChildCount\":12}".utf8))
@@ -64,6 +67,18 @@ actor JellyfinLibrary {
         music.stop()
         precondition(music.current == nil && !music.isPlaying && music.currentTime == 0)
         print("Explicit Stop clears playback: PASS")
+        let savedVolume = music.volume
+        music.setVolume(0.35)
+        precondition(abs(music.volume - 0.35) < 0.0001)
+        music.setVolume(2)
+        precondition(music.volume == 1)
+        music.setVolume(-1)
+        precondition(music.volume == 0)
+        music.setVolume(.nan)
+        precondition(music.volume == 0)
+        music.setVolume(savedVolume)
+        print("Player volume is adjustable, clamped, and rejects invalid values: PASS")
+
         let untitled = try JSONDecoder().decode(JellyfinMusicItem.self, from: Data(#"{"Id":"song-b","Name":"Song B","Type":"Audio"}"#.utf8))
         precondition(untitled.isSong)
         print("Songs without Album metadata remain songs: PASS")
@@ -93,6 +108,45 @@ actor JellyfinLibrary {
         precondition(music.queue.count == 125 && music.current?.id == "a-0")
         music.stop()
         print("Explicit Play fetches the complete paged album queue: PASS")
+
+        let shortAlbum = Array(albumQueue.songs.prefix(3))
+        music.playShuffled(shortAlbum)
+        var visited: [String] = []
+        for _ in shortAlbum {
+            visited.append(music.current!.id)
+            music.next()
+        }
+        precondition(Set(visited) == Set(shortAlbum.map(\.id)) && music.current == nil)
+        print("Album shuffle visits each song exactly once and stops: PASS")
+
+        let beforeShuffle = await LibraryService.backend.requestCount()
+        await listing.shuffle(using: music)
+        let randomRequest = await LibraryService.backend.latestRequest()
+        let afterShuffle = await LibraryService.backend.requestCount()
+        precondition(afterShuffle == beforeShuffle + 1 && music.queue.count == 60 && music.isShuffled)
+        precondition(randomRequest?.playbackSongs == true && randomRequest?.randomOrder == true)
+        print("Library shuffle requests one bounded random song page: PASS")
+
+        let source = MusicRequest(playbackSongs: true, randomOrder: true)
+        music.playRandomPage([shortAlbum[0]], source: source, library: LibraryService.backend)
+        music.next()
+        try await Task.sleep(for: .milliseconds(80))
+        precondition(music.current != nil && music.queue.count == 59)
+        print("Library shuffle refills after its random page ends: PASS")
+        music.playRandomPage([shortAlbum[0]], source: source, library: LibraryService.backend)
+        music.next()
+        music.pause()
+        try await Task.sleep(for: .milliseconds(80))
+        precondition(music.queue.count == 1 && !music.isPlaying)
+        print("Pausing during a random refill prevents delayed autoplay: PASS")
+
+        music.playRandomPage([shortAlbum[0]], source: source, library: LibraryService.backend)
+        music.next()
+        music.stop()
+        try await Task.sleep(for: .milliseconds(80))
+        precondition(music.current == nil && music.queue.isEmpty)
+        print("Stopping during a random refill prevents delayed autoplay: PASS")
+
 
 
         let stale = MusicListing(request: MusicRequest(section: .albums))

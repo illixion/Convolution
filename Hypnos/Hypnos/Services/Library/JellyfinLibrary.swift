@@ -322,6 +322,18 @@ actor JellyfinLibrary: MediaServerLibrary {
             query.append(.init(name: "SortBy", value: sort))
             query.append(.init(name: "SortOrder", value: order))
         }
+        if request.playbackSongs {
+            query.removeAll { $0.name == "IncludeItemTypes" }
+            query.append(.init(name: "IncludeItemTypes", value: "Audio"))
+            // Playback starts from the item catalog even when browsing artists
+            // or playlists. Artist/album/search restrictions above remain intact.
+            path = request.playlistID.map { "Playlists/\($0)/Items" } ?? "Users/\(userID)/Items"
+        }
+        if request.randomOrder {
+            query.removeAll { $0.name == "SortBy" || $0.name == "SortOrder" }
+            query.append(.init(name: "SortBy", value: "Random"))
+            query.append(.init(name: "SortOrder", value: "Ascending"))
+        }
         return try await get(path, query: query)
     }
 
