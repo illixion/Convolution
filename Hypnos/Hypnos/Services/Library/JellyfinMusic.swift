@@ -210,8 +210,14 @@ final class JellyfinMusicSession {
     }
 
     private func start(_ item: JellyfinMusicItem, base: URL, token: String) {
-        var c = URLComponents(url: base.appendingPathComponent("Audio/\(item.Id)/stream"), resolvingAgainstBaseURL: false)!
-        c.queryItems = [URLQueryItem(name: "UserId", value: JellyfinAuth.shared.session?.userId), URLQueryItem(name: "ApiKey", value: token)].compactMap { item in
+        var c = URLComponents(url: base.appendingPathComponent("Audio/\(item.Id)/universal"), resolvingAgainstBaseURL: false)!
+        c.queryItems = [URLQueryItem(name: "UserId", value: JellyfinAuth.shared.session?.userId), URLQueryItem(name: "ApiKey", value: token),
+            // Direct play what AVFoundation opens; otherwise HLS. A bare `/stream` transcode is an endless,
+            // unseekable pipe: seeking after a long pause left the clock running past the track's length.
+            URLQueryItem(name: "Container", value: "mp3,aac,m4a,m4b,flac,wav,alac"),
+            URLQueryItem(name: "TranscodingContainer", value: "ts"),
+            URLQueryItem(name: "TranscodingProtocol", value: "hls"),
+            URLQueryItem(name: "AudioCodec", value: "aac")].compactMap { item in
             guard let value = item.value else { return nil }
             return URLQueryItem(name: item.name, value: value)
         }
@@ -245,7 +251,7 @@ final class JellyfinMusicSession {
         timeObserver = nextPlayer.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 2), queue: .main) { [weak self] time in
             Task { @MainActor in
                 guard let self, self.player === nextPlayer else { return }
-                self.currentTime = time.seconds.isFinite ? time.seconds : 0
+                self.currentTime = time.seconds.isFinite ? max(0, min(time.seconds, self.duration > 0 ? self.duration : time.seconds)) : 0
                 if let d = nextPlayer.currentItem?.duration.seconds, d.isFinite, d > 0 { self.duration = d }
                 self.reportProgress()
             }
@@ -310,6 +316,7 @@ final class JellyfinMusicSession {
         }
         guard let current else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            MPNowPlayingInfoCenter.default().playbackState = .stopped
             updateRemoteCommandsEnabled()
             return
         }

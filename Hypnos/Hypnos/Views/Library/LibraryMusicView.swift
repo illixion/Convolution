@@ -277,6 +277,8 @@ struct MusicNowPlayingView: View {
                     Button { music.toggle() } label: { Image(systemName: music.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 34)) }
                     Button { music.next() } label: { Image(systemName: "forward.end.fill") }
                     Button { music.toggleRepeat() } label: { Image(systemName: "repeat").foregroundStyle(music.repeats ? Color.accentColor : .primary) }
+                    Button { music.stop(); dismiss() } label: { Image(systemName: "stop.fill") }
+                        .accessibilityLabel("Stop Playback")
                 }.font(.title2).buttonStyle(.plain)
                 if !music.queue.isEmpty {
                     List { Section("Up Next") {
@@ -391,6 +393,8 @@ private struct MusicMiniPlayerOptions: View {
             }
             .accessibilityLabel(music.isShuffled ? "Turn Shuffle Off" : "Turn Shuffle On")
             MusicAudioOptionsMenu(music: music)
+            Button { music.stop() } label: { Image(systemName: "stop.fill") }
+                .accessibilityLabel("Stop Playback")
         }
     }
 }
