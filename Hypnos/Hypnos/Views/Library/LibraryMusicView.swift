@@ -1,18 +1,30 @@
 import SwiftUI
+import RAVEUI
 
 struct LibraryMusicView: View {
     @State private var music = JellyfinMusicSession.shared
     @State private var search = ""
-    @State private var showsNowPlaying = false
 
-    private var visibleTracks: [JellyfinMusicItem] {
-        guard !search.isEmpty else { return music.tracks }
-        return music.tracks.filter { $0.Name.localizedCaseInsensitiveContains(search) || $0.artist.localizedCaseInsensitiveContains(search) || ($0.Album ?? "").localizedCaseInsensitiveContains(search) }
-    }
+    private var visibleTracks: [JellyfinMusicItem] { search.isEmpty ? music.tracks : music.searchResults }
 
     var body: some View {
         List {
-            if !music.albums.isEmpty {
+            Section {
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Search artists, albums, songs", text: $search)
+                        .autocorrectionDisabled()
+                        #if os(iOS) || os(visionOS)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                    if !search.isEmpty {
+                        Button { search = ""; music.clearSearch() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Clear search")
+                    }
+                }
+            }
+            if search.isEmpty, !music.albums.isEmpty {
                 Section("Recently Added Albums") {
                     ForEach(music.albums) { album in
                         NavigationLink { JellyfinMusicAlbumView(album: album, music: music) } label: {
@@ -29,50 +41,41 @@ struct LibraryMusicView: View {
                     }
                 }
             }
-            Section("Songs") {
+            Section(search.isEmpty ? "Songs" : "Search Results") {
+                if !search.isEmpty && visibleTracks.isEmpty && !music.isLoading {
+                    ContentUnavailableView.search(text: search)
+                }
                 ForEach(visibleTracks) { track in
-                    Button { music.play(track) } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(track.Name).foregroundStyle(.primary)
-                            Text("\(track.artist) · \(track.Album ?? "")").font(.subheadline).foregroundStyle(.secondary)
+                    if track.Album == nil {
+                        NavigationLink { JellyfinMusicAlbumView(album: track, music: music) } label: {
+                            HStack(spacing: 12) {
+                                MusicArtwork(item: track, music: music).frame(width: 48, height: 48).clipShape(RoundedRectangle(cornerRadius: 6))
+                                VStack(alignment: .leading) { Text(track.Name).foregroundStyle(.primary); Text(track.artist).font(.subheadline).foregroundStyle(.secondary) }
+                            }
                         }
+                    } else {
+                        Button { music.play(track) } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(track.Name).foregroundStyle(.primary)
+                                Text("\(track.artist) · \(track.Album ?? "")").font(.subheadline).foregroundStyle(.secondary)
+                            }
+                        }.buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
-        .searchable(text: $search, prompt: "Artists, albums, songs")
         .navigationTitle("Music")
         .overlay {
             if music.isLoading && music.tracks.isEmpty { ProgressView() }
             else if let error = music.error { ContentUnavailableView("Music Unavailable", systemImage: "music.note", description: Text(error)) }
         }
-        .safeAreaInset(edge: .bottom) {
-            if let current = music.current {
-                VStack(spacing: 8) {
-                    HStack(spacing: 12) {
-                        MusicArtwork(item: current, music: music).frame(width: 42, height: 42).clipShape(RoundedRectangle(cornerRadius: 6))
-                        Button { showsNowPlaying = true } label: {
-                            VStack(alignment: .leading) { Text(current.Name).font(.headline).lineLimit(1); Text(current.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-                        }.buttonStyle(.plain)
-                        Spacer()
-                        Button { music.toggleShuffle() } label: { Image(systemName: "shuffle").foregroundStyle(music.isShuffled ? Color.accentColor : .secondary) }.buttonStyle(.plain)
-                        Button { music.previous() } label: { Image(systemName: "backward.end.fill").font(.title3) }.buttonStyle(.plain)
-                        Button { music.toggle() } label: { Image(systemName: music.isPlaying ? "pause.fill" : "play.fill").font(.title2) }.buttonStyle(.plain)
-                        Button { music.next() } label: { Image(systemName: "forward.end.fill").font(.title3) }.buttonStyle(.plain)
-                        Button { music.toggleRepeat() } label: { Image(systemName: music.repeats ? "repeat.1" : "repeat").foregroundStyle(music.repeats ? Color.accentColor : .secondary) }.buttonStyle(.plain)
-                    }
-                    #if os(tvOS)
-                    ProgressView(value: music.currentTime, total: max(1, music.duration))
-                    #else
-                    Slider(value: Binding(get: { music.currentTime }, set: { music.seek(to: $0) }), in: 0...max(1, music.duration))
-                    #endif
-                }
-                .padding(12).background(.regularMaterial).clipShape(RoundedRectangle(cornerRadius: 16)).padding(.horizontal, 12).padding(.bottom, 4)
-                .sheet(isPresented: $showsNowPlaying) { NavigationStack { MusicNowPlayingView(music: music) } }
-            }
-        }
         .task { await music.load() }
+        .task(id: search) {
+            guard !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { music.clearSearch(); return }
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            await music.search(search)
+        }
     }
 
     private func play(_ album: JellyfinMusicItem) {
@@ -81,7 +84,7 @@ struct LibraryMusicView: View {
     }
 }
 
-private struct MusicNowPlayingView: View {
+struct MusicNowPlayingView: View {
     let music: JellyfinMusicSession
     @Environment(\.dismiss) private var dismiss
     var body: some View {
@@ -118,9 +121,92 @@ private struct MusicNowPlayingView: View {
         }
         .padding(24)
         .navigationTitle("Now Playing")
-        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) { MusicAudioOptionsMenu(music: music) }
+            ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+        }
     }
     private func clock(_ seconds: Double) -> String { let s = max(0, Int(seconds)); return "\(s / 60):\(String(format: "%02d", s % 60))" }
+}
+
+struct MusicAudioOptionsMenu: View {
+    let music: JellyfinMusicSession
+
+    var body: some View {
+        Menu {
+            ForEach(JellyfinMusicAudioMode.allCases) { mode in
+                Button {
+                    music.setAudioMode(mode)
+                } label: {
+                    Label(mode.title, systemImage: music.audioMode == mode ? "checkmark" : mode.symbol)
+                }
+            }
+            #if os(visionOS)
+            Divider()
+            Button {
+                music.toggleHeadLocked()
+            } label: {
+                Label("Head-Locked Audio", systemImage: music.headLocked ? "checkmark" : "headphones")
+            }
+            #endif
+        } label: {
+            Image(systemName: music.audioMode.symbol)
+        }
+        .accessibilityLabel("Audio options: \(music.audioMode.title)")
+        .help("Speaker Mode mixes with other audio. Music Mode takes audio focus and enables system playback controls.")
+    }
+}
+
+struct MusicMiniPlayerView: View {
+    let music: JellyfinMusicSession
+    let onShowNowPlaying: () -> Void
+    var width: CGFloat?
+
+    var body: some View {
+        if let current = music.current {
+            VStack(spacing: 2) {
+                Button(action: onShowNowPlaying) {
+                    HStack(spacing: 10) {
+                        MusicArtwork(item: current, music: music)
+                            .frame(width: 38, height: 38)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(current.Name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                            Text(current.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                RAVEPlayerControls(
+                    state: RAVEPlayerControlState(
+                        currentTime: music.currentTime,
+                        duration: music.duration,
+                        isPlaying: music.isPlaying,
+                        isMuted: music.isMuted
+                    ),
+                    togglePlayback: { music.toggle() },
+                    seek: { music.seek(to: $0) },
+                    toggleMute: { music.toggleMute() },
+                    layout: .strip,
+                    navigation: RAVEPlayerNavigation(
+                        previous: { music.previous() },
+                        next: { music.next() }
+                    ),
+                    pinned: AnyView(MusicAudioOptionsMenu(music: music))
+                ) { EmptyView() }
+                .frame(width: width)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 8)
+            #if os(visionOS)
+            .glassBackgroundEffect(in: .rect(cornerRadius: 28))
+            #else
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+            #endif
+        }
+    }
 }
 
 private struct JellyfinMusicAlbumView: View {
@@ -150,7 +236,7 @@ private struct JellyfinMusicAlbumView: View {
     private func timeLabel(_ value: Double) -> String { let s = Int(value); return "\(s / 60):\(String(format: "%02d", s % 60))" }
 }
 
-private struct MusicArtwork: View {
+struct MusicArtwork: View {
     let item: JellyfinMusicItem
     let music: JellyfinMusicSession
     var body: some View {

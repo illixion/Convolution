@@ -41,6 +41,23 @@ enum AudioSessionConfig {
         #endif
     }
 
+    /// Longwave-style Music Mode: take audio focus so system transport controls
+    /// belong to this player. Speaker Mode restores the mixable app default.
+    static func configureExclusiveMusicPlayback() {
+        #if os(macOS)
+        // macOS has no per-app AVAudioSession focus category.
+        return
+        #else
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default)
+            try session.setActive(true)
+        } catch {
+            AppLogger.appModel.error("Failed to set exclusive music audio session: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+        }
+        #endif
+    }
+
     #if os(tvOS) || os(iOS)
     /// The film player's session while it is showing: not mixable, because
     /// only a non-mixable session can be the Now Playing app — without that,

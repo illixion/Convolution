@@ -19,16 +19,22 @@
  */
 
 import SwiftUI
+import DebugTraceUI
 
 struct LibraryTabRootView: View {
     @State private var model = LibraryHomeViewModel()
     @State private var playback = LibraryPlayback()
     @State private var path = NavigationPath()
     @State private var showsMusic = false
+    @State private var showsNowPlaying = false
+    @State private var music = JellyfinMusicSession.shared
 
     var body: some View {
         NavigationStack(path: $path) {
-            LibraryHomeContentView(model: model, playback: playback)
+            Group {
+                if showsMusic { LibraryMusicView().rebuildsOnPatch() }
+                else { LibraryHomeContentView(model: model, playback: playback) }
+            }
                 .navigationDestination(for: LibraryItem.self) { item in
                     LibraryDetailView(item: item, playback: playback)
                 }
@@ -38,20 +44,27 @@ struct LibraryTabRootView: View {
                 .navigationDestination(for: LibraryDownloadsRequest.self) { _ in
                     LibraryDownloadsView(playback: playback)
                 }
-                .navigationTitle("Library")
+                .navigationTitle(showsMusic ? "Music" : "Library")
                 .moreTabBackButton()
                 .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button { showsMusic = true } label: { Label("Music", systemImage: "music.note") }
+                    ToolbarItem(placement: .principal) {
+                        Picker("Library section", selection: $showsMusic.animation(.snappy)) {
+                            Text("Movies & TV").tag(false)
+                            Text("Music").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                        .fixedSize()
                     }
-                    ToolbarItem(placement: .primaryAction) {
-                        LibraryDownloadsToolbarButton { path.append(LibraryDownloadsRequest()) }
-                    }
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            path.append(LibraryBrowseRequest(kind: nil))
-                        } label: {
-                            Label("Browse & Search", systemImage: "magnifyingglass")
+                    if !showsMusic {
+                        ToolbarItem(placement: .primaryAction) {
+                            LibraryDownloadsToolbarButton { path.append(LibraryDownloadsRequest()) }
+                        }
+                        ToolbarItem(placement: .primaryAction) {
+                            Button {
+                                path.append(LibraryBrowseRequest(kind: nil))
+                            } label: {
+                                Label("Browse & Search", systemImage: "magnifyingglass")
+                            }
                         }
                     }
                 }
@@ -65,7 +78,14 @@ struct LibraryTabRootView: View {
                 #endif
         }
         .environment(\.libraryOpenDetail) { path.append($0) }
-        .sheet(isPresented: $showsMusic) { NavigationStack { LibraryMusicView() } }
+        #if !os(visionOS)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            MusicMiniPlayerView(music: music) { showsNowPlaying = true }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
+        }
+        .sheet(isPresented: $showsNowPlaying) { NavigationStack { MusicNowPlayingView(music: music).rebuildsOnPatch() } }
+        #endif
         // Dark whatever the system appearance, like the Apple TV app: the
         // page is artwork, and a white page between backdrops glares.
         .environment(\.colorScheme, .dark)

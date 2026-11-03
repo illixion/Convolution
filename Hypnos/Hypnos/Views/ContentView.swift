@@ -10,6 +10,7 @@
 
 import RAVEUI
 import SwiftUI
+import DebugTraceUI
 
 struct ContentView: View {
     @Environment(AppModel.self) private var appModel
@@ -178,7 +179,7 @@ struct ContentView: View {
         case .albums:
             AlbumsTabView()
         case .library:
-            LibraryTabRootView()
+            LibraryTabRootView().rebuildsOnPatch()
         #if HYPNOS_YOUTUBE
         case .youtube:
             YouTubeTabView()

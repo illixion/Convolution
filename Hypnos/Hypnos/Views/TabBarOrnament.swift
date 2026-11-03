@@ -6,12 +6,15 @@
 
 import RAVEUI
 import SwiftUI
+import DebugTraceUI
 
 #if os(visionOS)
 
 struct TabBarOrnament: View {
     @Environment(AppModel.self) private var appModel
     @Environment(MainWindowModel.self) private var windowModel
+    @State private var music = JellyfinMusicSession.shared
+    @State private var showsNowPlaying = false
 
     /// Drives the library switch's popover. A plain `@State` rather than
     /// something on `windowModel`: nothing outside this control cares, and
@@ -27,41 +30,49 @@ struct TabBarOrnament: View {
         MainTabCatalog.visibleTabs(appModel: appModel)
     }
 
+    private var musicControlWidth: CGFloat? {
+        guard appModel.mainWindowSize.width > 0 else { return nil }
+        return min(max(appModel.mainWindowSize.width, 760), 1180)
+    }
+
     var body: some View {
         @Bindable var windowModel = windowModel
-        RAVETabBar(
-            tabs: visibleTabs,
-            selection: $windowModel.selectedTab,
-            // Routed through `select` rather than straight to the binding:
-            // re-tapping Albums while already there is a "pop to the folder
-            // root" gesture for its local-folder browser, which a plain
-            // selection binding cannot see.
-            onSelect: select
-        ) {
-            // Actions, not navigation: both act on the current tab rather than
-            // moving between tabs, so they sit past a divider.
-            if showsLibraryToggle || slideshowLaunch != nil {
-                RAVETabBarDivider()
+        VStack(spacing: 8) {
+            if music.current != nil {
+                MusicMiniPlayerView(music: music) { showsNowPlaying = true }
+                    .frame(width: musicControlWidth)
             }
-            // Left of the slideshow button: which library the media tabs show.
-            // Only meaningful with more than one source available — with
-            // just Photos there is nothing to switch between. A dropdown
-            // rather than a cycling button because a third source made
-            // "tap to switch to the other one" ambiguous about where a tap
-            // would land.
-            if showsLibraryToggle {
-                libraryMenu
+            RAVETabBar(
+                tabs: visibleTabs,
+                selection: $windowModel.selectedTab,
+                // Routed through `select` rather than straight to the binding:
+                // re-tapping Albums while already there is a "pop to the folder
+                // root" gesture for its local-folder browser, which a plain
+                // selection binding cannot see.
+                onSelect: select
+            ) {
+                // Actions, not navigation: both act on the current tab rather than
+                // moving between tabs, so they sit past a divider.
+                if showsLibraryToggle || slideshowLaunch != nil {
+                    RAVETabBarDivider()
+                }
+                if showsLibraryToggle {
+                    libraryMenu
+                }
+                if let launch = slideshowLaunch {
+                    RAVETabBarActionButton(
+                        systemImage: "play.fill",
+                        help: launch.help,
+                        action: launch.start
+                    )
+                }
             }
-            if let launch = slideshowLaunch {
-                RAVETabBarActionButton(
-                    systemImage: "play.fill",
-                    help: launch.help,
-                    action: launch.start
-                )
-            }
+            .animation(.smooth(duration: 0.22), value: slideshowLaunch?.help)
+            .animation(.smooth(duration: 0.22), value: appModel.effectiveLibrarySource)
         }
-        .animation(.smooth(duration: 0.22), value: slideshowLaunch?.help)
-        .animation(.smooth(duration: 0.22), value: appModel.effectiveLibrarySource)
+        .sheet(isPresented: $showsNowPlaying) {
+            NavigationStack { MusicNowPlayingView(music: music).rebuildsOnPatch() }
+        }
     }
 
     /// Whether to offer the library switch: only with more than one source
