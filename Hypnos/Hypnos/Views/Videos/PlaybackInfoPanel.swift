@@ -1,8 +1,8 @@
 /*
  Hypnos - the playback info panel
 
- A small semi-opaque card in the video's top-right corner, with the rest of
- the chrome: how the picture gets here and what it is.
+ A small glass card in the video's top-right corner, dressed like the title
+ button in the top-left (`PlayerTitleButton`), with the rest of the chrome: how the picture gets here and what it is.
 
      ✓ Direct Play                     ⚠ Server Transcode  Jellyfin
      1920×1080 · 23.976 fps · HDR10    1920×1080 · 23.976 fps · SDR
@@ -31,10 +31,17 @@ struct PlaybackInfoPanel: View {
 
     var body: some View {
         Button { showsDetails.toggle() } label: { card }
-            .buttonStyle(.plain)
+            // The title button's chrome (`PlayerTitleButton`): the hover
+            // shape is the glass's own, so the highlight follows its corners.
             #if os(visionOS)
+            .buttonStyle(.plain)
             .contentShape(.hoverEffect, .rect(cornerRadius: Self.cornerRadius))
-            .hoverEffect(.highlight)
+            .hoverEffect()
+            .glassBackgroundEffect(in: .rect(cornerRadius: Self.cornerRadius))
+            #elseif os(iOS) || os(macOS)
+            .buttonStyle(.glass)
+            #else
+            .buttonStyle(.plain)
             #endif
             .accessibilityIdentifier("player.playbackInfo")
             .accessibilityLabel(accessibilityText)
@@ -57,7 +64,8 @@ struct PlaybackInfoPanel: View {
             }
     }
 
-    static let cornerRadius: CGFloat = 16
+    /// The title button's radius on visionOS, so the two corners match.
+    static let cornerRadius: CGFloat = 22
 
     private var card: some View {
         VStack(alignment: .trailing, spacing: 3) {
@@ -88,10 +96,14 @@ struct PlaybackInfoPanel: View {
         }
         .lineLimit(1)
         .frame(maxWidth: 340, alignment: .trailing)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.black.opacity(0.5), in: .rect(cornerRadius: Self.cornerRadius, style: .continuous))
-        .environment(\.colorScheme, .dark)
+        #if os(visionOS)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        #else
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        #endif
+        .contentShape(.rect)
         .fixedSize()
     }
 
