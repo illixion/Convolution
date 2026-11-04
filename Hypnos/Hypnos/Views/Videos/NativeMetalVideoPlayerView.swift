@@ -842,14 +842,11 @@ struct NativeMetalVideoPlayerView {
         private var needsPictureRedraw = true
 
         func draw(in view: MTKView) {
-            guard let renderer,
-                  let output = videoOutput,
-                  let textureCache,
-                  let drawable = view.currentDrawable,
-                  let finalPassDesc = view.currentRenderPassDescriptor,
-                  let commandBuffer = renderer.commandQueue.makeCommandBuffer() else {
-                return
-            }
+            // A new frame first: the view ticks at up to 120 Hz, and a tick
+            // with nothing new (between frames, paused) must cost nothing.
+            // Taking the drawable first made every idle window ask the
+            // compositor for one each tick.
+            guard let renderer, let output = videoOutput, let textureCache else { return }
 
             if let framePresenter {
                 if let frame = framePresenter.frame(forHostTime: CACurrentMediaTime()) {
