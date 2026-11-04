@@ -240,6 +240,10 @@ struct Pseudo3DVideoPlayerView: View {
             engine.interpolatesFrames = value
             if packedStereo == nil || sharedFields != nil { engine.reloadDepthPipeline() }
         }
+        // The readout says "24 → 48 fps" while the pump doubles.
+        .onChange(of: engine.showsDoubledFrames, initial: true) { _, doubled in
+            playbackModel?.noteSmoothMotionDoubling(doubled)
+        }
         // A track found after live 3D started: rebuild the pump with it.
         .onChange(of: sharedFields.map(ObjectIdentifier.init)) { _, _ in
             engine.sharedFields = sharedFields
@@ -284,6 +288,7 @@ struct Pseudo3DVideoPlayerView: View {
             engine.setRoomActive(active)
         }
         .onDisappear {
+            playbackModel?.noteSmoothMotionDoubling(false)
             if playbackModel?.stereoEngine === engine { playbackModel?.noteStereoEngine(nil) }
             engine.cleanup()
             playbackModel?.setStereoPicturePreparing(false)

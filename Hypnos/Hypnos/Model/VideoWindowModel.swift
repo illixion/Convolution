@@ -146,6 +146,8 @@ final class VideoWindowModel {
     /// (the strip reads them); cleared with each new video.
     private(set) var pictureSize: CGSize?
     private(set) var pictureFrameRate: Double?
+    /// Smooth Motion doubles what is shown (`noteSmoothMotionDoubling`).
+    private(set) var smoothMotionDoubling = false
     /// What the frames on screen are (transfer function, Dolby Vision RPU),
     /// from whichever renderer draws them; nil until one says, and for
     /// WebKit, which can't (`VideoWindowModel+PlaybackInfo`).
@@ -719,8 +721,19 @@ final class VideoWindowModel {
     /// "1920×1080 · 23.976 fps", once a renderer has said.
     var pictureDetails: String? {
         guard let size = pictureSize else { return nil }
-        return VideoPictureFormat(width: Int(size.width.rounded()), height: Int(size.height.rounded()),
-                                  framesPerSecond: pictureFrameRate).summary
+        let format = VideoPictureFormat(width: Int(size.width.rounded()), height: Int(size.height.rounded()),
+                                        framesPerSecond: pictureFrameRate)
+        // Smooth Motion shows twice the frames: "24 → 48 fps".
+        guard smoothMotionDoubling, let rate = pictureFrameRate,
+              let from = VideoPictureFormat.rateLabel(rate), let to = VideoPictureFormat.rateLabel(rate * 2)
+        else { return format.summary }
+        return "\(format.width)×\(format.height) · \(from) → \(to) fps"
+    }
+
+    /// A renderer's Smooth Motion is doubling the picture (or stopped).
+    func noteSmoothMotionDoubling(_ doubling: Bool) {
+        guard smoothMotionDoubling != doubling else { return }
+        smoothMotionDoubling = doubling
     }
 
     func notePictureSize(_ size: CGSize) {
@@ -889,6 +902,7 @@ final class VideoWindowModel {
         endHandled = false
         pictureSize = nil
         pictureFrameRate = nil
+        smoothMotionDoubling = false
         resetPlaybackInfo()
 
         // Reset per-window viewing state (a stereo episode plays 3D on the

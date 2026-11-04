@@ -278,6 +278,9 @@ struct NativeMetalVideoPlayerView {
             coordinator.onFrameRangeKnown = { [weak playbackModel] range in
                 playbackModel?.notePictureFrameRange(range, stereo: false)
             }
+            coordinator.onSmoothMotionChanged = { [weak playbackModel] doubling in
+                playbackModel?.noteSmoothMotionDoubling(doubling)
+            }
             coordinator.onPlaybackUpdate = { [weak playbackModel] state in
                 playbackModel?.applyPlaybackState(
                     currentTime: state.currentTime,
@@ -329,6 +332,15 @@ struct NativeMetalVideoPlayerView {
         /// system's renderer maps (with the RPU), so it never shows through
         /// Metal. The app does no Dolby processing of its own.
         private var needsSystemRenderer = false
+        /// The first frame carried a Dolby Vision RPU.
+        private var hasRPU = false
+        /// The first frame's HDR10 static metadata (SEI byte layout), for
+        /// the EDR layer's tone mapping.
+        private var masteringDisplay: Data?
+        private var contentLightLevel: Data?
+        /// What `onFrameRangeKnown` was last told, so a change of presenter
+        /// (the RPU applied or not) is told again.
+        private var reportedRange: VideoFrameRange?
         private var usesSystemLayer = false
         /// The first frame's format, for display criteria when the stream has
         /// no asset track to describe it (HLS).
@@ -339,7 +351,8 @@ struct NativeMetalVideoPlayerView {
         /// Smooth Motion. Takes effect at once: the presenter is rebuilt over
         /// the same frame output, no reload.
         var interpolatesFrames = false {
-            didSet { if oldValue != interpolatesFrames { rebuildFramePresenter() } }
+            // An HDR picture leaves the system layer to be interpolated.
+            didSet { if oldValue != interpolatesFrames { updatePresentation(); rebuildFramePresenter() } }
         }
         var interpolationEngine: SmoothMotionEngine = .automatic {
             didSet { if oldValue != interpolationEngine, interpolatesFrames { rebuildFramePresenter() } }
@@ -360,6 +373,8 @@ struct NativeMetalVideoPlayerView {
         /// What the first frame of each load is (PQ, HLG, SDR; a Dolby
         /// Vision RPU), for the playback info panel.
         var onFrameRangeKnown: ((VideoFrameRange) -> Void)?
+        /// Smooth Motion started or stopped doubling the picture.
+        var onSmoothMotionChanged: ((Bool) -> Void)?
         var onPlaybackUpdate: ((PlaybackState) -> Void)?
         /// The AVPlayer, as each load makes one and teardown drops it.
         var onPlayerChanged: ((AVPlayer?) -> Void)?
@@ -443,6 +458,10 @@ struct NativeMetalVideoPlayerView {
             guard let renderer else { return }
             dynamicRange = .unknown
             needsSystemRenderer = false
+            hasRPU = false
+            reportedRange = nil
+            masteringDisplay = nil
+            contentLightLevel = nil
             firstFrameFormat = nil
             configureMetalView(for: .sdr)
 
@@ -942,6 +961,22 @@ struct NativeMetalVideoPlayerView {
                 && visualAdjustments.saturation == 1 && visualAdjustments.clampedSharpenAmount <= 0.001
         }
 
+        /// The picture goes to the system's video layer: HDR with nothing for
+        /// Metal to do (no adjustments, no Smooth Motion), or a Dolby Vision
+        /// profile 5 picture, which only the system shows right.
+        private var wantsSystemLayer: Bool {
+            dynamicRange.isHDR && (needsSystemRenderer || (adjustmentsAreNeutral && !wantsSmoothMotion))
+        }
+
+        /// Smooth Motion is asked for and can run here (visionOS only).
+        private var wantsSmoothMotion: Bool {
+            #if os(visionOS)
+            interpolatesFrames
+            #else
+            false
+            #endif
+        }
+
         /// The first frame says what the picture is. AVFoundation hands PQ
         /// and HLG frames over still encoded (PQ code values in BGRA), which
         /// an SDR drawable showed washed out and dim.
@@ -956,13 +991,16 @@ struct NativeMetalVideoPlayerView {
             }
             // Profile 5 carries an RPU and no colour primaries (its IPT-PQ-c2
             // picture has none to state); 8.1 states BT.2020.
-            let hasRPU = CVBufferCopyAttachment(pixelBuffer, "DolbyVisionRPUData" as CFString, nil) != nil
+            hasRPU = CVBufferCopyAttachment(pixelBuffer, "DolbyVisionRPUData" as CFString, nil) != nil
+            masteringDisplay = CVBufferCopyAttachment(pixelBuffer, kCVImageBufferMasteringDisplayColorVolumeKey, nil) as? Data
+            contentLightLevel = CVBufferCopyAttachment(pixelBuffer, kCVImageBufferContentLightLevelInfoKey, nil) as? Data
             let hasPrimaries = CVBufferCopyAttachment(pixelBuffer, kCVImageBufferColorPrimariesKey, nil) != nil
             needsSystemRenderer = hasRPU && !hasPrimaries
             // The system layer applies an RPU (HDR and Dolby Vision show
-            // there); the Metal path, with adjustments on, does not.
-            onFrameRangeKnown?(VideoFrameRange(transferFunction: transfer,
-                                                hasDolbyVisionRPU: hasRPU && (needsSystemRenderer || adjustmentsAreNeutral)))
+            // there); the Metal path (adjustments, Smooth Motion) does not.
+            let range = VideoFrameRange(transferFunction: transfer, hasDolbyVisionRPU: hasRPU && wantsSystemLayer)
+            reportedRange = range
+            onFrameRangeKnown?(range)
             var format: CMVideoFormatDescription?
             CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: pixelBuffer, formatDescriptionOut: &format)
             firstFrameFormat = format
@@ -978,12 +1016,21 @@ struct NativeMetalVideoPlayerView {
 
         /// HDR plays through the system's video layer, which shows it (and
         /// Dolby Vision, RPU and all) as the OS does everywhere else. Metal
-        /// takes over only while adjustments or sharpening are on, then in
-        /// HDR itself (half-float frames into an EDR layer tagged PQ or HLG).
+        /// takes over only while adjustments, sharpening or Smooth Motion are
+        /// on, then in HDR itself (half-float frames into an EDR layer tagged
+        /// PQ or HLG; a Dolby Vision 8.x picture shows its base layer there).
         /// Profile 5 never leaves the system layer.
         private func updatePresentation() {
             guard host != nil, player != nil, dynamicRange != .unknown else { return }
-            let system = dynamicRange.isHDR && (needsSystemRenderer || adjustmentsAreNeutral)
+            let system = wantsSystemLayer
+            onFrameRangeKnown.map { report in
+                if let range = reportedRange, range.hasDolbyVisionRPU != (hasRPU && system) {
+                    var updated = range
+                    updated.hasDolbyVisionRPU = hasRPU && system
+                    reportedRange = updated
+                    report(updated)
+                }
+            }
             if !system { configureMetalView(for: dynamicRange) }
             guard system != usesSystemLayer else { return }
             usesSystemLayer = system
@@ -1032,6 +1079,18 @@ struct NativeMetalVideoPlayerView {
             // carries HDR there.
             #if !os(tvOS)
             layer.wantsExtendedDynamicRangeContent = range.isHDR
+            // Without metadata an EDR layer isn't tone-mapped at all: what is
+            // above the display's headroom clips (CAMetalLayer.h), so an HDR10
+            // film's highlights were cut off here where the system's video
+            // layer rolled them off. With the film's own mastering display and
+            // light levels the system tone-maps the layer as it does a video.
+            switch range {
+            case .pq:
+                layer.edrMetadata = CAEDRMetadata.hdr10(displayInfo: masteringDisplay, contentInfo: contentLightLevel,
+                                                        opticalOutputScale: 100)
+            case .hlg: layer.edrMetadata = CAEDRMetadata.hlg
+            case .sdr, .unknown: layer.edrMetadata = nil
+            }
             #endif
             #if os(macOS)
             // macOS 26 tone-maps a layer to SDR unless it asks for more.
@@ -1068,9 +1127,13 @@ struct NativeMetalVideoPlayerView {
         /// 16.7 ms. A display without 120 Hz (an M2 headset tops out at 100)
         /// shows a doubled 60 fps picture as best it can.
         ///
-        /// SDR only: VideoToolbox's interpolator takes 8-bit 4:2:0, and both
-        /// work on BGRA frames, so an HDR picture (the system layer, or
-        /// half-float frames with adjustments on) plays its own frames.
+        /// HDR too (since 2026-11-04): the picture leaves the system layer for
+        /// half-float frames in an EDR layer (`wantsSystemLayer`), and an HDR
+        /// pair goes through VideoToolbox's 8-bit interpolator with only its
+        /// motion kept (Vergence's `HDRMidFrameComposer`), so the in-between
+        /// frames don't band. A Dolby Vision profile 5 picture stays on the
+        /// system layer and plays its own frames; an 8.x one shows its HDR10
+        /// base layer while Smooth Motion is on.
         /// visionOS only: the motion sickness this is for is a headset's, and
         /// other displays (60/120 Hz) can't show 48 fps evenly. Nothing else
         /// uses the Neural Engine here, so it keeps up where AI 3D's depth
@@ -1080,8 +1143,8 @@ struct NativeMetalVideoPlayerView {
             #if os(visionOS)
             let had = framePresenter != nil
             framePresenter = nil
-            if interpolatesFrames, !usesSystemLayer, !dynamicRange.isHDR,
-               outputPixelFormat == kCVPixelFormatType_32BGRA,
+            if interpolatesFrames, !usesSystemLayer,
+               FramePixelFormat.isSupported(outputPixelFormat),
                let videoOutput, let playerItem {
                 let source = InterpolatingFrameSource.wrappingIfSupported(
                     AVPlayerFrameSource(output: videoOutput, item: playerItem), thresholds: .flat,
@@ -1094,6 +1157,7 @@ struct NativeMetalVideoPlayerView {
             let has = framePresenter != nil
             doubledDrawRate = 96
             updateDrawRate()
+            onSmoothMotionChanged?(has)
             if had || has {
                 AppLogger.videoWindow.info("Native player: Smooth Motion \(has ? "on" : "off", privacy: .public) (\(self.interpolationEngine.rawValue, privacy: .public))")
                 if dynamicRange != .unknown { updateDisplayCriteria() }
