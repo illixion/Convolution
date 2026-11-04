@@ -133,7 +133,15 @@ final class VideoWindowModel {
         didSet { refreshOfferedSegment() }
     }
     var duration: Double = 0
-    var isPaused: Bool = true
+    var isPaused: Bool = true {
+        didSet {
+            #if os(iOS) || os(tvOS)
+            // Every renderer reports here; the Metal one alone wouldn't hold
+            // the screen on (`IdleTimerHold`).
+            if oldValue != isPaused { IdleTimerHold.set(!isPaused, for: self) }
+            #endif
+        }
+    }
     /// Seeded from AppModel.videoAutoplayMuted in init (autoplay defaults to
     /// muted unless the setting says otherwise); toggled via the control bar.
     var isMuted: Bool = true
@@ -250,6 +258,9 @@ final class VideoWindowModel {
         sceneDisconnected = true
         Self.silence(nativePlayer)
         pauseCommand?()
+        #if os(iOS) || os(tvOS)
+        IdleTimerHold.set(false, for: self)
+        #endif
         #if os(visionOS)
         // The stereo player's onDisappear doesn't run when the scene goes
         // away in the background, and its pump kept ticking paused for the
@@ -760,6 +771,9 @@ final class VideoWindowModel {
 
     /// Call from onDisappear.
     func cleanup() {
+        #if os(iOS) || os(tvOS)
+        IdleTimerHold.set(false, for: self)
+        #endif
         AI3DWarmup.shared.clearIntent(self)
         nextEpisodeTask?.cancel()
         audioTracksTask?.cancel()
@@ -1941,11 +1955,30 @@ final class VideoWindowModel {
         if newPhase == .background {
             clearLostMenus(reason: "window backgrounded")
             backgroundedAt = Date()
+            pauseNativePlayerForBackground()
         } else if newPhase == .active, let since = backgroundedAt {
             backgroundedAt = nil
             // Resume is an explicit user action after a system interruption.
             if Date().timeIntervalSince(since) >= 2 { pausedSince = since }
         }
+    }
+
+    /// A flat native video stops when its window goes to the background, as
+    /// the WebKit and stereo players already do through `isRoomActive`. The
+    /// app declares the `audio` background mode for Jellyfin music, so the
+    /// system no longer suspends it then, and an `AVPlayer` with no player
+    /// layer (this one draws through Metal) would play its sound on with
+    /// nobody watching: a window left in another room, or the Home screen on
+    /// iPhone and iPad. A player lent to the Big Screen keeps playing. Not
+    /// resumed by itself; resuming after an interruption is the user's call.
+    private func pauseNativePlayerForBackground() {
+        guard playbackRenderer == .nativeMetal, !showsStereoPicture, !isPaused,
+              let nativePlayer else { return }
+        #if os(visionOS)
+        if Cinema.shared.screenPlayer === nativePlayer { return }
+        #endif
+        AppLogger.videoWindow.info("Video window backgrounded: pausing the native player")
+        pauseCommand?()
     }
 
     /// Menus count themselves open and closed from their content's appear and

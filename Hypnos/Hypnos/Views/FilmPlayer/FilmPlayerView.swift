@@ -147,7 +147,7 @@ struct FilmPlayerView: View {
                 nowPlaying?.deactivate()
                 nowPlaying = nil
                 AudioSessionConfig.configureMixedPlayback()
-                UIApplication.shared.isIdleTimerDisabled = false
+                IdleTimerHold.set(false, for: player)
                 #endif
             }
             #if os(tvOS) || os(iOS)
@@ -158,7 +158,7 @@ struct FilmPlayerView: View {
             // doesn't hold the screen on for a picture fed on our own clock
             // (the iPad slept mid-film), so the player holds it while playing.
             .onChange(of: player.isPlaying, initial: true) { _, playing in
-                UIApplication.shared.isIdleTimerDisabled = playing
+                IdleTimerHold.set(playing, for: player)
             }
             #endif
             #if os(visionOS)
@@ -170,7 +170,17 @@ struct FilmPlayerView: View {
             )) { Button("OK", role: .cancel) {} } message: { Text(stereoFailure ?? "") }
             .onChange(of: session.loadedItem?.id) { _, _ in stopStereo(keepingPosition: false) }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .background { clearLostHolds() }
+                guard phase == .background else { return }
+                clearLostHolds()
+                // The app keeps running in the background now (the audio
+                // background mode, for music), so a film whose window went to
+                // another room would play on unseen. One the Cinema space
+                // holds (Big Screen, Room Sound, head-locked sound) still has
+                // its picture or its room, so it keeps playing.
+                let cinema = Cinema.shared
+                if player.isPlaying, !(cinema.isOpen && cinema.owner == .film) {
+                    player.pause()
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIScene.didDisconnectNotification)) { notification in
                 guard let scene = notification.object as? UIWindowScene,
