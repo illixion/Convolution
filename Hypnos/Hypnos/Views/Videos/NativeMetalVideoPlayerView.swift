@@ -187,9 +187,11 @@ struct NativeMetalVideoPlayerView {
     /// parks on its last frame, reported as paused at the end so the window
     /// can go on to the next episode.
     var loops: Bool = true
-    /// Smooth Motion: an in-between frame for each pair of a 24-30 fps SDR
-    /// picture (visionOS; see the coordinator's `rebuildFramePresenter`).
+    /// Smooth Motion: an in-between frame for each pair of a 24-30 or 50-60
+    /// fps SDR picture (visionOS; see the coordinator's `rebuildFramePresenter`).
     var interpolatesFrames: Bool = false
+    /// Which interpolator Smooth Motion uses (Settings › Videos).
+    var interpolationEngine: SmoothMotionEngine = .automatic
     var onPlaybackError: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
@@ -231,6 +233,7 @@ struct NativeMetalVideoPlayerView {
         coordinator.startVolume = Float(playbackModel?.volume ?? 1)
         coordinator.speed = Float(playbackModel?.playbackSpeed ?? 1)
         coordinator.loops = loops
+        coordinator.interpolationEngine = interpolationEngine
         coordinator.interpolatesFrames = interpolatesFrames
         coordinator.resumesAfterInterruptions = playbackModel == nil
         coordinator.maximumResolution = playbackModel?.maximumPictureResolution ?? .zero
@@ -335,9 +338,16 @@ struct NativeMetalVideoPlayerView {
         var interpolatesFrames = false {
             didSet { if oldValue != interpolatesFrames { rebuildFramePresenter() } }
         }
+        var interpolationEngine: SmoothMotionEngine = .automatic {
+            didSet { if oldValue != interpolationEngine, interpolatesFrames { rebuildFramePresenter() } }
+        }
         /// Doubles a 24-30 fps picture while Smooth Motion is on (nil: frames
         /// straight from the output).
         private var framePresenter: InterpolatedFramePresenter?
+        /// The draw rate while Smooth Motion doubles: 96 (48 fps fits it
+        /// evenly) until the display criteria find the picture's doubled rate
+        /// is higher (100 or 120).
+        private var doubledDrawRate = 96.0
         private var presentationSizeObservation: NSKeyValueObservation?
         private var criteriaTask: Task<Void, Never>?
         private var frameRateTask: Task<Void, Never>?
@@ -627,10 +637,12 @@ struct NativeMetalVideoPlayerView {
             if player.rate != 0 { player.rate = speed }
         }
 
-        /// The view draws 60 times a second (96 with Smooth Motion's doubled
-        /// frames), and that many times more at a faster speed, up to 120.
+        /// The view draws 60 times a second (with Smooth Motion's doubled
+        /// frames 96, or 120 for a doubled 50-60 fps picture once the display
+        /// criteria know its rate), and that many times more at a faster
+        /// speed, up to 120.
         private func updateDrawRate() {
-            let base = framePresenter != nil ? 96.0 : PlaybackFrameRate.normalDrawRate
+            let base = framePresenter != nil ? doubledDrawRate : PlaybackFrameRate.normalDrawRate
             mtkView?.preferredFramesPerSecond = Int(PlaybackFrameRate.drawRate(base: base, speed: Double(speed)).rounded())
         }
 
@@ -1032,19 +1044,27 @@ struct NativeMetalVideoPlayerView {
         // MARK: Smooth Motion
 
         /// Puts Vergence's interpolator between the frame output and the draw
-        /// loop: a 24-30 fps picture plays at twice its rate, each in-between
-        /// frame shown when it is due (`InterpolatedFramePresenter`), with the
-        /// display asked for a matching refresh (48 fps on 96 Hz). It sits
-        /// before the adjustments and sharpening, which then apply to every
-        /// frame alike.
+        /// loop: a 24-30 or 50-60 fps picture plays at twice its rate, each
+        /// in-between frame shown when it is due (`InterpolatedFramePresenter`),
+        /// with the display asked for a matching refresh (48 fps on 96 Hz, 120
+        /// on an M5 headset's 120 Hz). It sits before the adjustments and
+        /// sharpening, which then apply to every frame alike.
         ///
-        /// SDR only: VideoToolbox's interpolator takes 8-bit 4:2:0, so an HDR
-        /// picture (the system layer, or half-float frames with adjustments
-        /// on) plays its own frames. visionOS only: the motion sickness this
-        /// is for is a headset's, and other displays (60/120 Hz) can't show
-        /// 48 fps evenly. Nothing else uses the Neural Engine here, so it keeps
-        /// up where AI 3D's depth model sharing it couldn't; the governor
-        /// (`.flat` thresholds) still backs off if frames come late.
+        /// Two interpolators, by the picture's rate (`interpolationEngine`):
+        /// VideoToolbox's for 24-30 fps, and for 50-60 fps the GPU one
+        /// (`FlowMidFrameInterpolator`, ~1.5 ms a 1080p frame on an M2 Max),
+        /// since VideoToolbox's 5-18 ms doesn't fit an in-between frame every
+        /// 16.7 ms. A display without 120 Hz (an M2 headset tops out at 100)
+        /// shows a doubled 60 fps picture as best it can.
+        ///
+        /// SDR only: VideoToolbox's interpolator takes 8-bit 4:2:0, and both
+        /// work on BGRA frames, so an HDR picture (the system layer, or
+        /// half-float frames with adjustments on) plays its own frames.
+        /// visionOS only: the motion sickness this is for is a headset's, and
+        /// other displays (60/120 Hz) can't show 48 fps evenly. Nothing else
+        /// uses the Neural Engine here, so it keeps up where AI 3D's depth
+        /// model sharing it couldn't; the governor (`.flat` thresholds) still
+        /// backs off if frames come late.
         private func rebuildFramePresenter() {
             #if os(visionOS)
             let had = framePresenter != nil
@@ -1053,16 +1073,18 @@ struct NativeMetalVideoPlayerView {
                outputPixelFormat == kCVPixelFormatType_32BGRA,
                let videoOutput, let playerItem {
                 let source = InterpolatingFrameSource.wrappingIfSupported(
-                    AVPlayerFrameSource(output: videoOutput, item: playerItem), thresholds: .flat
+                    AVPlayerFrameSource(output: videoOutput, item: playerItem), thresholds: .flat,
+                    engine: interpolationEngine.vergenceEngine
                 )
                 if source is InterpolatingFrameSource {
                     framePresenter = InterpolatedFramePresenter(source: source)
                 }
             }
             let has = framePresenter != nil
+            doubledDrawRate = 96
             updateDrawRate()
-            if had != has {
-                AppLogger.videoWindow.info("Native player: Smooth Motion \(has ? "on" : "off", privacy: .public)")
+            if had || has {
+                AppLogger.videoWindow.info("Native player: Smooth Motion \(has ? "on" : "off", privacy: .public) (\(self.interpolationEngine.rawValue, privacy: .public))")
                 if dynamicRange != .unknown { updateDisplayCriteria() }
             }
             #endif
@@ -1106,8 +1128,16 @@ struct NativeMetalVideoPlayerView {
                 }
                 guard !Task.isCancelled, let self, self.playerItem === item, let format else { return }
                 let snapped = PlaybackFrameRate.snapped(rate > 0 ? rate : 24)
-                let doubled = self.framePresenter != nil && snapped < InterpolatingFrameSource.maxSourceFrameRate
+                let highest = (self.framePresenter?.source as? InterpolatingFrameSource)?.highestSourceFrameRate ?? 0
+                let doubled = snapped < highest
                 let shown = PlaybackFrameRate.shown(source: snapped, doubled: doubled, speed: self.criteriaSpeed)
+                if self.framePresenter != nil {
+                    let draw = doubled ? max(96, min(PlaybackFrameRate.maximum, snapped * 2)) : 96
+                    if draw != self.doubledDrawRate {
+                        self.doubledDrawRate = draw
+                        self.updateDrawRate()
+                    }
+                }
                 self.host?.displayCriteria = AVDisplayCriteria(refreshRate: Float(shown), formatDescription: format)
                 AppLogger.videoWindow.info("Native player: display at \(shown, format: .fixed(precision: 3), privacy: .public) Hz")
             }

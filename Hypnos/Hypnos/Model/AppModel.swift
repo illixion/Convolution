@@ -981,6 +981,20 @@ class AppModel {
     }
     static let smoothMotionKey = "smoothMotion"
 
+    /// Which interpolator Smooth Motion uses for a flat 2D video
+    /// (`NativeMetalVideoPlayerView`). Automatic: VideoToolbox's for 24-30 fps,
+    /// the GPU one (Vergence's `FlowMidFrameInterpolator`) for 50-60 fps, which
+    /// VideoToolbox is too slow to double. GPU: the GPU one for every rate, to
+    /// compare the two on 24-30 fps. AI 3D always uses VideoToolbox's.
+    var smoothMotionEngine: SmoothMotionEngine {
+        didSet {
+            if smoothMotionEngine != oldValue {
+                UserDefaults.standard.set(smoothMotionEngine.rawValue, forKey: Self.smoothMotionEngineKey)
+            }
+        }
+    }
+    static let smoothMotionEngineKey = "smoothMotionEngine"
+
     /// When true (default), videos open with audio muted; autoplay always
     /// starts playback either way. Off = videos open with sound. Applies to
     /// the video player windows and the gallery long-press quick look.
@@ -1494,6 +1508,8 @@ class AppModel {
         let loadedDefaultRealtimePseudo3D = loadBool("defaultRealtimePseudo3D", default: false)
         let loadedStableDepth = loadBool(DepthRefinement.enabledDefaultsKey, default: true)
         let loadedSmoothMotion = loadBool(Self.smoothMotionKey, default: false)
+        let loadedSmoothMotionEngine = UserDefaults.standard.string(forKey: Self.smoothMotionEngineKey)
+            .flatMap(SmoothMotionEngine.init(rawValue:)) ?? .automatic
         let loadedVideoAutoplayMuted = loadBool("videoAutoplayMuted", default: true)
 
         // Load default image viewing mode (default: 2D / mono)
@@ -1613,6 +1629,7 @@ class AppModel {
         self.defaultRealtimePseudo3D = loadedDefaultRealtimePseudo3D
         self.stableDepth = loadedStableDepth
         self.smoothMotion = loadedSmoothMotion
+        self.smoothMotionEngine = loadedSmoothMotionEngine
         self.videoAutoplayMuted = loadedVideoAutoplayMuted
         self.rememberImageEnhancements = loadedRememberImageEnhancements
         self.autoRestoreSpatial3D = loadedAutoRestoreSpatial3D
@@ -2430,6 +2447,7 @@ class AppModel {
             defaultRealtimePseudo3D: defaultRealtimePseudo3D,
             stableDepth: stableDepth,
             smoothMotion: smoothMotion,
+            smoothMotionEngine: smoothMotionEngine.rawValue,
             videoAutoplayMuted: videoAutoplayMuted,
             useLossyTextureCompression: useLossyTextureCompression,
             globalPseudo3DSettings: try? JSONEncoder().encode(globalPseudo3DSettings),
@@ -2480,6 +2498,7 @@ class AppModel {
         if let v = backup.defaultRealtimePseudo3D { defaultRealtimePseudo3D = v }
         if let v = backup.stableDepth { stableDepth = v }
         if let v = backup.smoothMotion { smoothMotion = v }
+        if let v = backup.smoothMotionEngine.flatMap(SmoothMotionEngine.init(rawValue:)) { smoothMotionEngine = v }
         if let v = backup.videoAutoplayMuted { videoAutoplayMuted = v }
         if let v = backup.useLossyTextureCompression { useLossyTextureCompression = v }
         if let data = backup.globalPseudo3DSettings,

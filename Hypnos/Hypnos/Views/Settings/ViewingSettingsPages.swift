@@ -209,8 +209,12 @@ struct VideoSettingsPage: View {
             #if os(visionOS)
             Section {
                 Toggle("Smooth Motion", isOn: $appModel.smoothMotion)
+                Picker("2D Interpolator", selection: $appModel.smoothMotionEngine) {
+                    ForEach(SmoothMotionEngine.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                .disabled(!appModel.smoothMotion)
             } footer: {
-                Text("Adds an in-between frame to 24–30 fps videos, in 2D and AI 3D, so slow pans move in smaller steps. Works up to 1080p, and in 2D for non-HDR videos; cuts and seeks are never blended. Each video can change it in its View Mode menu.")
+                Text("Adds an in-between frame to 24–30 fps videos, in 2D and AI 3D, so slow pans move in smaller steps, and to 50–60 fps 2D videos, which then play at 100–120 fps on a display that has that refresh rate. Works up to 1080p, and in 2D for non-HDR videos; cuts and seeks are never blended. Automatic uses the system's interpolator for 24–30 fps and a faster GPU one for 50–60 fps; Fast (GPU) uses the GPU one for every 2D video. Each video can change Smooth Motion in its View Mode menu.")
             }
             #endif
         }

@@ -257,6 +257,7 @@ struct VideoWindowView: View {
                                 startMuted: windowModel.isMuted,
                                 loops: windowModel.loopsAtEnd,
                                 interpolatesFrames: windowModel.smoothMotion,
+                                interpolationEngine: appModel.smoothMotionEngine,
                                 onPlaybackError: {
                                     windowModel.forceWebKitPlayback()
                                 }
