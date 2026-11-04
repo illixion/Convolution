@@ -37,4 +37,15 @@ YOUTUBE_CONDITION =
 // gitignored scripts/build-signing.conf / LocalSigning.xcconfig.
 FFMPEG_CONDITION =
 
-SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(PRIVATE_API_CONDITION) $(YOUTUBE_CONDITION) $(FFMPEG_CONDITION)
+// Dolby Vision RPU processing on the device, for sideload builds only
+// (CLAUDE.md, "An App Store build never does Dolby processing itself"): the
+// on-device MKV remux plays a UHD Blu-ray's profile 7 as profile 8.1, its
+// enhancement layer dropped and every RPU rewritten by FFmpeg, instead of as
+// its HDR10 base layer. Needs HYPNOS_FFMPEG as well (the rewriter is in the
+// same HypnosFFmpeg.framework; a build with HYPNOS_DOVI alone stops with an
+// #error). Opt in with
+// `~/bin/build-and-sign --set FFMPEG_CONDITION=HYPNOS_FFMPEG --set DOVI_CONDITION=HYPNOS_DOVI`,
+// or in the gitignored scripts/build-signing.conf / LocalSigning.xcconfig.
+DOVI_CONDITION =
+
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(PRIVATE_API_CONDITION) $(YOUTUBE_CONDITION) $(FFMPEG_CONDITION) $(DOVI_CONDITION)

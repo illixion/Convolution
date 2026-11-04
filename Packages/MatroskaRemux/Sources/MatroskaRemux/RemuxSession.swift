@@ -69,6 +69,9 @@ public struct RemuxOptions: Sendable {
     /// Whether each decoded track is offered a second time levelled around
     /// its dialogue (`StableAudio.swift`), and whether that copy plays first.
     public var stableAudio: StableAudioMode = .off
+    /// An RPU converter: with one, Dolby Vision profile 7 plays as profile
+    /// 8.1 instead of as its HDR10 base layer (`DolbyVisionConversion.swift`).
+    public var dolbyVisionConversion: RemuxDolbyVisionConversion?
 
     public init() {}
 }
@@ -110,10 +113,20 @@ public struct RemuxSummary: Sendable {
     public var segmentCount: Int
     public var durationSeconds: Double
     public var videoRange: String
-    /// The video's Dolby Vision profile and base-layer compatibility (1
-    /// HDR10, 2 SDR, 4 HLG), when it has an RPU; carried for 5 and 8.
+    /// The source video's Dolby Vision profile and base-layer compatibility
+    /// (1 HDR10, 2 SDR, 4 HLG, 6 UHD Blu-ray), when it has an RPU; carried
+    /// for 5 and 8, and for 7 with a converter.
     public var dolbyVisionProfile: Int? = nil
     public var dolbyVisionCompatibility: Int? = nil
+    /// The Dolby Vision profile the remux plays: the source's 5 or 8, 8 for
+    /// a profile 7 converted to 8.1 (compatibility 1), nil when the source
+    /// has none or its Dolby Vision is left out (profile 7 without a
+    /// converter plays its HDR10 base layer).
+    public var dolbyVisionPlayedProfile: Int? = nil
+    /// What the source's enhancement layer was, when known: for a converted
+    /// profile 7, whether the conversion lost a full one (FEL) or dropped a
+    /// minimal one (MEL) losslessly.
+    public var dolbyVisionEnhancementLayer: DolbyVisionEnhancementLayer? = nil
     public var width: Int
     public var height: Int
     public var framesPerSecond: Double?
@@ -266,6 +279,8 @@ public actor RemuxSession {
             },
             dropped: dropped, segmentCount: index.count, durationSeconds: duration, videoRange: video.videoRange,
             dolbyVisionProfile: video.dolbyVisionProfile, dolbyVisionCompatibility: video.dolbyVisionCompatibility,
+            dolbyVisionPlayedProfile: video.dolbyVisionPlayedProfile,
+            dolbyVisionEnhancementLayer: video.dolbyVisionEnhancementLayer,
             width: video.displayWidth, height: video.displayHeight, framesPerSecond: video.framesPerSecond,
             scannedClusters: scanned, indexing: !index.isComplete)
     }
@@ -333,7 +348,8 @@ public actor RemuxSession {
 
         let video = try VideoPlan.make(track: videoTrack, firstKeyframe: keyframe.data,
                                        firstKeyframeTicks: keyframe.blockTimestamp,
-                                       timestampScale: header.timestampScale, offsetNanoseconds: offsetNanoseconds)
+                                       timestampScale: header.timestampScale, offsetNanoseconds: offsetNanoseconds,
+                                       dolbyVisionConversion: options.dolbyVisionConversion)
         var audio: [AudioPlan] = []
         for track in candidates {
             guard let first = firsts.audio[track.number] else {
@@ -753,7 +769,7 @@ public actor RemuxSession {
             }
             samples.append(FragmentSample(duration: UInt32(clamping: max(1, duration)),
                                           compositionOffset: Int32(clamping: presentation[i] - decode[i]),
-                                          isSync: frame.isKeyframe, data: frame.data))
+                                          isSync: frame.isKeyframe, data: video.sampleData(frame.data)))
         }
         return Fragment(baseDecodeTime: UInt64(max(0, decode[0])), samples: samples)
     }

@@ -17,8 +17,11 @@
  Dolby Vision rides on the track as a BlockAdditionMapping holding the
  dvcC/dvvC payload. Profile 8 keeps `hvc1` (its base layer is plain HEVC)
  plus the configuration box; profile 5 has no compatible base layer and is
- `dvh1`. The RPU NAL units stay in the samples untouched: the app never
- does Dolby processing itself.
+ `dvh1`. Their RPU NAL units stay in the samples untouched. Profile 7 plays
+ its HDR10 base layer, unless the caller hands the remux an RPU converter
+ (the sideload edition's FFmpeg, HYPNOS_DOVI): then its enhancement layer is
+ dropped and each RPU rewritten, and it plays as profile 8.1
+ (`DolbyVisionConversion.swift`). An App Store build never touches an RPU.
  */
 
 import Foundation
@@ -227,11 +230,15 @@ struct DolbyVisionConfiguration {
     let compatibilityID: Int
 
     init?(mapping: MatroskaTrack.BlockAdditionMapping) {
-        guard let type = mapping.idType, mapping.extraData.count >= 5 else { return nil }
+        guard let type = mapping.idType else { return nil }
         let fourCC = String(bytes: [24, 16, 8, 0].map { UInt8((type >> $0) & 0xFF) }, encoding: .ascii) ?? ""
-        guard ["dvcC", "dvvC", "dvwC"].contains(fourCC) else { return nil }
-        boxType = fourCC
-        payload = mapping.extraData
+        self.init(boxType: fourCC, payload: mapping.extraData)
+    }
+
+    init?(boxType: String, payload: [UInt8]) {
+        guard ["dvcC", "dvvC", "dvwC"].contains(boxType), payload.count >= 5 else { return nil }
+        self.boxType = boxType
+        self.payload = payload
         let bits = UInt16(payload[2]) << 8 | UInt16(payload[3])
         profile = Int(bits >> 9)
         level = Int((bits >> 3) & 0x3F)

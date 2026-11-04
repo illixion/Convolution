@@ -47,3 +47,19 @@ final class FFmpegRemuxDecoder: RemuxAudioDecoder {
         try decoder.withSamples(body)
     }
 }
+
+/// FFmpeg's RPU converter as the remux's (the app's copy is compiled only
+/// with HYPNOS_DOVI).
+enum FFmpegDolbyVisionConversion {
+    static var loaded: Bool { FFmpegRemuxDecoder.loaded && FFmpegDolbyVision.isAvailable }
+
+    static let conversion = RemuxDolbyVisionConversion { rpu in
+        guard let converted = FFmpegDolbyVision.convertToProfile81(rpu) else { return nil }
+        let layer: DolbyVisionEnhancementLayer = switch converted.sourceLayer {
+        case .none: .none
+        case .minimal: .minimal
+        case .full: .full
+        }
+        return .init(rpu: converted.rpu, sourceEnhancementLayer: layer)
+    }
+}

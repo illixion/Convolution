@@ -16,6 +16,8 @@
  decoders are built (`scripts/build-ffmpeg-decoders.sh`); without them they
  are dropped, as in the App Store app. With MKVREMUX_STABLE=1 in the
  environment, each also gets its Stable Audio rendition (`StableAudio.swift`).
+ Dolby Vision profile 7 plays as 8.1 with the same framework
+ (`DolbyVisionConversion.swift`; MKVREMUX_DOVI=0 keeps the base layer only).
 
  Writes master.m3u8, the media playlists, and every init and media segment,
  at the paths the app serves them on, then prints the summary. Serve the
@@ -114,11 +116,19 @@ do {
     let started = Date()
     var options = RemuxOptions()
     options.audioDecoding = FFmpegRemuxDecoder.decoding
+    if ProcessInfo.processInfo.environment["MKVREMUX_DOVI"] != "0" {
+        options.dolbyVisionConversion = FFmpegDolbyVisionConversion.conversion
+    }
     if ProcessInfo.processInfo.environment["MKVREMUX_STABLE"] == "1" { options.stableAudio = .offered }
     let session = try await RemuxSession.open(source: try source(arguments[1]), options: options)
     let opened = Date().timeIntervalSince(started)
     let summary = session.summary
     print("opened in \(String(format: "%.3f", opened)) s: \(summary.docType) \(summary.video.codec) \(summary.width)x\(summary.height) \(summary.videoRange), \(summary.segmentCount) segments, \(String(format: "%.3f", summary.durationSeconds)) s\(summary.scannedClusters ? " (scanned)" : "")")
+    if let profile = summary.dolbyVisionProfile {
+        let played = summary.dolbyVisionPlayedProfile.map { "plays as profile \($0)" } ?? "plays its base layer"
+        let layer = summary.dolbyVisionEnhancementLayer.map { ", source EL \($0.rawValue)" } ?? ""
+        print("  Dolby Vision profile \(profile) (compatibility \(summary.dolbyVisionCompatibility ?? 0)): \(played)\(layer); CODECS \(summary.video.codecs)")
+    }
     for track in summary.audio {
         print("  audio \(track.number): \(track.codec) \(track.codecs) \(track.channels ?? 0)ch \(track.language ?? "-") \"\(track.name)\"\(track.isDefault ? " default" : "")")
     }

@@ -184,6 +184,19 @@ for codec in aac eac3; do
        -map 0:v -map 1:a -c:v libx264 -preset veryfast -crf 40 -g 25 -c:a $codec -b:a 384k "$codec-51-clicks.mkv"
 done
 
+# Dolby Vision profile 7 RPUs (FEL, then MEL) written by FFmpeg's own RPU
+# writer, which DolbyVisionTests lays onto hevc-hdr10.mkv's frames. Needs the
+# static FFmpeg scripts/build-ffmpeg-decoders.sh builds; skipped without it.
+ffbuild=../../../../../build/ffmpeg-decoders
+if [[ -f "$ffbuild/out/arm64-apple-macos14.0/lib/libavcodec.a" ]]; then
+    prefix="$ffbuild/out/arm64-apple-macos14.0"
+    xcrun clang -target arm64-apple-macos14.0 -Os -I"$prefix/include" -I"$ffbuild/ffmpeg-9.0.2" make-dovi-rpus.c \
+        "$prefix/lib/libavcodec.a" "$prefix/lib/libavutil.a" -o "$tmp/make-dovi-rpus"
+    "$tmp/make-dovi-rpus" dovi-p7-rpus.bin
+else
+    echo "dovi-p7-rpus.bin kept: run scripts/build-ffmpeg-decoders.sh to regenerate it" >&2
+fi
+
 write_expected
 
 ls -l ./*.mkv ./*.webm

@@ -228,6 +228,7 @@ final class MatroskaRemuxService: Sendable {
             var options = RemuxOptions()
             options.audioDecoding = Self.audioDecoding
             options.stableAudio = stableAudio
+            options.dolbyVisionConversion = Self.dolbyVisionConversion
             session = try await RemuxSession.open(source: bytes, options: options)
         } catch let error as RemuxError {
             if error != .notMatroska {

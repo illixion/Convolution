@@ -50,6 +50,20 @@ struct VideoPlan: Sendable {
     /// can): what the source is, for a player saying what it shows.
     var dolbyVisionProfile: Int? = nil
     var dolbyVisionCompatibility: Int? = nil
+    /// The profile the output carries: the source's 5 or 8, 8 for a
+    /// converted profile 7, nil when the Dolby Vision is left out.
+    var dolbyVisionPlayedProfile: Int? = nil
+    /// The source's enhancement layer, when known (a converted profile 7's
+    /// first RPU says).
+    var dolbyVisionEnhancementLayer: DolbyVisionEnhancementLayer? = nil
+    /// Set while a profile 7 track is converted to 8.1: what every sample
+    /// goes through.
+    var dolbyVisionRewrite: DolbyVisionRewrite? = nil
+
+    /// A stored frame as it goes into the output.
+    func sampleData(_ data: [UInt8]) -> [UInt8] {
+        dolbyVisionRewrite?.rewrite(data) ?? data
+    }
 
     /// Presentation time of a block, at `timescale`.
     func time(ticks: Int64, laceIndex: Int = 0) -> Int64 {
@@ -75,7 +89,8 @@ struct VideoPlan: Sendable {
     }
 
     static func make(track: MatroskaTrack, firstKeyframe: [UInt8], firstKeyframeTicks: Int64,
-                     timestampScale: Int64, offsetNanoseconds: Int64) throws -> VideoPlan {
+                     timestampScale: Int64, offsetNanoseconds: Int64,
+                     dolbyVisionConversion: RemuxDolbyVisionConversion? = nil) throws -> VideoPlan {
         if let encoding = track.unreadableEncoding { throw RemuxError.declined("video track is \(encoding)") }
         let video = track.video ?? MatroskaTrack.Video()
         let width = video.pixelWidth, height = video.pixelHeight
@@ -111,6 +126,9 @@ struct VideoPlan: Sendable {
         var supplemental: String?
         var codecName: String
         var dolbyRange: String?
+        var dolbyPlayed: Int?
+        var dolbyLayer: DolbyVisionEnhancementLayer?
+        var rewrite: DolbyVisionRewrite?
         switch track.codecID {
         case "V_MPEG4/ISO/AVC":
             guard let config = AVCConfiguration(record: track.codecPrivate) else {
@@ -128,7 +146,7 @@ struct VideoPlan: Sendable {
                 throw RemuxError.declined("HEVC track without a usable hvcC")
             }
             // Parameter sets only in band: lift them into the record.
-            let config = stored.completed(fromKeyframe: firstKeyframe) ?? stored
+            var config = stored.completed(fromKeyframe: firstKeyframe) ?? stored
             colour = merged(config.colour)
             codecName = "HEVC"
             var entryType = config.hasParameterSets ? "hvc1" : "hev1"
@@ -142,14 +160,39 @@ struct VideoPlan: Sendable {
                     entryType = config.hasParameterSets ? "dvh1" : "dvhe"
                     dolbyBox = dolby
                     dolbyRange = "PQ"
+                    dolbyPlayed = 5
                     codecName = "HEVC (DV profile 5)"
                 case 8:
                     dolbyBox = dolby
                     supplemental = dolby.compatibilityBrand.map { "\(dolby.codecString)/\($0)" }
                     if dolby.compatibilityID == 4 { dolbyRange = "HLG" }
+                    dolbyPlayed = 8
                     codecName = "HEVC (DV profile 8.\(dolby.compatibilityID))"
+                case 7:
+                    // The enhancement layer can't play here; the base layer
+                    // can, as HDR10, or with a converter as profile 8.1
+                    // (`DolbyVisionConversion.swift`). Converted only when
+                    // the first keyframe's RPU converts.
+                    guard let conversion = dolbyVisionConversion,
+                          let rpu = DolbyVisionRewrite.firstRPU(in: firstKeyframe, lengthSize: config.lengthSize),
+                          let converted = conversion.convertToProfile81(rpu),
+                          let target = dolby.asProfile81() else { break }
+                    rewrite = DolbyVisionRewrite(conversion: conversion, lengthSize: config.lengthSize)
+                    config = config.removingArrays(ofTypes: [DolbyVisionRewrite.rpuType,
+                                                             DolbyVisionRewrite.enhancementLayerType])
+                    dolbyBox = target
+                    supplemental = target.compatibilityBrand.map { "\(target.codecString)/\($0)" }
+                    dolbyRange = "PQ"
+                    dolbyPlayed = 8
+                    dolbyLayer = converted.sourceEnhancementLayer
+                    let layer = switch converted.sourceEnhancementLayer {
+                    case .full: "FEL "
+                    case .minimal: "MEL "
+                    default: ""
+                    }
+                    codecName = "HEVC (DV profile 7 \(layer)as 8.1)"
                 default:
-                    break // profile 7's enhancement layer can't play here; the base layer can
+                    break
                 }
             }
             codecs = dolbyBox?.profile == 5
@@ -212,6 +255,9 @@ struct VideoPlan: Sendable {
             plan.dolbyVisionProfile = dolby.profile
             plan.dolbyVisionCompatibility = dolby.compatibilityID
         }
+        plan.dolbyVisionPlayedProfile = dolbyPlayed
+        plan.dolbyVisionEnhancementLayer = dolbyLayer
+        plan.dolbyVisionRewrite = rewrite
         return plan
     }
 }

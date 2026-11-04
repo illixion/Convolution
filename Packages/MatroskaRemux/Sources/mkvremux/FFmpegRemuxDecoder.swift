@@ -47,3 +47,19 @@ final class FFmpegRemuxDecoder: RemuxAudioDecoder {
         try decoder.withSamples(body)
     }
 }
+
+/// FFmpeg's RPU converter as the remux's: Dolby Vision profile 7 as 8.1.
+enum FFmpegDolbyVisionConversion {
+    static var conversion: RemuxDolbyVisionConversion? {
+        guard FFmpegRemuxDecoder.loaded, FFmpegDolbyVision.isAvailable else { return nil }
+        return RemuxDolbyVisionConversion { rpu in
+            guard let converted = FFmpegDolbyVision.convertToProfile81(rpu) else { return nil }
+            let layer: DolbyVisionEnhancementLayer = switch converted.sourceLayer {
+            case .none: .none
+            case .minimal: .minimal
+            case .full: .full
+            }
+            return .init(rpu: converted.rpu, sourceEnhancementLayer: layer)
+        }
+    }
+}
