@@ -43,7 +43,12 @@ final class LibraryHomeViewModel {
         error = nil
         defer { isLoading = false }
         do {
-            home = try await library.home()
+            // Publish only a change. A reload that finds the same Library
+            // (a watch report for another title, a download finishing)
+            // would otherwise rebuild every shelf, and with it any context
+            // menu open on a lockup, a second after it opened.
+            let fresh = try await library.home()
+            if fresh != home { home = fresh }
         } catch is CancellationError {
             // Superseded by a newer load (configuration changed); not an error.
         } catch let urlError as URLError where urlError.code == .cancelled {

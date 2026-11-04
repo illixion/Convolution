@@ -130,16 +130,19 @@ struct LibraryDetailView: View {
 
     private func reloadWatchState() async {
         guard let library else { return }
-        detail = (try? await library.item(id: item.id)) ?? detail
+        // Each value is assigned only when it changed, so a reload that
+        // finds nothing new doesn't rebuild the page under an open menu.
+        if let fresh = try? await library.item(id: item.id), fresh != detail { detail = fresh }
         if shown.kind == .series {
-            nextEpisode = (try? await library.nextUp(seriesId: shown.id)) ?? nextEpisode
+            if let next = try? await library.nextUp(seriesId: shown.id), next != nextEpisode { nextEpisode = next }
             await loadEpisodes()
         }
     }
 
     private func loadEpisodes() async {
         guard let library, let seasonId = selectedSeasonId else { return }
-        if let loaded = try? await library.episodes(seasonId: seasonId), seasonId == selectedSeasonId {
+        if let loaded = try? await library.episodes(seasonId: seasonId), seasonId == selectedSeasonId,
+           loaded != episodes {
             episodes = loaded
         }
     }

@@ -172,7 +172,7 @@ struct LibraryShelf: Identifiable, Hashable, Sendable {
 
 /// What the Library home screen renders: the featured picks the hero cycles
 /// through (movies/shows with backdrop art) plus the shelves below it.
-struct LibraryHome: Sendable {
+struct LibraryHome: Sendable, Equatable {
     var featured: [LibraryItem]
     var shelves: [LibraryShelf]
 }
