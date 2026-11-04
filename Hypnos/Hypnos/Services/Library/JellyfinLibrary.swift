@@ -925,9 +925,12 @@ actor JellyfinLibrary: MediaServerLibrary {
     }
 
     /// The URL is a stream the server remuxes or transcodes (one audio
-    /// stream), not the file itself.
+    /// stream), not the file itself. Jellyfin's are `Videos/{id}/main.m3u8`
+    /// (or `master.m3u8`); the on-device remux's loopback master is also a
+    /// `master.m3u8` but carries every track, so the path must say Videos.
     static func isServerStream(_ url: URL) -> Bool {
-        url.lastPathComponent == "main.m3u8" || url.lastPathComponent == "master.m3u8"
+        (url.lastPathComponent == "main.m3u8" || url.lastPathComponent == "master.m3u8")
+            && url.pathComponents.dropLast(2).last == "Videos"
     }
 
     // MARK: - Subtitles
