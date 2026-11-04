@@ -60,6 +60,9 @@ final class JellyfinMusicSession {
     @ObservationIgnored private var queueGeneration = UUID()
     private var player: AVPlayer?
     private var observation: NSKeyValueObservation?
+    private var itemObservation: NSKeyValueObservation?
+    /// The next song, already queued behind the playing one so the player rolls into it with no gap.
+    private var preloaded: (item: AVPlayerItem, music: JellyfinMusicItem)?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var playSessionId = UUID().uuidString
@@ -188,8 +191,9 @@ final class JellyfinMusicSession {
             queue = orderedQueue
             resetRandomSource()
         }
+        refreshPreload()
     }
-    func toggleRepeat() { repeats.toggle() }
+    func toggleRepeat() { repeats.toggle(); refreshPreload() }
 
     func setAudioMode(_ mode: JellyfinMusicAudioMode) {
         guard audioMode != mode else { return }
@@ -209,7 +213,7 @@ final class JellyfinMusicSession {
         applySpatialAudioPreference()
     }
 
-    private func start(_ item: JellyfinMusicItem, base: URL, token: String) {
+    private func streamURL(for item: JellyfinMusicItem, base: URL, token: String) -> URL? {
         var c = URLComponents(url: base.appendingPathComponent("Audio/\(item.Id)/universal"), resolvingAgainstBaseURL: false)!
         c.queryItems = [URLQueryItem(name: "UserId", value: JellyfinAuth.shared.session?.userId), URLQueryItem(name: "ApiKey", value: token),
             // Direct play what AVFoundation opens; otherwise HLS. A bare `/stream` transcode is an endless,
@@ -221,7 +225,55 @@ final class JellyfinMusicSession {
             guard let value = item.value else { return nil }
             return URLQueryItem(name: item.name, value: value)
         }
-        guard let url = c.url else { return }
+        return c.url
+    }
+
+    private func makePlayerItem(for item: JellyfinMusicItem, base: URL, token: String) -> AVPlayerItem? {
+        guard let url = streamURL(for: item, base: base, token: token) else { return nil }
+        let playerItem = AVPlayerItem(url: url)
+        #if os(visionOS)
+        playerItem.allowedAudioSpatializationFormats = .monoStereoAndMultichannel
+        #endif
+        return playerItem
+    }
+
+    /// What follows the current song, when that is already known (not a random refill).
+    private func upcoming() -> JellyfinMusicItem? {
+        guard let current, let i = queue.firstIndex(where: { $0.id == current.id }) else { return nil }
+        if i + 1 < queue.count { return queue[i + 1] }
+        if randomSource == nil, repeats, let first = queue.first { return first }
+        return nil
+    }
+
+    /// Queue the next song behind the playing one (or drop a stale one), for gapless playback.
+    private func refreshPreload() {
+        guard let queuePlayer = player as? AVQueuePlayer else { return }
+        let wanted = upcoming()
+        if let preloaded, preloaded.music.id == wanted?.id { return }
+        if let preloaded { queuePlayer.remove(preloaded.item); self.preloaded = nil }
+        guard let wanted, let (base, token) = connection(),
+              let item = makePlayerItem(for: wanted, base: base, token: token) else { return }
+        queuePlayer.insert(item, after: queuePlayer.currentItem)
+        preloaded = (item, wanted)
+    }
+
+    /// The queue player rolled into the preloaded song: move the session's state onto it.
+    private func advanceToPreloaded() {
+        guard let preloaded else { return }
+        self.preloaded = nil
+        stopReporting()
+        playSessionId = UUID().uuidString
+        current = preloaded.music
+        currentTime = 0
+        duration = Double(preloaded.music.RunTimeTicks ?? 0) / 10_000_000
+        isPlaying = true
+        reportStarted()
+        publishNowPlaying()
+        refreshPreload()
+    }
+
+    private func start(_ item: JellyfinMusicItem, base: URL, token: String) {
+        guard let firstItem = makePlayerItem(for: item, base: base, token: token) else { return }
         stopReporting()
         releasePlayer()
         playSessionId = UUID().uuidString
@@ -229,18 +281,20 @@ final class JellyfinMusicSession {
         currentTime = 0; duration = Double(item.RunTimeTicks ?? 0) / 10_000_000
         if audioMode == .music { AudioSessionConfig.configureExclusiveMusicPlayback() }
         else { AudioSessionConfig.configureMixedPlayback() }
-        let nextPlayer = AVPlayer(url: url)
-        #if os(visionOS)
-        if let playerItem = nextPlayer.currentItem {
-            playerItem.allowedAudioSpatializationFormats = .monoStereoAndMultichannel
-        }
-        #endif
+        let nextPlayer = AVQueuePlayer(items: [firstItem])
+        nextPlayer.actionAtItemEnd = .advance
         player = nextPlayer
         nextPlayer.isMuted = isMuted
         nextPlayer.volume = Float(volume)
         applySpatialAudioPreference()
         configureRemoteCommands()
         nextPlayer.play(); isPlaying = true
+        itemObservation = nextPlayer.observe(\.currentItem, options: [.new]) { [weak self] p, _ in
+            Task { @MainActor in
+                guard let self, self.player === p, let queued = self.preloaded, p.currentItem === queued.item else { return }
+                self.advanceToPreloaded()
+            }
+        }
         observation = nextPlayer.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
             Task { @MainActor in
                 guard let self, self.player === p else { return }
@@ -265,9 +319,18 @@ final class JellyfinMusicSession {
                 self.reportProgress()
             }
         }
-        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nextPlayer.currentItem, queue: .main) { [weak self] _ in Task { @MainActor in self?.next() } }
+        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] note in
+            nonisolated(unsafe) let ended = note.object as? AVPlayerItem
+            Task { @MainActor in
+                // With a song queued behind it the player rolls on by itself (advanceToPreloaded).
+                guard let self, self.preloaded == nil, let ended,
+                      ended === self.player?.currentItem else { return }
+                self.next()
+            }
+        }
         reportStarted()
         publishNowPlaying()
+        refreshPreload()
     }
 
     /// End playback before hiding its controls, including a manual Next on the last song.
@@ -287,11 +350,14 @@ final class JellyfinMusicSession {
 
     private func releasePlayer() {
         observation = nil
+        itemObservation = nil
+        preloaded = nil
         player?.pause()
         if let timeObserver { player?.removeTimeObserver(timeObserver) }
         timeObserver = nil
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
+        (player as? AVQueuePlayer)?.removeAllItems()
         player?.replaceCurrentItem(with: nil)
         player = nil
     }
