@@ -523,6 +523,27 @@ META
     fi
     write_movie_nfo "$w/movie.nfo" "Subtitle Window" 2026 "Drama" \
         "Ten minutes of test pattern with a cue every few seconds." 6.0
+
+    # "Caption Window", the same with a PGS track (a disc's bitmap
+    # subtitles, the shape of a UHD remux's), for the plugin's streamed
+    # FilmSubtitles/….sup route. ffmpeg has no PGS encoder, so the track is
+    # synthetic (scripts/gen-pgs-sup.py: a white bar every 5 s).
+    local c="$root/data/movies/Caption Window (2026)"
+    mkdir -p "$c"
+    local captions="$c/Caption Window (2026).mkv"
+    if [[ ! -f "$captions" ]]; then
+        python3 -I "$repo_root/scripts/gen-pgs-sup.py" "$c/.embedded.sup" --duration 600 --every 5 >/dev/null
+        ffmpeg -loglevel error -y \
+            -f lavfi -i "testsrc=size=640x360:rate=24:duration=600" \
+            -f lavfi -i "sine=frequency=330:duration=600" \
+            -i "$c/.embedded.sup" \
+            -map 0:v -map 1:a -map 2:s \
+            -c:v libx264 -preset ultrafast -g 48 -pix_fmt yuv420p -c:a aac -c:s copy \
+            -metadata:s:s:0 language=eng "$captions"
+        rm -f "$c/.embedded.sup"
+    fi
+    write_movie_nfo "$c/movie.nfo" "Caption Window" 2026 "Drama" \
+        "Ten minutes of test pattern with a picture caption every few seconds." 6.0
 }
 
 install_plugin_config() {

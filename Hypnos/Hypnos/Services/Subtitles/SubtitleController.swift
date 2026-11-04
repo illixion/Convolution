@@ -27,10 +27,11 @@
  the track list like any other and stays with the video through a reload of
  its source (the remux opening), not into the next one.
 
- An embedded text track is streamed (`SubtitleSource.progressive`, the
- plugin's `FilmSubtitles` route) rather than fetched whole: Jellyfin's own
- `Stream.vtt` reads the whole video file before answering, 15–90 s for an
- Archer episode on a network share. The stream starts just before the
+ An embedded text or PGS track is streamed (`SubtitleSource.progressive`,
+ the plugin's `FilmSubtitles` route) rather than fetched whole: Jellyfin's
+ own `Stream.vtt` and `Stream.pgssub` read the whole video file before
+ answering, 15–90 s for an Archer episode on a network share and minutes
+ for a UHD film's PGS (Parasite, 2026-11-04: about four). The stream starts just before the
  player's playhead, the cues show as they arrive, and a seek outside what
  has arrived starts it again from there. Once a run reaches the end of the
  file, the stretch before it is fetched from the start and merged. Without
@@ -519,7 +520,7 @@ final class SubtitleController {
         }
         cues = nil
         isFetching = true
-        if track.isText, track.isEmbedded, let progressive = source.progressive {
+        if track.isText || track.isBitmap, track.isEmbedded, let progressive = source.progressive {
             fetchTask = Task { [weak self] in
                 await self?.stream(track, progressive: progressive, fallback: source)
             }
@@ -626,8 +627,11 @@ final class SubtitleController {
                 try Task.checkCancellation()
                 guard selected == track else { throw CancellationError() }
                 let data = chunk.data
+                let isPGS = track.isBitmap, trackID = track.id, growing = !chunk.isFinished
                 let received = await Task.detached(priority: .userInitiated) {
-                    (try? RAVESubtitleTrack(data: data))?.cues ?? []
+                    let parsed = isPGS ? try? PGSSupFile.track(from: data, trackID: trackID, isGrowing: growing)
+                        : try? RAVESubtitleTrack(data: data)
+                    return parsed?.cues ?? []
                 }.value
                 let reached = received.last?.start ?? start
                 let kept = until.map { limit in received.filter { $0.start < limit } } ?? received

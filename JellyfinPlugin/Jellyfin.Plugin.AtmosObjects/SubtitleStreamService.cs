@@ -9,8 +9,9 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.AtmosObjects;
 
 /// <summary>
-/// An embedded text subtitle stream as WebVTT, written as ffmpeg reads it,
-/// from any point in the file.
+/// An embedded subtitle stream, written as ffmpeg reads it, from any point
+/// in the file: a text stream as WebVTT, a PGS stream as itself (a
+/// <c>.sup</c> file, which is what Jellyfin's <c>Stream.pgssub</c> serves).
 ///
 /// Jellyfin's own <c>Subtitles/{n}/Stream.vtt</c> extracts an embedded
 /// stream by reading the whole file before the first byte goes out (every
@@ -53,12 +54,32 @@ public sealed class SubtitleStreamService
     /// external files first and numbers the embedded streams after them, so
     /// its <c>Index</c> isn't the container's once an item has a sidecar.
     /// </summary>
-    public sealed record Source(string MediaPath, int StreamIndex, int SubtitleOrdinal, string CachePath);
+    public sealed record Source(string MediaPath, int StreamIndex, int SubtitleOrdinal, string CachePath, SubtitleFormat Format);
+
+    /// <summary>What a stream is served as.</summary>
+    public enum SubtitleFormat
+    {
+        /// <summary>A text stream converted to WebVTT.</summary>
+        WebVtt,
+
+        /// <summary>A PGS stream copied as a <c>.sup</c> file.</summary>
+        Sup
+    }
 
     private static PluginConfiguration Config => Plugin.Instance?.Configuration ?? new PluginConfiguration();
 
-    /// <summary>An embedded text subtitle stream of the item, or null (unknown item, external file, image subtitles).</summary>
-    public Source? Resolve(Guid itemId, int streamIndex)
+    private static bool IsPgs(MediaStream stream) =>
+        stream.Codec is { } codec
+        && (codec.Equals("pgssub", StringComparison.OrdinalIgnoreCase)
+            || codec.Equals("hdmv_pgs_subtitle", StringComparison.OrdinalIgnoreCase)
+            || codec.Equals("pgs", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// An embedded subtitle stream of the item in <paramref name="format"/>,
+    /// or null (unknown item, external file, or a stream that isn't that
+    /// format: WebVTT takes text streams, sup takes PGS).
+    /// </summary>
+    public Source? Resolve(Guid itemId, int streamIndex, SubtitleFormat format = SubtitleFormat.WebVtt)
     {
         var item = _libraryManager.GetItemById(itemId);
         if (item is null || string.IsNullOrEmpty(item.Path) || !File.Exists(item.Path))
@@ -71,7 +92,14 @@ public sealed class SubtitleStreamService
             .OrderBy(s => s.Index)
             .ToList();
         var ordinal = embedded.FindIndex(s => s.Index == streamIndex);
-        if (ordinal < 0 || !embedded[ordinal].IsTextSubtitleStream)
+        if (ordinal < 0)
+        {
+            return null;
+        }
+
+        var stream = embedded[ordinal];
+        var fits = format == SubtitleFormat.Sup ? IsPgs(stream) : stream.IsTextSubtitleStream;
+        if (!fits)
         {
             return null;
         }
@@ -83,8 +111,10 @@ public sealed class SubtitleStreamService
             "subtitles");
         // Named for the file's version too, so a replaced file isn't served old cues.
         var version = File.GetLastWriteTimeUtc(item.Path).Ticks.ToString(CultureInfo.InvariantCulture);
-        return new Source(item.Path, streamIndex, ordinal, Path.Combine(directory, $"{streamIndex}-{version}.vtt"));
+        return new Source(item.Path, streamIndex, ordinal, Path.Combine(directory, $"{streamIndex}-{version}.{Extension(format)}"), format);
     }
+
+    private static string Extension(SubtitleFormat format) => format == SubtitleFormat.Sup ? "sup" : "vtt";
 
     /// <summary>
     /// Streams the cues from <paramref name="startSeconds"/> to the end into
@@ -101,8 +131,11 @@ public sealed class SubtitleStreamService
             args.AddRange(["-ss", startSeconds.ToString("0.###", CultureInfo.InvariantCulture)]);
         }
 
-        args.AddRange(["-copyts", "-start_at_zero", "-i", source.MediaPath, "-map", $"0:s:{source.SubtitleOrdinal}",
-            "-c:s", "webvtt", "-flush_packets", "1", "-f", "webvtt", "pipe:1"]);
+        args.AddRange(["-copyts", "-start_at_zero", "-i", source.MediaPath, "-map", $"0:s:{source.SubtitleOrdinal}"]);
+        // PGS is copied: its segments are the bitmaps, which only a player decodes.
+        args.AddRange(source.Format == SubtitleFormat.Sup
+            ? ["-c:s", "copy", "-flush_packets", "1", "-f", "sup", "pipe:1"]
+            : ["-c:s", "webvtt", "-flush_packets", "1", "-f", "webvtt", "pipe:1"]);
 
         // Only a run over the whole file is worth keeping.
         var keep = startSeconds <= 0;
@@ -170,7 +203,7 @@ public sealed class SubtitleStreamService
             {
                 File.Move(temp, source.CachePath, overwrite: true);
                 // Tracks kept for earlier versions of the file.
-                foreach (var old in Directory.EnumerateFiles(Path.GetDirectoryName(source.CachePath)!, $"{source.StreamIndex}-*.vtt"))
+                foreach (var old in Directory.EnumerateFiles(Path.GetDirectoryName(source.CachePath)!, $"{source.StreamIndex}-*.{Extension(source.Format)}"))
                 {
                     if (!string.Equals(old, source.CachePath, StringComparison.Ordinal))
                     {

@@ -1046,13 +1046,17 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// The plugin's `FilmSubtitles/{id}/{index}.vtt?startSeconds=` (see
     /// `JellyfinPlugin/README.md` → Subtitles): ffmpeg seeks to the start
     /// and the cues stream as the file reads, instead of Jellyfin's
-    /// `Stream.vtt` reading the whole file before its first byte. A 404 (no
-    /// plugin) ends the stream with `.http(_, 404)`, for the caller to fall
+    /// `Stream.vtt` reading the whole file before its first byte. A PGS
+    /// track comes the same way as a `.sup` file (`….sup`), cut at whole
+    /// display sets. A 404 (no plugin, or a plugin from before the `.sup`
+    /// route) ends the stream with `.http(_, 404)`, for the caller to fall
     /// back to `subtitleData`.
     nonisolated func subtitleStream(itemId: String, track: LibrarySubtitleTrack,
                                     from startSeconds: Double) -> AsyncThrowingStream<SubtitleStreamChunk, Error>? {
-        guard track.isText, track.isEmbedded, LibraryOfflineStore.shared.record(for: itemId) == nil else { return nil }
-        let path = "FilmSubtitles/\(itemId)/\(track.id).vtt"
+        guard track.isText || track.isBitmap, track.isEmbedded,
+              LibraryOfflineStore.shared.record(for: itemId) == nil else { return nil }
+        let isPGS = track.isBitmap
+        let path = "FilmSubtitles/\(itemId)/\(track.id).\(isPGS ? "sup" : "vtt")"
         var url = baseURL.appending(path: path)
         if startSeconds > 0 {
             url.append(queryItems: [URLQueryItem(name: "startSeconds", value: String(format: "%.3f", startSeconds))])
@@ -1074,12 +1078,14 @@ actor JellyfinLibrary: MediaServerLibrary {
                     var lastSent = ContinuousClock.now - .seconds(10)
                     var sentAny = false
                     var previous: UInt8 = 0
+                    var sets = PGSSupFile.DisplaySetScanner()
                     for try await byte in bytes {
                         data.append(byte)
-                        // At a cue boundary: the first cues at once, then
+                        // At a cue boundary (a blank line; the end of a
+                        // display set for PGS): the first cues at once, then
                         // every couple of seconds, so a growing track isn't
                         // re-parsed on every cue.
-                        let boundary = byte == 0x0A && previous == 0x0A
+                        let boundary = isPGS ? sets.feed(byte) : byte == 0x0A && previous == 0x0A
                         previous = byte
                         guard boundary, !sentAny || ContinuousClock.now - lastSent > .seconds(2) else { continue }
                         sentAny = true

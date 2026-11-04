@@ -281,27 +281,39 @@ enum LibraryHarness {
     }
 
     /// The plugin's streamed subtitles through a real `SubtitleController`,
-    /// on the first movie with an embedded text track (the dev seed's
-    /// `Subtitle Window (2026)`, a 10-minute MKV with an SRT cue every 5 s,
-    /// is meant for it). Resumed at 300 s, the cues there must come first
-    /// and the head before them after; from the top, one run the server
-    /// keeps; resumed again, the kept track whole. Clear the plugin's
-    /// `subtitles` cache folder first for the first case to stream.
+    /// on the first movie with an embedded text track and the first with an
+    /// embedded PGS track (the dev seed's `Subtitle Window (2026)`, a
+    /// 10-minute MKV with an SRT cue every 5 s, and `Caption Window (2026)`,
+    /// the same with PGS captions, are meant for it). Resumed at 300 s, the
+    /// cues there must come first and the head before them after; from the
+    /// top, one run the server keeps; resumed again, the kept track whole.
+    /// Clear the plugin's `subtitles` cache folder first for the first case
+    /// to stream.
     @MainActor
     private static func checkStreamedSubtitles(library: JellyfinLibrary) async {
+        for pgs in [false, true] {
+            await checkStreamedSubtitles(library: library, pgs: pgs)
+        }
+    }
+
+    @MainActor
+    private static func checkStreamedSubtitles(library: JellyfinLibrary, pgs: Bool) async {
+        let kind = pgs ? "PGS" : "text"
         do {
             let movies = try await library.browse(kind: .movie, startIndex: 0, limit: 100)
             var found: (LibraryItem, LibrarySubtitleTrack)?
             for movie in movies where found == nil {
-                if let track = try await library.subtitleTracks(itemId: movie.id).first(where: { $0.isText && $0.isEmbedded }) {
+                if let track = try await library.subtitleTracks(itemId: movie.id)
+                    .first(where: { (pgs ? $0.isBitmap : $0.isText) && $0.isEmbedded }) {
                     found = (movie, track)
                 }
             }
             guard let (movie, track) = found else {
-                log("streamedSubtitles: no movie with an embedded text track")
+                log("streamedSubtitles: no movie with an embedded \(kind) track")
                 return
             }
-            let whole = try RAVESubtitleTrack(data: try await library.subtitleData(itemId: movie.id, track: track)).cues.count
+            let data = try await library.subtitleData(itemId: movie.id, track: track)
+            let whole = try (pgs ? PGSSupFile.track(from: data, trackID: track.id) : RAVESubtitleTrack(data: data)).cues.count
             for (label, playhead) in [("resumed", 300.0), ("fromStart", 0.0), ("resumedAgain", 300.0)] {
                 let controller = SubtitleController()
                 controller.playhead = { playhead }
@@ -324,10 +336,10 @@ enum LibraryHarness {
                     try await Task.sleep(for: .milliseconds(20))
                 }
                 let count = controller.cues?.cues.count ?? 0
-                log("streamedSubtitles(\(movie.title))[\(label) @\(Int(playhead))s]: cue at playhead after \(firstAtPlayhead.map { String(format: "%.2f s", $0) } ?? "never"), \(count)/\(whole) cues after \(String(format: "%.2f", Date.now.timeIntervalSince(began))) s \(count == whole && firstAtPlayhead != nil ? "OK" : "FAIL") error=\(controller.error ?? "nil")")
+                log("streamedSubtitles(\(movie.title), \(kind))[\(label) @\(Int(playhead))s]: cue at playhead after \(firstAtPlayhead.map { String(format: "%.2f s", $0) } ?? "never"), \(count)/\(whole) cues after \(String(format: "%.2f", Date.now.timeIntervalSince(began))) s \(count == whole && firstAtPlayhead != nil ? "OK" : "FAIL") error=\(controller.error ?? "nil")")
             }
         } catch {
-            log("streamedSubtitles FAILED: \(error)")
+            log("streamedSubtitles(\(kind)) FAILED: \(error)")
         }
     }
 

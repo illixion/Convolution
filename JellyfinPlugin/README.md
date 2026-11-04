@@ -556,6 +556,18 @@ again on a seek outside what has arrived, and once a run reaches the end
 fetches the stretch before it from 0 (`SubtitleController` in the app).
 Jellyfin's web player and other clients keep Jellyfin's own route.
 
+An embedded **PGS** stream (a UHD remux's usual subtitles) comes the same way
+from `FilmSubtitles/{id}/{index}.sup`: ffmpeg copies the stream as a `.sup`
+file (`-c:s copy -f sup`) instead of converting it, kept whole as
+`{index}-{ticks}.sup`. Each route takes only its own kind (`.vtt` text, `.sup`
+PGS) and answers 404 for the other, which is also what a plugin from before
+`.sup` answers, so the app falls back to Jellyfin's `Stream.pgssub`. Parasite's
+English PGS track took about four minutes to arrive that way (2026-11-04). On
+the dev instance's `Caption Window (2026)` (synthetic PGS, a caption every 5 s,
+`scripts/gen-pgs-sup.py`), a run from 300 s sends its first byte in 81 ms. The
+app cuts what has arrived at whole display sets and holds back the last
+caption until the set that ends it has come.
+
 ## Smooth Motion tracks (3D titles, Mac server)
 
 Convolution doubles a 3D picture's frame rate (Smooth Motion) from one
