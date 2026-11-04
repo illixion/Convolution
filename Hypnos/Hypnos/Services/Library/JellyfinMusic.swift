@@ -244,6 +244,15 @@ final class JellyfinMusicSession {
         observation = nextPlayer.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
             Task { @MainActor in
                 guard let self, self.player === p else { return }
+                // Something else paused us (opening an AI 3D photo takes audio focus) while
+                // the listener never asked to: take focus back and carry on.
+                if p.timeControlStatus == .paused, self.isPlaying, self.current != nil,
+                   self.duration <= 0 || self.currentTime < self.duration - 1 {
+                    if self.audioMode == .music { AudioSessionConfig.configureExclusiveMusicPlayback() }
+                    else { AudioSessionConfig.configureMixedPlayback() }
+                    p.play()
+                    return
+                }
                 self.isPlaying = p.timeControlStatus == .playing
                 self.publishNowPlaying()
             }
