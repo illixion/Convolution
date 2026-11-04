@@ -440,7 +440,10 @@ final class JellyfinMusicSession {
         #if os(visionOS)
         player?.intendedSpatialAudioExperience = headLocked
             ? .fixed(soundStageSize: .automatic)
-            : AutomaticSpatialAudio.automatic
+            // Anchored to the user's front, not to whichever window is active: automatic
+            // anchoring followed the active scene, so opening a window (a photo viewer)
+            // moved the sound's anchor and cut the music.
+            : .headTracked(.front, soundStageSize: .automatic)
         #endif
     }
     private func connection() -> (URL,String)? {
