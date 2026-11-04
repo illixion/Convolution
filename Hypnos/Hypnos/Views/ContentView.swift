@@ -17,6 +17,12 @@ struct ContentView: View {
     @OpenWindowProxy private var openWindow
     @DismissWindowProxy private var dismissWindow
     @State private var windowModel = MainWindowModel()
+    #if os(visionOS)
+    /// True while a viewer this window pushed stands in its place. The window
+    /// hides its content itself (RAVEUI's push host); the tab bar ornament
+    /// has to be hidden here.
+    @Environment(\.raveIsPushedAway) private var isPushedAway
+    #endif
     #if !os(visionOS)
     @Environment(IOSWindowRouter.self) private var router: IOSWindowRouter?
     #endif
@@ -70,7 +76,7 @@ struct ContentView: View {
         .ornament(
             // Nothing behind the welcome flow is useful yet, and a visible tab
             // bar under it invites an escape into an empty gallery.
-            visibility: showWelcome ? .hidden : .visible,
+            visibility: showWelcome || isPushedAway ? .hidden : .visible,
             attachmentAnchor: .scene(.bottomFront),
             contentAlignment: .top,
             ornament: {

@@ -143,10 +143,12 @@ struct HypnosApp: App {
                     .handleIncomingMediaURLs(appModel: appModel)
                     .debugApprovalPrompts()
                     .manageWindow(ManagedWindows.photo(windowValue))
+                    .raveWindowPushHost(sceneID: "photo-detail", value: windowValue)
             }
         }
         .windowStyle(.plain)
         .defaultSize(width: 1200, height: 900)
+        .raveWindowPushPlacement(id: "photo-detail")
         .defaultLaunchBehavior(.suppressed)
 
         // Individual video window - pop-out video player
@@ -161,10 +163,12 @@ struct HypnosApp: App {
                     .handleIncomingMediaURLs(appModel: appModel)
                     .debugApprovalPrompts()
                     .manageWindow(ManagedWindows.video(windowValue))
+                    .raveWindowPushHost(sceneID: "video-detail", value: windowValue)
             }
         }
         .windowStyle(.plain)
         .defaultSize(width: 1200, height: 700)
+        .raveWindowPushPlacement(id: "video-detail")
         .defaultLaunchBehavior(.suppressed)
 
         // Shared photo viewer - opens when image is shared to the app
@@ -292,9 +296,11 @@ struct HypnosApp: App {
         Window("Film Player", id: FilmPlayerView.windowID) {
             FilmPlayerView()
                 .environment(appModel)
+                .raveWindowPushHost(sceneID: FilmPlayerView.windowID)
         }
         .windowStyle(.plain)
         .defaultSize(width: 1280, height: 720)
+        .raveWindowPushPlacement(id: FilmPlayerView.windowID)
         .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
 
@@ -466,6 +472,9 @@ private struct MainWindowView: View {
             .frame(minWidth: 320, maxWidth: 3000, minHeight: 320, maxHeight: 3000)
             .registerAsMainWindow()
             .manageWindow(ManagedWindows.main(windowId ?? fallbackWindowId))
+            // The gallery pushes viewers in its own place (Settings → Always
+            // Open In New Window off) and hides behind them until they close.
+            .raveWindowPushHost(sceneID: "main", value: windowId ?? fallbackWindowId)
             .onAppear {
                 RAVEWindowSessionRegistry.shared.openWindow = openWindow
             }

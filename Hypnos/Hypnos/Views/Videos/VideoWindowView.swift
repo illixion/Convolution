@@ -23,6 +23,9 @@ struct VideoWindowView: View {
     @Environment(AppModel.self) private var appModel
     @OpenWindowProxy private var openWindow
     @DismissWindowProxy private var dismissWindow
+    #if os(visionOS)
+    @Environment(\.raveIsPushedWindow) private var isPushedOverGallery
+    #endif
     @Environment(\.scenePhase) private var scenePhase
     /// THIS window's scene (used for aspect-ratio locking). Reading it from the
     /// environment avoids the multi-window bug of resizing an arbitrary
@@ -787,6 +790,12 @@ struct VideoWindowView: View {
             windowModel: windowModel,
             stripWidth: stripWidth,
             onGalleryButtonTap: {
+                #if os(visionOS)
+                // Pushed over a gallery that is waiting behind it: closing
+                // reveals that gallery. Opening another main window would
+                // leave it hidden underneath.
+                if isPushedOverGallery { return dismissWindow() }
+                #endif
                 appModel.showMainWindow(openWindow: openWindow)
             },
             onPopOut: windowValue.wasPushed ? {

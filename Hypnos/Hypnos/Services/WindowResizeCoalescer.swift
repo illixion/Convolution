@@ -7,9 +7,10 @@
 //  visionOS has no window-*position* API: `requestGeometryUpdate` carries a
 //  size and the system decides where the resized window ends up. So every
 //  granted resize is also a move the app cannot undo, and the cost is paid in
-//  full by the pushed photo viewer — `pushWindow` swaps content inside the
-//  gallery's own scene, so each request the viewer makes walks the grid window
-//  around the room.
+//  full by the photo viewer. (Under SwiftUI's `pushWindow` the viewer shared
+//  the gallery's scene, so each request walked the grid window around the
+//  room; RAVEUI's push gives the viewer its own scene and leaves the hidden
+//  gallery where it was, but the viewer itself still moves with every grant.)
 //
 //  The viewer computes the same target size from several independent triggers
 //  (branch appearance, aspect-ratio change, load completion, end of a swipe,

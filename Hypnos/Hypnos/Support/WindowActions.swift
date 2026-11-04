@@ -16,6 +16,11 @@
    visionOS-only API: "replace this window's content in place"), so a push on
    macOS just opens a new window instead — the ordinary Mac convention is
    separate windows, not one window that swaps its content;
+ - a push on visionOS is RAVEUI's `ravePushWindow`, not SwiftUI's
+   `pushWindow`, which visionOS 27 stopped honouring (the viewer opened beside
+   the gallery instead of in its place). RAVEUI opens the viewer and hides the
+   caller until the viewer closes; every scene a push starts from or lands in
+   carries `.raveWindowPushHost(sceneID:value:)` in `HypnosApp`;
  - on iOS and tvOS each proxy talks to `IOSWindowRouter`, which turns a window
    value into a full-screen cover (viewers) or a sheet (tool panels) inside the
    one window.
@@ -25,6 +30,9 @@
  */
 
 import SwiftUI
+#if os(visionOS)
+import RAVEUI
+#endif
 
 // MARK: - Actions
 
@@ -61,7 +69,7 @@ struct WindowOpenAction {
 @MainActor
 struct WindowPushAction {
     #if os(visionOS)
-    let action: PushWindowAction
+    let action: RAVEPushWindowAction
 
     func callAsFunction(id: String) {
         action(id: id)
@@ -149,7 +157,7 @@ struct OpenWindowProxy: DynamicProperty {
 @propertyWrapper
 struct PushWindowProxy: DynamicProperty {
     #if os(visionOS)
-    @Environment(\.pushWindow) private var action
+    @Environment(\.ravePushWindow) private var action
 
     var wrappedValue: WindowPushAction { WindowPushAction(action: action) }
     #elseif os(macOS)

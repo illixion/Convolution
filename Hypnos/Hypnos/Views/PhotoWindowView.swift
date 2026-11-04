@@ -24,6 +24,9 @@ struct PhotoWindowView: View {
     @Environment(SceneDelegate.self) private var sceneDelegate: SceneDelegate?
     @OpenWindowProxy private var openWindow
     @DismissWindowProxy private var dismissWindow
+    #if os(visionOS)
+    @Environment(\.raveIsPushedWindow) private var isPushedOverGallery
+    #endif
 
     @State private var pendingPopOutImage: GalleryImage? = nil
     @State private var showDuplicateWindowAlert: Bool = false
@@ -96,6 +99,12 @@ struct PhotoWindowView: View {
                     windowModel: windowModel,
                     context: wasPushed ? .pushedFromGallery : .standalone,
                     onGalleryButtonTap: {
+                        #if os(visionOS)
+                        // Pushed over a gallery that is waiting behind it:
+                        // closing reveals that gallery. Opening another main
+                        // window would leave it hidden underneath.
+                        if isPushedOverGallery { return dismissWindow() }
+                        #endif
                         appModel.showMainWindow(openWindow: openWindow)
                     },
                     extraMenuItems: {
