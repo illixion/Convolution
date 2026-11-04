@@ -2019,6 +2019,12 @@ final class VideoWindowModel {
         let owed = carriedPosition?.time ?? (currentTime > 1 ? currentTime : nil)
         let start = takeStreamSwitchStart(fallback: fallback) ?? owed
         if start != nil { carriedPosition = nil }
+        // The engage's playhead (the caller's fallback) is for the player
+        // that engaged. Kept, it outranked the carried position at every
+        // later mount: a renderer change three minutes in (the on-device
+        // remux taking over from the server's transcode) restarted the
+        // episode where AI 3D had been turned on (device, 2026-11-04).
+        pseudo3DEngageResumeTime = nil
         AppLogger.videoWindow.info("Stereo player starts at \(start ?? 0, format: .fixed(precision: 2))s")
         return start
     }
