@@ -40,7 +40,7 @@ extension VideoWindowModel {
         case .opening, .direct, .youTube:
             break
         case .deviceRemux:
-            break
+            if let note = remuxDolbyVisionNote { reasons.append(note) }
         case .webPlayer:
             severity = .issue
             if reasons.isEmpty { reasons = ["the native player can't open this file"] }
@@ -122,11 +122,19 @@ extension VideoWindowModel {
         return .direct
     }
 
-    /// What the source file is in dynamic range, as far as anything says.
+    /// What the source file is in dynamic range, as far as anything says;
+    /// for a remux that changed it (profile 7 played as 8.1, or as its HDR10
+    /// base layer), what the remux plays.
     private var playbackSourceRange: VideoSourceRange? {
+        let summary = remuxedStreamURL.flatMap { MatroskaRemuxService.shared.session(playing: $0)?.summary }
+        if let summary, summary.dolbyVisionProfile == 7 {
+            if summary.dolbyVisionPlayedProfile == 8 {
+                return VideoSourceRange(kind: .dolbyVision(profile: 8, compatibility: 1))
+            }
+            return VideoSourceRange(kind: .hdr10)
+        }
         if let range = librarySource?.range { return range }
-        guard let remux = remuxedStreamURL, let summary = MatroskaRemuxService.shared.session(playing: remux)?.summary
-        else { return nil }
+        guard let summary else { return nil }
         if let profile = summary.dolbyVisionProfile {
             return VideoSourceRange(kind: .dolbyVision(profile: profile, compatibility: summary.dolbyVisionCompatibility))
         }
@@ -134,6 +142,20 @@ extension VideoWindowModel {
         case "PQ": return VideoSourceRange(kind: .hdr10)
         case "HLG": return VideoSourceRange(kind: .hlg)
         default: return VideoSourceRange(kind: .sdr)
+        }
+    }
+
+    /// What the remux did to a profile 7 file's Dolby Vision, for the reasons.
+    private var remuxDolbyVisionNote: String? {
+        guard let remux = remuxedStreamURL, let summary = MatroskaRemuxService.shared.session(playing: remux)?.summary,
+              summary.dolbyVisionProfile == 7 else { return nil }
+        guard summary.dolbyVisionPlayedProfile == 8 else {
+            return "Dolby Vision profile 7 plays as its HDR10 base layer (this edition can't convert it)"
+        }
+        switch summary.dolbyVisionEnhancementLayer {
+        case .minimal: return "Dolby Vision profile 7 (MEL) converted to 8.1 on this device, losslessly"
+        case .full: return "Dolby Vision profile 7 (FEL) converted to 8.1 on this device, without the enhancement layer's detail"
+        default: return "Dolby Vision profile 7 converted to 8.1 on this device"
         }
     }
 
