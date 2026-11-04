@@ -47,7 +47,10 @@ extension VideoWindowModel {
         audioTracksTask?.cancel()
         let player = audioPlayer
         let itemId = libraryItemId
-        let stream = video.streamURL
+        // What plays, not what the window was opened with: the server's
+        // transcode stands in for the original file once WebKit can't
+        // decode it or AI 3D needs AVFoundation, and it carries one track.
+        let stream = activeStreamURL
         audioTracksTask = Task { [weak self] in
             // The server's tracks, when what plays carries only one of them.
             if let itemId, JellyfinLibrary.isServerStream(stream), let library = LibraryService.current() {
@@ -60,7 +63,7 @@ extension VideoWindowModel {
                 }
                 guard !Task.isCancelled, let self, self.libraryItemId == itemId else { return }
                 if tracks.count > 1 {
-                    let playing = JellyfinLibrary.audioStreamIndex(ofStream: self.video.streamURL)
+                    let playing = JellyfinLibrary.audioStreamIndex(ofStream: self.activeStreamURL)
                         ?? tracks.first(where: \.isDefault)?.index ?? tracks.first?.index
                     self.audioTracks = tracks.map { VideoAudioTrack(id: .server($0.index), title: $0.menuTitle) }
                     self.selectedAudioTrack = playing.map { .server($0) }

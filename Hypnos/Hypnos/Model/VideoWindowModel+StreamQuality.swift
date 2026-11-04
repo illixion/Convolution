@@ -182,7 +182,13 @@ extension VideoWindowModel {
                     audioStreamIndex: self?.chosenLibraryAudioStream(itemId: itemId))
                 guard !Task.isCancelled, let self, self.libraryItemId == itemId else { return }
                 self.sourceBitrate = (itemId, plan.sourceBitrate)
-                guard plan.streamURL != self.video.streamURL else {
+                // A window on the server's reserve transcode (the file was
+                // undecodable, or AI 3D needed AVFoundation) keeps the same
+                // file URL in the plan; what changes is the reserve, which
+                // now names the audio stream picked.
+                let reserveChanged = self.usingTranscodedStream && plan.transcodeURL != nil
+                    && plan.transcodeURL != self.video.transcodeStreamURL
+                guard plan.streamURL != self.video.streamURL || reserveChanged else {
                     self.resumePendingPseudo3DEngage()
                     return
                 }
@@ -194,7 +200,8 @@ extension VideoWindowModel {
                 let needsRenderer = plan.streamURL.pathExtension != self.video.streamURL.pathExtension
                     || self.usingTranscodedStream
                 // The reserve transcode belongs to the stream it backs up.
-                self.usingTranscodedStream = false
+                let keepsReserve = reserveChanged && plan.streamURL == self.video.streamURL
+                self.usingTranscodedStream = keepsReserve
                 self.video.transcodeStreamURL = plan.transcodeURL
                 self.video.streamURL = plan.streamURL
                 if needsRenderer {
