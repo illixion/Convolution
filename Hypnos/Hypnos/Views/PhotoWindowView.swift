@@ -26,7 +26,13 @@ struct PhotoWindowView: View {
     @DismissWindowProxy private var dismissWindow
     #if os(visionOS)
     @Environment(\.raveIsPushedWindow) private var isPushedOverGallery
+    @Environment(\.raveDetachFromStack) private var detachFromStack
     #endif
+    /// Whether this window is on a stack right now (see
+    /// `VideoWindowModel.isStacked`): `wasPushed` is how it opened, this is
+    /// what the chrome follows, so a viewer that detaches becomes a pop-out.
+    @State private var isStacked: Bool
+    @State private var hasBeenStacked = false
 
     @State private var pendingPopOutImage: GalleryImage? = nil
     @State private var showDuplicateWindowAlert: Bool = false
@@ -37,6 +43,7 @@ struct PhotoWindowView: View {
 
     init(windowValue: PhotoWindowValue, appModel: AppModel, onSizeSettled: @escaping (CGSize) -> Void = { _ in }) {
         self.wasPushed = windowValue.wasPushed
+        _isStacked = State(initialValue: windowValue.wasPushed)
         self.popOutWindowID = windowValue.wasPushed ? nil : windowValue.id
         self.restoredSize = windowValue.restoredSize?.cgSize
         // Mirror the settled size into RestoredWindowTracker as well as the
@@ -88,7 +95,19 @@ struct PhotoWindowView: View {
             )
         }
         .opacity(appModel.allWindowsHidden ? 0 : 1)
-        .persistentSystemOverlays(windowModel.isWindowControlsHidden ? .hidden : .visible)
+        #if os(visionOS)
+        .onChange(of: isPushedOverGallery, initial: true) { _, pushedOver in
+            // False until the push host claims the push, so only leaving a
+            // stack that was seen counts.
+            if pushedOver {
+                hasBeenStacked = true
+                isStacked = wasPushed
+            } else if hasBeenStacked {
+                isStacked = false
+            }
+        }
+        #endif
+        .raveSystemOverlays(windowModel.isWindowControlsHidden ? .hidden : .visible)
         .hidesStatusBar(windowModel.isUIHidden)
         .ornament(
             visibility: windowModel.isUIHidden ? .hidden : .visible,
@@ -97,18 +116,19 @@ struct PhotoWindowView: View {
             ornament: {
                 PhotoOrnamentView(
                     windowModel: windowModel,
-                    context: wasPushed ? .pushedFromGallery : .standalone,
+                    context: isStacked ? .pushedFromGallery : .standalone,
                     onGalleryButtonTap: {
                         #if os(visionOS)
-                        // Pushed over a gallery that is waiting behind it:
-                        // closing reveals that gallery. Opening another main
-                        // window would leave it hidden underneath.
-                        if isPushedOverGallery { return dismissWindow() }
+                        // Stacked over a gallery that is hidden behind it: show
+                        // that gallery beside the viewer. Closing the window
+                        // would lose the picture, and opening another main
+                        // window would leave the hidden one underneath.
+                        if isPushedOverGallery { return detachFromStack() }
                         #endif
                         appModel.showMainWindow(openWindow: openWindow)
                     },
                     extraMenuItems: {
-                        if wasPushed {
+                        if isStacked {
                             Button {
                                 let image = windowModel.image
                                 let state = appModel.existingWindowState(for: image.fullSizeURL)

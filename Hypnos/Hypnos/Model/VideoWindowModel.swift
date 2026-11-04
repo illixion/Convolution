@@ -38,6 +38,26 @@ final class VideoWindowModel {
     /// vs openWindow (standalone pop-out with gallery button).
     let wasPushed: Bool
 
+    /// Whether this window is on a stack right now: it was pushed over a
+    /// window that is still hidden behind it. `wasPushed` is how it was
+    /// opened and never changes; this is what the chrome follows, so a
+    /// stacked player that detaches (its Videos button) becomes a pop-out
+    /// with pop-out chrome and no Pop Out item.
+    private(set) var isStacked: Bool
+    @ObservationIgnored private var hasBeenStacked = false
+
+    /// Report the window's stack state (RAVEUI's `\.raveIsPushedWindow`). It
+    /// is false until the push host has claimed the push, so only leaving a
+    /// stack that was seen counts.
+    func stackStateChanged(isPushedOver: Bool) {
+        if isPushedOver {
+            hasBeenStacked = true
+            isStacked = wasPushed
+        } else if hasBeenStacked {
+            isStacked = false
+        }
+    }
+
     /// The originating window value's UUID (used for RestoredWindowTracker).
     let windowValueId: UUID
 
@@ -467,6 +487,7 @@ final class VideoWindowModel {
     init(windowValue: VideoWindowValue, appModel: AppModel) {
         self.video = windowValue.video
         self.wasPushed = windowValue.wasPushed
+        self.isStacked = windowValue.wasPushed
         self.windowValueId = windowValue.id
         self.popOutWindowValue = windowValue.wasPushed ? nil : windowValue
         self.appModel = appModel

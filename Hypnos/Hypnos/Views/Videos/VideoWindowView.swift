@@ -25,6 +25,7 @@ struct VideoWindowView: View {
     @DismissWindowProxy private var dismissWindow
     #if os(visionOS)
     @Environment(\.raveIsPushedWindow) private var isPushedOverGallery
+    @Environment(\.raveDetachFromStack) private var detachFromStack
     #endif
     @Environment(\.scenePhase) private var scenePhase
     /// THIS window's scene (used for aspect-ratio locking). Reading it from the
@@ -513,7 +514,7 @@ struct VideoWindowView: View {
             let width = (newSize.width / 20).rounded() * 20
             if width != windowWidth { windowWidth = width }
         }
-        .persistentSystemOverlays(windowModel.isWindowControlsHidden ? .hidden : .visible)
+        .raveSystemOverlays(windowModel.isWindowControlsHidden ? .hidden : .visible)
         .hidesStatusBar(windowModel.isUIHidden)
         #if os(visionOS)
         // Hung under the window, outside it: the window holds only the
@@ -627,6 +628,11 @@ struct VideoWindowView: View {
         } message: {
             Text(windowModel.depthConversionFailureMessage ?? "")
         }
+        #if os(visionOS)
+        .onChange(of: isPushedOverGallery, initial: true) { _, pushedOver in
+            windowModel.stackStateChanged(isPushedOver: pushedOver)
+        }
+        #endif
         .onAppear {
             // Wall-snapped pop-outs restored by visionOS after a reboot come
             // back with the same windowValue UUID. Repeat appearances of the
@@ -826,14 +832,15 @@ struct VideoWindowView: View {
             stripWidth: stripWidth,
             onGalleryButtonTap: {
                 #if os(visionOS)
-                // Pushed over a gallery that is waiting behind it: closing
-                // reveals that gallery. Opening another main window would
-                // leave it hidden underneath.
-                if isPushedOverGallery { return dismissWindow() }
+                // Stacked over a gallery that is hidden behind it: show that
+                // gallery beside the player and keep playing. Closing the
+                // window would end the video, and opening another main
+                // window would leave the hidden one underneath.
+                if isPushedOverGallery { return detachFromStack() }
                 #endif
                 appModel.showMainWindow(openWindow: openWindow)
             },
-            onPopOut: windowValue.wasPushed ? {
+            onPopOut: windowModel.isStacked ? {
                 let newValue = VideoWindowValue(
                     video: windowModel.video,
                     // Preserve a static (Local) navigation list across pop-out.

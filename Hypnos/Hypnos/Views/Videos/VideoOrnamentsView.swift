@@ -158,10 +158,10 @@ struct VideoOrnamentsView: View {
 
     private var galleryButton: some View {
         Button(action: onGalleryButtonTap) {
-            OrnamentGlyph(title: windowModel.wasPushed ? "Videos" : "Gallery", systemImage: "square.grid.2x2")
+            OrnamentGlyph(title: windowModel.isStacked ? "Videos" : "Gallery", systemImage: "square.grid.2x2")
         }
         .modifier(OrnamentButtonStyle())
-        .help(windowModel.wasPushed ? "Videos" : "Show Gallery")
+        .help(windowModel.isStacked ? "Videos" : "Show Gallery")
     }
 
     @ViewBuilder
@@ -347,7 +347,7 @@ struct VideoOrnamentsView: View {
             Label("Slideshow", systemImage: "play.fill")
         }
 
-        if windowModel.wasPushed, onPopOut != nil {
+        if windowModel.isStacked, onPopOut != nil {
             Button {
                 close()
                 onPopOut?()

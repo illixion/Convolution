@@ -526,7 +526,7 @@ struct FilmPlayerView: View {
             let rounded = (width / 20).rounded() * 20
             if rounded != windowWidth { windowWidth = rounded }
         }
-        .persistentSystemOverlays(chromeVisible ? .visible : .hidden)
+        .raveSystemOverlays(chromeVisible ? .visible : .hidden)
         // The strip rises into place and sinks away (`playerChromeOrnament`).
         .playerChromeOrnament(
             isPresented: chromeVisible && cinema.mode(for: .film) != .hud,
