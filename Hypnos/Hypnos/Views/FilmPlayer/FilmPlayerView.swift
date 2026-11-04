@@ -60,7 +60,11 @@ struct FilmPlayerView: View {
     #if os(visionOS)
     @Environment(AppModel.self) private var appModel
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(SceneDelegate.self) private var sceneDelegate
+    /// Optional, as every other view reads it: SwiftUI hands no scene
+    /// delegate to some scenes, and a non-optional read is a fatal error at
+    /// the window's first layout (opening Parasite in the film player,
+    /// device, 2026-11-04).
+    @Environment(SceneDelegate.self) private var sceneDelegate: SceneDelegate?
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @DismissWindowProxy private var dismissWindow
@@ -184,7 +188,7 @@ struct FilmPlayerView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: UIScene.didDisconnectNotification)) { notification in
                 guard let scene = notification.object as? UIWindowScene,
-                      scene === sceneDelegate.windowScene else { return }
+                      let windowScene = sceneDelegate?.windowScene, scene === windowScene else { return }
                 stopStereo(keepingPosition: false)
                 guard session.activePlayerView == viewID else { return }
                 session.activePlayerView = nil
