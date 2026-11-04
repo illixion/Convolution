@@ -73,6 +73,7 @@ public final class FFmpegAudioDecoder {
 
     private static let lock = NSLock()
     nonisolated(unsafe) private static var loaded: Symbols?
+    nonisolated(unsafe) private static var loadedHandle: UnsafeMutableRawPointer?
     nonisolated(unsafe) private static var searched = false
 
     /// Loads the framework from a given path (tests, tools); true when its
@@ -88,7 +89,15 @@ public final class FFmpegAudioDecoder {
             return false
         }
         loaded = symbols
+        loadedHandle = handle
         return true
+    }
+
+    /// The loaded framework, for looking up its other functions
+    /// (`FFmpegDolbyVision`).
+    static var handle: UnsafeMutableRawPointer? {
+        _ = symbols
+        return lock.withLock { loadedHandle }
     }
 
     /// The framework's functions, looked for once in the app's Frameworks

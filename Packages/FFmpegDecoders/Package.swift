@@ -1,7 +1,8 @@
 // swift-tools-version: 6.2
 import PackageDescription
 
-// FFmpeg's DTS and TrueHD/MLP audio decoders for the sideload edition.
+// FFmpeg's DTS and TrueHD/MLP audio decoders and Dolby Vision RPU reader and
+// writer, for the sideload edition.
 //
 // The decoders live in HypnosFFmpeg.framework, built by
 // `scripts/build-ffmpeg-decoders.sh` into `HypnosFFmpeg.xcframework` beside
@@ -24,7 +25,10 @@ let package = Package(
         .library(name: "FFmpegDecoders", targets: ["FFmpegDecoders"]),
     ],
     targets: [
-        .target(name: "FFmpegDecoders"),
+        // The shim's header alone, for its types (`hyp_ff_dovi_rpu`): nothing
+        // in it is compiled here, and its functions are looked up with dlsym.
+        .target(name: "CFFmpegShim", path: "Shim", exclude: ["shim.c"], publicHeadersPath: "."),
+        .target(name: "FFmpegDecoders", dependencies: ["CFFmpegShim"]),
         .testTarget(name: "FFmpegDecodersTests", dependencies: ["FFmpegDecoders"]),
     ]
 )

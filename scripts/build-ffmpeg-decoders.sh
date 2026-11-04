@@ -3,9 +3,11 @@
 # build-ffmpeg-decoders.sh
 #
 # Builds the sideload edition's audio decoders: FFmpeg's DTS (core and DTS-HD
-# MA lossless) and TrueHD/MLP decoders, nothing else, linked with the small C
-# surface in Packages/FFmpegDecoders/Shim into one dynamic framework per
-# Apple platform, packed into
+# MA lossless) and TrueHD/MLP decoders, plus its Dolby Vision RPU reader and
+# writer (for HYPNOS_DOVI's profile 7 to 8.1 conversion; pulled in by the
+# dovi_rpu bitstream filter, whose CBS parts the linker drops), nothing else,
+# linked with the small C surface in Packages/FFmpegDecoders/Shim into one
+# dynamic framework per Apple platform, packed into
 #
 #   Packages/FFmpegDecoders/HypnosFFmpeg.xcframework   (gitignored)
 #
@@ -97,6 +99,7 @@ build_ffmpeg() { # sdk triple
             --disable-x86asm \
             --enable-decoder=dca,truehd,mlp \
             --enable-parser=dca,mlp \
+            --enable-bsf=dovi_rpu \
             > configure.log 2>&1 || { tail -30 configure.log; exit 1; }
         make -j"$(sysctl -n hw.ncpu)" > make.log 2>&1 || { tail -40 make.log; exit 1; }
         make install > install.log 2>&1
@@ -104,14 +107,15 @@ build_ffmpeg() { # sdk triple
 }
 
 # The framework's binary for one triple: the shim and FFmpeg in one dylib,
-# exporting only the shim's functions.
+# exporting only the shim's functions. The source tree is on the include path
+# for libavcodec/dovi_rpu.h, an internal header `make install` leaves out.
 link_one() { # sdk triple install_name output
     local sdk=$1 triple=$2 install_name=$3 output=$4
     local prefix="$WORK/out/$triple"
     local exports="$WORK/exports.txt"
-    grep -o 'hyp_ff_[a-z_]*(' "$SHIM/CFFmpegShim.h" | tr -d '(' | sed 's/^/_/' | sort -u > "$exports"
+    grep -o 'hyp_ff_[a-z0-9_]*(' "$SHIM/CFFmpegShim.h" | tr -d '(' | sed 's/^/_/' | sort -u > "$exports"
     xcrun --sdk "$sdk" clang -target "$triple" -isysroot "$(xcrun --sdk "$sdk" --show-sdk-path)" \
-        -dynamiclib -Os -I"$prefix/include" -I"$SHIM" \
+        -dynamiclib -Os -I"$prefix/include" -I"$SHIM" -I"$SRC" \
         "$SHIM/shim.c" "$prefix/lib/libavcodec.a" "$prefix/lib/libavutil.a" \
         -install_name "$install_name" -Wl,-exported_symbols_list,"$exports" -Wl,-dead_strip \
         -o "$output"
@@ -140,7 +144,10 @@ $( [[ $platform == MacOSX ]] && echo "    <key>LSMinimumSystemVersion</key><stri
 PLIST
 }
 
-rm -rf "$WORK/frameworks" "$OUT"
+# The new xcframework replaces the old one only once it is complete, so an
+# app build running meanwhile still finds one.
+STAGED="$WORK/staged/HypnosFFmpeg.xcframework"
+rm -rf "$WORK/frameworks" "$WORK/staged"
 ARGS=()
 for slice in "${SLICES[@]}"; do
     read -r name sdk platform triples <<<"$slice"
@@ -172,6 +179,8 @@ for slice in "${SLICES[@]}"; do
     ARGS+=(-framework "$framework")
 done
 
-xcodebuild -create-xcframework "${ARGS[@]}" -output "$OUT" >/dev/null
+xcodebuild -create-xcframework "${ARGS[@]}" -output "$STAGED" >/dev/null
+rm -rf "$OUT"
+mv "$STAGED" "$OUT"
 echo "Built $OUT"
 ls "$OUT"
