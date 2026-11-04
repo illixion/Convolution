@@ -860,6 +860,7 @@ actor JellyfinLibrary: MediaServerLibrary {
         let sourceVideoCodec = sourceVideo?.Codec?.lowercased()
         let sourceBitrate = source?.Bitrate
         let sourceContainer = source?.Container?.lowercased()
+        let sourceIsHDR = sourceVideo?.VideoRangeType.map { !$0.isEmpty && $0 != "SDR" && $0 != "Unknown" } ?? false
 
         // A low-bitrate UHD file still needs scaling for AI 3D. The normal
         // quality planner would direct-play it because it considers bitrate
@@ -871,7 +872,7 @@ actor JellyfinLibrary: MediaServerLibrary {
         if quality.caps(sourceBitrate: sourceBitrate) || needsAI3DScale {
             let capped = Self.hlsStreamURL(
                 baseURL: baseURL, itemId: itemId, mediaSourceId: mediaSourceId,
-                sourceVideoCodec: sourceVideoCodec, playSessionId: playSessionId,
+                sourceVideoCodec: sourceVideoCodec, sourceIsHDR: sourceIsHDR, playSessionId: playSessionId,
                 token: authHeaderToken, quality: quality, audioStreamIndex: audioStreamIndex)
             return GenericPlaybackPlan(method: .transcode, streamURL: capped, resumeSeconds: resumeSeconds,
                                        quality: quality, sourceBitrate: sourceBitrate)
@@ -905,7 +906,7 @@ actor JellyfinLibrary: MediaServerLibrary {
         if Self.remuxesOnDevice, sourceContainer?.split(separator: ",").contains(where: { $0 == "mkv" || $0 == "matroska" }) == true {
             let reserve = Self.hlsStreamURL(
                 baseURL: baseURL, itemId: itemId, mediaSourceId: mediaSourceId,
-                sourceVideoCodec: sourceVideoCodec, playSessionId: playSessionId,
+                sourceVideoCodec: sourceVideoCodec, sourceIsHDR: sourceIsHDR, playSessionId: playSessionId,
                 token: authHeaderToken, audioStreamIndex: audioStreamIndex)
             return GenericPlaybackPlan(method: .direct, streamURL: directURL, resumeSeconds: resumeSeconds,
                                        sourceBitrate: sourceBitrate, transcodeURL: reserve)
@@ -923,7 +924,7 @@ actor JellyfinLibrary: MediaServerLibrary {
             // WebM, and the video window swaps onto it when 3D is picked.
             let reserve = Self.hlsStreamURL(
                 baseURL: baseURL, itemId: itemId, mediaSourceId: mediaSourceId,
-                sourceVideoCodec: sourceVideoCodec, playSessionId: playSessionId,
+                sourceVideoCodec: sourceVideoCodec, sourceIsHDR: sourceIsHDR, playSessionId: playSessionId,
                 token: authHeaderToken, audioStreamIndex: audioStreamIndex)
             return GenericPlaybackPlan(method: .direct, streamURL: directURL, resumeSeconds: resumeSeconds,
                                        sourceBitrate: sourceBitrate, transcodeURL: reserve)
@@ -931,7 +932,7 @@ actor JellyfinLibrary: MediaServerLibrary {
 
         let transcodeURL = Self.hlsStreamURL(
             baseURL: baseURL, itemId: itemId, mediaSourceId: mediaSourceId,
-            sourceVideoCodec: sourceVideoCodec, playSessionId: playSessionId,
+            sourceVideoCodec: sourceVideoCodec, sourceIsHDR: sourceIsHDR, playSessionId: playSessionId,
             token: authHeaderToken, audioStreamIndex: audioStreamIndex)
         return GenericPlaybackPlan(method: .transcode, streamURL: transcodeURL, resumeSeconds: resumeSeconds,
                                    sourceBitrate: sourceBitrate)
@@ -1183,8 +1184,8 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// - `DeviceId` and `PlaySessionId` key the server's transcode job, which
     ///   `ApiKey` query auth otherwise leaves unset.
     ///
-    /// A capped `quality` encodes H.264 at its bitrate and picture size, but
-    /// still lists the source's codec so a file already within the cap is
+    /// A capped `quality` encodes H.264 at its bitrate and picture size (HEVC
+    /// first for an HDR source, below), but still lists the source's codec so a file already within the cap is
     /// copied rather than encoded (the caller skips caps above the source's
     /// bitrate, so that is rare). Verified on the dev instance: an H.264 MKV
     /// at the 1.5 Mbps level came back as 852x480 H.264 in fMP4 segments.
@@ -1198,12 +1199,24 @@ actor JellyfinLibrary: MediaServerLibrary {
     static let hevcRangeTypes = "SDR,HDR10,HDR10Plus,HLG,DOVI,DOVIWithHDR10,DOVIWithHDR10Plus,DOVIWithHLG,DOVIWithSDR"
 
     static func hlsStreamURL(baseURL: URL, itemId: String, mediaSourceId: String,
-                             sourceVideoCodec: String?, playSessionId: String,
+                             sourceVideoCodec: String?, sourceIsHDR: Bool = false, playSessionId: String,
                              token: String, quality: LibraryStreamQuality = .original,
                              audioStreamIndex: Int? = nil) -> URL {
         let sourceCodec = switch sourceVideoCodec {
         case "hevc", "h265": "hevc"
         default: "h264"
+        }
+        // HEVC first for an HDR source, whatever its codec: H.264 is always
+        // tone-mapped to SDR, and only an HEVC encode can keep HDR. Whether
+        // it does is the server's: measured on Jellyfin 12.2 (2026-11-04,
+        // the Dolby Vision 8.1 demo at the 10 Mbps level), it tone-maps to
+        // SDR with HEVC encoding off (the default) or with libx265, and with
+        // VideoToolbox keeps PQ/BT.2020 but encodes 8-bit Main (`scale_vt
+        // format=nv12`), Main 10 asked for or not.
+        let videoCodec = if sourceIsHDR {
+            quality.maxBitrate == nil && sourceCodec == "hevc" ? "hevc" : "hevc,h264"
+        } else {
+            quality.maxBitrate == nil || sourceCodec == "h264" ? sourceCodec : "h264,hevc"
         }
         let maxBitrate = quality.maxBitrate ?? 120_000_000
         let audioBitrate = quality.audioBitrate
@@ -1212,7 +1225,7 @@ actor JellyfinLibrary: MediaServerLibrary {
             .init(name: "MediaSourceId", value: mediaSourceId),
             .init(name: "DeviceId", value: JellyfinClientIdentity.deviceId),
             .init(name: "PlaySessionId", value: playSessionId),
-            .init(name: "VideoCodec", value: quality.maxBitrate == nil || sourceCodec == "h264" ? sourceCodec : "h264,hevc"),
+            .init(name: "VideoCodec", value: videoCodec),
             .init(name: "AudioCodec", value: "aac"),
             .init(name: "TranscodingMaxAudioChannels", value: String(quality.audioChannels)),
             .init(name: "MaxAudioChannels", value: String(quality.audioChannels)),
@@ -1225,7 +1238,7 @@ actor JellyfinLibrary: MediaServerLibrary {
             query.append(.init(name: "MaxWidth", value: String(width)))
             query.append(.init(name: "MaxHeight", value: String(height)))
         }
-        if sourceCodec == "hevc" {
+        if videoCodec.split(separator: ",").contains("hevc") {
             query.append(.init(name: "hevc-rangetype", value: hevcRangeTypes))
         }
         if let audioStreamIndex {
