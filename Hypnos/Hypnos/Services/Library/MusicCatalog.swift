@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 enum MusicSection: String, CaseIterable, Identifiable, Sendable {
-    case recent, albums, artists, songs, playlists
+    case recent, albums, artists, songs, genres, playlists, favorites, recentlyPlayed, mostPlayed
     var id: Self { self }
     var title: String {
         switch self {
@@ -10,7 +10,11 @@ enum MusicSection: String, CaseIterable, Identifiable, Sendable {
         case .albums: "Albums"
         case .artists: "Artists"
         case .songs: "Songs"
+        case .genres: "Genres"
         case .playlists: "Playlists"
+        case .favorites: "Favorite Songs"
+        case .recentlyPlayed: "Recently Played"
+        case .mostPlayed: "Most Played"
         }
     }
     var symbol: String {
@@ -19,7 +23,49 @@ enum MusicSection: String, CaseIterable, Identifiable, Sendable {
         case .albums: "square.stack"
         case .artists: "music.mic"
         case .songs: "music.note"
+        case .genres: "guitars"
         case .playlists: "music.note.list"
+        case .favorites: "heart"
+        case .recentlyPlayed: "clock.arrow.circlepath"
+        case .mostPlayed: "chart.bar"
+        }
+    }
+    /// The browsing sections, then the lists made from what the listener does.
+    static let library: [MusicSection] = [.recent, .albums, .artists, .songs, .genres]
+    static let collections: [MusicSection] = [.playlists, .favorites, .recentlyPlayed, .mostPlayed]
+    /// Sections whose rows are songs rather than artwork tiles.
+    var listsSongs: Bool { [.songs, .favorites, .recentlyPlayed, .mostPlayed].contains(self) }
+    /// The orders the listener can pick; the others have an order that is their point.
+    var sorts: [MusicSort] {
+        switch self {
+        case .albums: [.title, .artist, .year, .dateAdded]
+        case .songs, .favorites: [.title, .artist, .album, .year, .dateAdded]
+        default: []
+        }
+    }
+}
+
+enum MusicSort: String, CaseIterable, Identifiable, Sendable {
+    case title, artist, album, year, dateAdded
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .title: "Title"
+        case .artist: "Artist"
+        case .album: "Album"
+        case .year: "Year"
+        case .dateAdded: "Date Added"
+        }
+    }
+    /// Jellyfin's `SortBy` and `SortOrder` for this order. A song's `SortName` starts with its track number,
+    /// so songs sort by `Name`.
+    func server(songs: Bool) -> (keys: String, descending: Bool) {
+        switch self {
+        case .title: (songs ? "Name" : "SortName", false)
+        case .artist: (songs ? "Artist,Album,ParentIndexNumber,IndexNumber" : "AlbumArtist,ProductionYear,SortName", false)
+        case .album: ("Album,ParentIndexNumber,IndexNumber,SortName", false)
+        case .year: ("ProductionYear,SortName", true)
+        case .dateAdded: ("DateCreated", true)
         }
     }
 }
@@ -29,6 +75,8 @@ struct MusicRequest: Hashable, Sendable {
     var albumID: String?
     var artistID: String?
     var playlistID: String?
+    var genreID: String?
+    var sort: MusicSort?
     var search = ""
     var playbackSongs = false
     var randomOrder = false
@@ -129,6 +177,11 @@ final class MusicListing {
                     guard let items = buckets[title] else { return nil }
                     return MusicAlbumGroup(title: title, items: items)
                 }
+            } else if !request.search.isEmpty {
+                let artists = albums.filter { $0.Type == "MusicArtist" }
+                let rest = albums.filter { $0.Type != "MusicArtist" }
+                groups = [MusicAlbumGroup(title: "Artists", items: artists), MusicAlbumGroup(title: "Albums", items: rest)]
+                    .filter { !$0.items.isEmpty }
             } else { groups = [MusicAlbumGroup(title: request.section.title, items: albums)] }
         } catch is CancellationError {
         } catch let failure as URLError where failure.code == .cancelled {
@@ -137,18 +190,32 @@ final class MusicListing {
         }
     }
 
+    /// Forget what was loaded and load again (after the playlist behind it changed).
+    func refresh() async {
+        loadTask?.cancel()
+        loadTask = nil
+        configuration = nil
+        await loadIfNeeded()
+    }
+
     /// Full album/playlist queues are fetched only after an explicit Play action,
     /// in bounded requests, on JellyfinLibrary's actor.
-    func playAll(using music: JellyfinMusicSession, shuffled: Bool = false) async {
+    /// Every song of this screen, paged in bounded requests. Empty after a failure.
+    func allSongs() async -> [JellyfinMusicItem] {
         await loadIfNeeded()
         while hasMore && error == nil && !Task.isCancelled {
             let previousOffset = offset
             await loadMore()
-            guard offset > previousOffset else { return }
+            guard offset > previousOffset else { break }
         }
-        guard !Task.isCancelled, error == nil, let first = songs.first else { return }
-        if shuffled { music.playShuffled(songs) }
-        else { music.play(first, from: songs) }
+        return Task.isCancelled || error != nil ? [] : songs
+    }
+
+    func playAll(using music: JellyfinMusicSession, shuffled: Bool = false) async {
+        let queue = await allSongs()
+        guard let first = queue.first else { return }
+        if shuffled { music.playShuffled(queue) }
+        else { music.play(first, from: queue) }
     }
     func shuffle(using music: JellyfinMusicSession) async {
         error = nil
@@ -189,5 +256,9 @@ final class MusicCatalog {
         let listing = MusicListing(request: request)
         listings[request] = listing
         return listing
+    }
+    /// Drop cached screens that a change made stale (a playlist created, renamed or edited).
+    func invalidate(where stale: (MusicRequest) -> Bool) {
+        listings = listings.filter { !stale($0.key) }
     }
 }

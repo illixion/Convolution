@@ -48,6 +48,7 @@ struct HypnosApp: App {
         #endif
         #if DEBUG && os(macOS)
         LibraryHarness.runIfRequested()
+        MusicHarness.runIfRequested()
         #endif
         _appModel = State(initialValue: AppModel())
         // Reconnects downloads that ran while the app was closed.

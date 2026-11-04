@@ -264,6 +264,9 @@ actor JellyfinLibrary: MediaServerLibrary {
     private nonisolated let authHeaderToken: String
     private var cachedUserId: String?
     private nonisolated let fixedUserId: String?
+    /// True when signed in as a user. Playlist and rating changes belong to a user, and Jellyfin refuses
+    /// them (HTTP 400) on a bare API key.
+    nonisolated var hasUserSession: Bool { fixedUserId != nil }
 
     /// - Parameters:
     ///   - baseURL: the Jellyfin server address.
@@ -290,11 +293,10 @@ actor JellyfinLibrary: MediaServerLibrary {
             .init(name: "StartIndex", value: String(start)),
             .init(name: "Limit", value: String(limit)),
             .init(name: "EnableTotalRecordCount", value: "true"),
-            .init(name: "Fields", value: "DateCreated,ChildCount"),
             .init(name: "Recursive", value: "true"),
         ]
         let searching = !request.search.isEmpty
-        var type = searching ? "Audio,MusicAlbum" : "MusicAlbum"
+        var type = searching ? "Audio,MusicAlbum,MusicArtist" : "MusicAlbum"
         var sort = request.section == .recent && !searching ? "DateCreated" : "SortName"
         var order = request.section == .recent && !searching ? "Descending" : "Ascending"
         if searching { query.append(.init(name: "SearchTerm", value: request.search)) }
@@ -309,15 +311,38 @@ actor JellyfinLibrary: MediaServerLibrary {
             order = "Ascending"
         } else if let artistID = request.artistID {
             query.append(.init(name: "ArtistIds", value: artistID))
+            if request.section == .songs { type = "Audio"; sort = "Album,ParentIndexNumber,IndexNumber,SortName" }
+        } else if let genreID = request.genreID {
+            query.append(.init(name: "GenreIds", value: genreID))
+            if request.section == .songs { type = "Audio"; sort = "Album,ParentIndexNumber,IndexNumber,SortName" }
         } else {
             switch request.section {
-            case .songs: type = "Audio"
+            case .songs: type = "Audio"; sort = "Name"
             case .artists: path = "Artists/AlbumArtists"; type = "MusicArtist"
-            case .playlists: type = "Playlist"
+            case .genres: path = "MusicGenres"; type = "MusicGenre"
+            case .playlists:
+                type = "Playlist"
+                // A film or photo playlist is not music.
+                query.append(.init(name: "MediaTypes", value: "Audio"))
+            case .favorites:
+                type = "Audio"; sort = "Name"
+                query.append(.init(name: "Filters", value: "IsFavorite"))
+            case .recentlyPlayed:
+                type = "Audio"; sort = "DatePlayed"; order = "Descending"
+                query.append(.init(name: "Filters", value: "IsPlayed"))
+            case .mostPlayed:
+                type = "Audio"; sort = "PlayCount,DatePlayed"; order = "Descending"
+                query.append(.init(name: "Filters", value: "IsPlayed"))
             case .recent, .albums: break
             }
         }
-        if path != "Artists/AlbumArtists" { query.append(.init(name: "IncludeItemTypes", value: type)) }
+        if let chosen = request.sort, request.section.sorts.contains(chosen), !searching, request.playlistID == nil,
+           request.albumID == nil, request.artistID == nil, request.genreID == nil {
+            let (keys, descending) = chosen.server(songs: type == "Audio")
+            sort = keys
+            order = descending ? "Descending" : "Ascending"
+        }
+        if path != "Artists/AlbumArtists" && path != "MusicGenres" { query.append(.init(name: "IncludeItemTypes", value: type)) }
         if !sort.isEmpty {
             query.append(.init(name: "SortBy", value: sort))
             query.append(.init(name: "SortOrder", value: order))
@@ -328,12 +353,16 @@ actor JellyfinLibrary: MediaServerLibrary {
             // Playback starts from the item catalog even when browsing artists
             // or playlists. Artist/album/search restrictions above remain intact.
             path = request.playlistID.map { "Playlists/\($0)/Items" } ?? "Users/\(userID)/Items"
+            query.removeAll { $0.name == "MediaTypes" }
         }
         if request.randomOrder {
             query.removeAll { $0.name == "SortBy" || $0.name == "SortOrder" }
             query.append(.init(name: "SortBy", value: "Random"))
             query.append(.init(name: "SortOrder", value: "Ascending"))
         }
+        // Genres, and the audio stream behind a lossless badge, for what the screens show.
+        let songs = query.contains { $0.name == "IncludeItemTypes" && $0.value?.contains("Audio") == true }
+        query.append(.init(name: "Fields", value: songs ? "DateCreated,ChildCount,Genres,MediaStreams" : "DateCreated,ChildCount,Genres"))
         return try await get(path, query: query)
     }
 
@@ -1522,7 +1551,7 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// A signed-in session already knows its user id; API-key mode has to
     /// ask the server which users exist and pick one (the first — Jellyfin
     /// servers configured this way are typically single-user).
-    private func resolveUserId() async throws -> String {
+    func resolveUserId() async throws -> String {
         if let fixedUserId { return fixedUserId }
         if let cachedUserId { return cachedUserId }
         struct JFUser: Decodable { let Id: String }

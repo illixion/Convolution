@@ -2,6 +2,28 @@ import AVFoundation
 import Foundation
 import MediaPlayer
 
+struct JellyfinMusicNameID: Decodable, Hashable, Sendable {
+    let Name: String
+    let Id: String?
+}
+
+struct JellyfinMusicUserData: Decodable, Hashable, Sendable {
+    let IsFavorite: Bool?
+    /// 0-10; the Jellyfin web UI ignores it, so stars are Hypnos's own view of it.
+    let Rating: Double?
+    let PlayCount: Int?
+    let Likes: Bool?
+}
+
+struct JellyfinMusicStream: Decodable, Hashable, Sendable {
+    let `Type`: String?
+    let Codec: String?
+    let BitDepth: Int?
+    let SampleRate: Int?
+    let BitRate: Int?
+    let Channels: Int?
+}
+
 struct JellyfinMusicItem: Decodable, Identifiable, Hashable, Sendable {
     let Id: String
     let Name: String
@@ -10,22 +32,54 @@ struct JellyfinMusicItem: Decodable, Identifiable, Hashable, Sendable {
     let DateCreated: String?
     let ChildCount: Int?
     let IndexNumber: Int?
+    /// The disc number on a song.
+    let ParentIndexNumber: Int?
+    let ProductionYear: Int?
+    let Genres: [String]?
+    let Overview: String?
     let AlbumPrimaryImageTag: String?
     let NormalizationGain: Double?
     let AlbumNormalizationGain: Double?
     let Album: String?
     let AlbumArtist: String?
+    let AlbumArtists: [JellyfinMusicNameID]?
     let Artists: [String]?
+    let ArtistItems: [JellyfinMusicNameID]?
     let RunTimeTicks: Int64?
     let ImageTags: [String: String]?
+    let HasLyrics: Bool?
+    let UserData: JellyfinMusicUserData?
+    let MediaStreams: [JellyfinMusicStream]?
+    /// Set on a playlist's songs; the handle for removing and moving that entry.
+    let PlaylistItemId: String?
     var isSong: Bool { self.Type == "Audio" }
     var id: String { Id }
     var artist: String { AlbumArtist ?? Artists?.joined(separator: ", ") ?? "Unknown Artist" }
+    /// The first audio stream, which is what a lossless badge is read from.
+    var audioStream: JellyfinMusicStream? { MediaStreams?.first { $0.Type == "Audio" } }
+    var albumArtistID: String? { AlbumArtists?.first?.Id }
+    var artistID: String? { ArtistItems?.first?.Id }
+    var seconds: Double { Double(RunTimeTicks ?? 0) / 10_000_000 }
+
+    /// A navigation target made from what a song already knows about its album or artist.
+    static func reference(id: String, name: String, type: String, artist: String? = nil) -> JellyfinMusicItem? {
+        var object: [String: Any] = ["Id": id, "Name": name, "Type": type]
+        if let artist { object["AlbumArtist"] = artist }
+        guard let data = try? JSONSerialization.data(withJSONObject: object) else { return nil }
+        return try? JSONDecoder().decode(JellyfinMusicItem.self, from: data)
+    }
 }
 
 struct JellyfinMusicPage: Decodable, Sendable {
     let Items: [JellyfinMusicItem]
     let TotalRecordCount: Int?
+}
+
+/// What Jellyfin holds about one song's plays for the listener.
+struct MusicPlayState: Sendable {
+    let playCount: Int
+    let played: Bool
+    let lastPlayed: String?
 }
 
 enum JellyfinMusicAudioMode: String, CaseIterable, Identifiable {
@@ -42,6 +96,9 @@ final class JellyfinMusicSession {
     static let shared = JellyfinMusicSession()
     private(set) var queue: [JellyfinMusicItem] = []
     private(set) var current: JellyfinMusicItem?
+    /// Where `current` sits in `queue`. A song can be queued twice, so a position (never the song's id) is what
+    /// identifies "now playing", what Next advances from and what the Up Next list marks.
+    private(set) var currentIndex: Int?
     private(set) var isPlaying = false
     private(set) var isMuted = false
     private(set) var volume = min(1, max(0, UserDefaults.standard.object(forKey: "jellyfinMusic.volume") as? Double ?? 1))
@@ -49,6 +106,8 @@ final class JellyfinMusicSession {
     private(set) var duration: Double = 0
     private(set) var audioMode = JellyfinMusicAudioMode(rawValue: UserDefaults.standard.string(forKey: "jellyfinMusic.audioMode") ?? "") ?? .speaker
     private(set) var headLocked = UserDefaults.standard.bool(forKey: "jellyfinMusic.headLocked")
+    /// Even out song loudness with the server's `NormalizationGain` (Jellyfin's LUFS scan).
+    private(set) var soundCheck = UserDefaults.standard.bool(forKey: "jellyfinMusic.soundCheck")
     var isShuffled = false
     var repeats = false
     var error: String?
@@ -62,23 +121,34 @@ final class JellyfinMusicSession {
     private var observation: NSKeyValueObservation?
     private var itemObservation: NSKeyValueObservation?
     /// The next song, already queued behind the playing one so the player rolls into it with no gap.
-    private var preloaded: (item: AVPlayerItem, music: JellyfinMusicItem)?
+    private var preloaded: (item: AVPlayerItem, music: JellyfinMusicItem, index: Int)?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var playSessionId = UUID().uuidString
     private var progressTask: Task<Void, Never>?
+    /// The playing song's play state as it was before Jellyfin counted this play (it counts at the start).
+    private var startTask: Task<MusicPlayState?, Never>?
     private var lastProgressReport = Date.distantPast
 
     private init() {}
 
-    func play(_ track: JellyfinMusicItem, from tracks: [JellyfinMusicItem]? = nil) {
+    // MARK: - Starting playback
+
+    /// Play `track` as part of `tracks`. `index` names the entry when the same song is in the list twice.
+    func play(_ track: JellyfinMusicItem, from tracks: [JellyfinMusicItem]? = nil, at index: Int? = nil) {
         guard let (base, token) = connection() else { error = "Configure Jellyfin in Settings first."; return }
         resetRandomSource()
         isShuffled = false
         queue = tracks ?? [track]
         orderedQueue = queue
-        guard let index = queue.firstIndex(of: track) else { queue = [track]; start(track, base: base, token: token); return }
-        start(queue[index], base: base, token: token)
+        if let index, queue.indices.contains(index) {
+            start(at: index, base: base, token: token)
+        } else if let found = queue.firstIndex(of: track) {
+            start(at: found, base: base, token: token)
+        } else {
+            queue = [track]; orderedQueue = queue
+            start(at: 0, base: base, token: token)
+        }
     }
 
     /// Shuffle a concrete album/playlist once, then walk it without repeating
@@ -89,7 +159,7 @@ final class JellyfinMusicSession {
         orderedQueue = tracks
         queue = tracks.shuffled()
         isShuffled = true
-        start(queue[0], base: base, token: token)
+        start(at: 0, base: base, token: token)
     }
 
     func playRandomPage(_ tracks: [JellyfinMusicItem], source: MusicRequest, library: JellyfinLibrary) {
@@ -101,14 +171,74 @@ final class JellyfinMusicSession {
     }
 
     func next() {
-        guard let current, let i = queue.firstIndex(where: { $0.id == current.id }), let (base, token) = connection() else { return }
-        if i + 1 < queue.count {
-            start(queue[i + 1], base: base, token: token)
+        guard let currentIndex, let (base, token) = connection() else { return }
+        if currentIndex + 1 < queue.count {
+            start(at: currentIndex + 1, base: base, token: token)
         } else if let randomSource, let randomLibrary {
             refillRandomQueue(source: randomSource, library: randomLibrary)
-        } else if repeats, let first = queue.first {
-            start(first, base: base, token: token)
+        } else if repeats, !queue.isEmpty {
+            start(at: 0, base: base, token: token)
         } else { stop() }
+    }
+
+    func previous() {
+        guard let currentIndex, let (base, token) = connection() else { return }
+        if currentTime > 3 { player?.seek(to: .zero); return }
+        let previous = currentIndex > 0 ? currentIndex - 1 : (repeats ? queue.count - 1 : -1)
+        guard previous >= 0 else { player?.seek(to: .zero); return }
+        start(at: previous, base: base, token: token)
+    }
+
+    /// Jump to an entry of the queue (a tap in Up Next).
+    func jump(to index: Int) {
+        guard queue.indices.contains(index), let (base, token) = connection() else { return }
+        start(at: index, base: base, token: token)
+    }
+
+    // MARK: - Editing the queue
+
+    /// Put `item` right behind the playing song. With nothing playing it simply starts.
+    func playNext(_ item: JellyfinMusicItem) { insert([item], at: (currentIndex ?? -1) + 1) }
+    func playNext(_ items: [JellyfinMusicItem]) { insert(items, at: (currentIndex ?? -1) + 1) }
+    /// Put `items` at the end of the queue.
+    func addToQueue(_ items: [JellyfinMusicItem]) { insert(items, at: queue.count) }
+
+    private func insert(_ items: [JellyfinMusicItem], at position: Int) {
+        guard !items.isEmpty else { return }
+        guard current != nil, currentIndex != nil else { play(items[0], from: items); return }
+        let at = min(max(0, position), queue.count)
+        queue.insert(contentsOf: items, at: at)
+        if let currentIndex, at <= currentIndex { self.currentIndex = currentIndex + items.count }
+        // A random-refill queue is finished once the listener adds to it by hand.
+        syncOrderedQueueAfterEdit(adding: items)
+        refreshPreload()
+    }
+
+    /// Remove an entry. The playing song can't be removed (Next skips past it).
+    func removeFromQueue(at index: Int) {
+        guard queue.indices.contains(index), index != currentIndex else { return }
+        queue.remove(at: index)
+        if let currentIndex, index < currentIndex { self.currentIndex = currentIndex - 1 }
+        if !isShuffled { orderedQueue = queue }
+        refreshPreload()
+    }
+
+    /// Move an entry so it ends up at `destination` in the new order.
+    func moveInQueue(from source: Int, to destination: Int) {
+        guard queue.indices.contains(source), queue.indices.contains(destination), source != destination else { return }
+        let entry = queue.remove(at: source)
+        queue.insert(entry, at: destination)
+        if let currentIndex {
+            if currentIndex == source { self.currentIndex = destination }
+            else if source < currentIndex, destination >= currentIndex { self.currentIndex = currentIndex - 1 }
+            else if source > currentIndex, destination <= currentIndex { self.currentIndex = currentIndex + 1 }
+        }
+        if !isShuffled { orderedQueue = queue }
+        refreshPreload()
+    }
+
+    private func syncOrderedQueueAfterEdit(adding items: [JellyfinMusicItem]) {
+        if isShuffled { orderedQueue.append(contentsOf: items) } else { orderedQueue = queue }
     }
 
     private func refillRandomQueue(source: MusicRequest, library: JellyfinLibrary) {
@@ -144,13 +274,6 @@ final class JellyfinMusicSession {
         randomConfiguration = nil
     }
 
-    func previous() {
-        guard let current, let i = queue.firstIndex(where: { $0.id == current.id }), let (base, token) = connection() else { return }
-        if currentTime > 3 { player?.seek(to: .zero); return }
-        let previous = i > 0 ? i - 1 : (repeats ? queue.count - 1 : -1)
-        guard previous >= 0 else { player?.seek(to: .zero); return }
-        start(queue[previous], base: base, token: token)
-    }
     func pause() {
         // A queued network result must not restart music after an explicit pause.
         queueGeneration = UUID()
@@ -169,9 +292,32 @@ final class JellyfinMusicSession {
     func setVolume(_ value: Double) {
         guard value.isFinite else { return }
         volume = min(1, max(0, value))
-        player?.volume = Float(volume)
+        applyVolume()
         UserDefaults.standard.set(volume, forKey: "jellyfinMusic.volume")
     }
+
+    // MARK: - Sound Check
+
+    func setSoundCheck(_ enabled: Bool) {
+        soundCheck = enabled
+        UserDefaults.standard.set(enabled, forKey: "jellyfinMusic.soundCheck")
+        applyVolume()
+    }
+
+    /// The loudness correction the server measured for the playing song, in dB (negative: it is loud).
+    var currentGainDB: Double? { current?.NormalizationGain ?? current?.AlbumNormalizationGain }
+
+    /// What Sound Check multiplies the volume by. AVPlayer can't go above 1.0, so a quiet song stays as it is.
+    nonisolated static func soundCheckFactor(gainDB: Double?) -> Double {
+        guard let gainDB, gainDB.isFinite else { return 1 }
+        return min(1, max(0.05, pow(10, gainDB / 20)))
+    }
+
+    private func applyVolume() {
+        let factor = soundCheck ? Self.soundCheckFactor(gainDB: currentGainDB) : 1
+        player?.volume = Float(volume * factor)
+    }
+
     func seek(to seconds: Double) { player?.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)); currentTime = seconds; publishNowPlaying() }
     func artworkURL(for item: JellyfinMusicItem) -> URL? {
         guard let (base, token) = connection() else { return nil }
@@ -182,13 +328,17 @@ final class JellyfinMusicSession {
         return c?.url
     }
     func toggleShuffle() {
-        guard let current else { isShuffled.toggle(); return }
+        guard let current, let currentIndex else { isShuffled.toggle(); return }
         isShuffled.toggle()
         if isShuffled {
             orderedQueue = queue
-            queue = [current] + queue.filter { $0.id != current.id }.shuffled()
+            var rest = queue
+            rest.remove(at: currentIndex)
+            queue = [current] + rest.shuffled()
+            self.currentIndex = 0
         } else {
             queue = orderedQueue
+            self.currentIndex = queue.firstIndex(where: { $0.id == current.id }) ?? 0
             resetRandomSource()
         }
         refreshPreload()
@@ -237,47 +387,52 @@ final class JellyfinMusicSession {
         return playerItem
     }
 
-    /// What follows the current song, when that is already known (not a random refill).
-    private func upcoming() -> JellyfinMusicItem? {
-        guard let current, let i = queue.firstIndex(where: { $0.id == current.id }) else { return nil }
-        if i + 1 < queue.count { return queue[i + 1] }
-        if randomSource == nil, repeats, let first = queue.first { return first }
+    /// Where playback goes after the current song, when that is already known (not a random refill).
+    private func upcomingIndex() -> Int? {
+        guard let currentIndex else { return nil }
+        if currentIndex + 1 < queue.count { return currentIndex + 1 }
+        if randomSource == nil, repeats, !queue.isEmpty { return 0 }
         return nil
     }
 
     /// Queue the next song behind the playing one (or drop a stale one), for gapless playback.
     private func refreshPreload() {
         guard let queuePlayer = player as? AVQueuePlayer else { return }
-        let wanted = upcoming()
-        if let preloaded, preloaded.music.id == wanted?.id { return }
+        let wanted = upcomingIndex()
+        if let preloaded, let wanted, preloaded.index == wanted, preloaded.music.id == queue[wanted].id { return }
         if let preloaded { queuePlayer.remove(preloaded.item); self.preloaded = nil }
         guard let wanted, let (base, token) = connection(),
-              let item = makePlayerItem(for: wanted, base: base, token: token) else { return }
+              let item = makePlayerItem(for: queue[wanted], base: base, token: token) else { return }
         queuePlayer.insert(item, after: queuePlayer.currentItem)
-        preloaded = (item, wanted)
+        preloaded = (item, queue[wanted], wanted)
     }
 
     /// The queue player rolled into the preloaded song: move the session's state onto it.
     private func advanceToPreloaded() {
         guard let preloaded else { return }
         self.preloaded = nil
-        stopReporting()
+        finishReporting()
         playSessionId = UUID().uuidString
         current = preloaded.music
+        currentIndex = preloaded.index
         currentTime = 0
         duration = Double(preloaded.music.RunTimeTicks ?? 0) / 10_000_000
         isPlaying = true
+        applyVolume()
         reportStarted()
         publishNowPlaying()
         refreshPreload()
     }
 
-    private func start(_ item: JellyfinMusicItem, base: URL, token: String) {
-        guard let firstItem = makePlayerItem(for: item, base: base, token: token) else { return }
-        stopReporting()
+    private func start(at index: Int, base: URL, token: String) {
+        guard queue.indices.contains(index),
+              let firstItem = makePlayerItem(for: queue[index], base: base, token: token) else { return }
+        let item = queue[index]
+        finishReporting()
         releasePlayer()
         playSessionId = UUID().uuidString
         current = item
+        currentIndex = index
         currentTime = 0; duration = Double(item.RunTimeTicks ?? 0) / 10_000_000
         if audioMode == .music { AudioSessionConfig.configureExclusiveMusicPlayback() }
         else { AudioSessionConfig.configureMixedPlayback() }
@@ -285,7 +440,7 @@ final class JellyfinMusicSession {
         nextPlayer.actionAtItemEnd = .advance
         player = nextPlayer
         nextPlayer.isMuted = isMuted
-        nextPlayer.volume = Float(volume)
+        applyVolume()
         applySpatialAudioPreference()
         configureRemoteCommands()
         nextPlayer.play(); isPlaying = true
@@ -337,9 +492,10 @@ final class JellyfinMusicSession {
     func stop() {
         resetRandomSource()
         orderedQueue = []
-        stopReporting()
+        finishReporting()
         releasePlayer()
         current = nil
+        currentIndex = nil
         queue = []
         currentTime = 0
         duration = 0
@@ -362,26 +518,95 @@ final class JellyfinMusicSession {
         player = nil
     }
 
-    private func reportStarted() { sendReport("Sessions/Playing", includePaused: true) }
+    // MARK: - Reporting to Jellyfin
+
+    private func reportStarted() {
+        guard let (base, token) = connection(), let item = current else { return }
+        let userID = JellyfinAuth.shared.session?.userId
+        nonisolated(unsafe) let payload: [String: Any] = ["ItemId": item.Id, "PlaySessionId": playSessionId, "PositionTicks": 0,
+                                                            "IsPaused": false, "CanSeek": true]
+        startTask = Task {
+            // Jellyfin counts a play the moment it hears of the start, so the state worth keeping is read first.
+            let before = await Self.readPlayState(base: base, token: token, userID: userID, itemID: item.Id)
+            await Self.deliverReport(path: "Sessions/Playing", payload: payload, base: base, token: token, userID: userID,
+                                     itemID: item.Id, restoring: nil)
+            return before
+        }
+    }
     private func reportProgress() {
         guard Date().timeIntervalSince(lastProgressReport) >= 10 else { return }
         lastProgressReport = Date()
         sendReport("Sessions/Playing/Progress", includePaused: true)
     }
-    private func stopReporting() { progressTask?.cancel(); sendReport("Sessions/Playing/Stopped", includePaused: false); isPlaying = false }
+
+    /// Whether a listen counts as a play: half the song or four minutes, the rule scrobblers use.
+    nonisolated static func isCountedListen(seconds: Double, duration: Double) -> Bool {
+        guard duration > 0 else { return seconds >= 30 }
+        return seconds >= min(duration * 0.5, 240)
+    }
+
+    /// Tell Jellyfin the song ended. Jellyfin counts a play when a song starts, so every skip would land in Most
+    /// Played and Recently Played; a song left before a real listen has its play state put back as it was
+    /// before it started.
+    private func finishReporting() {
+        progressTask?.cancel()
+        let counted = Self.isCountedListen(seconds: currentTime, duration: duration)
+        let started = startTask
+        startTask = nil
+        guard let (base, token) = connection(), let item = current else { isPlaying = false; return }
+        let ticks = Int64(max(0, currentTime) * 10_000_000)
+        nonisolated(unsafe) let payload: [String: Any] = ["ItemId": item.Id, "PlaySessionId": playSessionId, "PositionTicks": ticks]
+        let userID = JellyfinAuth.shared.session?.userId
+        Task {
+            let before = counted ? nil : await started?.value
+            await Self.deliverReport(path: "Sessions/Playing/Stopped", payload: payload, base: base, token: token, userID: userID,
+                                     itemID: item.Id, restoring: before)
+        }
+        isPlaying = false
+    }
+
     private func sendReport(_ path: String, includePaused: Bool) {
         guard let (base, token) = connection(), let item = current else { return }
         let ticks = Int64(max(0, currentTime) * 10_000_000)
         var payload: [String: Any] = ["ItemId": item.Id, "PlaySessionId": playSessionId, "PositionTicks": ticks]
         if includePaused { payload["IsPaused"] = !isPlaying; payload["CanSeek"] = true }
-        let task = Task {
-            var request = URLRequest(url: base.appendingPathComponent(path)); request.httpMethod = "POST"
-            request.setValue("MediaBrowser Token=\"\(token)\"", forHTTPHeaderField: "Authorization")
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
-            _ = try? await URLSession.shared.data(for: request)
+        let userID = JellyfinAuth.shared.session?.userId
+        nonisolated(unsafe) let body = payload
+        progressTask = Task {
+            await Self.deliverReport(path: path, payload: body, base: base, token: token, userID: userID, itemID: item.Id, restoring: nil)
         }
-        if path != "Sessions/Playing/Stopped" { progressTask = task }
+    }
+
+    /// A song's play state as Jellyfin holds it for the signed-in user. Nil on an API key (no user to count for).
+    nonisolated static func readPlayState(base: URL, token: String, userID: String?, itemID: String) async -> MusicPlayState? {
+        guard let userID else { return nil }
+        var read = URLRequest(url: base.appendingPathComponent("Users/\(userID)/Items/\(itemID)"))
+        read.setValue("MediaBrowser Token=\"\(token)\"", forHTTPHeaderField: "Authorization")
+        guard let (data, _) = try? await URLSession.shared.data(for: read),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let state = object["UserData"] as? [String: Any] else { return nil }
+        return MusicPlayState(playCount: state["PlayCount"] as? Int ?? 0, played: state["Played"] as? Bool ?? false,
+                              lastPlayed: state["LastPlayedDate"] as? String)
+    }
+
+    /// Post a playback report, then, with `restoring`, write that play state back.
+    nonisolated static func deliverReport(path: String, payload: [String: Any], base: URL, token: String, userID: String?,
+                                          itemID: String, restoring: MusicPlayState?) async {
+        let authorization = "MediaBrowser Token=\"\(token)\""
+        var request = URLRequest(url: base.appendingPathComponent(path)); request.httpMethod = "POST"
+        request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        _ = try? await URLSession.shared.data(for: request)
+        guard let restoring, let userID else { return }
+        var restore: [String: Any] = ["PlayCount": restoring.playCount, "Played": restoring.played]
+        if let last = restoring.lastPlayed { restore["LastPlayedDate"] = last }
+        var write = URLRequest(url: base.appendingPathComponent("UserItems/\(itemID)/UserData").appending(queryItems: [URLQueryItem(name: "userId", value: userID)]))
+        write.httpMethod = "POST"
+        write.setValue(authorization, forHTTPHeaderField: "Authorization")
+        write.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        write.httpBody = try? JSONSerialization.data(withJSONObject: restore)
+        _ = try? await URLSession.shared.data(for: write)
     }
     private func publishNowPlaying() {
         guard audioMode == .music else {

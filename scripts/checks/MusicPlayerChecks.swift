@@ -149,6 +149,59 @@ actor JellyfinLibrary {
 
 
 
+        func track(_ id: String) throws -> JellyfinMusicItem {
+            try JSONDecoder().decode(JellyfinMusicItem.self, from: Data("{\"Id\":\"\(id)\",\"Name\":\"\(id)\",\"Type\":\"Audio\",\"RunTimeTicks\":2000000000}".utf8))
+        }
+        // The same song twice: position, not the song's id, says where playback is.
+        let twin = try track("twin"), other = try track("other")
+        music.play(twin, from: [twin, other, twin], at: 2)
+        precondition(music.currentIndex == 2)
+        music.previous()
+        precondition(music.currentIndex == 1 && music.current?.id == "other")
+        music.next()
+        precondition(music.currentIndex == 2 && music.current?.id == "twin")
+        music.next()
+        precondition(music.current == nil && music.currentIndex == nil)
+        print("A song queued twice advances by position, not by id: PASS")
+
+        let queued = try (0..<4).map { try track("q-\($0)") }
+        let extra = try track("x"), tail = try track("y")
+        music.play(queued[1], from: queued)
+        music.playNext(extra)
+        precondition(music.queue.map(\.id) == ["q-0", "q-1", "x", "q-2", "q-3"] && music.currentIndex == 1)
+        music.addToQueue([tail])
+        precondition(music.queue.last?.id == "y")
+        music.removeFromQueue(at: 0)
+        precondition(music.currentIndex == 0 && music.current?.id == "q-1")
+        music.removeFromQueue(at: 0)
+        precondition(music.queue.count == 5, "The playing song can't be removed")
+        music.moveInQueue(from: 3, to: 0)
+        precondition(music.queue.map(\.id) == ["q-3", "q-1", "x", "q-2", "y"] && music.currentIndex == 1)
+        music.moveInQueue(from: 0, to: 4)
+        precondition(music.currentIndex == 0 && music.queue[0].id == "q-1" && music.current?.id == "q-1")
+        music.moveInQueue(from: 0, to: 3)
+        precondition(music.currentIndex == 3 && music.current?.id == "q-1")
+        music.jump(to: 0)
+        precondition(music.current?.id == music.queue[0].id)
+        music.stop()
+        music.playNext(extra)
+        precondition(music.current?.id == "x" && music.queue.count == 1)
+        music.stop()
+        print("Play Next, Add to Queue, remove and move keep the playing song's position: PASS")
+
+        precondition(JellyfinMusicSession.soundCheckFactor(gainDB: nil) == 1)
+        precondition(abs(JellyfinMusicSession.soundCheckFactor(gainDB: -6) - 0.501) < 0.01)
+        precondition(JellyfinMusicSession.soundCheckFactor(gainDB: 4) == 1, "A quiet song can't be boosted past full volume")
+        precondition(JellyfinMusicSession.soundCheckFactor(gainDB: -200) >= 0.05)
+        print("Sound Check turns loud songs down and never boosts: PASS")
+
+        precondition(!JellyfinMusicSession.isCountedListen(seconds: 10, duration: 200))
+        precondition(JellyfinMusicSession.isCountedListen(seconds: 100, duration: 200))
+        precondition(JellyfinMusicSession.isCountedListen(seconds: 240, duration: 1000))
+        precondition(!JellyfinMusicSession.isCountedListen(seconds: 200, duration: 1000))
+        precondition(!JellyfinMusicSession.isCountedListen(seconds: 29, duration: 0))
+        print("A listen counts after half the song or four minutes: PASS")
+
         let stale = MusicListing(request: MusicRequest(section: .albums))
         let oldLoad = Task { await stale.loadIfNeeded() }
         try await Task.sleep(for: .milliseconds(5))
