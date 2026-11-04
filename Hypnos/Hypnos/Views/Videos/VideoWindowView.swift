@@ -495,7 +495,6 @@ struct VideoWindowView: View {
             }
         }
         #endif
-        .animation(windowModel.isUIHidden ? PlayerChromeAnimation.hide : PlayerChromeAnimation.reveal,
         #if os(iOS) || os(macOS)
         // How the picture gets here, in the other top corner.
         .overlay(alignment: .topTrailing) {
@@ -506,6 +505,7 @@ struct VideoWindowView: View {
             }
         }
         #endif
+        .animation(windowModel.isUIHidden ? PlayerChromeAnimation.hide : PlayerChromeAnimation.reveal,
                    value: windowModel.isUIHidden)
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
@@ -548,7 +548,6 @@ struct VideoWindowView: View {
                 .modifier(PlayerChromeReveal(shown: shown, edge: .top))
                 .offset(z: windowModel.showsStereoPicture ? PlayerChromeAnimation.stereoTitleLift : 0)
         }
-        #else
         // How the picture gets here, over the other top corner.
         .playerChromeOrnament(
             isPresented: !windowModel.isUIHidden && !appModel.allWindowsHidden && showsPlaybackInfo
@@ -560,6 +559,7 @@ struct VideoWindowView: View {
                 .modifier(PlayerChromeReveal(shown: shown, edge: .top))
                 .offset(z: windowModel.showsStereoPicture ? PlayerChromeAnimation.stereoTitleLift : 0)
         }
+        #else
         .ornament(
             visibility: windowModel.isUIHidden || appModel.allWindowsHidden ? .hidden : .visible,
             attachmentAnchor: .scene(.bottomFront),
@@ -765,12 +765,6 @@ struct VideoWindowView: View {
         windowModel.resumeAtLibraryPosition(start)
     }
 
-    // MARK: - Title
-
-    /// The title, and behind it the details (`PlayerDetails`).
-    private var titleButton: some View {
-        PlayerTitleButton(source: PlayerDetailsSource(video: video), fallback: PlayerDetails(video: video),
-                          video: video, dismissal: windowModel.menuDismissals,
     // MARK: - Playback info
 
     @AppStorage(PlaybackInfoVisibility.key) private var playbackInfoVisibility = PlaybackInfoVisibility.always
@@ -785,6 +779,12 @@ struct VideoWindowView: View {
                           onOpenChanged: { windowModel.ornamentMenu("Playback Info", opened: $0) })
     }
 
+    // MARK: - Title
+
+    /// The title, and behind it the details (`PlayerDetails`).
+    private var titleButton: some View {
+        PlayerTitleButton(source: PlayerDetailsSource(video: video), fallback: PlayerDetails(video: video),
+                          video: video, dismissal: windowModel.menuDismissals,
                           onOpenChanged: { windowModel.ornamentMenu("Details", opened: $0) })
     }
 

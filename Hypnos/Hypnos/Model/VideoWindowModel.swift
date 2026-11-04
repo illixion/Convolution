@@ -146,6 +146,19 @@ final class VideoWindowModel {
     /// (the strip reads them); cleared with each new video.
     private(set) var pictureSize: CGSize?
     private(set) var pictureFrameRate: Double?
+    /// What the frames on screen are (transfer function, Dolby Vision RPU),
+    /// from whichever renderer draws them; nil until one says, and for
+    /// WebKit, which can't (`VideoWindowModel+PlaybackInfo`).
+    var pictureFrameRange: VideoFrameRange?
+    /// Why this video's original doesn't play natively, as each fallback
+    /// found it ("the remux on this device declined it: …"). Cleared with
+    /// the video.
+    var playbackRefusals: [String] = []
+    /// Why the Library stream plays at its level.
+    var streamLevelReason: PlaybackLevelReason?
+    /// What Jellyfin's encoder is doing for the server stream playing.
+    var serverTranscode: LibraryTranscodeInfo?
+    @ObservationIgnored var serverTranscodeTask: Task<Void, Never>?
 
     // MARK: - Playback State (driven by the WebVideoPlayerView JS bridge)
 
@@ -166,19 +179,6 @@ final class VideoWindowModel {
     /// muted unless the setting says otherwise); toggled via the control bar.
     var isMuted: Bool = true
     /// 0…1, shared by every player and remembered between launches
-    /// What the frames on screen are (transfer function, Dolby Vision RPU),
-    /// from whichever renderer draws them; nil until one says, and for
-    /// WebKit, which can't (`VideoWindowModel+PlaybackInfo`).
-    var pictureFrameRange: VideoFrameRange?
-    /// Why this video's original doesn't play natively, as each fallback
-    /// found it ("the remux on this device declined it: …"). Cleared with
-    /// the video.
-    var playbackRefusals: [String] = []
-    /// Why the Library stream plays at its level.
-    var streamLevelReason: PlaybackLevelReason?
-    /// What Jellyfin's encoder is doing for the server stream playing.
-    var serverTranscode: LibraryTranscodeInfo?
-    @ObservationIgnored var serverTranscodeTask: Task<Void, Never>?
     /// (`PlayerVolume`); mute sits on top of it.
     var volume: Double = PlayerVolume.saved
     /// End of the last buffered range (seconds).
@@ -763,6 +763,7 @@ final class VideoWindowModel {
         playbackFailure = nil
         isLoadStalled = false
         hasPresentedVideo = false
+        resetPlaybackInfo()
         carryPositionToNextRenderer(reason: "retry")
         playbackAttempt += 1
         usingTranscodedStream = false
@@ -784,7 +785,6 @@ final class VideoWindowModel {
             AppLogger.videoWindow.error("[\(self.videoDisplayName, privacy: .private(mask: .hash))] no picture after \(Self.loadStallTimeout, privacy: .public)")
             self.isLoadStalled = true
             self.revealChrome()
-        resetPlaybackInfo()
         }
     }
 
@@ -813,6 +813,7 @@ final class VideoWindowModel {
         nextEpisodeTask?.cancel()
         audioTracksTask?.cancel()
         sharedFieldsTask?.cancel()
+        serverTranscodeTask?.cancel()
         if popOutWindowValue != nil {
             appModel.unregisterVideoWindow(video: video, windowValueId: windowValueId)
         }
@@ -834,7 +835,6 @@ final class VideoWindowModel {
         youTubeSurroundTask?.cancel()
         #endif
         loopController.reset()
-        serverTranscodeTask?.cancel()
         subtitles.reset()
         playCommand = nil
         pauseCommand = nil
@@ -889,6 +889,7 @@ final class VideoWindowModel {
         endHandled = false
         pictureSize = nil
         pictureFrameRate = nil
+        resetPlaybackInfo()
 
         // Reset per-window viewing state (a stereo episode plays 3D on the
         // big screen too)
@@ -910,7 +911,6 @@ final class VideoWindowModel {
         streamSwitchStart = nil
         carriedPosition = nil
         // Every video starts on its own original file, whatever the previous
-        resetPlaybackInfo()
         // one ended up playing.
         usingTranscodedStream = false
         ai3DUsesStashTier = false
@@ -1480,6 +1480,9 @@ final class VideoWindowModel {
         if dropYouTubeHDR(reason: "the native player couldn't play the HDR variants") { return }
         if dropYouTubeSurround(reason: "the native player couldn't play the surround stream") { return }
         #endif
+        notePlaybackRefusal(remuxedStreamURL != nil
+            ? "the native player failed on the remux made on this device"
+            : "the native player couldn't play the file")
         if remuxedStreamURL != nil {
             // The remux opened but didn't play: the original goes to WebKit.
             AppLogger.remux.error("[\(self.videoDisplayName, privacy: .private(mask: .hash))] the native player failed on the remux; falling back")
@@ -1501,9 +1504,6 @@ final class VideoWindowModel {
     @discardableResult
     func switchToTranscodedStream(reason: String) -> Bool {
         guard canUseTranscodedStream else { return false }
-        notePlaybackRefusal(remuxedStreamURL != nil
-            ? "the native player failed on the remux made on this device"
-            : "the native player couldn't play the file")
         AppLogger.videoWindow.info(
             "[\(self.videoDisplayName, privacy: .private(mask: .hash))] switching to server transcode: \(reason, privacy: .public)"
         )
@@ -1566,8 +1566,11 @@ final class VideoWindowModel {
         // being lossless and on the device.
         let remuxSource = canTryRemux ? url : nil
         let remuxFileName = video.fileName
+        pictureFrameRange = nil
+        let onTranscode = usingTranscodedStream || ai3DUsesStashTier
         playbackRendererTask = Task { [weak self] in
             var isPlayable = await Self.canPlayNatively(url: url)
+            let opensNatively = isPlayable
             var remuxed: URL?
             if !isPlayable, let remuxSource {
                 remuxed = await MatroskaRemuxService.shared.playlistURL(for: remuxSource, fileName: remuxFileName)
@@ -1576,30 +1579,6 @@ final class VideoWindowModel {
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard let self, self.authenticatedStreamURL == url else { return }
-                if let remuxed {
-                    AppLogger.videoWindow.info("[\(self.videoDisplayName, privacy: .private(mask: .hash))] playing the original remuxed to HLS")
-                    self.remuxedStreamURL = remuxed
-                    // The file's own subtitle tracks, read from the remux.
-                    self.subtitles.load(SubtitleSource.forVideo(self.video, remuxing: url), keepingPickedFile: true)
-                }
-                #if HYPNOS_YOUTUBE
-                if !isPlayable, self.dropYouTubeHDR(reason: "the HDR variants aren't decodable") { return }
-                if !isPlayable, self.dropYouTubeSurround(reason: "the surround stream isn't decodable") { return }
-                #endif
-                // The big screen needs AVFoundation; don't mount WebKit (and
-        pictureFrameRange = nil
-        let onTranscode = usingTranscodedStream || ai3DUsesStashTier
-                // play its sound) on the way to the transcode.
-                if !isPlayable, self.holdsBigScreen,
-            let opensNatively = isPlayable
-                   self.switchToTranscodedStream(reason: "the Big Screen needs the AVFoundation renderer") { return }
-                // A stereo file plays live in the window from the transcode
-                // (a 3D MKV with DTS only, which the remux declines). With no
-                // transcode it plays flat in WebKit.
-                if !isPlayable, self.wantsLiveStereo {
-                    if self.switchToTranscodedStream(reason: "live 3D needs the AVFoundation renderer") { return }
-                    self.live3DUnavailable = true
-                    self.showQualityNotice(Self.live3DUnavailableNotice)
                 if !opensNatively {
                     if let remuxSource, remuxed == nil {
                         let why = MatroskaRemuxService.shared.declineReason(for: remuxSource)
@@ -1611,8 +1590,30 @@ final class VideoWindowModel {
                             : "the native player can't open this file")
                     }
                 }
+                if let remuxed {
+                    AppLogger.videoWindow.info("[\(self.videoDisplayName, privacy: .private(mask: .hash))] playing the original remuxed to HLS")
+                    self.remuxedStreamURL = remuxed
+                    // The file's own subtitle tracks, read from the remux.
+                    self.subtitles.load(SubtitleSource.forVideo(self.video, remuxing: url), keepingPickedFile: true)
+                }
+                #if HYPNOS_YOUTUBE
+                if !isPlayable, self.dropYouTubeHDR(reason: "the HDR variants aren't decodable") { return }
+                if !isPlayable, self.dropYouTubeSurround(reason: "the surround stream isn't decodable") { return }
+                #endif
+                // The big screen needs AVFoundation; don't mount WebKit (and
+                // play its sound) on the way to the transcode.
+                if !isPlayable, self.holdsBigScreen,
+                   self.switchToTranscodedStream(reason: "the Big Screen needs the AVFoundation renderer") { return }
+                // A stereo file plays live in the window from the transcode
+                // (a 3D MKV with DTS only, which the remux declines). With no
+                // transcode it plays flat in WebKit.
+                if !isPlayable, self.wantsLiveStereo {
+                    if self.switchToTranscodedStream(reason: "live 3D needs the AVFoundation renderer") { return }
+                    self.live3DUnavailable = true
+                    self.showQualityNotice(Self.live3DUnavailableNotice)
                 }
                 self.playbackRenderer = isPlayable ? .nativeMetal : .webKit
+                self.watchServerTranscode()
                 // A fake-3D engage waiting on the transcode swap resolves here.
                 if self.pendingPseudo3DEngage != nil {
                     self.resumePendingPseudo3DEngage()
@@ -1634,7 +1635,6 @@ final class VideoWindowModel {
     /// the native renderer is confirmed (runs on open and on every video
     /// switch), unless this window already has a mode — restored fake-3D or
     /// genuine stereoscopic. Prefers this video's pre-processed cache (strict
-                self.watchServerTranscode()
     /// engageEntry, so a deliberate pre-process model switch isn't silently
     /// overridden by an old cache), else real-time inference; with no depth
     /// model installed it stays 2D silently — never forces the setup sheet.
