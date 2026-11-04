@@ -4,8 +4,10 @@
  Like H.264, Matroska keeps the MP4 forms: CodecPrivate is the
  HEVCDecoderConfigurationRecord and blocks are length-prefixed NAL units.
  The record becomes `hvcC` under `hvc1` when it carries the parameter sets
- (VPS, SPS and PPS), else under `hev1`, which tells the decoder to look for
- them in the samples.
+ (VPS, SPS and PPS). A record without them takes them from the first
+ keyframe, where such files repeat them in band (`completed(fromKeyframe:)`):
+ VideoToolbox has no decoder for `hev1` with an empty hvcC. Only a file
+ whose first keyframe lacks them too stays `hev1`.
 
  The SPS is parsed down to its VUI for the colour description: a UHD remux
  often has no Colour element at all (the Dolby demo doesn't) and only the
@@ -65,6 +67,38 @@ struct HEVCConfiguration {
     /// The record carries a VPS, an SPS and a PPS.
     var hasParameterSets: Bool {
         [32, 33, 34].allSatisfy { !(arrays[$0]?.isEmpty ?? true) }
+    }
+
+    /// This record with the parameter sets it lacks taken from a keyframe
+    /// that carries them in band, or nil when the keyframe doesn't have all
+    /// three. Some web releases leave the hvcC with no arrays at all (a
+    /// 23-byte CodecPrivate) and repeat the VPS, SPS and PPS before each
+    /// keyframe; VideoToolbox makes no decoder from a sample entry without
+    /// them (-12906), and Apple's HLS takes `hvc1` only, so the remux would
+    /// be refused outright. The in-band copies stay in the samples, as
+    /// ffmpeg's `-tag:v hvc1` leaves them, which Apple's decoders accept.
+    func completed(fromKeyframe keyframe: [UInt8]) -> HEVCConfiguration? {
+        guard !hasParameterSets else { return self }
+        var found: [UInt8: [[UInt8]]] = [:]
+        for nal in NALUnits.lengthPrefixed(keyframe, lengthSize: lengthSize) where nal.count > 2 {
+            let type = (nal[nal.startIndex] >> 1) & 0x3F
+            guard [32, 33, 34].contains(type) else { continue }
+            let unit = Array(nal)
+            if !(found[type]?.contains(unit) ?? false) { found[type, default: []].append(unit) }
+        }
+        guard [32, 33, 34].allSatisfy({ !(found[$0]?.isEmpty ?? true) }) else { return nil }
+        var record = Array(self.record.prefix(22))
+        let types: [UInt8] = [32, 33, 34]
+        record.append(UInt8(types.count))
+        for type in types {
+            let units = found[type]!
+            record.append(0x80 | type) // array_completeness 1, as `hvc1` requires
+            record += [UInt8(units.count >> 8), UInt8(units.count & 0xFF)]
+            for unit in units {
+                record += [UInt8(unit.count >> 8), UInt8(unit.count & 0xFF)] + unit
+            }
+        }
+        return HEVCConfiguration(record: record)
     }
 
     /// ISO/IEC 14496-15 Annex E: hvc1.2.4.L153.B0.

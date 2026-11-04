@@ -119,9 +119,11 @@ struct VideoPlan: Sendable {
                 SampleEntries.colourBoxes(&w, colour: colour, track: track)
             }
         case "V_MPEGH/ISO/HEVC":
-            guard let config = HEVCConfiguration(record: track.codecPrivate) else {
+            guard let stored = HEVCConfiguration(record: track.codecPrivate) else {
                 throw RemuxError.declined("HEVC track without a usable hvcC")
             }
+            // Parameter sets only in band: lift them into the record.
+            let config = stored.completed(fromKeyframe: firstKeyframe) ?? stored
             colour = merged(config.colour)
             codecName = "HEVC"
             var entryType = config.hasParameterSets ? "hvc1" : "hev1"

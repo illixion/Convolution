@@ -161,6 +161,62 @@ struct AVFoundationTests {
         #expect(atoms["hvcC"] != nil)
     }
 
+    /// A web release's HEVC (Netflix WEB-DLs, 2026-11-04): CodecPrivate an
+    /// hvcC with no arrays, the VPS/SPS/PPS repeated before every keyframe.
+    /// As `hev1` with that empty hvcC, VideoToolbox had no decoder for it
+    /// (-12906), so the app declined the remux and the title went to a
+    /// single-audio server transcode.
+    @Test func inBandParameterSetsAreLiftedIntoTheRecord() async throws {
+        var writer = try await MatroskaTestWriter.load(try Fixtures.data("hevc-hdr10.mkv"))
+        let stored = try #require(HEVCConfiguration(record: writer.tracks[0].codecPrivate))
+        try #require(stored.hasParameterSets)
+        var inBand: [UInt8] = []
+        for type: UInt8 in [32, 33, 34] {
+            for unit in stored.arrays[type] ?? [] {
+                inBand += (0 ..< stored.lengthSize).reversed().map { UInt8((unit.count >> (8 * $0)) & 0xFF) } + unit
+            }
+        }
+        for k in writer.frames.indices where writer.frames[k].track == writer.tracks[0].number && writer.frames[k].isKeyframe {
+            writer.frames[k].data = inBand + writer.frames[k].data
+        }
+        var empty = Array(stored.record.prefix(23))
+        empty[22] = 0
+        writer.tracks[0].codecPrivate = empty
+
+        let session = try await RemuxSession.open(source: DataByteSource(writer.write()))
+        let entry = try #require(try MP4Read.initSegment(await session.fetch("video/init.mp4")).first)
+        #expect(entry.entryType == "hvc1")
+        let lifted = try #require(entry.entryChildren["hvcC"].flatMap(HEVCConfiguration.init(record:)))
+        #expect(lifted.hasParameterSets)
+        #expect(lifted.arrays[33] == stored.arrays[33])
+        #expect(session.summary.video.codecs.hasPrefix("hvc1."))
+
+        var description: CMVideoFormatDescription?
+        let entryData = session.videoSampleEntry
+        let status = entryData.withUnsafeBytes { raw in
+            CMVideoFormatDescriptionCreateFromBigEndianImageDescriptionData(
+                allocator: kCFAllocatorDefault, bigEndianImageDescriptionData: raw.bindMemory(to: UInt8.self).baseAddress!,
+                size: entryData.count, stringEncoding: CFStringBuiltInEncodings.UTF8.rawValue, flavor: .isoFamily,
+                formatDescriptionOut: &description)
+        }
+        #expect(status == noErr)
+        var decoder: VTDecompressionSession?
+        let created = VTDecompressionSessionCreate(allocator: kCFAllocatorDefault, formatDescription: try #require(description),
+                                                   decoderSpecification: nil, imageBufferAttributes: nil,
+                                                   outputCallback: nil, decompressionSessionOut: &decoder)
+        if let decoder { VTDecompressionSessionInvalidate(decoder) }
+        #expect(created == noErr, "VideoToolbox makes a decoder from the sample entry (the app's canDecode)")
+
+        // The in-band copies stay in the samples; every frame still decodes.
+        let url = try write(try await session.concatenated("video"), "inband")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let asset = AVURLAsset(url: url)
+        let track = try #require(try await asset.loadTracks(withMediaType: .video).first)
+        let video = try await decode(asset, track, video: true)
+        let expected = try Fixtures.expected("hevc-hdr10.mkv").first { $0.type == "video" }?.packets
+        #expect(video.count == expected)
+    }
+
     @Test func audioGapStillDecodes() async throws {
         var writer = try await MatroskaTestWriter.load(try Fixtures.data("ac3-51.mkv"))
         let audio = writer.frames.indices.filter { writer.frames[$0].track == 2 }
