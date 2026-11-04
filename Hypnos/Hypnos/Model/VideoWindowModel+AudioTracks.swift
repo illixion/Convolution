@@ -71,40 +71,69 @@ extension VideoWindowModel {
                     return
                 }
             }
-            guard let self else { return }
-            guard let item = player?.currentItem,
-                  let group = try? await item.asset.loadMediaSelectionGroup(for: .audible),
-                  !Task.isCancelled, self.audioPlayer === player
-            else {
-                if !Task.isCancelled {
-                    self.stableAudioPairs = [:]
-                    self.setAudioTracks([], selected: nil)
-                }
-                return
+            // The player's own options. The item settles its selection
+            // after they load (AVFoundation picks by the preferred
+            // languages, so a remux whose default is Japanese plays
+            // English), and the viewer can change it elsewhere (AVKit's
+            // menu on the Mac), so the checkmark follows each change. Only
+            // a weak reference waits: a scene the system drops never runs
+            // `cleanup`.
+            guard let listed = await self?.listPlayerAudioTracks(player) else { return }
+            let (item, group) = listed
+            for await _ in NotificationCenter.default.notifications(
+                named: AVPlayerItem.mediaSelectionDidChangeNotification, object: item) {
+                guard !Task.isCancelled, let self, self.audioPlayer === player, player?.currentItem === item else { return }
+                self.followAudioSelection(item: item, group: group)
             }
-            let options = group.options
-            var titles: [String] = []
-            for (number, option) in options.enumerated() {
-                titles.append(await Self.title(of: option, number: number + 1))
-            }
-            guard !Task.isCancelled, self.audioPlayer === player else { return }
-            let pairs = Self.stablePairs(titles)
-            let copies = Set(pairs.values)
-            let tracks = options.indices.filter { !copies.contains($0) }
-                .map { VideoAudioTrack(id: .player($0), title: titles[$0]) }
-            var selected = item.currentMediaSelection.selectedMediaOption(in: group)
-                .flatMap { options.firstIndex(of: $0) }
-            self.stableAudioPairs = pairs
-            // The switch decides between a track and its copy, whichever
-            // the player started on.
-            if let playing = selected, let wanted = self.stableAudioCounterpart(of: playing), wanted != playing {
-                item.select(options[wanted], in: group)
-                AppLogger.videoWindow.info("Stable Audio \(self.stableAudioOn ? "on" : "off", privacy: .public): switched to option \(wanted + 1, privacy: .public) of \(options.count, privacy: .public)")
-                selected = wanted
-            }
-            let shown = selected.map { playing in pairs.first { $0.value == playing }?.key ?? playing }
-            self.setAudioTracks(tracks.count > 1 ? tracks : [], selected: shown.map { .player($0) })
         }
+    }
+
+    /// Lists `player`'s audible options as the menu; returns its item and
+    /// group when the menu has entries whose checkmark must follow the
+    /// item's selection.
+    private func listPlayerAudioTracks(_ player: AVPlayer?) async -> (AVPlayerItem, AVMediaSelectionGroup)? {
+        guard let item = player?.currentItem,
+              let group = try? await item.asset.loadMediaSelectionGroup(for: .audible),
+              !Task.isCancelled, audioPlayer === player
+        else {
+            if !Task.isCancelled {
+                stableAudioPairs = [:]
+                setAudioTracks([], selected: nil)
+            }
+            return nil
+        }
+        let options = group.options
+        var titles: [String] = []
+        for (number, option) in options.enumerated() {
+            titles.append(await Self.title(of: option, number: number + 1))
+        }
+        guard !Task.isCancelled, audioPlayer === player else { return nil }
+        let pairs = Self.stablePairs(titles)
+        let copies = Set(pairs.values)
+        let tracks = options.indices.filter { !copies.contains($0) }
+            .map { VideoAudioTrack(id: .player($0), title: titles[$0]) }
+        stableAudioPairs = pairs
+        setAudioTracks(tracks.count > 1 ? tracks : [], selected: nil)
+        followAudioSelection(item: item, group: group)
+        return tracks.count > 1 || !pairs.isEmpty ? (item, group) : nil
+    }
+
+    /// Checks the menu's row for what `item` now plays, after playing the
+    /// Stable Audio copy, or the track, the switch asks for.
+    private func followAudioSelection(item: AVPlayerItem, group: AVMediaSelectionGroup) {
+        let options = group.options
+        var selected = item.currentMediaSelection.selectedMediaOption(in: group)
+            .flatMap { options.firstIndex(of: $0) }
+        // The switch decides between a track and its copy, whichever the
+        // player started on or chose since.
+        if let playing = selected, let wanted = stableAudioCounterpart(of: playing), wanted != playing {
+            item.select(options[wanted], in: group)
+            AppLogger.videoWindow.info("Stable Audio \(self.stableAudioOn ? "on" : "off", privacy: .public): switched to option \(wanted + 1, privacy: .public) of \(options.count, privacy: .public)")
+            selected = wanted
+        }
+        guard !audioTracks.isEmpty else { return }
+        let shown = selected.map { playing in stableAudioPairs.first { $0.value == playing }?.key ?? playing }
+        setAudioTracks(audioTracks, selected: shown.map { .player($0) })
     }
 
     /// The player whose audio options are offered: the native renderer's,
