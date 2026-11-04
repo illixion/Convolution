@@ -1309,18 +1309,27 @@ actor JellyfinLibrary: MediaServerLibrary {
         await LibraryWatchState.shared.reportLanded(itemId: itemId)
     }
 
+    /// Marks an item watched or unwatched. Watched also clears its resume
+    /// point, so the next Play starts from the beginning: Jellyfin keeps the
+    /// last position on an item it marks played (see
+    /// `LibraryUserData.resumeSeconds`), which "Mark as Unwatched" or a
+    /// server-side Resume list would otherwise bring back.
     func setPlayed(itemId: String, played: Bool) async throws {
         do {
             let userId = try await resolveUserId()
             try await sendState(path: "Users/\(userId)/PlayedItems/\(itemId)", set: played)
+            if played { await clearServerResumePoint(itemId: itemId) }
             LibraryOfflineStore.shared.update(itemId: itemId) { record in
                 record.item.userData.isPlayed = played
+                if played { Self.clearResumePoint(of: &record.item.userData) }
                 record.localPlayed = nil
                 record.localPosition = played ? 0 : record.localPosition
             }
         } catch where Self.isUnreachable(error) && LibraryOfflineStore.shared.record(for: itemId) != nil {
             // Kept on the device until the server can hear it.
             LibraryOfflineStore.shared.update(itemId: itemId) { record in
+                record.item.userData.isPlayed = played
+                if played { Self.clearResumePoint(of: &record.item.userData) }
                 record.localPlayed = played
                 record.localPosition = 0
                 record.localChangedAt = Date()
@@ -1328,6 +1337,22 @@ actor JellyfinLibrary: MediaServerLibrary {
             }
         }
         await LibraryWatchState.shared.changed()
+    }
+
+    /// Zeroes the server's saved position for an item just marked watched.
+    /// Best effort: the title is watched either way, and `resumeSeconds`
+    /// ignores a position on a played item.
+    private func clearServerResumePoint(itemId: String) async {
+        do {
+            try await syncUserData(itemId: itemId, positionSeconds: 0, played: true, lastPlayed: nil)
+        } catch {
+            AppLogger.library.error("Clearing a watched title's resume point failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
+        }
+    }
+
+    private static func clearResumePoint(of userData: inout LibraryUserData) {
+        userData.playbackPositionTicks = 0
+        userData.playedPercentage = nil
     }
 
     func setFavorite(itemId: String, favorite: Bool) async throws {
