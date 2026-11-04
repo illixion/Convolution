@@ -192,6 +192,7 @@ struct PhotoSettingsPage: View {
 
 struct VideoSettingsPage: View {
     @Environment(AppModel.self) private var appModel
+    @AppStorage(PlaybackInfoVisibility.key) private var playbackInfoVisibility = PlaybackInfoVisibility.always
 
     var body: some View {
         @Bindable var appModel = appModel
@@ -204,6 +205,15 @@ struct VideoSettingsPage: View {
             #if !os(tvOS)
             Section {
                 Toggle("Pinch to Zoom Videos", isOn: $appModel.pinchToZoomVideos)
+            }
+            #endif
+            #if !os(tvOS)
+            Section {
+                Picker("Playback Info", selection: $playbackInfoVisibility) {
+                    ForEach(PlaybackInfoVisibility.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+            } footer: {
+                Text("A panel in the video's top corner, with the controls: whether the original plays as it is or the server converts it, and why, with the picture's size, frame rate and HDR format. When Something's Off shows it only when a video falls back to a conversion or loses HDR.")
             }
             #endif
             #if os(visionOS)

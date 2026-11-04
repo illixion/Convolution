@@ -96,6 +96,24 @@ enum VideoPlayerDebugEndpoints {
                    + "Includes player and model clocks and subtitle timing, without cue text.") { _ in
                 await reply()
             },
+            .query("videoPlayback", "What each video window's playback info panel shows: the route (direct, "
+                   + "deviceRemux, serverRemux, serverTranscode, webPlayer, youTube), how it came about (normal, "
+                   + "chosen, issue), the reasons, the picture readout and dynamic range (from the frames or only "
+                   + "the source's metadata), what the server's encoder copies or converts, and the source file. "
+                   + "Code-defined text only. Windows that have had a native player.") { _ in
+                VideoWindowModel.withNativePlayers.allObjects.map { model in
+                    let info = model.playbackInfo
+                    return PlaybackReply(
+                        route: "\(info.route)", title: info.route.title, severity: "\(info.severity)",
+                        server: info.server, reasons: info.reasons, headline: info.headline,
+                        readout: info.readout, range: info.range?.label, rangeNote: info.range?.note,
+                        rangeReduced: info.range?.isReduced, rangeFromFrames: info.rangeFromFrames,
+                        frames: model.pictureFrameRange.map { "\($0.transfer.rawValue)\($0.hasDolbyVisionRPU ? "+RPU" : "")" },
+                        serverVideo: info.transcode.map(PlaybackInfoDetailsView.videoText),
+                        serverAudio: info.transcode.map(PlaybackInfoDetailsView.audioText),
+                        serverReasons: info.transcode?.reasons, source: info.source)
+                }
+            },
             .command("videoAudioTrack", "Picks an entry of the first video window's Audio menu, as a tap would: "
                      + "position counts from 0 in menu order. Returns the windows' state after it.",
                      parameters: [.integer("position", "the entry's position in the Audio menu", required: true,
@@ -121,6 +139,25 @@ enum VideoPlayerDebugEndpoints {
 
     struct Reply: Encodable {
         var windows: [Window]
+    }
+
+    struct PlaybackReply: Encodable {
+        var route: String
+        var title: String
+        var severity: String
+        var server: String?
+        var reasons: [String]
+        var headline: String?
+        var readout: String?
+        var range: String?
+        var rangeNote: String?
+        var rangeReduced: Bool?
+        var rangeFromFrames: Bool
+        var frames: String?
+        var serverVideo: String?
+        var serverAudio: String?
+        var serverReasons: [String]?
+        var source: String?
     }
 
     struct Window: Encodable {

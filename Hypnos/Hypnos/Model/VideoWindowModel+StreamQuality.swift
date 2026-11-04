@@ -204,10 +204,12 @@ extension VideoWindowModel {
                 self.usingTranscodedStream = keepsReserve
                 self.video.transcodeStreamURL = plan.transcodeURL
                 self.video.streamURL = plan.streamURL
+                self.noteStreamLevel(plan.quality, reason: reason, forAI3D: forAI3D)
                 if needsRenderer {
                     self.resolvePlaybackRenderer()
                 } else {
                     self.resumePendingPseudo3DEngage()
+                    self.watchServerTranscode()
                 }
                 self.armStartupQualityWatchIfNoPicture()
             } catch {

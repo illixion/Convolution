@@ -111,6 +111,12 @@ struct Pseudo3DVideoPlayerView: View {
                 }
                 engine.onDurationKnown = onDurationKnown
                 engine.onPerformance = { [weak playbackModel] in playbackModel?.noteStereoPerformance($0) }
+                engine.onFrameSignal = { [weak playbackModel] signal in
+                    playbackModel?.notePictureFrameRange(
+                        VideoFrameRange(transferFunction: signal.transferFunction,
+                                        hasDolbyVisionRPU: signal.hasDolbyVisionRPU),
+                        stereo: true)
+                }
                 engine.startMuted = startMuted
                 engine.startVolume = Float(playbackModel?.volume ?? 1)
                 engine.startRate = Float(playbackModel?.playbackSpeed ?? 1)

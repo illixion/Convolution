@@ -27,6 +27,12 @@ struct VideoControlBar<Accessories: View>: View {
     /// and the accessories in it, and an open visionOS menu redrew (and
     /// dropped taps) with each one. The film player does the same.
     @State private var frozenState: RAVEPlayerControlState?
+    #if os(tvOS)
+    private var readoutInPanel: Bool { false }
+    #else
+    @AppStorage(PlaybackInfoVisibility.key) private var playbackInfoVisibility = PlaybackInfoVisibility.always
+    private var readoutInPanel: Bool { windowModel.playbackInfo.isShown(playbackInfoVisibility) }
+    #endif
 
     private var liveState: RAVEPlayerControlState {
         RAVEPlayerControlState(
@@ -34,7 +40,9 @@ struct VideoControlBar<Accessories: View>: View {
             bufferedUntil: windowModel.bufferedEnd, isPlaying: !windowModel.isPaused,
             isMuted: windowModel.isMuted, volume: windowModel.volume,
             markers: [windowModel.loopController.pointA, windowModel.loopController.pointB].compactMap { $0 },
-            details: windowModel.pictureDetails,
+            // The picture's readout is in the playback info panel, unless
+            // that is set to show only when something is off.
+            details: readoutInPanel ? nil : windowModel.pictureDetails,
             markedRanges: windowModel.segmentSkipper.markedRanges
         )
     }

@@ -495,6 +495,16 @@ struct VideoWindowView: View {
         }
         #endif
         .animation(windowModel.isUIHidden ? PlayerChromeAnimation.hide : PlayerChromeAnimation.reveal,
+        #if os(iOS) || os(macOS)
+        // How the picture gets here, in the other top corner.
+        .overlay(alignment: .topTrailing) {
+            if !windowModel.isUIHidden, !appModel.allWindowsHidden, showsPlaybackInfo {
+                playbackInfoPanel
+                    .padding(16)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        #endif
                    value: windowModel.isUIHidden)
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
@@ -538,6 +548,17 @@ struct VideoWindowView: View {
                 .offset(z: windowModel.showsStereoPicture ? PlayerChromeAnimation.stereoTitleLift : 0)
         }
         #else
+        // How the picture gets here, over the other top corner.
+        .playerChromeOrnament(
+            isPresented: !windowModel.isUIHidden && !appModel.allWindowsHidden && showsPlaybackInfo
+                && Cinema.shared.mode(for: .video(ObjectIdentifier(windowModel))) != .hud,
+            attachmentAnchor: .scene(.topTrailing),
+            contentAlignment: .topTrailing
+        ) { shown in
+            playbackInfoPanel.padding(20)
+                .modifier(PlayerChromeReveal(shown: shown, edge: .top))
+                .offset(z: windowModel.showsStereoPicture ? PlayerChromeAnimation.stereoTitleLift : 0)
+        }
         .ornament(
             visibility: windowModel.isUIHidden || appModel.allWindowsHidden ? .hidden : .visible,
             attachmentAnchor: .scene(.bottomFront),
@@ -744,6 +765,20 @@ struct VideoWindowView: View {
     private var titleButton: some View {
         PlayerTitleButton(source: PlayerDetailsSource(video: video), fallback: PlayerDetails(video: video),
                           video: video, dismissal: windowModel.menuDismissals,
+    // MARK: - Playback info
+
+    @AppStorage(PlaybackInfoVisibility.key) private var playbackInfoVisibility = PlaybackInfoVisibility.always
+
+    /// The panel shows under Settings → Videos → Playback Info.
+    private var showsPlaybackInfo: Bool {
+        windowModel.playbackInfo.isShown(playbackInfoVisibility)
+    }
+
+    private var playbackInfoPanel: some View {
+        PlaybackInfoPanel(info: windowModel.playbackInfo, dismissal: windowModel.menuDismissals,
+                          onOpenChanged: { windowModel.ornamentMenu("Playback Info", opened: $0) })
+    }
+
                           onOpenChanged: { windowModel.ornamentMenu("Details", opened: $0) })
     }
 

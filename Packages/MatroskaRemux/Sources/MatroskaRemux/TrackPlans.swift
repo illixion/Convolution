@@ -45,6 +45,11 @@ struct VideoPlan: Sendable {
     let originNanoseconds: Int64
     let timestampScale: Int64
     let offsetNanoseconds: Int64
+    /// The track's Dolby Vision configuration, whether or not the remux
+    /// carries it (profile 7's enhancement layer can't play, its base layer
+    /// can): what the source is, for a player saying what it shows.
+    var dolbyVisionProfile: Int? = nil
+    var dolbyVisionCompatibility: Int? = nil
 
     /// Presentation time of a block, at `timescale`.
     func time(ticks: Int64, laceIndex: Int = 0) -> Int64 {
@@ -198,11 +203,16 @@ struct VideoPlan: Sendable {
             displayWidth = Int((Double(height) * Double(dw) / Double(dh)).rounded())
         }
 
-        return VideoPlan(track: track, sampleEntry: sampleEntry, codecs: codecs, supplementalCodecs: supplemental,
-                         videoRange: range, codecName: codecName, displayWidth: displayWidth,
-                         displayHeight: displayHeight, framesPerSecond: framesPerSecond, timescale: timescale,
-                         gridTicks: gridTicks, originNanoseconds: firstKeyframeTicks * timestampScale,
-                         timestampScale: timestampScale, offsetNanoseconds: offsetNanoseconds)
+        var plan = VideoPlan(track: track, sampleEntry: sampleEntry, codecs: codecs, supplementalCodecs: supplemental,
+                             videoRange: range, codecName: codecName, displayWidth: displayWidth,
+                             displayHeight: displayHeight, framesPerSecond: framesPerSecond, timescale: timescale,
+                             gridTicks: gridTicks, originNanoseconds: firstKeyframeTicks * timestampScale,
+                             timestampScale: timestampScale, offsetNanoseconds: offsetNanoseconds)
+        if let dolby = track.blockAdditionMappings.lazy.compactMap(DolbyVisionConfiguration.init).first, dolby.hasRPU {
+            plan.dolbyVisionProfile = dolby.profile
+            plan.dolbyVisionCompatibility = dolby.compatibilityID
+        }
+        return plan
     }
 }
 

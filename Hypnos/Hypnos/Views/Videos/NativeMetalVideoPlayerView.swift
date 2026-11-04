@@ -275,6 +275,9 @@ struct NativeMetalVideoPlayerView {
             coordinator.onFrameRateKnown = { [weak playbackModel] rate in
                 playbackModel?.notePictureFrameRate(rate)
             }
+            coordinator.onFrameRangeKnown = { [weak playbackModel] range in
+                playbackModel?.notePictureFrameRange(range, stereo: false)
+            }
             coordinator.onPlaybackUpdate = { [weak playbackModel] state in
                 playbackModel?.applyPlaybackState(
                     currentTime: state.currentTime,
@@ -354,6 +357,9 @@ struct NativeMetalVideoPlayerView {
         var onVideoSizeKnown: ((CGSize) -> Void)?
         /// The picture's frame rate, for the control strip's readout.
         var onFrameRateKnown: ((Double) -> Void)?
+        /// What the first frame of each load is (PQ, HLG, SDR; a Dolby
+        /// Vision RPU), for the playback info panel.
+        var onFrameRangeKnown: ((VideoFrameRange) -> Void)?
         var onPlaybackUpdate: ((PlaybackState) -> Void)?
         /// The AVPlayer, as each load makes one and teardown drops it.
         var onPlayerChanged: ((AVPlayer?) -> Void)?
@@ -691,6 +697,7 @@ struct NativeMetalVideoPlayerView {
             mtkView = nil
             onVideoSizeKnown = nil
             onFrameRateKnown = nil
+            onFrameRangeKnown = nil
             onPlaybackUpdate = nil
             onPlaybackError = nil
         }
@@ -952,6 +959,10 @@ struct NativeMetalVideoPlayerView {
             let hasRPU = CVBufferCopyAttachment(pixelBuffer, "DolbyVisionRPUData" as CFString, nil) != nil
             let hasPrimaries = CVBufferCopyAttachment(pixelBuffer, kCVImageBufferColorPrimariesKey, nil) != nil
             needsSystemRenderer = hasRPU && !hasPrimaries
+            // The system layer applies an RPU (HDR and Dolby Vision show
+            // there); the Metal path, with adjustments on, does not.
+            onFrameRangeKnown?(VideoFrameRange(transferFunction: transfer,
+                                                hasDolbyVisionRPU: hasRPU && (needsSystemRenderer || adjustmentsAreNeutral)))
             var format: CMVideoFormatDescription?
             CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: pixelBuffer, formatDescriptionOut: &format)
             firstFrameFormat = format

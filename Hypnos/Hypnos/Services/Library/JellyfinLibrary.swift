@@ -192,6 +192,26 @@ private extension LibraryItem {
 }
 
 /// The parts of `GET /Items/{id}/PlaybackInfo` that shape a stream request.
+private struct JFSession: Decodable {
+    struct Item: Decodable { let Id: String? }
+    struct Transcoding: Decodable {
+        let AudioCodec: String?
+        let VideoCodec: String?
+        let Container: String?
+        let IsVideoDirect: Bool?
+        let IsAudioDirect: Bool?
+        let Bitrate: Int?
+        let Width: Int?
+        let Height: Int?
+        let AudioChannels: Int?
+        let HardwareAccelerationType: String?
+        let TranscodeReasons: [String]?
+    }
+    let DeviceId: String?
+    let NowPlayingItem: Item?
+    let TranscodingInfo: Transcoding?
+}
+
 private struct JFPlaybackInfo: Decodable {
     struct MediaSource: Decodable {
         struct Stream: Decodable {
@@ -211,6 +231,14 @@ private struct JFPlaybackInfo: Decodable {
             let IsExternal: Bool?
             let Channels: Int?
             let DisplayTitle: String?
+            /// SDR, HDR10, HDR10Plus, HLG, DOVI, DOVIWithHDR10, … (10.9+).
+            let VideoRangeType: String?
+            let DvProfile: Int?
+            let DvBlSignalCompatibilityId: Int?
+            /// "Main 10", "High".
+            let Profile: String?
+            let BitDepth: Int?
+            let BitRate: Int?
         }
         let Id: String?
         /// "mkv", or ffprobe's list for the MP4 family ("mov,mp4,m4a,3gp,3g2,mj2").
@@ -760,7 +788,34 @@ actor JellyfinLibrary: MediaServerLibrary {
         let video = source?.MediaStreams?.first { $0.Type == "Video" }
         return LibrarySourcePicture(width: video?.Width, height: video?.Height,
                                     frameRate: video?.RealFrameRate ?? video?.AverageFrameRate,
-                                    bitrate: source?.Bitrate)
+                                    bitrate: source?.Bitrate,
+                                    range: VideoSourceRange(jellyfinRangeType: video?.VideoRangeType,
+                                                            dolbyVisionProfile: video?.DvProfile,
+                                                            dolbyVisionCompatibility: video?.DvBlSignalCompatibilityId),
+                                    videoCodec: video?.Codec, videoProfile: video?.Profile, bitDepth: video?.BitDepth,
+                                    container: source?.Container)
+    }
+
+    // MARK: - What the server is doing
+
+    /// What the server's encoder is doing for this device's play of
+    /// `itemId` (`/Sessions`' TranscodingInfo): whether it copies the
+    /// video and the audio or converts them, into what, and why. Nil when
+    /// nothing is being encoded for it (direct play) or the server didn't
+    /// say. A remux or transcode reports here while its job runs.
+    func transcodingInfo(itemId: String) async -> LibraryTranscodeInfo? {
+        guard let sessions: [JFSession] = try? await get("Sessions", query: [
+            .init(name: "deviceId", value: JellyfinClientIdentity.deviceId),
+        ]) else { return nil }
+        let mine = sessions.filter { $0.DeviceId == nil || $0.DeviceId == JellyfinClientIdentity.deviceId }
+        let session = mine.first { $0.NowPlayingItem?.Id == itemId && $0.TranscodingInfo != nil }
+            ?? mine.first { $0.TranscodingInfo != nil && $0.NowPlayingItem == nil }
+        guard let info = session?.TranscodingInfo else { return nil }
+        return LibraryTranscodeInfo(isVideoDirect: info.IsVideoDirect ?? false, isAudioDirect: info.IsAudioDirect ?? false,
+                                    videoCodec: info.VideoCodec, audioCodec: info.AudioCodec, container: info.Container,
+                                    bitrate: info.Bitrate, width: info.Width, height: info.Height,
+                                    audioChannels: info.AudioChannels, reasons: info.TranscodeReasons ?? [],
+                                    hardwareAcceleration: info.HardwareAccelerationType)
     }
 
     /// The generic player's stream for `itemId` at `quality`: the original

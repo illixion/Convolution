@@ -92,6 +92,15 @@ struct LibrarySourcePicture: Sendable, Equatable {
     var height: Int?
     var frameRate: Double?
     var bitrate: Int?
+    /// What the file's video is in dynamic range, as the server read it.
+    var range: VideoSourceRange? = nil
+    /// "hevc", "h264", "av1".
+    var videoCodec: String? = nil
+    /// "Main 10".
+    var videoProfile: String? = nil
+    var bitDepth: Int? = nil
+    /// "mkv", or ffprobe's list for the MP4 family.
+    var container: String? = nil
 
     /// "1080p", "4K": the picture's class (a 1920×800 film is 1080p), nil
     /// when the server didn't say.
@@ -99,6 +108,45 @@ struct LibrarySourcePicture: Sendable, Equatable {
         guard let width, let height, width > 0, height > 0 else { return nil }
         let picture = LibraryStreamQuality.pictureClass(width: width, height: height)
         return picture == 2160 ? "4K" : "\(picture)p"
+    }
+}
+
+/// What a server's encoder is doing for one play (Jellyfin's
+/// TranscodingInfo): copying the video and the audio (a remux) or
+/// converting them, and the reasons it gave ("ContainerNotSupported",
+/// "AudioCodecNotSupported").
+struct LibraryTranscodeInfo: Sendable, Equatable {
+    var isVideoDirect: Bool
+    var isAudioDirect: Bool
+    var videoCodec: String?
+    var audioCodec: String?
+    var container: String?
+    var bitrate: Int?
+    var width: Int?
+    var height: Int?
+    var audioChannels: Int?
+    var reasons: [String]
+    var hardwareAcceleration: String?
+
+    /// "container not supported, audio codec not supported": the server's
+    /// reasons in words.
+    var reasonsText: String? {
+        let words = reasons.map(Self.words)
+        return words.isEmpty ? nil : words.joined(separator: ", ")
+    }
+
+    /// "AudioCodecNotSupported" → "audio codec not supported".
+    static func words(_ reason: String) -> String {
+        var out = ""
+        var previous: Character?
+        for character in reason {
+            if character.isUppercase, let previous, previous.isLowercase || previous.isNumber {
+                out.append(" ")
+            }
+            out.append(character)
+            previous = character
+        }
+        return out.lowercased()
     }
 }
 

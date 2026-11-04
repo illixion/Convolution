@@ -110,6 +110,10 @@ public struct RemuxSummary: Sendable {
     public var segmentCount: Int
     public var durationSeconds: Double
     public var videoRange: String
+    /// The video's Dolby Vision profile and base-layer compatibility (1
+    /// HDR10, 2 SDR, 4 HLG), when it has an RPU; carried for 5 and 8.
+    public var dolbyVisionProfile: Int? = nil
+    public var dolbyVisionCompatibility: Int? = nil
     public var width: Int
     public var height: Int
     public var framesPerSecond: Double?
@@ -261,6 +265,7 @@ public actor RemuxSession {
                       isDefault: defaultNumber == plan.renditionNumber, isStable: plan.stable)
             },
             dropped: dropped, segmentCount: index.count, durationSeconds: duration, videoRange: video.videoRange,
+            dolbyVisionProfile: video.dolbyVisionProfile, dolbyVisionCompatibility: video.dolbyVisionCompatibility,
             width: video.displayWidth, height: video.displayHeight, framesPerSecond: video.framesPerSecond,
             scannedClusters: scanned, indexing: !index.isComplete)
     }

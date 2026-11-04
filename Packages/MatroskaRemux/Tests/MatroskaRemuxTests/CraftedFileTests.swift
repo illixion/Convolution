@@ -97,6 +97,8 @@ struct CraftedFileTests {
         #expect(session.masterPlaylist.contains("SUPPLEMENTAL-CODECS=\"dvh1.08.06/db1p\""))
         #expect(session.masterPlaylist.contains("CODECS=\"hvc1.2.4.L60.90,mp4a.40.2\""))
         #expect(session.summary.videoRange == "PQ")
+        #expect(session.summary.dolbyVisionProfile == 8)
+        #expect(session.summary.dolbyVisionCompatibility == 1)
     }
 
     @Test func dolbyVisionProfile5IsDVH1() async throws {
@@ -110,6 +112,8 @@ struct CraftedFileTests {
         #expect(entry.entryType == "dvh1")
         #expect(entry.entryChildren["dvcC"] == payload)
         #expect(session.summary.video.codecs == "dvh1.05.06")
+        #expect(session.summary.dolbyVisionProfile == 5)
+        #expect(session.summary.dolbyVisionCompatibility == 0)
         #expect(session.summary.videoRange == "PQ")
         #expect(!session.masterPlaylist.contains("SUPPLEMENTAL-CODECS"))
     }

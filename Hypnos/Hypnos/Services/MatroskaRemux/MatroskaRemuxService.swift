@@ -74,7 +74,8 @@ final class MatroskaRemuxService: Sendable {
     private struct State {
         var entries: [String: Entry] = [:]
         var opening: [String: Task<Entry?, Never>] = [:]
-        var declined: Set<String> = []
+        /// Sources this device won't remux, and why (`declineReason`).
+        var declined: [String: String] = [:]
     }
 
     private let state = Mutex<State>(State())
@@ -166,7 +167,7 @@ final class MatroskaRemuxService: Sendable {
         }
         if let retired { LoopbackHTTPServer.shared.unregister(prefix: retired.prefix) }
         let task: Task<Entry?, Never>? = state.withLock { state in
-            if state.declined.contains(key) { return nil }
+            if state.declined[key] != nil { return nil }
             if let task = state.opening[key] { return task }
             let task = Task { await self.open(source, key: key) }
             state.opening[key] = task
@@ -232,11 +233,11 @@ final class MatroskaRemuxService: Sendable {
             if error != .notMatroska {
                 AppLogger.remux.info("Not remuxed: \(error.description, privacy: .public)")
             }
-            decline(key)
+            decline(key, reason: Self.reason(error))
             return nil
         } catch let failure as RemoteByteSource.Failure {
             AppLogger.remux.info("Not remuxed: \(failure.description, privacy: .public)")
-            if case .noRanges = failure { decline(key) }
+            if case .noRanges = failure { decline(key, reason: "the server doesn't serve the file in pieces") }
             return nil
         } catch {
             // Network trouble: worth another try later, so not remembered.
@@ -247,7 +248,7 @@ final class MatroskaRemuxService: Sendable {
         let summary = session.summary
         guard Self.canDecode(sampleEntry: session.videoSampleEntry) else {
             AppLogger.remux.info("Not remuxed: no decoder for \(summary.video.codec, privacy: .public) (\(summary.video.codecs, privacy: .public)) on this device")
-            decline(key)
+            decline(key, reason: "this device has no decoder for its \(summary.video.codec) video (\(summary.video.codecs))")
             return nil
         }
 
@@ -271,7 +272,7 @@ final class MatroskaRemuxService: Sendable {
         guard await NativeVideoDecodeProbe.canPlayNatively(url: probeURL, timeout: 15) else {
             AppLogger.remux.error("Remuxed \(summary.video.codec, privacy: .public) isn't playable here; keeping the fallback")
             LoopbackHTTPServer.shared.unregister(prefix: prefix)
-            decline(key)
+            decline(key, reason: "the native player refused the remuxed \(summary.video.codec) stream")
             return nil
         }
 
@@ -289,8 +290,23 @@ final class MatroskaRemuxService: Sendable {
         return entry
     }
 
-    private func decline(_ key: String) {
-        _ = state.withLock { $0.declined.insert(key) }
+    private func decline(_ key: String, reason: String) {
+        state.withLock { $0.declined[key] = reason }
+    }
+
+    /// Why `source` isn't remuxed on this device, once it was tried and
+    /// declined: "this device has no decoder for its AV1 video (av01…)".
+    /// Shown by the player's playback info; code-defined text, no paths.
+    func declineReason(for source: URL) -> String? {
+        state.withLock { $0.declined[source.absoluteString] }
+    }
+
+    private static func reason(_ error: RemuxError) -> String {
+        switch error {
+        case .notMatroska: "it isn't a Matroska file"
+        case .declined(let reason): reason
+        case .malformed(let detail): "the file is malformed (\(detail))"
+        }
     }
 
     /// Notes a request for `key`'s session, and lets the sessions nobody
