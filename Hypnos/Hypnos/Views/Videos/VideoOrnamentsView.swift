@@ -67,6 +67,19 @@ struct VideoOrnamentsView: View {
                              bigScreenAvailable: windowModel.playbackRenderer == .nativeMetal || windowModel.canUseTranscodedStream,
                              dismissal: windowModel.menuDismissals,
                              onOpenChanged: { windowModel.ornamentMenu("Cinema", opened: $0) }))
+        #elseif os(iOS) || os(macOS)
+        // Where visionOS has its Cinema: the system's Picture in Picture.
+        guard windowModel.pictureInPicturePossible || windowModel.pictureInPictureActive else { return nil }
+        let active = windowModel.pictureInPictureActive
+        return AnyView(Button {
+            windowModel.togglePictureInPictureCommand?()
+        } label: {
+            Label(active ? "Exit Picture in Picture" : "Picture in Picture",
+                  systemImage: active ? "pip.exit" : "pip.enter")
+                .ravePlayerAccessoryLabel()
+        }
+        .help(active ? "Bring the picture back into the window" : "Float the picture over other apps")
+        .accessibilityIdentifier("player.pictureInPicture"))
         #else
         nil
         #endif

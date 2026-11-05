@@ -122,6 +122,9 @@ struct FilmPlayerView: View {
             .onAppear {
                 session.activePlayerView = viewID
                 session.isPlayerOpen = true
+                #if os(iOS) || os(macOS) || os(tvOS)
+                session.pictureInPicture.activate()
+                #endif
                 #if os(tvOS) || os(iOS)
                 // Claim Now Playing so the remote's and AirPods' play/pause
                 // reach this player (see RAVEFilm's FilmNowPlaying).
@@ -139,6 +142,9 @@ struct FilmPlayerView: View {
                 // on reopening a film) leaves the player to that one.
                 guard session.activePlayerView == viewID else { return }
                 session.activePlayerView = nil
+                #if os(iOS) || os(macOS) || os(tvOS)
+                session.pictureInPicture.deactivate()
+                #endif
                 player.pause()
                 // The speed lasts the sitting (the next episode too); the next film opens at 1×.
                 player.setSpeed(1)
@@ -1066,7 +1072,17 @@ struct FilmTransport: View {
         AnyView(CinemaButton(owner: .film, dismissal: menuDismissal,
                              onOpenChanged: { onModalChanged("Cinema", $0) }))
         #else
-        nil
+        let pip = session.pictureInPicture
+        guard pip.isPossible || pip.isActive else { return nil }
+        return AnyView(Button {
+            pip.toggle()
+        } label: {
+            Label(pip.isActive ? "Exit Picture in Picture" : "Picture in Picture",
+                  systemImage: pip.isActive ? "pip.exit" : "pip.enter")
+                .ravePlayerAccessoryLabel()
+        }
+        .help(pip.isActive ? "Bring the picture back into the player" : "Float the picture over other apps")
+        .accessibilityIdentifier("player.pictureInPicture"))
         #endif
     }
 

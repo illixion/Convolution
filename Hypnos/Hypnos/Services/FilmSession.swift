@@ -27,6 +27,11 @@ final class FilmSession {
     }()
     /// The loaded item's subtitle tracks, drawn over the picture by the player view.
     let subtitles = SubtitleController()
+    #if os(iOS) || os(macOS) || os(tvOS)
+    /// The system's Picture in Picture for the film's picture, offered while
+    /// the player view is up (`FilmPlayerView`).
+    @ObservationIgnored private(set) lazy var pictureInPicture = FilmPictureInPicture(player: player)
+    #endif
     /// How the loaded film packs its eyes, when it is a 3D film (Jellyfin's
     /// `Video3DFormat`). The player view plays it as real 3D, cropped per
     /// eye, instead of the fake-3D warp. Arrives just after the picture.

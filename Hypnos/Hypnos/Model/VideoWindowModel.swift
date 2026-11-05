@@ -326,6 +326,22 @@ final class VideoWindowModel {
     @ObservationIgnored var setMutedCommand: (@MainActor (Bool) -> Void)?
     @ObservationIgnored var setVolumeCommand: (@MainActor (Double) -> Void)?
     @ObservationIgnored var setSpeedCommand: (@MainActor (Double) -> Void)?
+    /// Floats the picture over other apps, or brings it back (iOS, macOS;
+    /// the native renderer's `VideoPictureInPicture`).
+    @ObservationIgnored var togglePictureInPictureCommand: (@MainActor () -> Void)?
+    /// The system can float this window's picture now (a native player with a
+    /// picture, on a device that has Picture in Picture).
+    private(set) var pictureInPicturePossible = false
+    /// The picture floats over other apps; the window plays on in the background.
+    private(set) var pictureInPictureActive = false
+
+    func notePictureInPicture(possible: Bool, active: Bool) {
+        if pictureInPicturePossible != possible { pictureInPicturePossible = possible }
+        if pictureInPictureActive != active { pictureInPictureActive = active }
+        // Closed from the floating window while the app is away: it stops
+        // as leaving the app would have stopped it.
+        if !active, backgroundedAt != nil, isInActiveRoom { isInActiveRoom = false }
+    }
 
     // MARK: - A-B Loop
 
@@ -2020,7 +2036,8 @@ final class VideoWindowModel {
         if newPhase == .active {
             isInActiveRoom = true
         } else if newPhase == .background {
-            isInActiveRoom = false
+            // Floating in Picture in Picture, it plays on (see `notePictureInPicture`).
+            if !pictureInPictureActive { isInActiveRoom = false }
             if isRenewableJellyfinStream {
                 shouldRenewStreamOnExplicitResume = true
             }
@@ -2047,7 +2064,7 @@ final class VideoWindowModel {
     /// resumed by itself; resuming after an interruption is the user's call.
     private func pauseNativePlayerForBackground() {
         guard playbackRenderer == .nativeMetal, !showsStereoPicture, !isPaused,
-              let nativePlayer else { return }
+              !pictureInPictureActive, let nativePlayer else { return }
         #if os(visionOS)
         if Cinema.shared.screenPlayer === nativePlayer { return }
         #endif

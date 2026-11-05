@@ -337,6 +337,11 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         // no transport UI popping up at the loop point.
         let player = CaptionQueuePlayer()
         controller.player = player
+        // The transport's Picture in Picture: the video floats over the Home
+        // screen and other apps while the app plays on in the background
+        // (`UIBackgroundModes` audio). Said outright rather than left to the
+        // default, which has differed between AVKit's platforms.
+        controller.allowsPictureInPicturePlayback = true
         // The transport bar's speed menu, with the same choices as the
         // other players. It sets the player's `defaultRate`, which `play()`
         // starts at: a loop, a looper's next copy and a swapped-in stream

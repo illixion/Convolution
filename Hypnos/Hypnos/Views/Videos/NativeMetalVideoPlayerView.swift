@@ -55,6 +55,10 @@ enum NativeVideoDynamicRange {
 final class NativeVideoHostView: NativePlayerPlatformView {
     let metalView: MTKView
     let systemView = SystemVideoLayerView()
+    #if os(iOS) || os(macOS)
+    /// The player's picture for Picture in Picture alone, never shown inline.
+    let pipView = SystemVideoLayerView()
+    #endif
 
     init(metalView: MTKView) {
         self.metalView = metalView
@@ -64,7 +68,13 @@ final class NativeVideoHostView: NativePlayerPlatformView {
         #else
         isOpaque = false
         #endif
-        for view in [metalView, systemView] as [NativePlayerPlatformView] {
+        var views: [NativePlayerPlatformView] = [metalView, systemView]
+        #if os(iOS) || os(macOS)
+        // Under the Metal view, which covers it: Picture in Picture takes its
+        // picture from here (`VideoPictureInPicture`).
+        views.insert(pipView, at: 0)
+        #endif
+        for view in views {
             view.frame = bounds
             #if os(macOS)
             view.autoresizingMask = [.width, .height]
@@ -266,6 +276,14 @@ struct NativeMetalVideoPlayerView {
             playbackModel.setSpeedCommand = { [weak coordinator] speed in
                 coordinator?.setSpeed(Float(speed))
             }
+            #if os(iOS) || os(macOS)
+            playbackModel.togglePictureInPictureCommand = { [weak coordinator] in
+                coordinator?.pictureInPicture.toggle()
+            }
+            coordinator.pictureInPicture.onChange = { [weak playbackModel] possible, active in
+                playbackModel?.notePictureInPicture(possible: possible, active: active)
+            }
+            #endif
             coordinator.onPlayerChanged = { [weak playbackModel, weak coordinator] player in
                 playbackModel?.subtitles.bindAnalysisPlayer(player, buffering: { [weak coordinator] held in
                     coordinator?.setAnalysisBuffering(held)
@@ -378,6 +396,9 @@ struct NativeMetalVideoPlayerView {
         var onPlaybackUpdate: ((PlaybackState) -> Void)?
         /// The AVPlayer, as each load makes one and teardown drops it.
         var onPlayerChanged: ((AVPlayer?) -> Void)?
+        #if os(iOS) || os(macOS)
+        let pictureInPicture = VideoPictureInPicture()
+        #endif
         var onPlaybackError: (() -> Void)?
         var startMuted = true
         var startVolume: Float = 1
@@ -446,6 +467,9 @@ struct NativeMetalVideoPlayerView {
         func attach(to host: NativeVideoHostView) {
             self.host = host
             mtkView = host.metalView
+            #if os(iOS) || os(macOS)
+            pictureInPicture.attach(to: host.pipView.playerLayer)
+            #endif
             if let device = renderer?.device {
                 CVMetalTextureCacheCreate(nil, nil, device, nil, &textureCache)
             }
@@ -484,6 +508,9 @@ struct NativeMetalVideoPlayerView {
             self.player = player
             self.playerItem = item
             self.videoOutput = output
+            #if os(iOS) || os(macOS)
+            host?.pipView.playerLayer.player = player
+            #endif
             outputPixelFormat = kCVPixelFormatType_32BGRA
             onPlayerChanged?(player)
             usesSystemLayer = false
@@ -708,6 +735,11 @@ struct NativeMetalVideoPlayerView {
         }
 
         func cleanup() {
+            #if os(iOS) || os(macOS)
+            pictureInPicture.stop()
+            pictureInPicture.onChange(false, false)
+            pictureInPicture.onChange = { _, _ in }
+            #endif
             cleanupPlayer()
             host = nil
             intermediate = nil
@@ -774,6 +806,9 @@ struct NativeMetalVideoPlayerView {
             criteriaTask?.cancel()
             criteriaTask = nil
             host?.systemView.playerLayer.player = nil
+            #if os(iOS) || os(macOS)
+            host?.pipView.playerLayer.player = nil
+            #endif
             #if os(tvOS) || os(visionOS)
             host?.displayCriteria = nil
             #endif
