@@ -364,11 +364,13 @@ actor JellyfinLibrary: MediaServerLibrary {
             case .recent, .albums: break
             }
         }
-        if let chosen = request.sort, request.section.sorts.contains(chosen), !searching, request.playlistID == nil,
-           request.albumID == nil, request.artistID == nil, request.genreID == nil {
-            let (keys, descending) = chosen.server(songs: type == "Audio")
-            sort = keys
-            order = descending ? "Descending" : "Ascending"
+        if !searching, request.isTopLevel, !request.section.sorts.isEmpty {
+            if let chosen = request.sort, request.section.sorts.contains(chosen) {
+                let (keys, descending) = chosen.server(songs: type == "Audio")
+                sort = keys
+                order = descending ? "Descending" : "Ascending"
+            }
+            if let descending = request.descending { order = descending ? "Descending" : "Ascending" }
         }
         if path != "Artists/AlbumArtists" && path != "MusicGenres" { query.append(.init(name: "IncludeItemTypes", value: type)) }
         if !sort.isEmpty {

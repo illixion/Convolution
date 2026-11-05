@@ -87,8 +87,11 @@ final class MusicActions {
         }
     }
 
-    func libraryChanged() {
+    /// Something about the library changed. `namesChanged` is true when an item's title, artist or album did
+    /// (Get Info), which is what the fuzzy search index holds; playlist edits leave it alone.
+    func libraryChanged(namesChanged: Bool = false) {
         MusicCatalog.shared.invalidate { _ in true }
+        if namesChanged { MusicSearchStore.shared.invalidate(rebuild: true) }
         revision += 1
     }
 

@@ -24,7 +24,37 @@ actor JellyfinLibrary {
     private let prefix: String
     private var calls = 0
     private var lastRequest: MusicRequest?
+    private var bigSearchPages = 0
     init(prefix: String = "a") { self.prefix = prefix }
+    /// How many full pages of names the search index asked for (the totals check asks for one name).
+    func fullSearchPageCount() -> Int { bigSearchPages }
+    static let corpus: [MusicSearchDoc] = [
+        MusicSearchDoc(id: "ar1", kind: .artist, name: "The Beatles", artist: nil, album: nil),
+        MusicSearchDoc(id: "ar2", kind: .artist, name: "Motörhead", artist: nil, album: nil),
+        MusicSearchDoc(id: "ar3", kind: .artist, name: "AC/DC", artist: nil, album: nil),
+        MusicSearchDoc(id: "ar4", kind: .artist, name: "Beyoncé", artist: nil, album: nil),
+        MusicSearchDoc(id: "al1", kind: .album, name: "Abbey Road", artist: "The Beatles", album: nil),
+        MusicSearchDoc(id: "al2", kind: .album, name: "Ace of Spades", artist: "Motörhead", album: nil),
+        MusicSearchDoc(id: "al3", kind: .album, name: "Back in Black", artist: "AC/DC", album: nil),
+        MusicSearchDoc(id: "al4", kind: .album, name: "Lemonade", artist: "Beyoncé", album: nil),
+        MusicSearchDoc(id: "s1", kind: .song, name: "Come Together", artist: "The Beatles", album: "Abbey Road"),
+        MusicSearchDoc(id: "s2", kind: .song, name: "Ace of Spades", artist: "Motörhead", album: "Ace of Spades"),
+        MusicSearchDoc(id: "s3", kind: .song, name: "Hells Bells", artist: "AC/DC", album: "Back in Black"),
+        MusicSearchDoc(id: "s4", kind: .song, name: "Formation", artist: "Beyoncé", album: "Lemonade"),
+        MusicSearchDoc(id: "s5", kind: .song, name: "Sgt. Pepper's Lonely Hearts Club Band", artist: "The Beatles", album: "Sgt. Pepper's Lonely Hearts Club Band"),
+    ]
+    func musicSearchPage(kind: MusicSearchKind, start: Int, limit: Int) async throws -> (docs: [MusicSearchDoc], total: Int) {
+        if limit > 1 { bigSearchPages += 1 }
+        let all = Self.corpus.filter { $0.kind == kind }
+        return (Array(all.dropFirst(start).prefix(limit)), all.count)
+    }
+    func musicItems(ids: [String]) async throws -> [JellyfinMusicItem] {
+        try ids.reversed().compactMap { id in
+            guard let doc = Self.corpus.first(where: { $0.id == id }) else { return nil }
+            return try JSONDecoder().decode(JellyfinMusicItem.self, from: Data(
+                "{\"Id\":\"\(id)\",\"Name\":\"\(doc.name)\",\"Type\":\"\(doc.kind.itemType)\"}".utf8))
+        }
+    }
     func requestCount() -> Int { calls }
     func latestRequest() -> MusicRequest? { lastRequest }
     func musicPage(_ request: MusicRequest, start: Int, limit: Int = 60) async throws -> JellyfinMusicPage {
@@ -211,6 +241,108 @@ actor JellyfinLibrary {
         await oldLoad.value
         precondition(stale.items.count == 60 && stale.items.allSatisfy { $0.id.hasPrefix("b-") })
         print("Configuration changes discard old results and load the new account: PASS")
+
+        // Sorting and section headers follow the order in force.
+        precondition(MusicRequest(section: .songs).effectiveSort == .title && !MusicRequest(section: .songs).isDescending)
+        precondition(MusicRequest(section: .recent).isDescending, "Recently Added starts newest first")
+        precondition(MusicRequest(section: .songs, sort: .plays).isDescending, "Most played first")
+        precondition(!MusicRequest(section: .songs, sort: .plays, descending: false).isDescending)
+        precondition(MusicRequest(section: .albums, descending: true).effectiveSort == .title, "Flipping the default order keeps it")
+        precondition(MusicRequest(section: .songs, albumID: "x").isTopLevel == false)
+        precondition(MusicGrouping.of(MusicRequest(section: .songs)) == .letter)
+        precondition(MusicGrouping.of(MusicRequest(section: .songs, sort: .time)) == .none)
+        precondition(MusicGrouping.of(MusicRequest(section: .albums, search: "abba")) == .none)
+        precondition(MusicGrouping.of(MusicRequest(section: .songs, albumID: "x")) == .none)
+        precondition(MusicGrouping.of(MusicRequest(section: .mostPlayed)) == .none)
+        precondition(MusicGrouping.letter(of: "The Beatles") == "B" && MusicGrouping.letter(of: "Écoute") == "E")
+        precondition(MusicGrouping.letter(of: "99 Luftballons") == "#" && MusicGrouping.letter(of: "A") == "A")
+        let calendar = Calendar(identifier: .gregorian)
+        let now = ISO8601DateFormatter().date(from: "2026-11-05T12:00:00Z")!
+        func bucket(_ raw: String) -> String { MusicGrouping.dateBucket(raw, now: now, calendar: calendar) }
+        precondition(bucket("2026-11-05T01:00:00.0000000Z") == "Today")
+        precondition(bucket("2026-11-04T20:00:00.0000000Z") == "Yesterday")
+        precondition(bucket("2026-11-01T20:00:00.0000000Z") == "This Week")
+        precondition(bucket("2026-11-01T01:00:00.0000000Z") == "This Week" || bucket("2026-11-01T01:00:00.0000000Z") == "This Month")
+        precondition(bucket("2026-10-12T10:00:00Z").contains("October") && bucket("2025-03-12T10:00:00Z").contains("2025"))
+        precondition(MusicGrouping.dateBucket(nil) == "Earlier")
+        func named(_ name: String) throws -> JellyfinMusicItem {
+            try JSONDecoder().decode(JellyfinMusicItem.self, from: Data("{\"Id\":\"\(name)\",\"Name\":\"\(name)\",\"Type\":\"Audio\"}".utf8))
+        }
+        let names = try ["Apple", "Avocado", "Banana", "The Cherry", "Cranberry", "Apricot"].map(named)
+        let runs = MusicGrouping.letter.runs(names, item: { $0 })
+        precondition(runs.map { $0.title } == ["A", "B", "C", "A"], "Runs keep the server's order")
+        precondition(runs.map { $0.range.count } == [2, 1, 2, 1])
+        precondition(MusicGrouping.letter.runs([JellyfinMusicItem](), item: { $0 }).count == 1)
+        print("Sort direction and section headers follow the order in force: PASS")
+
+        // Fuzzy search: typos, diacritics, punctuation closed up, every word required.
+        let index = MusicSearchIndex(docs: JellyfinLibrary.corpus)
+        func top(_ query: String) -> [String] { index.search(query).map(\.id) }
+        precondition(top("beatels").first == "ar1", "A typo finds the artist: \(top("beatels"))")
+        precondition(top("motorhed").first == "ar2", "Diacritics and a typo: \(top("motorhed"))")
+        precondition(top("MOTORHEAD").first == "ar2" && top("beyonce").first == "ar4")
+        precondition(top("acdc").first == "ar3", "AC/DC typed without the slash: \(top("acdc"))")
+        precondition(top("ac dc").first == "ar3")
+        precondition(top("abbey road").first == "al1", "The album outranks its songs: \(top("abbey road"))")
+        precondition(top("come tog").first == "s1", "Half a title: \(top("come tog"))")
+        precondition(top("peper lonely").first == "s5", "A typo in a multi-word query: \(top("peper lonely"))")
+        precondition(top("beatles lemonade").isEmpty, "Every word must match")
+        precondition(top("zzzzzz").isEmpty && top("").isEmpty && top("  ").isEmpty)
+        precondition(Set(top("beatles").prefix(1)) == ["ar1"] && top("beatles").contains("s1"), "Songs match on their artist too")
+        precondition(top("ace of spades").prefix(2).sorted() == ["al2", "s2"], "Album and song of the same name tie ahead of the rest")
+        precondition(MusicSearchIndex(docs: []).search("a").isEmpty)
+        precondition(MusicSearchIndex.editDistance(Array("ab".unicodeScalars), Array("ba".unicodeScalars)[...], limit: 2) == 1, "A swap costs one")
+        print("Fuzzy search forgives typos, folds diacritics and requires every word: PASS")
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hypnos-music-search-\(UUID().uuidString)")
+        let backend = JellyfinLibrary(prefix: "s")
+        LibraryService.configurationKey = "search-config"
+        LibraryService.backend = backend
+        let store = MusicSearchStore(directory: directory, pageSize: 2)
+        precondition(store.state == .idle && !store.isReady)
+        store.prepare(onlyIfCached: true)
+        try await Task.sleep(for: .milliseconds(100))
+        precondition(!store.isReady && store.state == .idle, "Nothing is built for someone who has not searched")
+        store.prepare()
+        for _ in 0..<100 where store.state != .ready { try await Task.sleep(for: .milliseconds(50)) }
+        precondition(store.state == .ready && store.isReady)
+        let beatels = await store.hits(for: "beatels")
+        precondition(beatels?.first?.id == "ar1")
+        let builtPages = await backend.fullSearchPageCount()
+        precondition(builtPages >= 5, "Built from bounded pages")
+        try await Task.sleep(for: .milliseconds(300))
+
+        // A second launch reads the saved index and downloads no names.
+        let again = JellyfinLibrary(prefix: "s2")
+        LibraryService.backend = again
+        let reopened = MusicSearchStore(directory: directory, pageSize: 2)
+        reopened.prepare(onlyIfCached: true)
+        for _ in 0..<100 where reopened.state != .ready { try await Task.sleep(for: .milliseconds(50)) }
+        precondition(reopened.isReady, "A saved index loads without a search")
+        let motorhed = await reopened.hits(for: "motorhed")
+        precondition(motorhed?.first?.id == "ar2")
+        try await Task.sleep(for: .milliseconds(200))
+        let downloaded = await again.fullSearchPageCount()
+        precondition(downloaded == 0, "Unchanged totals mean no download")
+
+        // A change of account starts from nothing.
+        LibraryService.configurationKey = "another-account"
+        reopened.prepare(onlyIfCached: true)
+        precondition(!reopened.isReady && reopened.state == .idle)
+        print("The search index is built in pages, saved, reused without a download and dropped with the account: PASS")
+
+        // A search in a listing goes through the index and keeps its ranking.
+        LibraryService.configurationKey = "search-config"
+        LibraryService.backend = JellyfinLibrary(prefix: "s3")
+        MusicSearchStore.shared = MusicSearchStore(directory: directory, pageSize: 2)
+        MusicSearchStore.shared.prepare()
+        for _ in 0..<100 where !MusicSearchStore.shared.isReady { try await Task.sleep(for: .milliseconds(50)) }
+        let searching = MusicListing(request: MusicRequest(section: .albums, search: "beatels"))
+        await searching.loadIfNeeded()
+        precondition(searching.items.first?.id == "ar1", "Ranked order survives the server's own order: \(searching.items.map(\.id))")
+        precondition(searching.groups.first?.title == "Artists" && !searching.hasMore)
+        try? FileManager.default.removeItem(at: directory)
+        print("A search listing shows the index's ranking, artists first: PASS")
 
     }
 }

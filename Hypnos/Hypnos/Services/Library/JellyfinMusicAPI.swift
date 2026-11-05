@@ -63,6 +63,46 @@ extension JellyfinLibrary {
         return try JSONDecoder().decode(JellyfinMusicItem.self, from: data)
     }
 
+    /// These items, with what the lists show, in the order the server answers (callers keep their own order).
+    func musicItems(ids: [String]) async throws -> [JellyfinMusicItem] {
+        guard !ids.isEmpty else { return [] }
+        let userID = try await resolveUserId()
+        var found: [JellyfinMusicItem] = []
+        // The ids ride in the URL, so a long list goes in pieces.
+        for chunk in stride(from: 0, to: ids.count, by: 60).map({ Array(ids[$0..<min($0 + 60, ids.count)]) }) {
+            let data = try await http.data("Users/\(userID)/Items", query: [
+                .init(name: "Ids", value: chunk.joined(separator: ",")),
+                .init(name: "Fields", value: "DateCreated,ChildCount,Genres,MediaStreams"),
+            ])
+            found += try JSONDecoder().decode(JellyfinMusicPage.self, from: data).Items
+        }
+        return found
+    }
+
+    /// One bounded page of the names the fuzzy search indexes, and how many there are of this kind in all.
+    /// No artwork, user data or other fields: only what a word of the query can match.
+    func musicSearchPage(kind: MusicSearchKind, start: Int, limit: Int) async throws -> (docs: [MusicSearchDoc], total: Int) {
+        let userID = try await resolveUserId()
+        var path = "Users/\(userID)/Items"
+        var query: [URLQueryItem] = [
+            .init(name: "UserId", value: userID), .init(name: "StartIndex", value: String(start)),
+            .init(name: "Limit", value: String(limit)), .init(name: "EnableTotalRecordCount", value: "true"),
+            .init(name: "Recursive", value: "true"), .init(name: "EnableImages", value: "false"),
+            .init(name: "EnableUserData", value: "false"), .init(name: "SortBy", value: "SortName"),
+            .init(name: "SortOrder", value: "Ascending"),
+        ]
+        if kind == .artist { path = "Artists/AlbumArtists" } else { query.append(.init(name: "IncludeItemTypes", value: kind.itemType)) }
+        let page = try JSONDecoder().decode(JellyfinMusicPage.self, from: try await http.data(path, query: query))
+        let docs = page.Items.map { item -> MusicSearchDoc in
+            var artists: [String] = []
+            for name in [item.AlbumArtist].compactMap({ $0 }) + (item.Artists ?? []) where !artists.contains(name) { artists.append(name) }
+            return MusicSearchDoc(id: item.id, kind: kind, name: item.Name,
+                                  artist: kind == .artist ? nil : artists.joined(separator: " "),
+                                  album: kind == .song ? item.Album : nil)
+        }
+        return (docs, page.TotalRecordCount ?? start + docs.count)
+    }
+
     // MARK: Ratings
 
     /// Stars are Hypnos's own view of Jellyfin's 0-10 `UserData.Rating` (two points a star). Jellyfin's web UI

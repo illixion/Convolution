@@ -193,7 +193,7 @@ struct MusicInfoEditorSheet: View {
         object["LockData"] = keepEdits
         do {
             try await library.saveMusicItem(id: item.id, json: try JSONSerialization.data(withJSONObject: object))
-            actions.libraryChanged()
+            actions.libraryChanged(namesChanged: true)
             actions.post("Saved “\(draft.name)”")
             dismiss()
         } catch JellyfinHTTP.Failure.http(403) {
@@ -208,7 +208,7 @@ struct MusicInfoEditorSheet: View {
             try await library.refreshMusicMetadata(id: item.id, replaceAll: false)
             actions.post(keepEdits ? "Refreshing. Your edits stay." : "Refreshing from the file…")
             try? await Task.sleep(for: .seconds(2))
-            actions.libraryChanged()
+            actions.libraryChanged(namesChanged: true)
         } catch { actions.post(error.localizedDescription) }
     }
 
@@ -227,7 +227,7 @@ struct MusicInfoEditorSheet: View {
             try await library.refreshMusicMetadata(id: item.id, replaceAll: true)
             actions.post("Re-reading “\(item.Name)” from its file…")
             try? await Task.sleep(for: .seconds(3))
-            actions.libraryChanged()
+            actions.libraryChanged(namesChanged: true)
             dismiss()
         } catch { actions.post(error.localizedDescription) }
     }

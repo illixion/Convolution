@@ -4,17 +4,33 @@ import RAVEUI
 struct LibraryMusicView: View {
     @State private var section = MusicSection.recent
     @State private var sort: MusicSort?
+    @State private var descending: Bool?
     @State private var search = ""
     @State private var actions = MusicActions()
 
     private var request: MusicRequest {
-        MusicRequest(section: section, sort: sort, search: search.trimmingCharacters(in: .whitespacesAndNewlines))
+        MusicRequest(section: section, sort: sort, descending: descending, search: search.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     private func select(_ item: MusicSection) {
         section = item
-        sort = nil
+        (sort, descending) = MusicSortPreference.load(for: item)
         search = ""
+    }
+
+    /// Pick an order from the menu: the order starts in its own direction, and picking it again changes nothing.
+    private func pickSort(_ chosen: MusicSort) {
+        guard chosen != request.effectiveSort else { return }
+        sort = chosen
+        descending = nil
+        MusicSortPreference.save(sort: sort, descending: descending, for: section)
+    }
+
+    /// Click a column header: another column sorts by it, the sorted column flips its direction.
+    private func clickColumn(_ chosen: MusicSort) {
+        if chosen == request.effectiveSort { descending = !request.isDescending }
+        else { sort = chosen; descending = nil }
+        MusicSortPreference.save(sort: sort, descending: descending, for: section)
     }
 
     var body: some View {
@@ -43,35 +59,24 @@ struct LibraryMusicView: View {
                             }.pickerStyle(.menu)
                         } else { Text(section.title).font(.title2.bold()) }
                         Spacer(minLength: 0)
-                        if !section.sorts.isEmpty, request.search.isEmpty {
-                            Menu {
-                                Picker("Sort By", selection: $sort) {
-                                    Text("Default").tag(MusicSort?.none)
-                                    ForEach(section.sorts) { Text($0.title).tag(MusicSort?.some($0)) }
-                                }
-                            } label: { Label(sort?.title ?? "Sort", systemImage: "arrow.up.arrow.down") }
-                        }
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Search Music", text: $search)
-                            .autocorrectionDisabled()
-                            #if os(iOS) || os(visionOS)
-                            .textInputAutocapitalization(.never)
-                            #endif
-                            .frame(maxWidth: 260)
-                        if !search.isEmpty {
-                            Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
-                                .buttonStyle(.plain).accessibilityLabel("Clear search")
-                        }
+                        if !section.sorts.isEmpty, request.search.isEmpty { sortMenu }
+                        searchField
                     }
                     .padding(20)
-                    MusicCollectionView(request: request)
+                    MusicCollectionView(request: request, onSort: columnSort)
                         .id(request)
                 }
             }
         }
         .navigationTitle("Music")
         .environment(\.musicActions, actions)
-        .task(id: LibraryService.configurationKey) { await actions.prepare() }
+        .task(id: LibraryService.configurationKey) {
+            await actions.prepare()
+            MusicSearchStore.shared.prepare(onlyIfCached: true)
+        }
+        .onChange(of: search) { _, text in
+            if !text.isEmpty { MusicSearchStore.shared.prepare() }
+        }
         .sheet(item: $actions.playlistRequest) { MusicPlaylistPickerSheet(request: $0, actions: actions) }
         .sheet(item: $actions.infoItem) { MusicInfoEditorSheet(item: $0, actions: actions) }
         .overlay(alignment: .bottom) {
@@ -85,6 +90,53 @@ struct LibraryMusicView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: actions.notice)
+    }
+
+    /// What a click on a column header does; nil in the sections that have no order to pick.
+    private var columnSort: ((MusicSort) -> Void)? {
+        if section.sorts.isEmpty { return nil }
+        return { chosen in clickColumn(chosen) }
+    }
+
+    private var sortBinding: Binding<MusicSort?> {
+        Binding(get: { request.effectiveSort }, set: { value in if let value { pickSort(value) } })
+    }
+
+    private var orderBinding: Binding<Bool> {
+        Binding(get: { request.isDescending }, set: { value in
+            descending = value
+            MusicSortPreference.save(sort: sort, descending: descending, for: section)
+        })
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Picker("Sort By", selection: sortBinding) {
+                ForEach(section.sorts) { Text($0.title).tag(MusicSort?.some($0)) }
+            }
+            Picker("Order", selection: orderBinding) {
+                Label("Ascending", systemImage: "arrow.up").tag(false)
+                Label("Descending", systemImage: "arrow.down").tag(true)
+            }
+        } label: {
+            Label(request.effectiveSort?.title ?? "Sort", systemImage: request.isDescending ? "arrow.down" : "arrow.up")
+        }
+        .accessibilityLabel("Sort by \(request.effectiveSort?.title ?? "default"), \(request.isDescending ? "descending" : "ascending")")
+    }
+
+    @ViewBuilder
+    private var searchField: some View {
+        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+        TextField("Search Music", text: $search)
+            .autocorrectionDisabled()
+            #if os(iOS) || os(visionOS)
+            .textInputAutocapitalization(.never)
+            #endif
+            .frame(maxWidth: 260)
+        if !search.isEmpty {
+            Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                .buttonStyle(.plain).accessibilityLabel("Clear search")
+        }
     }
 
     @ViewBuilder
@@ -112,6 +164,9 @@ struct LibraryMusicView: View {
 private struct MusicCollectionView: View {
     let request: MusicRequest
     let container: JellyfinMusicItem?
+    /// A click on a column header of the songs table; nil where the list has no sortable columns.
+    var onSort: ((MusicSort) -> Void)?
+    @State private var width: CGFloat = 0
     @State private var listing: MusicListing
     @State private var playTask: Task<Void, Never>?
     @State private var preparingQueue = false
@@ -120,9 +175,10 @@ private struct MusicCollectionView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.musicActions) private var actions
 
-    init(request: MusicRequest, container: JellyfinMusicItem? = nil) {
+    init(request: MusicRequest, container: JellyfinMusicItem? = nil, onSort: ((MusicSort) -> Void)? = nil) {
         self.request = request
         self.container = container
+        self.onSort = onSort
         _listing = State(initialValue: MusicCatalog.shared.listing(for: request))
     }
 
@@ -135,18 +191,27 @@ private struct MusicCollectionView: View {
 
     private var isPlaylist: Bool { container?.Type == "Playlist" }
 
-    /// An album with more than one disc is listed disc by disc.
-    private var songGroups: [(title: String?, rows: [(position: Int, song: JellyfinMusicItem)])] {
+    /// Songs go in a table (title, artist, album, plays, time) once the window is wide enough and the list is one
+    /// of the library's own, not the inside of an album.
+    private var usesColumns: Bool {
+        width >= 760 && request.isTopLevel && request.section.listsSongs && request.search.isEmpty && !editingPlaylist
+    }
+
+    /// The loaded songs under their headers. An album with more than one disc is listed disc by disc.
+    private var songSections: [MusicSongGroup] {
+        if !listing.songGroups.isEmpty { return listing.songGroups }
         let rows = Array(listing.songs.enumerated()).map { (position: $0.offset, song: $0.element) }
-        guard request.albumID != nil, Set(rows.map { $0.song.ParentIndexNumber ?? 1 }).count > 1 else { return [(nil, rows)] }
+        guard request.albumID != nil, Set(rows.map { $0.song.ParentIndexNumber ?? 1 }).count > 1 else {
+            return [MusicSongGroup(id: "all", title: nil, rows: rows)]
+        }
         return Dictionary(grouping: rows) { $0.song.ParentIndexNumber ?? 1 }
             .sorted { $0.key < $1.key }
-            .map { ("Disc \($0.key)", $0.value) }
+            .map { MusicSongGroup(id: "disc-\($0.key)", title: "Disc \($0.key)", rows: $0.value) }
     }
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 24) {
+            LazyVStack(alignment: .leading, spacing: 24, pinnedViews: [.sectionHeaders]) {
                 if let container {
                     MusicCollectionHeader(item: container, songs: listing.songs, complete: !listing.hasMore && !listing.isLoading,
                                           preparing: preparingQueue, editing: $editingPlaylist,
@@ -160,6 +225,10 @@ private struct MusicCollectionView: View {
                     .disabled(preparingQueue)
                     .accessibilityLabel("Shuffle \(request.search.isEmpty ? request.section.title : "search results")")
                 }
+                if !request.search.isEmpty, case .building(let progress) = MusicSearchStore.shared.state {
+                    Label("Indexing your music for typo-tolerant search… \(Int(progress * 100))%", systemImage: "magnifyingglass")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 ForEach(listing.groups) { group in
                     VStack(alignment: .leading, spacing: 16) {
                         if !group.items.isEmpty {
@@ -171,15 +240,27 @@ private struct MusicCollectionView: View {
                     }
                 }
                 if !listing.songs.isEmpty {
-                    if request.albumID == nil { Text("Songs").font(.title2.bold()) }
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(songGroups.enumerated()), id: \.offset) { _, group in
-                            if let title = group.title { Text(title).font(.headline).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 12) }
-                            ForEach(group.rows, id: \.position) { row in
-                                MusicSongRow(song: row.song, position: row.position, list: listing.songs,
-                                             showsTrackNumber: request.albumID != nil,
-                                             editing: editingPlaylist ? playlistEditing(row.song, position: row.position) : nil)
+                    Section {
+                        if request.albumID == nil, !listing.albums.isEmpty { Text("Songs").font(.title2.bold()) }
+                        LazyVStack(spacing: 0) {
+                            ForEach(songSections) { group in
+                                if let title = group.title {
+                                    if request.albumID != nil {
+                                        Text(title).font(.headline).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 12)
+                                    } else {
+                                        Text(title).font(.title3.bold()).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 18).padding(.bottom, 4)
+                                    }
+                                }
+                                ForEach(group.rows, id: \.position) { row in
+                                    MusicSongRow(song: row.song, position: row.position, list: listing.songs,
+                                                 showsTrackNumber: request.albumID != nil, columns: usesColumns,
+                                                 editing: editingPlaylist ? playlistEditing(row.song, position: row.position) : nil)
+                                }
                             }
+                        }
+                    } header: {
+                        if usesColumns {
+                            MusicSongColumnHeader(sort: request.effectiveSort, descending: request.isDescending, onSort: onSort)
                         }
                     }
                 }
@@ -198,13 +279,17 @@ private struct MusicCollectionView: View {
             .padding(24)
             .padding(.bottom, 24)
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .environment(\.musicOpen) { opened = $0 }
         .navigationDestination(item: $opened) { MusicDestinationView(item: $0) }
-        .task(id: LibraryService.configurationKey) {
+        .task(id: "\(LibraryService.configurationKey)|\(request.search.isEmpty ? 0 : MusicSearchStore.shared.generation)") {
             if !request.search.isEmpty {
-                do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+                do { try await Task.sleep(for: .milliseconds(MusicSearchStore.shared.isReady ? 120 : 300)) } catch { return }
+                // A new index arrived while results were showing: ask it again.
+                await listing.refresh()
+            } else {
+                await listing.loadIfNeeded()
             }
-            await listing.loadIfNeeded()
         }
         .onChange(of: actions?.revision) { Task { await listing.refresh() } }
         .onDisappear { playTask?.cancel() }
@@ -424,5 +509,24 @@ private struct MusicCollectionHeader: View {
             actions?.post("Deleted “\(item.Name)”")
             dismiss()
         } catch { actions?.post(error.localizedDescription) }
+    }
+}
+
+/// The order each section was last left in, as iTunes keeps a view's sort.
+enum MusicSortPreference {
+    private static let key = "jellyfinMusic.sortOrder"
+
+    static func load(for section: MusicSection) -> (MusicSort?, Bool?) {
+        guard let saved = UserDefaults.standard.dictionary(forKey: key)?[section.rawValue] as? String else { return (nil, nil) }
+        let parts = saved.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+        let sort = MusicSort(rawValue: parts.first ?? "").flatMap { section.sorts.contains($0) ? $0 : nil }
+        let descending = parts.count > 1 ? (parts[1] == "desc" ? true : parts[1] == "asc" ? false : nil) : nil
+        return (sort, descending)
+    }
+
+    static func save(sort: MusicSort?, descending: Bool?, for section: MusicSection) {
+        var all = UserDefaults.standard.dictionary(forKey: key) ?? [:]
+        all[section.rawValue] = "\(sort?.rawValue ?? "")|\(descending.map { $0 ? "desc" : "asc" } ?? "")"
+        UserDefaults.standard.set(all, forKey: key)
     }
 }

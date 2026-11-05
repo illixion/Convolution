@@ -39,14 +39,24 @@ enum MusicSection: String, CaseIterable, Identifiable, Sendable {
     var sorts: [MusicSort] {
         switch self {
         case .albums: [.title, .artist, .year, .dateAdded]
-        case .songs, .favorites: [.title, .artist, .album, .year, .dateAdded]
+        case .artists, .playlists: [.title, .dateAdded]
+        case .songs: [.title, .artist, .album, .year, .time, .plays, .lastPlayed, .dateAdded]
+        case .favorites: [.title, .artist, .album, .year, .time, .plays, .dateAdded]
         default: []
+        }
+    }
+    /// The order a section is in until the listener picks another (what its section headers follow).
+    var defaultSort: MusicSort? {
+        switch self {
+        case .recent: .dateAdded
+        case .albums, .artists, .songs, .genres, .playlists, .favorites: .title
+        case .recentlyPlayed, .mostPlayed: nil
         }
     }
 }
 
 enum MusicSort: String, CaseIterable, Identifiable, Sendable {
-    case title, artist, album, year, dateAdded
+    case title, artist, album, year, time, plays, lastPlayed, dateAdded
     var id: Self { self }
     var title: String {
         switch self {
@@ -54,6 +64,9 @@ enum MusicSort: String, CaseIterable, Identifiable, Sendable {
         case .artist: "Artist"
         case .album: "Album"
         case .year: "Year"
+        case .time: "Time"
+        case .plays: "Plays"
+        case .lastPlayed: "Last Played"
         case .dateAdded: "Date Added"
         }
     }
@@ -65,9 +78,14 @@ enum MusicSort: String, CaseIterable, Identifiable, Sendable {
         case .artist: (songs ? "Artist,Album,ParentIndexNumber,IndexNumber" : "AlbumArtist,ProductionYear,SortName", false)
         case .album: ("Album,ParentIndexNumber,IndexNumber,SortName", false)
         case .year: ("ProductionYear,SortName", true)
+        case .time: ("Runtime,SortName", false)
+        case .plays: ("PlayCount,SortName", true)
+        case .lastPlayed: ("DatePlayed", true)
         case .dateAdded: ("DateCreated", true)
         }
     }
+    /// The direction a first pick of this order goes (newest, most played and latest year first).
+    var startsDescending: Bool { server(songs: false).descending }
 }
 
 struct MusicRequest: Hashable, Sendable {
@@ -77,15 +95,119 @@ struct MusicRequest: Hashable, Sendable {
     var playlistID: String?
     var genreID: String?
     var sort: MusicSort?
+    /// Nil is the direction the order starts in; set once the listener flips it.
+    var descending: Bool?
     var search = ""
     var playbackSongs = false
     var randomOrder = false
+
+    /// The order in force, the section's own when none was picked.
+    var effectiveSort: MusicSort? { sort ?? section.defaultSort }
+    var isDescending: Bool { descending ?? effectiveSort?.startsDescending ?? false }
+    /// Whether the screen is one of a section's lists, as opposed to the inside of an album, artist, playlist or genre.
+    var isTopLevel: Bool { albumID == nil && artistID == nil && playlistID == nil && genreID == nil && !playbackSongs }
 }
 
 struct MusicAlbumGroup: Identifiable {
+    let id: String
     let title: String
     let items: [JellyfinMusicItem]
-    var id: String { title }
+    init(title: String, items: [JellyfinMusicItem], id: String? = nil) {
+        self.title = title; self.items = items; self.id = id ?? title
+    }
+}
+
+/// One run of songs under a header. `position` is where each song sits in the whole loaded list.
+struct MusicSongGroup: Identifiable {
+    let id: String
+    let title: String?
+    let rows: [(position: Int, song: JellyfinMusicItem)]
+}
+
+/// What a list's section headers say. They follow the order the list is in, as iTunes's do: sorted by title
+/// there is a letter above each run, by year the year, by date added Today, Yesterday and the months.
+enum MusicGrouping: Sendable {
+    case none, letter, artist, album, year, dateAdded
+
+    static func of(_ request: MusicRequest) -> MusicGrouping {
+        guard request.search.isEmpty, request.isTopLevel else { return .none }
+        switch request.effectiveSort {
+        case .title: return .letter
+        case .artist: return .artist
+        case .album: return .album
+        case .year: return .year
+        case .dateAdded: return .dateAdded
+        case .time, .plays, .lastPlayed, nil: return .none
+        }
+    }
+
+    /// The header an item sits under; nil when this grouping has none for it.
+    func title(for item: JellyfinMusicItem, now: Date = Date()) -> String? {
+        switch self {
+        case .none: return nil
+        case .letter: return Self.letter(of: item.Name)
+        case .artist: return item.isSong || item.Type == "MusicAlbum" ? item.artist : Self.letter(of: item.Name)
+        case .album: return item.isSong ? (item.Album ?? "Unknown Album") : Self.letter(of: item.Name)
+        case .year: return item.ProductionYear.map(String.init) ?? "Unknown Year"
+        case .dateAdded: return Self.dateBucket(item.DateCreated, now: now)
+        }
+    }
+
+    /// The letter an A-Z index files a name under, skipping the articles Jellyfin leaves out of its sort
+    /// names ("The Beatles" is under B); digits and symbols share "#".
+    static func letter(of name: String) -> String {
+        var text = name.trimmingCharacters(in: .whitespaces)
+        let lower = text.lowercased()
+        for article in ["the ", "a ", "an "] where lower.hasPrefix(article) && lower.count > article.count {
+            text = String(text.dropFirst(article.count)).trimmingCharacters(in: .whitespaces)
+            break
+        }
+        guard let first = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil).first,
+              first.isLetter else { return "#" }
+        return String(first).uppercased()
+    }
+
+    static func dateBucket(_ raw: String?, now: Date = Date(), calendar: Calendar = .current) -> String {
+        guard let raw, let date = MusicDates.parse(raw) else { return "Earlier" }
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        if let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day,
+           days >= 0, days < 7 { return "This Week" }
+        if calendar.isDate(date, equalTo: now, toGranularity: .month) { return "This Month" }
+        let style = Date.FormatStyle(calendar: calendar).month(.wide).year()
+        return date.formatted(style)
+    }
+
+    /// Cut `items` into runs of one header each, in the order they arrived: the server's order is the truth,
+    /// so a header is never moved up to meet an earlier run of the same name.
+    func runs<T>(_ items: [T], item: (T) -> JellyfinMusicItem) -> [(title: String?, range: Range<Int>)] {
+        guard self != .none, !items.isEmpty else { return [(nil, 0..<items.count)] }
+        let now = Date()
+        var result: [(title: String?, range: Range<Int>)] = []
+        var start = 0
+        var current = title(for: item(items[0]), now: now)
+        for index in 1..<max(1, items.count) where index < items.count {
+            let next = title(for: item(items[index]), now: now)
+            if next != current {
+                result.append((current, start..<index))
+                start = index; current = next
+            }
+        }
+        result.append((current, start..<items.count))
+        return result
+    }
+}
+
+enum MusicDates {
+    // ISO8601DateFormatter is documented thread-safe for formatting and parsing.
+    nonisolated(unsafe) private static let fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    nonisolated(unsafe) private static let plain = ISO8601DateFormatter()
+    /// Jellyfin writes dates with seven fractional digits, which `ISO8601DateFormatter` reads only as `.withFractionalSeconds`.
+    static func parse(_ raw: String) -> Date? { fractional.date(from: raw) ?? plain.date(from: raw) }
 }
 
 /// Browsing owns no playback clock. Loading a page cannot invalidate the transport,
@@ -96,6 +218,8 @@ final class MusicListing {
     private(set) var albums: [JellyfinMusicItem] = []
     private(set) var songs: [JellyfinMusicItem] = []
     private(set) var groups: [MusicAlbumGroup] = []
+    /// The songs under their section headers; empty when the screen has none (an album lists its own discs).
+    private(set) var songGroups: [MusicSongGroup] = []
     private(set) var isLoading = false
     private(set) var hasMore = true
     private(set) var error: String?
@@ -117,7 +241,7 @@ final class MusicListing {
             generation = UUID()
             configuration = key
             library = LibraryService.current()
-            items = []; albums = []; songs = []; groups = []
+            items = []; albums = []; songs = []; groups = []; songGroups = []
             offset = 0; loaded = false; hasMore = true; isLoading = false; error = nil
         }
         guard !loaded else { return }
@@ -147,7 +271,17 @@ final class MusicListing {
         error = nil
         defer { if ticket == generation { isLoading = false } }
         do {
-            let page = try await library.musicPage(request, start: offset)
+            let page: JellyfinMusicPage
+            if !request.search.isEmpty, let hits = await MusicSearchStore.shared.hits(for: request.search) {
+                // The fuzzy index ranks by name, artist and album and forgives typos; the server then
+                // gives those items as the screens show them.
+                let found = try await library.musicItems(ids: hits.map(\.id))
+                let byID = Dictionary(found.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                let ordered = hits.compactMap { byID[$0.id] }
+                page = JellyfinMusicPage(Items: ordered, TotalRecordCount: ordered.count)
+            } else {
+                page = try await library.musicPage(request, start: offset)
+            }
             try Task.checkCancellation()
             guard ticket == generation, configuration == LibraryService.configurationKey else { return }
             let existing = Set(items.map(\.id))
@@ -158,30 +292,20 @@ final class MusicListing {
             // Partition once per page, rather than conditionally expanding ForEach rows.
             songs = items.filter(\.isSong)
             albums = items.filter { !$0.isSong }
-            if request.section == .recent && request.search.isEmpty {
-                let calendar = Calendar.current
-                let now = Date()
-                let formatter = ISO8601DateFormatter()
-                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                let plainFormatter = ISO8601DateFormatter()
-                let buckets = Dictionary(grouping: albums) { item -> String in
-                    guard let raw = item.DateCreated,
-                          let date = formatter.date(from: raw) ?? plainFormatter.date(from: raw) else { return "Earlier" }
-                    if calendar.isDateInToday(date) { return "Today" }
-                    if calendar.isDateInYesterday(date) { return "Yesterday" }
-                    if calendar.isDate(date, equalTo: now, toGranularity: .weekOfYear) { return "This Week" }
-                    if calendar.isDate(date, equalTo: now, toGranularity: .month) { return "This Month" }
-                    return "Earlier"
-                }
-                groups = ["Today", "Yesterday", "This Week", "This Month", "Earlier"].compactMap { title in
-                    guard let items = buckets[title] else { return nil }
-                    return MusicAlbumGroup(title: title, items: items)
-                }
-            } else if !request.search.isEmpty {
+            let grouping = MusicGrouping.of(request)
+            if !request.search.isEmpty {
                 let artists = albums.filter { $0.Type == "MusicArtist" }
                 let rest = albums.filter { $0.Type != "MusicArtist" }
                 groups = [MusicAlbumGroup(title: "Artists", items: artists), MusicAlbumGroup(title: "Albums", items: rest)]
                     .filter { !$0.items.isEmpty }
+            } else if grouping != .none {
+                groups = grouping.runs(albums, item: { $0 }).enumerated().map { index, run in
+                    MusicAlbumGroup(title: run.title ?? "", items: Array(albums[run.range]), id: "\(index)-\(run.title ?? "")")
+                }
+                let rows = songs.enumerated().map { (position: $0.offset, song: $0.element) }
+                songGroups = grouping.runs(rows, item: { $0.song }).enumerated().map { index, run in
+                    MusicSongGroup(id: "\(index)-\(run.title ?? "")", title: run.title, rows: Array(rows[run.range]))
+                }
             } else { groups = [MusicAlbumGroup(title: request.section.title, items: albums)] }
         } catch is CancellationError {
         } catch let failure as URLError where failure.code == .cancelled {
