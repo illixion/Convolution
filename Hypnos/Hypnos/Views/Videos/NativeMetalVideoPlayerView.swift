@@ -385,6 +385,11 @@ struct NativeMetalVideoPlayerView {
         private var presentationSizeObservation: NSKeyValueObservation?
         private var criteriaTask: Task<Void, Never>?
         private var frameRateTask: Task<Void, Never>?
+        /// The rate the player measured (`measureFrameRate`), for display
+        /// criteria when the asset has no track to say (HLS).
+        private var measuredFrameRate: Double?
+        /// The display criteria were stated before any rate was known (24).
+        private var criteriaGuessedRate = false
         var onVideoSizeKnown: ((CGSize) -> Void)?
         /// The picture's frame rate, for the control strip's readout.
         var onFrameRateKnown: ((Double) -> Void)?
@@ -775,7 +780,12 @@ struct NativeMetalVideoPlayerView {
                     }
                     if rate > 0, rate != reported {
                         reported = rate
+                        self.measuredFrameRate = rate
                         self.onFrameRateKnown?(rate)
+                        // An HLS stream's first frame comes before the player
+                        // has measured anything: the criteria said 24 Hz for
+                        // a 23.976 fps episode.
+                        if self.criteriaGuessedRate { self.updateDisplayCriteria() }
                     }
                     try? await Task.sleep(for: .seconds(2))
                 }
@@ -798,6 +808,8 @@ struct NativeMetalVideoPlayerView {
             }
             frameRateTask?.cancel()
             frameRateTask = nil
+            measuredFrameRate = nil
+            criteriaGuessedRate = false
             statusObservation?.invalidate()
             statusObservation = nil
             presentationSizeObservation?.invalidate()
@@ -996,17 +1008,20 @@ struct NativeMetalVideoPlayerView {
                 && visualAdjustments.saturation == 1 && visualAdjustments.clampedSharpenAmount <= 0.001
         }
 
-        /// The picture goes to the system's video layer only for Dolby Vision,
-        /// whose RPU only the system applies: always for profile 5 (purple and
-        /// green without it), and for 8.x while Metal has nothing to do (no
-        /// adjustments, no Smooth Motion). HDR10 and HLG draw through Metal's
-        /// EDR layer, tone-mapped with the picture's own metadata: on the
-        /// headset `AVPlayerLayer` showed them darker and flatter, reading as
-        /// SDR beside the same episode in AI 3D and through Metal (user,
-        /// 2026-11-04; the film player's A/B found the same of every Core
-        /// Animation video layer).
+        /// The picture goes to the system's video layer only for Dolby Vision
+        /// profile 5, whose RPU only the system applies (purple and green
+        /// without it). Everything else HDR draws through Metal's EDR layer,
+        /// tone-mapped with the picture's own static metadata: HDR10 and HLG,
+        /// and Dolby Vision 8.x as its HDR10 (8.1) or HLG (8.4) base layer.
+        /// On the headset `AVPlayerLayer` showed HDR10 darker and flatter,
+        /// reading as SDR beside the same episode in AI 3D and through Metal
+        /// (user, 2026-11-04; the film player's A/B found the same of every
+        /// Core Animation video layer), and applying an 8.1 RPU it blew a
+        /// bright scene out (a Netflix 8.1 episode, most of the frame at
+        /// 150-260 nits), where the base layer through Metal and AI 3D looked
+        /// right (user, 2026-11-05).
         private var wantsSystemLayer: Bool {
-            dynamicRange.isHDR && (needsSystemRenderer || (hasRPU && adjustmentsAreNeutral && !wantsSmoothMotion))
+            dynamicRange.isHDR && needsSystemRenderer
         }
 
         /// Smooth Motion is asked for and can run here (visionOS only).
@@ -1055,12 +1070,10 @@ struct NativeMetalVideoPlayerView {
             updateDisplayCriteria()
         }
 
-        /// Dolby Vision plays through the system's video layer, which applies
-        /// its RPU; Metal takes over for it only while adjustments, sharpening
-        /// or Smooth Motion are on (its HDR10 base layer then). HDR10 and HLG
-        /// always draw through Metal (half-float frames into an EDR layer
-        /// tagged PQ or HLG, `wantsSystemLayer`). Profile 5 never leaves the
-        /// system layer.
+        /// HDR draws through Metal (half-float frames into an EDR layer tagged
+        /// PQ or HLG, `wantsSystemLayer`), Dolby Vision 8.x as its base layer.
+        /// Only profile 5 plays through the system's video layer, which
+        /// applies its RPU, and never leaves it.
         private func updatePresentation() {
             guard host != nil, player != nil, dynamicRange != .unknown else { return }
             let system = wantsSystemLayer
@@ -1243,6 +1256,8 @@ struct NativeMetalVideoPlayerView {
                     }
                 }
                 guard !Task.isCancelled, let self, self.playerItem === item, let format else { return }
+                if rate <= 0, let measured = self.measuredFrameRate { rate = measured }
+                self.criteriaGuessedRate = rate <= 0
                 let snapped = PlaybackFrameRate.snapped(rate > 0 ? rate : 24)
                 let highest = (self.framePresenter?.source as? InterpolatingFrameSource)?.highestSourceFrameRate ?? 0
                 let doubled = snapped < highest
