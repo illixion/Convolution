@@ -86,6 +86,17 @@ enum VideoPlayerDebugEndpoints {
                 "bufferEnd": item.loadedTimeRanges.map { $0.timeRangeValue.end.seconds }.max() ?? 0]
     }
 
+    struct DolbyVisionReply: Encodable {
+        var available: Bool
+        var current: DolbyVisionSceneLog.Entry?
+        var scenes: [DolbyVisionSceneLog.Entry]
+    }
+
+    struct CompareReply: Encodable {
+        var status: String
+        var driftSeconds: Double?
+    }
+
     static func register() {
         guard !registered else { return }
         registered = true
@@ -113,6 +124,41 @@ enum VideoPlayerDebugEndpoints {
                         serverAudio: info.transcode.map(PlaybackInfoDetailsView.audioText),
                         serverReasons: info.transcode?.reasons, source: info.source)
                 }
+            },
+            .query("videoDolbyVision", "The Dolby Vision 8.x scene the flat Metal player is showing and the last "
+                   + "40 scene changes: each RPU's L1 range (min, average, max in nits), the source's range, the "
+                   + "trims it carries (not applied), its content-mapping version and whether its reshaping is "
+                   + "identity. `available` false: a build without HYPNOS_DOVI or without the FFmpeg framework, "
+                   + "so 8.x plays as its HDR10 base layer with static metadata.") { _ in
+                DolbyVisionReply(available: DolbyVisionScenes.isAvailable, current: DolbyVisionSceneLog.current,
+                                 scenes: DolbyVisionSceneLog.entries)
+            },
+            .command("videoCompare", "Opens a window showing the first playing video window's stream through one "
+                     + "of Apple's renderers, muted, following that window's clock, to compare its picture with "
+                     + "the Metal player's: playerLayer (AVPlayerLayer with the window's display criteria), "
+                     + "playerViewController (AVKit, controls hidden, as Infuse draws), videoPlayerComponent "
+                     + "(RealityKit's video component), or close. visionOS only.",
+                     parameters: [.string("renderer", "playerLayer, playerViewController, videoPlayerComponent or close",
+                                          required: true,
+                                          choices: ["playerLayer", "playerViewController", "videoPlayerComponent", "close"])]) { args in
+                let name = args.string("renderer") ?? "close"
+                #if os(visionOS)
+                guard let renderer = PictureCompare.Renderer(rawValue: name) else {
+                    PictureCompare.shared.close()
+                    return CompareReply(status: "Closed", driftSeconds: nil)
+                }
+                guard let model = VideoWindowModel.withNativePlayers.allObjects.first(where: { $0.nativePlayer?.currentItem != nil }),
+                      let player = model.nativePlayer else {
+                    return CompareReply(status: "No video window is playing through the native player", driftSeconds: nil)
+                }
+                let url = MediaAuthorization.shared.authorizedURL(model.activeStreamURL)
+                let aspect = model.pictureSize.map { $0.width / max($0.height, 1) } ?? 16.0 / 9.0
+                let status = PictureCompare.shared.openVideo(renderer, url: url, following: player, aspect: aspect,
+                                                             criteria: { NativeVideoHostView.lastStatedCriteria })
+                return CompareReply(status: status, driftSeconds: PictureCompare.shared.drift)
+                #else
+                return CompareReply(status: "visionOS only (\(name))", driftSeconds: nil)
+                #endif
             },
             .command("videoAudioTrack", "Picks an entry of the first video window's Audio menu, as a tap would: "
                      + "position counts from 0 in menu order. Returns the windows' state after it.",

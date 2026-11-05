@@ -367,6 +367,9 @@ struct VideoWindowView: View {
                     .frame(height: ornamentBottomPadding)
             }
             #if os(visionOS)
+            // Debug: this window's stream through Apple's renderers
+            // (the `videoCompare` debug command).
+            .modifier(PictureCompareOpener())
             .modifier(CinemaVideoWindowHook(windowModel: windowModel, hudControls: AnyView(VStack(alignment: .leading) { titleButton; videoOrnament }.environment(appModel)), closePlayer: { dismissWindow() }))
             // In the HUD the skip button and notices go with the picture.
             .onChange(of: hudPromptKey, initial: true) { _, key in

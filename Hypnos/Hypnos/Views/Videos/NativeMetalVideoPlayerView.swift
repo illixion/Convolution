@@ -98,8 +98,14 @@ final class NativeVideoHostView: NativePlayerPlatformView {
     /// visionOS it is how a player declares HDR video (without it the picture
     /// dims once playback starts); tvOS switches the TV's mode with it.
     var displayCriteria: AVDisplayCriteria? {
-        didSet { applyDisplayCriteria() }
+        didSet {
+            if let displayCriteria { Self.lastStatedCriteria = displayCriteria }
+            applyDisplayCriteria()
+        }
     }
+    /// The criteria a video window last stated, for the debug comparison's
+    /// plain-layer renderer (`videoCompare`).
+    static var lastStatedCriteria: AVDisplayCriteria?
     private weak var criteriaWindow: UIWindow?
 
     override func didMoveToWindow() {
@@ -356,6 +362,10 @@ struct NativeMetalVideoPlayerView {
         /// the EDR layer's tone mapping.
         private var masteringDisplay: Data?
         private var contentLightLevel: Data?
+        /// The Dolby Vision 8.x scene whose range the EDR layer's metadata
+        /// carries (sideload edition, `DolbyVisionScenes`); nil: the static
+        /// HDR10 metadata.
+        private var dolbyVisionScene: DolbyVisionScenes.Scene?
         /// What `onFrameRangeKnown` was last told, so a change of presenter
         /// (the RPU applied or not) is told again.
         private var reportedRange: VideoFrameRange?
@@ -488,6 +498,8 @@ struct NativeMetalVideoPlayerView {
             dynamicRange = .unknown
             needsSystemRenderer = false
             hasRPU = false
+            dolbyVisionScene = nil
+            DolbyVisionSceneLog.reset()
             reportedRange = nil
             masteringDisplay = nil
             contentLightLevel = nil
@@ -895,10 +907,12 @@ struct NativeMetalVideoPlayerView {
             // compositor for one each tick.
             guard let renderer, let output = videoOutput, let textureCache else { return }
 
+            var newFrame = false
             if let framePresenter {
                 if let frame = framePresenter.frame(forHostTime: CACurrentMediaTime()) {
                     lastPixelBuffer = frame.pixelBuffer
                     needsPictureRedraw = true
+                    newFrame = true
                 }
             } else {
                 let itemTime = output.itemTime(forHostTime: CACurrentMediaTime())
@@ -906,6 +920,7 @@ struct NativeMetalVideoPlayerView {
                    let buffer = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil) {
                     lastPixelBuffer = buffer
                     needsPictureRedraw = true
+                    newFrame = true
                 }
             }
             guard needsPictureRedraw,
@@ -921,6 +936,7 @@ struct NativeMetalVideoPlayerView {
                 noteDynamicRange(of: pixelBuffer)
                 if usesSystemLayer { return }
             }
+            if newFrame, appliesDolbyVisionScenes { noteDolbyVisionScene(of: pixelBuffer) }
 
             let sharpen = Float(visualAdjustments.clampedSharpenAmount)
             let useRCAS = sharpen > 0.001
@@ -1019,7 +1035,8 @@ struct NativeMetalVideoPlayerView {
         /// Core Animation video layer), and applying an 8.1 RPU it blew a
         /// bright scene out (a Netflix 8.1 episode, most of the frame at
         /// 150-260 nits), where the base layer through Metal and AI 3D looked
-        /// right (user, 2026-11-05).
+        /// right (user, 2026-11-05). In the sideload edition each 8.x scene's
+        /// RPU range then becomes the layer's metadata (`DolbyVisionScenes`).
         private var wantsSystemLayer: Bool {
             dynamicRange.isHDR && needsSystemRenderer
         }
@@ -1054,7 +1071,7 @@ struct NativeMetalVideoPlayerView {
             needsSystemRenderer = hasRPU && !hasPrimaries
             // The system layer applies an RPU (HDR and Dolby Vision show
             // there); the Metal path (adjustments, Smooth Motion) does not.
-            let range = VideoFrameRange(transferFunction: transfer, hasDolbyVisionRPU: hasRPU && wantsSystemLayer)
+            let range = VideoFrameRange(transferFunction: transfer, hasDolbyVisionRPU: rpuApplied(system: wantsSystemLayer))
             reportedRange = range
             onFrameRangeKnown?(range)
             var format: CMVideoFormatDescription?
@@ -1078,9 +1095,9 @@ struct NativeMetalVideoPlayerView {
             guard host != nil, player != nil, dynamicRange != .unknown else { return }
             let system = wantsSystemLayer
             onFrameRangeKnown.map { report in
-                if let range = reportedRange, range.hasDolbyVisionRPU != (hasRPU && system) {
+                if let range = reportedRange, range.hasDolbyVisionRPU != rpuApplied(system: system) {
                     var updated = range
-                    updated.hasDolbyVisionRPU = hasRPU && system
+                    updated.hasDolbyVisionRPU = rpuApplied(system: system)
                     reportedRange = updated
                     report(updated)
                 }
@@ -1139,9 +1156,7 @@ struct NativeMetalVideoPlayerView {
             // layer rolled them off. With the film's own mastering display and
             // light levels the system tone-maps the layer as it does a video.
             switch range {
-            case .pq:
-                layer.edrMetadata = CAEDRMetadata.hdr10(displayInfo: masteringDisplay, contentInfo: contentLightLevel,
-                                                        opticalOutputScale: 100)
+            case .pq: layer.edrMetadata = pqMetadata()
             case .hlg: layer.edrMetadata = CAEDRMetadata.hlg
             case .sdr, .unknown: layer.edrMetadata = nil
             }
@@ -1150,6 +1165,51 @@ struct NativeMetalVideoPlayerView {
             // macOS 26 tone-maps a layer to SDR unless it asks for more.
             layer.preferredDynamicRange = range.isHDR ? .high : .standard
             #endif
+        }
+
+        #if !os(tvOS)
+        /// HDR10's static metadata, or the Dolby Vision scene's range when one
+        /// applies: the system then maps this scene, not the whole master.
+        private func pqMetadata() -> CAEDRMetadata {
+            if let scene = dolbyVisionScene, let maxNits = scene.maxNits {
+                // A scene darker than paper white is still mapped as one that
+                // reaches it, so the curve never lifts it.
+                return CAEDRMetadata.hdr10(minLuminance: Float(max(scene.minNits ?? 0, 0.0001)),
+                                           maxLuminance: Float(min(max(maxNits, 100), 10000)),
+                                           opticalOutputScale: 100)
+            }
+            return CAEDRMetadata.hdr10(displayInfo: masteringDisplay, contentInfo: contentLightLevel,
+                                       opticalOutputScale: 100)
+        }
+        #endif
+
+        // MARK: Dolby Vision scenes (sideload edition)
+
+        /// Metal draws a Dolby Vision 8.x picture (PQ base layer) and the
+        /// build can read its RPUs: each scene's L1 range goes to the layer.
+        private var appliesDolbyVisionScenes: Bool {
+            hasRPU && !needsSystemRenderer && dynamicRange == .pq && !usesSystemLayer && DolbyVisionScenes.isAvailable
+        }
+
+        /// The RPU is applied: by the system's layer, or as scene metadata.
+        private func rpuApplied(system: Bool) -> Bool {
+            hasRPU && (system || (!needsSystemRenderer && dynamicRange == .pq && DolbyVisionScenes.isAvailable))
+        }
+
+        /// Reads a new frame's RPU and, at a new scene, hands its range to the
+        /// layer. Interpolated frames carry none and keep the scene.
+        private func noteDolbyVisionScene(of pixelBuffer: CVPixelBuffer) {
+            guard let scene = DolbyVisionScenes.read(pixelBuffer), scene.maxNits != nil,
+                  !scene.sameRange(as: dolbyVisionScene) else { return }
+            dolbyVisionScene = scene
+            #if !os(tvOS)
+            (mtkView?.layer as? CAMetalLayer)?.edrMetadata = pqMetadata()
+            #endif
+            let seconds = player?.currentTime().seconds ?? 0
+            DolbyVisionSceneLog.note(scene, at: seconds, applied: true)
+            AppLogger.videoWindow.info(
+                "Dolby Vision scene at \(seconds, format: .fixed(precision: 2), privacy: .public) s: L1 \(scene.minNits ?? 0, format: .fixed(precision: 3), privacy: .public)/\(scene.averageNits ?? 0, format: .fixed(precision: 1), privacy: .public)/\(scene.maxNits ?? 0, format: .fixed(precision: 1), privacy: .public) nits, CM \(scene.contentMappingVersion, privacy: .public), \(scene.l2Trims + scene.l8Trims, privacy: .public) trims, reshaping \(scene.identityReshaping ? "identity" : "not identity", privacy: .public)"
+            )
         }
 
         /// Swaps the frame output for one in another pixel format.

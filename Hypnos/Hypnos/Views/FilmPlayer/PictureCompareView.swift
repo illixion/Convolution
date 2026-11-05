@@ -18,6 +18,11 @@
  Result (device, 2026-10-10, Dolby Vision profile 5): the two layers looked
  alike and darker and flatter than Infuse; AVKit and the video component
  matched Infuse. The film player now draws through the video component.
+
+ A video window opens it too (the `videoCompare` debug command): the window's
+ own stream (its remux or server URL) through the same renderers, following
+ that window's AVPlayer, to see what the system makes of a Dolby Vision 8.x
+ picture beside the Metal player's.
  */
 
 #if os(visionOS)
@@ -37,7 +42,20 @@ final class PictureCompare {
         case playerLayer, playerViewController, videoPlayerComponent
     }
 
+    /// The clock the comparison follows: the film player's, or a video
+    /// window's player.
+    struct Clock {
+        var time: @MainActor () -> Double
+        var isPlaying: @MainActor () -> Bool
+        var speed: @MainActor () -> Double
+    }
+
     private(set) var renderer: Renderer?
+    /// The display criteria the plain-layer renderer states on its window.
+    private(set) var layerCriteria: @MainActor () -> AVDisplayCriteria? = { nil }
+    /// The picture's aspect, for the window's shape.
+    private(set) var aspect: Double = 3840.0 / 1740.0
+    private var clock: Clock?
     /// Bumped by each request, which the film player turns into openWindow.
     private(set) var openRequest = 0
     private(set) var status = "Closed"
@@ -105,6 +123,35 @@ final class PictureCompare {
                 return "No stream: \(error.localizedDescription)"
             }
         }
+        let film = FilmSession.shared.player
+        clock = Clock(time: { film.currentTime }, isPlaying: { film.isPlaying }, speed: { film.speed })
+        layerCriteria = { FilmSession.shared.player.video.displayCriteria }
+        aspect = 3840.0 / 1740.0
+        self.renderer = renderer
+        openRequest += 1
+        status = "Showing \(renderer.rawValue)"
+        follow()
+        return status
+    }
+
+    /// A video window's stream through `renderer`, following `source`, the
+    /// window's own player. `criteria` is what the window states.
+    func openVideo(_ renderer: Renderer, url: URL, following source: AVPlayer, aspect: Double,
+                   criteria: @escaping @MainActor () -> AVDisplayCriteria?) -> String {
+        let key = "video:" + url.absoluteString
+        if player == nil || loadedItemID != key {
+            player?.pause()
+            let player = AVPlayer(url: url)
+            player.isMuted = true
+            player.automaticallyWaitsToMinimizeStalling = false
+            self.player = player
+            loadedItemID = key
+        }
+        clock = Clock(time: { [weak source] in source?.currentTime().seconds ?? 0 },
+                      isPlaying: { [weak source] in (source?.rate ?? 0) != 0 },
+                      speed: { [weak source] in Double(source?.defaultRate ?? 1) })
+        layerCriteria = criteria
+        self.aspect = aspect > 0 ? aspect : 16.0 / 9.0
         self.renderer = renderer
         openRequest += 1
         status = "Showing \(renderer.rawValue)"
@@ -118,6 +165,7 @@ final class PictureCompare {
         player?.pause()
         player = nil
         loadedItemID = nil
+        clock = nil
         renderer = nil
         status = "Closed"
     }
@@ -128,27 +176,28 @@ final class PictureCompare {
         followTask?.cancel()
         followTask = Task { [weak self] in
             while !Task.isCancelled {
-                guard let self, let player = self.player else { return }
-                let film = FilmSession.shared.player
-                let target = film.currentTime
+                guard let self, let player = self.player, let clock = self.clock else { return }
+                let target = clock.time()
+                let playing = clock.isPlaying()
+                let speed = clock.speed()
                 let drift = player.currentTime().seconds - target
                 if !drift.isFinite || abs(drift) > 0.25 {
                     // Aimed a little ahead: the seek itself takes time.
-                    let lead = film.isPlaying ? 0.3 * film.speed : 0
+                    let lead = playing ? 0.3 * speed : 0
                     await player.seek(to: CMTime(seconds: target + lead, preferredTimescale: 600),
                                       toleranceBefore: .zero, toleranceAfter: .zero)
                 }
-                player.defaultRate = Float(film.speed)
-                if film.isPlaying, player.rate != player.defaultRate { player.play() }
-                if !film.isPlaying, player.rate != 0 { player.pause() }
+                player.defaultRate = Float(speed)
+                if playing, player.rate != player.defaultRate { player.play() }
+                if !playing, player.rate != 0 { player.pause() }
                 try? await Task.sleep(for: .seconds(1))
             }
         }
     }
 
     var drift: Double? {
-        guard let player else { return nil }
-        let value = player.currentTime().seconds - FilmSession.shared.player.currentTime
+        guard let player, let clock else { return nil }
+        let value = player.currentTime().seconds - clock.time()
         return value.isFinite ? value : nil
     }
 }
@@ -161,7 +210,7 @@ struct PictureCompareView: View {
             if let player = compare.player, let renderer = compare.renderer {
                 switch renderer {
                 case .playerLayer:
-                    CompareLayerView(player: player, criteria: FilmSession.shared.player.video.displayCriteria)
+                    CompareLayerView(player: player, criteria: compare.layerCriteria())
                 case .playerViewController:
                     CompareControllerView(player: player)
                 case .videoPlayerComponent:
@@ -171,7 +220,7 @@ struct PictureCompareView: View {
                 Text(compare.status).foregroundStyle(.secondary)
             }
         }
-        .aspectRatio(3840.0 / 1740.0, contentMode: .fit)
+        .aspectRatio(compare.aspect, contentMode: .fit)
         .overlay(alignment: .topLeading) {
             if let renderer = compare.renderer {
                 Text(renderer.rawValue)
