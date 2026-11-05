@@ -861,7 +861,10 @@ struct NativeMetalVideoPlayerView {
                     needsPictureRedraw = true
                 }
             }
-            guard needsPictureRedraw else { return }
+            guard needsPictureRedraw,
+                  let drawable = view.currentDrawable,
+                  let finalPassDesc = view.currentRenderPassDescriptor,
+                  let commandBuffer = renderer.commandQueue.makeCommandBuffer() else { return }
             guard let pixelBuffer = lastPixelBuffer,
                   let sourceTexture = makeTexture(from: pixelBuffer, cache: textureCache) else {
                 return
@@ -958,11 +961,17 @@ struct NativeMetalVideoPlayerView {
                 && visualAdjustments.saturation == 1 && visualAdjustments.clampedSharpenAmount <= 0.001
         }
 
-        /// The picture goes to the system's video layer: HDR with nothing for
-        /// Metal to do (no adjustments, no Smooth Motion), or a Dolby Vision
-        /// profile 5 picture, which only the system shows right.
+        /// The picture goes to the system's video layer only for Dolby Vision,
+        /// whose RPU only the system applies: always for profile 5 (purple and
+        /// green without it), and for 8.x while Metal has nothing to do (no
+        /// adjustments, no Smooth Motion). HDR10 and HLG draw through Metal's
+        /// EDR layer, tone-mapped with the picture's own metadata: on the
+        /// headset `AVPlayerLayer` showed them darker and flatter, reading as
+        /// SDR beside the same episode in AI 3D and through Metal (user,
+        /// 2026-11-04; the film player's A/B found the same of every Core
+        /// Animation video layer).
         private var wantsSystemLayer: Bool {
-            dynamicRange.isHDR && (needsSystemRenderer || (adjustmentsAreNeutral && !wantsSmoothMotion))
+            dynamicRange.isHDR && (needsSystemRenderer || (hasRPU && adjustmentsAreNeutral && !wantsSmoothMotion))
         }
 
         /// Smooth Motion is asked for and can run here (visionOS only).
@@ -1011,12 +1020,12 @@ struct NativeMetalVideoPlayerView {
             updateDisplayCriteria()
         }
 
-        /// HDR plays through the system's video layer, which shows it (and
-        /// Dolby Vision, RPU and all) as the OS does everywhere else. Metal
-        /// takes over only while adjustments, sharpening or Smooth Motion are
-        /// on, then in HDR itself (half-float frames into an EDR layer tagged
-        /// PQ or HLG; a Dolby Vision 8.x picture shows its base layer there).
-        /// Profile 5 never leaves the system layer.
+        /// Dolby Vision plays through the system's video layer, which applies
+        /// its RPU; Metal takes over for it only while adjustments, sharpening
+        /// or Smooth Motion are on (its HDR10 base layer then). HDR10 and HLG
+        /// always draw through Metal (half-float frames into an EDR layer
+        /// tagged PQ or HLG, `wantsSystemLayer`). Profile 5 never leaves the
+        /// system layer.
         private func updatePresentation() {
             guard host != nil, player != nil, dynamicRange != .unknown else { return }
             let system = wantsSystemLayer
