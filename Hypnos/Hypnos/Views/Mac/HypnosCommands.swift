@@ -28,6 +28,15 @@ struct HypnosCommands: Commands {
     let appModel: AppModel
     @Environment(\.openWindow) private var openWindow
     @FocusedValue(\.videoWindowModel) private var video
+    private let music = JellyfinMusicSession.shared
+
+    private var repeatTitle: String {
+        switch music.repeatMode {
+        case .off: "Repeat All"
+        case .all: "Repeat One"
+        case .one: "Turn Repeat Off"
+        }
+    }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -43,6 +52,30 @@ struct HypnosCommands: Commands {
                     NotificationCenter.default.post(name: .hypnosSelectTab, object: tab)
                 }
             }
+        }
+
+        // Music is one session for the whole app, so these act on it from any window. The shortcuts carry
+        // Option so they leave editing keys (Command-arrows in a text field) alone.
+        CommandMenu("Music") {
+            Button(music.isPlaying ? "Pause" : "Play") { music.toggle() }
+                .keyboardShortcut("p", modifiers: [.command, .option])
+            Button("Next") { music.next() }
+                .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+            Button("Previous") { music.previous() }
+                .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+            Divider()
+            Button(music.isShuffled ? "Turn Shuffle Off" : "Turn Shuffle On") { music.toggleShuffle() }
+                .keyboardShortcut("s", modifiers: [.command, .option])
+            Button(repeatTitle) { music.toggleRepeat() }
+                .keyboardShortcut("r", modifiers: [.command, .option])
+            Divider()
+            Button("Volume Up") { music.setVolume(music.volume + 0.1) }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+            Button("Volume Down") { music.setVolume(music.volume - 0.1) }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+            Divider()
+            Button("Mini Player") { openWindow(id: MusicMiniPlayerWindowView.windowID) }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
         }
 
         CommandMenu("Playback") {

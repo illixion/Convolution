@@ -275,6 +275,29 @@ actor JellyfinLibrary {
         precondition(MusicGrouping.letter.runs([JellyfinMusicItem](), item: { $0 }).count == 1)
         print("Sort direction and section headers follow the order in force: PASS")
 
+        // Repeat cycles off, all, one; Clear Up Next keeps the queue through the playing song only.
+        do {
+            func item(_ id: String) throws -> JellyfinMusicItem {
+                try JSONDecoder().decode(JellyfinMusicItem.self, from: Data("{\"Id\":\"\(id)\",\"Name\":\"\(id)\",\"Type\":\"Audio\"}".utf8))
+            }
+            let session = JellyfinMusicSession.shared
+            let songs = try ["q1", "q2", "q3", "q4"].map(item)
+            precondition(session.repeatMode == .off)
+            session.toggleRepeat(); precondition(session.repeatMode == .all && session.repeats)
+            session.toggleRepeat(); precondition(session.repeatMode == .one && session.repeats)
+            session.toggleRepeat(); precondition(session.repeatMode == .off && !session.repeats)
+            session.play(songs[1], from: songs, at: 1)
+            session.clearUpNext()
+            precondition(session.queue.map(\.id) == ["q1", "q2"] && session.currentIndex == 1 && session.current?.id == "q2")
+            session.clearUpNext()
+            precondition(session.queue.count == 2, "Clearing twice changes nothing")
+            session.stop()
+            session.clearUpNext()
+            precondition(session.queue.isEmpty, "Nothing playing, nothing to clear")
+            UserDefaults.standard.removeObject(forKey: "jellyfinMusic.repeatMode")
+        }
+        print("Repeat cycles off, all, one and Clear Up Next keeps the playing song: PASS")
+
         // Fuzzy search: typos, diacritics, punctuation closed up, every word required.
         let index = MusicSearchIndex(docs: JellyfinLibrary.corpus)
         func top(_ query: String) -> [String] { index.search(query).map(\.id) }

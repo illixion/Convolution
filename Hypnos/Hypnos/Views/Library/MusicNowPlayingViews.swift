@@ -12,6 +12,10 @@ struct MusicNowPlayingView: View {
     let music: JellyfinMusicSession
     @Environment(\.dismiss) private var dismiss
     @State private var pane = Pane.upNext
+    @State private var actions = MusicActions()
+    #if os(macOS) || os(visionOS)
+    @OpenWindowProxy private var openWindow
+    #endif
 
     private enum Pane: String, CaseIterable, Identifiable {
         case upNext = "Up Next", lyrics = "Lyrics"
@@ -62,8 +66,11 @@ struct MusicNowPlayingView: View {
                     Button { music.toggle() } label: { Image(systemName: music.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 34)) }
                         .accessibilityLabel(music.isPlaying ? "Pause" : "Play")
                     Button { music.next() } label: { Image(systemName: "forward.end.fill") }.accessibilityLabel("Next")
-                    Button { music.toggleRepeat() } label: { Image(systemName: "repeat").foregroundStyle(music.repeats ? Color.accentColor : .primary) }
-                        .accessibilityLabel(music.repeats ? "Turn Repeat Off" : "Turn Repeat On")
+                    Button { music.toggleRepeat() } label: {
+                        Image(systemName: music.repeatMode == .one ? "repeat.1" : "repeat").foregroundStyle(music.repeats ? Color.accentColor : .primary)
+                    }
+                    .accessibilityLabel("Repeat")
+                    .accessibilityValue(music.repeatMode == .off ? "Off" : music.repeatMode == .all ? "All" : "One")
                     Button { music.stop(); dismiss() } label: { Image(systemName: "stop.fill") }
                         .accessibilityLabel("Stop Playback")
                 }.font(.title2).buttonStyle(.plain)
@@ -73,7 +80,7 @@ struct MusicNowPlayingView: View {
                 .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 320)
                 Group {
                     switch pane {
-                    case .upNext: MusicUpNextList(music: music)
+                    case .upNext: MusicUpNextList(music: music, actions: actions)
                     case .lyrics: MusicLyricsView(music: music)
                     }
                 }
@@ -82,7 +89,14 @@ struct MusicNowPlayingView: View {
         }
         .padding(24)
         .navigationTitle("Now Playing")
+        .musicActionHost(actions, bottomInset: 24)
         .toolbar {
+            #if os(macOS) || os(visionOS)
+            ToolbarItem(placement: .primaryAction) {
+                Button { openWindow(id: MusicMiniPlayerWindowView.windowID) } label: { Image(systemName: "pip.enter") }
+                    .accessibilityLabel("Open Mini Player")
+            }
+            #endif
             ToolbarItem(placement: .primaryAction) { MusicAudioOptionsMenu(music: music) }
             ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
         }
@@ -96,11 +110,34 @@ struct MusicNowPlayingView: View {
     }
 }
 
-/// The queue: tap to jump, drag (or the menu) to reorder, swipe to remove.
-private struct MusicUpNextList: View {
+/// The queue: tap to jump, drag (or the menu) to reorder, swipe to remove, and a menu to clear what is after
+/// the playing song or keep the queue as a playlist.
+struct MusicUpNextList: View {
     let music: JellyfinMusicSession
+    /// Where "Save as Playlist" goes; nil hides it (the host has no playlist sheet).
+    var actions: MusicActions?
 
     var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                let remaining = max(0, music.queue.count - (music.currentIndex ?? -1) - 1)
+                Text(remaining == 0 ? "Nothing Up Next" : "\(remaining) Up Next").font(.subheadline).foregroundStyle(.secondary)
+                Spacer()
+                Menu {
+                    Button("Clear Up Next", systemImage: "text.badge.minus", role: .destructive) { music.clearUpNext() }
+                        .disabled(remaining == 0 && !music.hasRandomRefill)
+                    if let actions {
+                        Button("Save as Playlist…", systemImage: "text.badge.plus") { actions.saveQueueAsPlaylist() }
+                    }
+                } label: { Image(systemName: "ellipsis.circle") }
+                .accessibilityLabel("Queue options")
+            }
+            .padding(.horizontal, 16).padding(.vertical, 6)
+            list
+        }
+    }
+
+    private var list: some View {
         ScrollViewReader { proxy in
             List {
                 ForEach(Array(music.queue.enumerated()), id: \.offset) { index, track in
@@ -292,27 +329,7 @@ struct MusicMiniPlayerView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            RAVEPlayerControls(
-                state: RAVEPlayerControlState(
-                    currentTime: music.currentTime,
-                    duration: music.duration,
-                    isPlaying: music.isPlaying,
-                    isMuted: music.isMuted,
-                    volume: music.volume
-                ),
-                togglePlayback: { music.toggle() },
-                seek: { music.seek(to: $0) },
-                toggleMute: { music.toggleMute() },
-                layout: .strip,
-                setVolume: { music.setVolume($0) },
-                navigation: RAVEPlayerNavigation(
-                    previous: { music.previous() },
-                    next: { music.next() }
-                ),
-                pinned: AnyView(MusicMiniPlayerOptions(music: music)),
-                volumeAccessory: AnyView(MusicSoundCheckControl(music: music))
-            ) { EmptyView() }
-            .frame(width: width)
+            MusicTransportStrip(music: music, width: width)
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 8)
@@ -326,10 +343,48 @@ struct MusicMiniPlayerView: View {
     }
 }
 
+/// The video player's transport strip, driving the music session: seek, previous, play/pause, next, and the
+/// volume popover with Sound Check. The library's mini player and the Mini Player window share it.
+struct MusicTransportStrip: View {
+    let music: JellyfinMusicSession
+    var width: CGFloat?
+
+    var body: some View {
+        RAVEPlayerControls(
+            state: RAVEPlayerControlState(
+                currentTime: music.currentTime,
+                duration: music.duration,
+                isPlaying: music.isPlaying,
+                isMuted: music.isMuted,
+                volume: music.volume
+            ),
+            togglePlayback: { music.toggle() },
+            seek: { music.seek(to: $0) },
+            toggleMute: { music.toggleMute() },
+            layout: .strip,
+            setVolume: { music.setVolume($0) },
+            navigation: RAVEPlayerNavigation(
+                previous: { music.previous() },
+                next: { music.next() }
+            ),
+            pinned: AnyView(MusicMiniPlayerOptions(music: music)),
+            volumeAccessory: AnyView(MusicSoundCheckControl(music: music))
+        ) { EmptyView() }
+        .frame(width: width)
+    }
+}
+
 private struct MusicMiniPlayerOptions: View {
     let music: JellyfinMusicSession
+    #if os(macOS) || os(visionOS)
+    @OpenWindowProxy private var openWindow
+    #endif
     var body: some View {
         HStack(spacing: 16) {
+            #if os(macOS) || os(visionOS)
+            Button { openWindow(id: MusicMiniPlayerWindowView.windowID) } label: { Image(systemName: "pip.enter") }
+                .accessibilityLabel("Open Mini Player")
+            #endif
             Button { music.toggleShuffle() } label: {
                 Image(systemName: "shuffle")
                     .foregroundStyle(music.isShuffled ? Color.accentColor : .primary)
@@ -370,9 +425,11 @@ private struct MusicSoundCheckControl: View {
 struct MusicArtwork: View {
     let item: JellyfinMusicItem
     let music: JellyfinMusicSession
+    /// Pixels wide to ask the server for; the mini player window is big enough to want more than a grid tile.
+    var maxWidth = 360
     var body: some View {
         Group {
-            if let url = music.artworkURL(for: item) { AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { fallback } }
+            if let url = music.artworkURL(for: item, maxWidth: maxWidth) { AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { fallback } }
             else { fallback }
         }.background(Color.gray.opacity(0.2))
     }

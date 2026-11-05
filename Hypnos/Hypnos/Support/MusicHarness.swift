@@ -109,6 +109,38 @@ enum MusicHarness {
                 let items = try await songs(library, MusicRequest(section: .albums, sort: sort))
                 check("albums sort by \(sort.rawValue) is accepted", !items.isEmpty)
             }
+            for section in MusicSection.allCases where !section.sorts.isEmpty {
+                for sort in section.sorts {
+                    for descending in [false, true] {
+                        let items = try await songs(library, MusicRequest(section: section, sort: sort, descending: descending))
+                        check("\(section.rawValue) by \(sort.rawValue) \(descending ? "descending" : "ascending") loads", section == .favorites || section == .playlists || !items.isEmpty)
+                    }
+                }
+            }
+            let byTitle = try await songs(library, MusicRequest(section: .songs, sort: .title))
+            let byTitleDown = try await songs(library, MusicRequest(section: .songs, sort: .title, descending: true))
+            check("flipping the direction reverses the order", byTitle.count < 2 || byTitle.map(\.id) == byTitleDown.map(\.id).reversed(), "\(byTitle.first?.Name ?? "") / \(byTitleDown.first?.Name ?? "")")
+            let byTime = try await songs(library, MusicRequest(section: .songs, sort: .time))
+            check("songs sort by time, shortest first", byTime.map(\.seconds) == byTime.map(\.seconds).sorted(), byTime.prefix(3).map { JellyfinMusicItem.clock($0.seconds) }.joined(separator: " "))
+            let grouping = MusicGrouping.of(MusicRequest(section: .songs, sort: .dateAdded))
+            check("date added sections read as buckets", grouping.runs(byTime, item: { $0 }).allSatisfy { $0.title != nil }, grouping.runs(byTime, item: { $0 }).compactMap(\.title).joined(separator: ", "))
+            // The fuzzy search's server half: names only, then the ids resolved to full items.
+            for kind in MusicSearchKind.allCases {
+                let page = try await library.musicSearchPage(kind: kind, start: 0, limit: 500)
+                check("search names page for \(kind.rawValue)", !page.docs.isEmpty && page.total >= page.docs.count, "\(page.docs.count)/\(page.total) e.g. \(page.docs.first?.name ?? "")")
+            }
+            let docs = try await MusicSearchKind.allCases.asyncFlatMap { try await library.musicSearchPage(kind: $0, start: 0, limit: 500).docs }
+            let index = MusicSearchIndex(docs: docs)
+            if let doc = docs.first(where: { $0.kind == .song && $0.name.count > 5 }) {
+                var typo = Array(doc.name.lowercased()); typo.swapAt(1, 2)
+                let hits = index.search(String(typo))
+                check("a typo of \"\(doc.name)\" still finds it", hits.contains { $0.id == doc.id }, "\(hits.count) hits")
+                let resolved = try await library.musicItems(ids: hits.map(\.id))
+                check("hit ids resolve to items", Set(resolved.map(\.id)) == Set(hits.map(\.id)), "\(resolved.count)")
+            }
+            let mixSource = song
+            let mix = try await library.musicInstantMix(id: mixSource.id, limit: 10)
+            check("instant mix returns songs", !mix.isEmpty && mix.allSatisfy(\.isSong), "\(mix.count)")
             let random = try await songs(library, MusicRequest(section: .songs, playbackSongs: true, randomOrder: true))
             check("random playback page is songs", !random.isEmpty && random.allSatisfy(\.isSong))
 
@@ -231,6 +263,14 @@ extension JellyfinMusicSession {
         await deliverReport(path: "Sessions/Playing", payload: started, base: base, token: token, userID: userID, itemID: itemID, restoring: nil)
         nonisolated(unsafe) let stopped: [String: Any] = ["ItemId": itemID, "PlaySessionId": play, "PositionTicks": positionTicks]
         await deliverReport(path: "Sessions/Playing/Stopped", payload: stopped, base: base, token: token, userID: userID, itemID: itemID, restoring: counted ? nil : before)
+    }
+}
+
+private extension Sequence {
+    func asyncFlatMap<T>(_ transform: (Element) async throws -> [T]) async rethrows -> [T] {
+        var result: [T] = []
+        for element in self { result += try await transform(element) }
+        return result
     }
 }
 

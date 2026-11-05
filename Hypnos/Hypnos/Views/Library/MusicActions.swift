@@ -133,6 +133,58 @@ final class MusicActions {
     }
 
     func showInfo(_ item: JellyfinMusicItem) { infoItem = item }
+
+    /// Play songs like `item`, starting with `item` itself when it is a song.
+    func startStation(_ item: JellyfinMusicItem) async {
+        guard let library = LibraryService.current() else { return post("Configure Jellyfin in Settings first.") }
+        post("Starting a station from “\(item.Name)”…")
+        do {
+            var mix = try await library.musicInstantMix(id: item.id)
+            if item.isSong { mix.removeAll { $0.id == item.id }; mix.insert(item, at: 0) }
+            guard let first = mix.first else { return post("Jellyfin found no similar songs.") }
+            JellyfinMusicSession.shared.play(first, from: mix)
+            post("Station from “\(item.Name)”")
+        } catch { post(error.localizedDescription) }
+    }
+
+    /// The queue as it stands, offered to the playlist picker.
+    func saveQueueAsPlaylist() {
+        let songs = JellyfinMusicSession.shared.queue
+        guard !songs.isEmpty else { return post("The queue is empty.") }
+        playlistRequest = PlaylistRequest(title: "Up Next", items: songs)
+    }
+}
+
+extension View {
+    /// What the Music section's screens share: the coordinator in the environment, its playlist and Get Info
+    /// sheets, and the notice that says what happened. Now Playing and the mini player window host their own.
+    func musicActionHost(_ actions: MusicActions, bottomInset: CGFloat = 96) -> some View {
+        modifier(MusicActionHost(actions: actions, bottomInset: bottomInset))
+    }
+}
+
+private struct MusicActionHost: ViewModifier {
+    @Bindable var actions: MusicActions
+    let bottomInset: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.musicActions, actions)
+            .task(id: LibraryService.configurationKey) { await actions.prepare() }
+            .sheet(item: $actions.playlistRequest) { MusicPlaylistPickerSheet(request: $0, actions: actions) }
+            .sheet(item: $actions.infoItem) { MusicInfoEditorSheet(item: $0, actions: actions) }
+            .overlay(alignment: .bottom) {
+                if let notice = actions.notice {
+                    Text(notice)
+                        .font(.subheadline).padding(.horizontal, 16).padding(.vertical, 10)
+                        .background(.regularMaterial, in: Capsule())
+                        .padding(.bottom, bottomInset)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        .accessibilityAddTraits(.updatesFrequently)
+                }
+            }
+            .animation(.easeInOut(duration: 0.25), value: actions.notice)
+    }
 }
 
 extension EnvironmentValues {

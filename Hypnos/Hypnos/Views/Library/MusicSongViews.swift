@@ -202,6 +202,7 @@ struct MusicItemMenu: View {
                 if item.Type != "Playlist" {
                     Button("Add to Playlist…", systemImage: "text.badge.plus") { Task { await actions.addToPlaylist(item) } }
                 }
+                Button("Start Station", systemImage: "dot.radiowaves.left.and.right") { Task { await actions.startStation(item) } }
             }
         }
         Section {

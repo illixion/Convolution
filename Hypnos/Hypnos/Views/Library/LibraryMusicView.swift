@@ -69,27 +69,11 @@ struct LibraryMusicView: View {
             }
         }
         .navigationTitle("Music")
-        .environment(\.musicActions, actions)
-        .task(id: LibraryService.configurationKey) {
-            await actions.prepare()
-            MusicSearchStore.shared.prepare(onlyIfCached: true)
-        }
+        .musicActionHost(actions)
+        .task(id: LibraryService.configurationKey) { MusicSearchStore.shared.prepare(onlyIfCached: true) }
         .onChange(of: search) { _, text in
             if !text.isEmpty { MusicSearchStore.shared.prepare() }
         }
-        .sheet(item: $actions.playlistRequest) { MusicPlaylistPickerSheet(request: $0, actions: actions) }
-        .sheet(item: $actions.infoItem) { MusicInfoEditorSheet(item: $0, actions: actions) }
-        .overlay(alignment: .bottom) {
-            if let notice = actions.notice {
-                Text(notice)
-                    .font(.subheadline).padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(.regularMaterial, in: Capsule())
-                    .padding(.bottom, 96)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    .accessibilityAddTraits(.updatesFrequently)
-            }
-        }
-        .animation(.easeInOut(duration: 0.25), value: actions.notice)
     }
 
     /// What a click on a column header does; nil in the sections that have no order to pick.

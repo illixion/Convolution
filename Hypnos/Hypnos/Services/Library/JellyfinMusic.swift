@@ -82,6 +82,12 @@ struct MusicPlayState: Sendable {
     let lastPlayed: String?
 }
 
+/// What happens when a song ends: stop at the end of the queue, wrap around it, or play the same song again.
+enum MusicRepeatMode: String, Sendable {
+    case off, all, one
+    var next: MusicRepeatMode { self == .off ? .all : self == .all ? .one : .off }
+}
+
 enum JellyfinMusicAudioMode: String, CaseIterable, Identifiable {
     case speaker
     case music
@@ -109,7 +115,9 @@ final class JellyfinMusicSession {
     /// Even out song loudness with the server's `NormalizationGain` (Jellyfin's LUFS scan).
     private(set) var soundCheck = UserDefaults.standard.bool(forKey: "jellyfinMusic.soundCheck")
     var isShuffled = false
-    var repeats = false
+    private(set) var repeatMode = MusicRepeatMode(rawValue: UserDefaults.standard.string(forKey: "jellyfinMusic.repeatMode") ?? "") ?? .off
+    /// Whether the queue wraps around: Repeat All, and Repeat One once the listener moves on by hand.
+    var repeats: Bool { repeatMode != .off }
     var error: String?
     @ObservationIgnored private var orderedQueue: [JellyfinMusicItem] = []
     @ObservationIgnored private var randomSource: MusicRequest?
@@ -265,6 +273,9 @@ final class JellyfinMusicSession {
         }
     }
 
+    /// Whether the queue refills itself from the server when it runs out (a library or artist shuffle).
+    var hasRandomRefill: Bool { randomSource != nil }
+
     private func resetRandomSource() {
         queueGeneration = UUID()
         refillTask?.cancel()
@@ -319,12 +330,12 @@ final class JellyfinMusicSession {
     }
 
     func seek(to seconds: Double) { player?.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)); currentTime = seconds; publishNowPlaying() }
-    func artworkURL(for item: JellyfinMusicItem) -> URL? {
+    func artworkURL(for item: JellyfinMusicItem, maxWidth: Int = 360) -> URL? {
         guard let (base, token) = connection() else { return nil }
         let imageID = item.ImageTags?["Primary"] != nil ? item.Id : item.AlbumId
         guard let imageID, let tag = item.ImageTags?["Primary"] ?? item.AlbumPrimaryImageTag else { return nil }
         var c = URLComponents(url: base.appendingPathComponent("Items/\(imageID)/Images/Primary"), resolvingAgainstBaseURL: false)
-        c?.queryItems = [URLQueryItem(name: "tag", value: tag), URLQueryItem(name: "maxWidth", value: "360"), URLQueryItem(name: "ApiKey", value: token)]
+        c?.queryItems = [URLQueryItem(name: "tag", value: tag), URLQueryItem(name: "maxWidth", value: String(maxWidth)), URLQueryItem(name: "ApiKey", value: token)]
         return c?.url
     }
     func toggleShuffle() {
@@ -343,7 +354,22 @@ final class JellyfinMusicSession {
         }
         refreshPreload()
     }
-    func toggleRepeat() { repeats.toggle(); refreshPreload() }
+    /// Off, then Repeat All, then Repeat One.
+    func toggleRepeat() {
+        repeatMode = repeatMode.next
+        UserDefaults.standard.set(repeatMode.rawValue, forKey: "jellyfinMusic.repeatMode")
+        refreshPreload()
+    }
+
+    /// Everything after the playing song leaves the queue, and a random queue stops refilling: the song plays out
+    /// and that is the end (iTunes's Clear Up Next).
+    func clearUpNext() {
+        guard let currentIndex else { return }
+        resetRandomSource()
+        queue.removeSubrange((currentIndex + 1)...)
+        orderedQueue = queue
+        refreshPreload()
+    }
 
     func setAudioMode(_ mode: JellyfinMusicAudioMode) {
         guard audioMode != mode else { return }
@@ -389,7 +415,7 @@ final class JellyfinMusicSession {
 
     /// Where playback goes after the current song, when that is already known (not a random refill).
     private func upcomingIndex() -> Int? {
-        guard let currentIndex else { return nil }
+        guard let currentIndex, repeatMode != .one else { return nil }
         if currentIndex + 1 < queue.count { return currentIndex + 1 }
         if randomSource == nil, repeats, !queue.isEmpty { return 0 }
         return nil
@@ -480,7 +506,10 @@ final class JellyfinMusicSession {
                 // With a song queued behind it the player rolls on by itself (advanceToPreloaded).
                 guard let self, self.preloaded == nil, let ended,
                       ended === self.player?.currentItem else { return }
-                self.next()
+                // Repeat One starts the same song over; nothing is queued behind it, so the end lands here.
+                if self.repeatMode == .one, let index = self.currentIndex, let (base, token) = self.connection() {
+                    self.start(at: index, base: base, token: token)
+                } else { self.next() }
             }
         }
         reportStarted()

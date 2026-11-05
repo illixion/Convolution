@@ -306,6 +306,15 @@ struct HypnosApp: App {
 
         // Debug: the film's picture through Apple's renderers, beside the
         // film player (the `filmCompare` debug command).
+        // The music mini player: a small glass panel to park beside other windows.
+        Window("Mini Player", id: MusicMiniPlayerWindowView.windowID) {
+            MusicMiniPlayerWindowView()
+        }
+        .windowStyle(.plain)
+        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
+
         Window("Picture Compare", id: PictureCompare.windowID) {
             PictureCompareView()
         }
@@ -430,6 +439,14 @@ struct HypnosApp: App {
         }
         .defaultSize(width: 380, height: 640)
         .windowResizability(.contentSize)
+        .handlesExternalEvents(matching: [])
+
+        // The music mini player (iTunes's): cover, song and transport, small enough to park beside other work.
+        Window("Mini Player", id: MusicMiniPlayerWindowView.windowID) {
+            MusicMiniPlayerWindowView()
+        }
+        .windowResizability(.contentSize)
+        .restorationBehavior(.disabled)
         .handlesExternalEvents(matching: [])
 
         Window("Console", id: "console") {

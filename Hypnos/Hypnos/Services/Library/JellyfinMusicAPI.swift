@@ -103,6 +103,16 @@ extension JellyfinLibrary {
         return (docs, page.TotalRecordCount ?? start + docs.count)
     }
 
+    /// A station started from a song, album, artist, genre or playlist: Jellyfin's instant mix of similar songs.
+    func musicInstantMix(id: String, limit: Int = 50) async throws -> [JellyfinMusicItem] {
+        let userID = try await resolveUserId()
+        let data = try await http.data("Items/\(id)/InstantMix", query: [
+            .init(name: "userId", value: userID), .init(name: "limit", value: String(limit)),
+            .init(name: "Fields", value: "DateCreated,ChildCount,Genres,MediaStreams"),
+        ])
+        return try JSONDecoder().decode(JellyfinMusicPage.self, from: data).Items.filter(\.isSong)
+    }
+
     // MARK: Ratings
 
     /// Stars are Hypnos's own view of Jellyfin's 0-10 `UserData.Rating` (two points a star). Jellyfin's web UI
