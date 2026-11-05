@@ -368,6 +368,11 @@ struct VideoWindowView: View {
             }
             #if os(visionOS)
             .modifier(CinemaVideoWindowHook(windowModel: windowModel, hudControls: AnyView(VStack(alignment: .leading) { titleButton; videoOrnament }.environment(appModel)), closePlayer: { dismissWindow() }))
+            // In the HUD the skip button and notices go with the picture.
+            .onChange(of: hudPromptKey, initial: true) { _, key in
+                Cinema.shared.setHUDPrompt(key.inHUD ? ornamentPrompt : nil,
+                                           for: .video(ObjectIdentifier(windowModel)))
+            }
             #endif
 
             #if os(visionOS)
@@ -524,13 +529,13 @@ struct VideoWindowView: View {
         .playerChromeOrnament(
             isPresented: !windowModel.isUIHidden && !appModel.allWindowsHidden && Cinema.shared.mode(for: .video(ObjectIdentifier(windowModel))) != .hud,
             keepsMounted: !appModel.allWindowsHidden && PlayerOrnamentStack<EmptyView>.keepsMounted(
-                subtitles: bandSubtitles, hasPrompt: ornamentPrompt != nil),
+                subtitles: bandSubtitles, hasPrompt: ornamentPrompt != nil && !hudPromptKey.inHUD),
             attachmentAnchor: .scene(.bottom),
             contentAlignment: .top
         ) { shown in
             PlayerOrnamentStack(
                 subtitles: bandSubtitles, controlsVisible: shown,
-                prompt: ornamentPrompt,
+                prompt: hudPromptKey.inHUD ? nil : ornamentPrompt,
                 gap: windowModel.showsStereoPicture ? Self.stereoControlsGap : 12,
                 filmTime: { windowModel.currentTime }
             ) { videoOrnament }
@@ -737,6 +742,16 @@ struct VideoWindowView: View {
             if let skip { skip } else { undo }
         })
     }
+
+    #if os(visionOS)
+    /// What the prompt shows, and whether the HUD has it instead of the window.
+    private var hudPromptKey: CinemaPromptKey {
+        CinemaPromptKey(inHUD: Cinema.shared.mode(for: .video(ObjectIdentifier(windowModel))) == .hud,
+                        notices: [windowModel.qualityNotice].compactMap { $0 },
+                        segment: windowModel.offeredSegment,
+                        undo: windowModel.segmentSkipper.undo?.id)
+    }
+    #endif
 
     /// Resumes at `windowValue.startSeconds` (the Library's Resume), for the
     /// video the window opened with only. The model holds the position until

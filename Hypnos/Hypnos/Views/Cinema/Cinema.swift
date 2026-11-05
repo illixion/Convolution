@@ -92,6 +92,15 @@ struct CinemaSubtitles {
     let time: @MainActor () -> Double
 }
 
+/// What an owner's prompt (skip button, notices) shows, so it is handed to
+/// the HUD again only when that changes.
+struct CinemaPromptKey: Equatable {
+    var inHUD: Bool
+    var notices: [String]
+    var segment: LibraryMediaSegment?
+    var undo: UUID?
+}
+
 /// Which player the space is serving.
 enum CinemaOwner: Equatable {
     case film
@@ -131,8 +140,19 @@ final class Cinema {
     /// Taps on the screen, for the owner's window to toggle its controls.
     private(set) var screenTaps = 0
     private(set) var status = "Closed"
-    var hudOffset = SIMD3<Float>(0, 0, -2)
-    var hudWidth: Float = 2 * 2 * tanf(55 * .pi / 360)
+    var hudOffset = Cinema.hudHomeOffset
+    var hudWidth: Float = Cinema.hudHomeWidth
+
+    /// Where the HUD opens and Recenter takes it, picture-in-picture style:
+    /// a small picture 1 m away, low in the right of the view (18° right,
+    /// 12° down, 31° wide). It used to open 2 m ahead and 55° wide, a second
+    /// big screen that had to be shrunk and pulled in by hand every time
+    /// (user, 2026-11-05). Where the wearer then puts it is kept (`save`).
+    static let hudHomeWidth: Float = 0.55
+    static let hudHomeOffset: SIMD3<Float> = {
+        let azimuth: Float = 18 * .pi / 180, elevation: Float = -12 * .pi / 180
+        return SIMD3(sinf(azimuth) * cosf(elevation), sinf(elevation), -cosf(azimuth) * cosf(elevation))
+    }()
     /// The picture's aspect, reported by the space each frame so the framing
     /// knows how tall it is.
     @ObservationIgnored var hudAspect: Float = 16 / 9
@@ -152,8 +172,22 @@ final class Cinema {
     }
 
     func recenterHUD() {
-        hudOffset = SIMD3(0, 0, -2)
-        hudWidth = 4 * tanf(55 * .pi / 360)
+        hudOffset = Self.hudHomeOffset
+        hudWidth = Self.hudHomeWidth
+        refitHUD()
+        save()
+    }
+
+    /// The wearer let go of the HUD after moving or resizing it: it opens there next time.
+    func hudPlacementSettled() { save() }
+
+    /// The skip button and notices the owner wants shown with the HUD's
+    /// picture, which its window then doesn't show.
+    private(set) var hudPrompt: AnyView?
+
+    func setHUDPrompt(_ prompt: AnyView?, for owner: CinemaOwner) {
+        guard self.owner == owner else { return }
+        hudPrompt = prompt
     }
 
     /// How far the HUD's smoothed head may lag the real one right now.
@@ -231,6 +265,9 @@ final class Cinema {
         var headLocked: Bool?
         /// Optional: settings saved before it existed decode as full.
         var hudStabilization: Float?
+        /// Optional: where the wearer left the HUD; before, it opened at home.
+        var hudOffset: [Float]?
+        var hudWidth: Float?
     }
 
     private init() {
@@ -241,6 +278,12 @@ final class Cinema {
             dimsSurroundings = settings.dimsSurroundings
             headLocked = settings.headLocked ?? false
             hudStabilization = min(1, max(0, settings.hudStabilization ?? 1))
+            if let offset = settings.hudOffset, offset.count == 3,
+               let width = settings.hudWidth, width.isFinite {
+                hudWidth = min(4, max(0.25, width))
+                hudOffset = HUDFraming.clamp(offset: SIMD3(offset[0], offset[1], offset[2]),
+                                             requestedWidth: hudWidth, aspect: hudAspect)
+            }
         }
         RAVEMediaPolicy.headLockedSurround = headLocked
     }
@@ -248,7 +291,8 @@ final class Cinema {
     private func save() {
         let settings = Settings(screenDistance: screenDistance, screenWidthDegrees: screenWidthDegrees,
                                 dimsSurroundings: dimsSurroundings, headLocked: headLocked,
-                                hudStabilization: hudStabilization)
+                                hudStabilization: hudStabilization,
+                                hudOffset: [hudOffset.x, hudOffset.y, hudOffset.z], hudWidth: hudWidth)
         if let data = try? JSONEncoder().encode(settings) {
             UserDefaults.standard.set(data, forKey: Self.defaultsKey)
         }
@@ -371,6 +415,7 @@ final class Cinema {
         hudVideoModel = nil
         hudControlsView = nil
         hudCloseAction = nil
+        hudPrompt = nil
         screenPose = nil
         screenTarget = nil
     }
@@ -729,6 +774,15 @@ private struct CinemaHUDUtilities: View {
     }
 }
 
+/// The owner's skip button and notices, drawn over the HUD's picture.
+private struct CinemaHUDPrompt: View {
+    private let cinema = Cinema.shared
+    var body: some View {
+        Group { if let prompt = cinema.hudPrompt { prompt } }
+            .animation(.easeInOut(duration: 0.2), value: cinema.hudPrompt == nil)
+    }
+}
+
 private struct CinemaHUDMenuAttachment: View {
     let presentation: RAVEImmersivePlayerPresentation
 
@@ -767,7 +821,13 @@ struct CinemaSpaceView: View {
     @State private var resizeStart: Float?
     /// A video window's picture: a `VideoPlayerComponent` on its player.
     @State private var playerPicture = Entity()
-    @State private var playerPictureSource: ObjectIdentifier?
+    /// The player the picture shows, held so it can't be mistaken for the
+    /// next one: an `ObjectIdentifier` of a freed player was reused by the
+    /// next episode's, at the same address, and the screen kept the old
+    /// picture frozen while the new episode's sound played (device, 2026-11-05).
+    @State private var playerPictureSource: AVPlayer?
+    /// The skip button and notices, over the picture's bottom-right corner.
+    @State private var hudPrompt = Entity()
     /// The stereo engine whose plane is on the screen, given back when it isn't.
     @State private var stereoPictureEngine: Pseudo3DStereoEngine?
     /// The subtitles over the picture, a view attachment.
@@ -797,6 +857,7 @@ struct CinemaSpaceView: View {
                     edge.components.set(HoverEffectComponent())
                 }
                 hudControls.components.set(ViewAttachmentComponent(rootView: CinemaHUDControls(presentation: presentation)))
+                hudPrompt.components.set(ViewAttachmentComponent(rootView: CinemaHUDPrompt().environment(appModel)))
                 hudClose.components.set(ViewAttachmentComponent(rootView: CinemaHUDClose {
                     guard let owner = cinema.owner else { return }
                     cinema.hudCloseAction?()
@@ -828,7 +889,10 @@ struct CinemaSpaceView: View {
                         cinema.moveHUD(to: candidate)
                     }
                 }
-                .onEnded { _ in dragStart = nil; screenDragStart = nil })
+                .onEnded { _ in
+                    if dragStart != nil { cinema.hudPlacementSettled() }
+                    dragStart = nil; screenDragStart = nil
+                })
             .simultaneousGesture(DragGesture().targetedToAnyEntity()
                 .onChanged { value in
                     guard value.entity === leftEdge || value.entity === rightEdge else { return }
@@ -836,9 +900,12 @@ struct CinemaSpaceView: View {
                     if resizeStart == nil { resizeStart = cinema.pictureWidth }
                     let movement = value.convert(value.translation3D, from: .local, to: screen)
                     let sign: Float = value.entity === rightEdge ? 1 : -1
-                    if let resizeStart { cinema.hudWidth = min(4, max(0.4, resizeStart + sign * 2 * movement.x)) }
+                    if let resizeStart { cinema.hudWidth = min(4, max(0.25, resizeStart + sign * 2 * movement.x)) }
                 }
-                .onEnded { _ in resizeStart = nil })
+                .onEnded { _ in
+                    if resizeStart != nil { cinema.hudPlacementSettled() }
+                    resizeStart = nil
+                })
         }
         .preferredSurroundingsEffect(cinema.mode == .bigScreen && cinema.dimsSurroundings ? .systemDark : nil)
         .onAppear { cinema.spaceAppeared() }
@@ -882,6 +949,7 @@ struct CinemaSpaceView: View {
             hudControls.removeFromParent()
             hudClose.removeFromParent()
             hudUtilities.removeFromParent()
+            hudPrompt.removeFromParent()
             presentationEntity.components.remove(ViewAttachmentComponent.self)
             presentationEntity.removeFromParent()
             presentation.dismiss()
@@ -908,6 +976,7 @@ struct CinemaSpaceView: View {
             if hudControls.parent !== screen { screen.addChild(hudControls) }
             if hudClose.parent !== screen { screen.addChild(hudClose) }
             if hudUtilities.parent !== screen { screen.addChild(hudUtilities) }
+            if hudPrompt.parent !== screen { screen.addChild(hudPrompt) }
             if presentationEntity.parent !== screen { screen.addChild(presentationEntity) }
             if leftEdge.parent !== screen { screen.addChild(leftEdge) }
             if rightEdge.parent !== screen { screen.addChild(rightEdge) }
@@ -923,6 +992,7 @@ struct CinemaSpaceView: View {
             hudControls.removeFromParent()
             hudClose.removeFromParent()
             hudUtilities.removeFromParent()
+            hudPrompt.removeFromParent()
             presentationEntity.components.remove(ViewAttachmentComponent.self)
             presentationEntity.removeFromParent()
             presentation.dismiss()
@@ -953,10 +1023,18 @@ struct CinemaSpaceView: View {
                 engine.noteLentPlaneWidth(cinema.pictureWidth)
                 break
             }
-            if let player = cinema.screenPlayer, playerPictureSource != ObjectIdentifier(player) {
-                playerPicture.components.set(VideoPlayerComponent(avPlayer: player))
-                playerPictureSource = ObjectIdentifier(player)
-                AppLogger.videoWindow.info("Cinema: video player on the big screen")
+            if let player = cinema.screenPlayer, playerPictureSource !== player {
+                // A fresh entity for every player: a second
+                // `VideoPlayerComponent` set on one that already showed a
+                // player isn't known to switch what it draws.
+                let replacing = playerPictureSource != nil
+                releasePlayerPicture()
+                let entity = Entity()
+                entity.name = "cinema-player-picture"
+                entity.components.set(VideoPlayerComponent(avPlayer: player))
+                playerPicture = entity
+                playerPictureSource = player
+                AppLogger.videoWindow.info("Cinema: video player on the \(cinema.mode.rawValue, privacy: .public) screen\(replacing ? " (next player)" : "", privacy: .public)")
             }
             // Nothing lent yet (the space opened before the player resolved).
             guard playerPictureSource != nil else {
@@ -1028,6 +1106,7 @@ struct CinemaSpaceView: View {
                 presentationEntity.position = SIMD3(x, y + 0.015 + bounds.extents.y * scale / 2, 0.1)
             }
         }
+        if cinema.mode == .hud { placeHUDPrompt(pictureHeight: height) }
         leftEdge.position = SIMD3(-cinema.pictureWidth / 2, 0, 0.02)
         rightEdge.position = SIMD3(cinema.pictureWidth / 2, 0, 0.02)
         leftEdge.scale.y = max(height / 0.6, 0.2)
@@ -1052,6 +1131,22 @@ struct CinemaSpaceView: View {
         }
         placeSubtitles(aspect: aspect)
         cinema.noteScreenAttached(cinema.mode != .hud || headAnchor.isAnchored)
+    }
+
+    /// The skip button and notices over the picture's bottom-right corner,
+    /// at the controls' scale, shown whether or not the controls are: like
+    /// the window's prompt, the button offers itself for its first seconds.
+    /// In front of the subtitles (0.05) so they never cover it.
+    private func placeHUDPrompt(pictureHeight height: Float) {
+        guard let bounds = hudPrompt.components[ViewAttachmentComponent.self]?.bounds,
+              bounds.extents.x > 1e-4 else { return }
+        // The controls' points-to-metres scale (natural size until measured).
+        let scale = hudControls.scale.x
+        let size = bounds.extents * scale
+        let margin = cinema.pictureWidth * 0.03
+        hudPrompt.scale = SIMD3(repeating: scale)
+        hudPrompt.position = SIMD3(cinema.pictureWidth / 2 - margin - size.x / 2,
+                                   -height / 2 + margin + size.y / 2, 0.06)
     }
 
     /// Immersive spaces reject modal presentations, including ones created
@@ -1116,6 +1211,7 @@ struct CinemaSpaceView: View {
     private func releasePlayerPicture() {
         guard playerPictureSource != nil else { return }
         playerPicture.components.remove(VideoPlayerComponent.self)
+        playerPicture.components.remove(CollisionComponent.self)
         playerPicture.removeFromParent()
         playerPictureSource = nil
     }

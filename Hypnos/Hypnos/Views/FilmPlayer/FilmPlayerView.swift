@@ -209,6 +209,10 @@ struct FilmPlayerView: View {
             .onChange(of: chromeVisible, initial: true) { _, visible in
                 if cinema.owner == .film { cinema.hudFilmChromeVisible = visible }
             }
+            // In the HUD the skip button and notices go with the picture.
+            .onChange(of: hudPromptKey, initial: true) { _, key in
+                cinema.setHUDPrompt(key.inHUD ? prompt(controlsVisible: chromeVisible) : nil, for: .film)
+            }
             .onChange(of: menuDismissals) { _, _ in
                 if cinema.mode(for: .film) == .hud { installHUDControls() }
             }
@@ -514,13 +518,11 @@ struct FilmPlayerView: View {
                     }
                 }
                 if stereoSource == nil, flatSubtitleStyle == .inPicture, !cinema.showsScreen(for: .film) {
-                    // The picture's plane claims the window's depth and is pulled
-                    // back by `viewRecess` to sit on the glass; a plain 2D sibling
-                    // lands at the front of that depth, ~9 cm proud of the picture
-                    // and close to the viewer's face. The same offset puts the
-                    // subtitles back on the picture.
+                    // A plain 2D sibling of the picture's plane lands at the
+                    // front of the window's depth, in front of the picture;
+                    // this puts the subtitles back on it (`RAVEVideoPlaneOverlay`).
                     subtitleOverlay
-                        .offset(z: RAVEVideoPlane.viewRecess)
+                        .onRAVEVideoPlane()
                 }
             }
         }
@@ -535,12 +537,12 @@ struct FilmPlayerView: View {
         .playerChromeOrnament(
             isPresented: chromeVisible && cinema.mode(for: .film) != .hud,
             keepsMounted: PlayerOrnamentStack<EmptyView>.keepsMounted(
-                subtitles: bandSubtitles, hasPrompt: prompt(controlsVisible: chromeVisible) != nil),
+                subtitles: bandSubtitles, hasPrompt: !hudPromptKey.inHUD && prompt(controlsVisible: chromeVisible) != nil),
             attachmentAnchor: .scene(.bottom), contentAlignment: .top
         ) { shown in
             PlayerOrnamentStack(
                 subtitles: bandSubtitles, controlsVisible: shown,
-                prompt: prompt(controlsVisible: chromeVisible),
+                prompt: hudPromptKey.inHUD ? nil : prompt(controlsVisible: chromeVisible),
                 gap: stereoSource == nil ? 12 : VideoWindowView.stereoControlsGap,
                 filmTime: { player.currentTime }
             ) {
@@ -660,6 +662,14 @@ struct FilmPlayerView: View {
         session.subtitles.selected != nil && !cinema.hidesPicture(for: .film)
             && (stereoSource != nil ? stereoSubtitleStyle : flatSubtitleStyle) == .belowPicture
             ? session.subtitles : nil
+    }
+
+    /// What the prompt shows, and whether the HUD has it instead of the window.
+    private var hudPromptKey: CinemaPromptKey {
+        CinemaPromptKey(inHUD: cinema.mode(for: .film) == .hud,
+                        notices: [audioNotice, pictureNotice].compactMap { $0 },
+                        segment: skipper.offered(at: player.currentTime, controlsVisible: chromeVisible),
+                        undo: skipper.undo?.id)
     }
 
     private func installHUDControls() {
@@ -1050,7 +1060,7 @@ struct FilmTransport: View {
         }
     }
 
-    /// The Cinema button, kept on the bar.
+    /// The Cinema button, kept on the bar; elsewhere the system's Picture in Picture.
     private var cinemaButton: AnyView? {
         #if os(visionOS)
         AnyView(CinemaButton(owner: .film, dismissal: menuDismissal,
