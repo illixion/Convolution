@@ -35,27 +35,14 @@ struct MusicMiniPlayerWindowView: View {
     }
 
     private func panel(_ current: JellyfinMusicItem) -> some View {
-        VStack(spacing: 0) {
+        RAVEMiniPlayerPanel(width: Self.width, title: current.Name, subtitle: current.artist, detail: current.Album) {
             MusicArtwork(item: current, music: music, maxWidth: 720)
-                .frame(width: Self.width, height: Self.width)
-                .clipped()
                 .id(current.id)
                 .transition(.opacity)
-            VStack(spacing: 2) {
-                Text(current.Name).font(.title3.weight(.semibold)).lineLimit(1)
-                Text(current.artist).font(.body).foregroundStyle(.secondary).lineLimit(1)
-                if let album = current.Album {
-                    Text(album).font(.subheadline).foregroundStyle(.tertiary).lineLimit(1)
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 14)
+        } actions: {
             actionRow(current)
-                .padding(.top, 10)
-            MusicTransportStrip(music: music, width: Self.width - 24)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
-                .padding(.top, 4)
+        } transport: {
+            MusicTransportStrip(music: music)
         }
     }
 
@@ -81,9 +68,7 @@ struct MusicMiniPlayerWindowView: View {
     }
 
     private var idle: some View {
-        ContentUnavailableView("Nothing Playing", systemImage: "music.note",
-                               description: Text("Play a song from your Jellyfin library."))
-            .frame(width: Self.width, height: Self.width)
+        RAVEMiniPlayerPlaceholder(width: Self.width, message: "Play a song from your Jellyfin library.")
     }
 }
 

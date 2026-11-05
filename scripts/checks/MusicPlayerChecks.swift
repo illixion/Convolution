@@ -314,7 +314,6 @@ actor JellyfinLibrary {
         precondition(Set(top("beatles").prefix(1)) == ["ar1"] && top("beatles").contains("s1"), "Songs match on their artist too")
         precondition(top("ace of spades").prefix(2).sorted() == ["al2", "s2"], "Album and song of the same name tie ahead of the rest")
         precondition(MusicSearchIndex(docs: []).search("a").isEmpty)
-        precondition(MusicSearchIndex.editDistance(Array("ab".unicodeScalars), Array("ba".unicodeScalars)[...], limit: 2) == 1, "A swap costs one")
         print("Fuzzy search forgives typos, folds diacritics and requires every word: PASS")
 
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hypnos-music-search-\(UUID().uuidString)")

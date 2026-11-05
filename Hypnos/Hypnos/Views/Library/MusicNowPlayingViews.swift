@@ -307,6 +307,7 @@ struct MusicAudioOptionsMenu: View {
     }
 }
 
+/// The library's compact mini player: RAVEUI's `RAVEMiniPlayerBar` around the music session's transport strip.
 struct MusicMiniPlayerView: View {
     let current: JellyfinMusicItem
     let music: JellyfinMusicSession
@@ -314,31 +315,11 @@ struct MusicMiniPlayerView: View {
     var width: CGFloat?
 
     var body: some View {
-        VStack(spacing: 2) {
-            Button(action: onShowNowPlaying) {
-                HStack(spacing: 10) {
-                    MusicArtwork(item: current, music: music)
-                        .frame(width: 38, height: 38)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(current.Name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                        Text(current.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+        RAVEMiniPlayerBar(title: current.Name, subtitle: current.artist, open: onShowNowPlaying) {
+            MusicArtwork(item: current, music: music)
+        } controls: {
             MusicTransportStrip(music: music, width: width)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 8)
-        .transition(.opacity)
-        #if os(visionOS)
-        .glassBackgroundEffect(in: .rect(cornerRadius: 28))
-        #else
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
-        #endif
         .allowsHitTesting(music.current != nil)
     }
 }
