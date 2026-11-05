@@ -181,13 +181,29 @@ struct SubtitleSource: Sendable {
     }
 }
 
-/// The user's subtitle choice, carried from one film to the next.
+/// The user's subtitle choice, carried from one film to the next: its
+/// language, and which of that language's tracks it was (title, SDH, forced).
+/// A Netflix episode has two English tracks, "For Japanese audio" (the
+/// default) and "For English audio"; with only the language kept, every next
+/// episode went back to the default one (user, 2026-11-05).
 enum SubtitlePreference {
     private static let key = "subtitles.language"
+    private static let nameKey = "subtitles.trackName"
+    private static let hearingImpairedKey = "subtitles.hearingImpaired"
+    private static let forcedKey = "subtitles.forced"
 
-    /// Remembers `track`'s language, or "off" for nil.
+    /// Remembers `track`'s language and kind, or "off" for nil.
     static func remember(_ track: LibrarySubtitleTrack?) {
-        UserDefaults.standard.set(track.map { normalized($0.language) } ?? "off", forKey: key)
+        let defaults = UserDefaults.standard
+        defaults.set(track.map { normalized($0.language) } ?? "off", forKey: key)
+        defaults.set(track.flatMap { comparableName($0.name) }, forKey: nameKey)
+        defaults.set(track?.isHearingImpaired ?? false, forKey: hearingImpairedKey)
+        defaults.set(track?.isForced ?? false, forKey: forcedKey)
+    }
+
+    private static func comparableName(_ name: String?) -> String? {
+        guard let name = name?.trimmingCharacters(in: .whitespaces), !name.isEmpty else { return nil }
+        return name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
     }
 
     /// Jellyfin tags ISO 639-2 ("eng"), Stash the file's own suffix ("en"):
@@ -204,7 +220,17 @@ enum SubtitlePreference {
             return nil
         case let language?:
             let matching = text.filter { normalized($0.language) == language }
-            return matching.first { !$0.isForced && $0.isDefault }
+            let defaults = UserDefaults.standard
+            let name = defaults.string(forKey: nameKey)
+            let hearingImpaired = defaults.bool(forKey: hearingImpairedKey)
+            let forced = defaults.bool(forKey: forcedKey)
+            // The same track as last time, by its title; else one of the
+            // same kind (SDH or not, forced or not), the default first.
+            let sameKind = matching.filter { $0.isHearingImpaired == hearingImpaired && $0.isForced == forced }
+            return name.flatMap { name in matching.first { comparableName($0.name) == name } }
+                ?? sameKind.first { $0.isDefault }
+                ?? sameKind.first
+                ?? matching.first { !$0.isForced && $0.isDefault }
                 ?? matching.first { !$0.isForced }
                 ?? matching.first
         case nil:
