@@ -241,6 +241,9 @@ struct NativeMetalVideoPlayerView {
     }
 
     func update(coordinator: Coordinator) {
+#if HYPNOS_YOUTUBE
+        coordinator.flashbackModel = playbackModel
+#endif
         coordinator.spatialAudioSceneIdentifier = spatialAudioSceneIdentifier
         coordinator.visualAdjustments = visualAdjustments
         coordinator.onVideoSizeKnown = onVideoSizeKnown
@@ -273,6 +276,11 @@ struct NativeMetalVideoPlayerView {
             playbackModel.seekCommand = { [weak coordinator] time in
                 coordinator?.seek(to: time)
             }
+            #if HYPNOS_YOUTUBE
+            playbackModel.flashbackScanCommand = { [weak coordinator] sensitivity in
+                coordinator?.flashbackCandidates(sensitivity: sensitivity) ?? []
+            }
+            #endif
             playbackModel.setMutedCommand = { [weak coordinator] muted in
                 coordinator?.setMuted(muted)
             }
@@ -344,6 +352,9 @@ struct NativeMetalVideoPlayerView {
 
         weak var mtkView: MTKView?
         weak var host: NativeVideoHostView?
+#if HYPNOS_YOUTUBE
+        weak var flashbackModel: VideoWindowModel?
+#endif
         var renderer: MetalImageRenderer?
         var loadedURL: URL?
         var loadedIdentity: String?
@@ -447,6 +458,14 @@ struct NativeMetalVideoPlayerView {
             }
         }
         private var videoOutput: AVPlayerItemVideoOutput?
+#if HYPNOS_YOUTUBE
+        private var flashbackFrames: [YouTubeFlashbackFrame] = []
+        private var lastFlashbackCaptureTime = -Double.infinity
+
+        func flashbackCandidates(sensitivity: Double) -> [YouTubeFlashbackCandidate] {
+            YouTubeFlashback.candidates(in: flashbackFrames, sensitivity: sensitivity)
+        }
+#endif
         private var textureCache: CVMetalTextureCache?
         private var timeObserver: Any?
         private var endObserver: NSObjectProtocol?
@@ -525,6 +544,10 @@ struct NativeMetalVideoPlayerView {
             self.player = player
             self.playerItem = item
             self.videoOutput = output
+#if HYPNOS_YOUTUBE
+            flashbackFrames.removeAll(keepingCapacity: true)
+            lastFlashbackCaptureTime = -Double.infinity
+#endif
             #if os(iOS) || os(macOS)
             host?.pipView.playerLayer.player = player
             #endif
@@ -923,6 +946,26 @@ struct NativeMetalVideoPlayerView {
                     newFrame = true
                 }
             }
+#if HYPNOS_YOUTUBE
+            if newFrame, flashbackModel?.youTubeID != nil, let pixelBuffer = lastPixelBuffer {
+                let frameTime = player?.currentTime().seconds ?? 0
+                if frameTime.isFinite, frameTime < lastFlashbackCaptureTime - 0.01 {
+                    flashbackFrames.removeAll(keepingCapacity: true)
+                    lastFlashbackCaptureTime = -Double.infinity
+                }
+                if frameTime.isFinite, frameTime - lastFlashbackCaptureTime >= 1.0 / 65.0,
+                   let fingerprint = YouTubeFlashback.fingerprint(pixelBuffer, time: frameTime) {
+                    flashbackFrames.append(fingerprint)
+                    let cutoff = frameTime - YouTubeFlashback.window
+                    if let first = flashbackFrames.firstIndex(where: { $0.time >= cutoff }), first > 0 {
+                        flashbackFrames.removeFirst(first)
+                    } else if flashbackFrames.last?.time ?? frameTime < cutoff {
+                        flashbackFrames.removeAll(keepingCapacity: true)
+                    }
+                    lastFlashbackCaptureTime = frameTime
+                }
+            }
+#endif
             guard needsPictureRedraw,
                   let drawable = view.currentDrawable,
                   let finalPassDesc = view.currentRenderPassDescriptor,

@@ -34,6 +34,9 @@ struct VideoOrnamentsView: View {
     @DismissWindowProxy private var dismissWindow
     @Environment(\.openURL) private var openURL
     @State private var depthModels = DepthModelManager.shared
+#if HYPNOS_YOUTUBE && !os(tvOS)
+    @State private var showingFlashbacks = false
+#endif
     #if !os(visionOS)
     /// Set while the ornament's horizontal scroller is being dragged; see
     /// `EnvironmentValues.ornamentIsScrolling`.
@@ -52,6 +55,9 @@ struct VideoOrnamentsView: View {
     var body: some View {
         chromeObservers(bar)
             .environment(\.playerChoiceDismissal, windowModel.menuDismissals)
+#if HYPNOS_YOUTUBE && !os(tvOS)
+            .sheet(isPresented: $showingFlashbacks) { flashbackSheet }
+#endif
     }
 
     private var bar: some View {
@@ -143,6 +149,12 @@ struct VideoOrnamentsView: View {
                 ConversionStatusRow(videoIdentity: video.identity)
             }
             LoopControls(windowModel: windowModel)
+#if HYPNOS_YOUTUBE && !os(tvOS)
+            if windowModel.youTubeID != nil, windowModel.playbackRenderer == .nativeMetal,
+               !windowModel.shouldUsePseudo3D, !windowModel.shouldUse3DMode {
+                flashbackButton
+            }
+#endif
             Divider()
         }
 
@@ -168,6 +180,74 @@ struct VideoOrnamentsView: View {
         }
         windowItems(close: {})
     }
+
+#if HYPNOS_YOUTUBE && !os(tvOS)
+    private var flashbackButton: some View {
+        Button {
+            windowModel.scanFlashbacks()
+            showingFlashbacks = true
+        } label: {
+            Label("Find Brief Interruptions", systemImage: "backward.end")
+        }
+    }
+
+    private var flashbackSheet: some View {
+            NavigationStack {
+                List {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Fewer")
+                                Slider(value: $windowModel.flashbackSensitivity, in: 0...1) { editing in
+                                    if !editing { windowModel.scanFlashbacks() }
+                                }
+                                    .accessibilityLabel("Flashback sensitivity")
+                                Text("More")
+                            }
+                            Text("Sensitivity")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Section("Last 10 Seconds") {
+                        if windowModel.flashbackCandidates.isEmpty {
+                            ContentUnavailableView("No brief interruptions found", systemImage: "viewfinder")
+                        } else {
+                            ForEach(windowModel.flashbackCandidates) { candidate in
+                                Button {
+                                    windowModel.seekToFlashback(candidate)
+                                    showingFlashbacks = false
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "arrow.uturn.backward")
+                                        Text(String(format: "%02d:%02d", Int(candidate.time) / 60, Int(candidate.time) % 60))
+                                        Spacer()
+                                        Text(String(format: "%.2f s", candidate.duration))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                .navigationTitle("Flashbacks")
+                #if !os(macOS) && !os(tvOS)
+                .navigationBarTitleDisplayMode(.inline)
+                #endif
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showingFlashbacks = false }
+                    }
+                    #if !os(macOS) && !os(tvOS)
+                    ToolbarItem(placement: .bottomBar) {
+                        Button("Scan Again") { windowModel.scanFlashbacks() }
+                    }
+                    #endif
+                }
+            }
+            .presentationDetents([.medium, .large])
+    }
+#endif
 
     private var galleryButton: some View {
         Button(action: onGalleryButtonTap) {

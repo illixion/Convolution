@@ -323,6 +323,23 @@ final class VideoWindowModel {
     @ObservationIgnored var playCommand: (@MainActor () -> Void)?
     @ObservationIgnored var pauseCommand: (@MainActor () -> Void)?
     @ObservationIgnored var seekCommand: (@MainActor (Double) -> Void)?
+#if HYPNOS_YOUTUBE
+    @ObservationIgnored var flashbackScanCommand: (@MainActor (Double) -> [YouTubeFlashbackCandidate])?
+    var flashbackCandidates: [YouTubeFlashbackCandidate] = []
+    var flashbackSensitivity: Double = 0.5
+    var isScanningFlashbacks = false
+
+    func scanFlashbacks() {
+        guard youTubeID != nil, !isScanningFlashbacks else { return }
+        isScanningFlashbacks = true
+        defer { isScanningFlashbacks = false }
+        flashbackCandidates = flashbackScanCommand?(flashbackSensitivity) ?? []
+    }
+
+    func seekToFlashback(_ candidate: YouTubeFlashbackCandidate) {
+        scrub(to: candidate.time)
+    }
+#endif
     @ObservationIgnored var setMutedCommand: (@MainActor (Bool) -> Void)?
     @ObservationIgnored var setVolumeCommand: (@MainActor (Double) -> Void)?
     @ObservationIgnored var setSpeedCommand: (@MainActor (Double) -> Void)?
