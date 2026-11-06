@@ -337,7 +337,7 @@ final class VideoWindowModel {
     }
 
     func seekToFlashback(_ candidate: YouTubeFlashbackCandidate) {
-        scrub(to: candidate.time)
+        endScrub(at: candidate.time)
     }
 #endif
     @ObservationIgnored var setMutedCommand: (@MainActor (Bool) -> Void)?

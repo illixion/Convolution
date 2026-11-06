@@ -149,14 +149,17 @@ struct VideoOrnamentsView: View {
                 ConversionStatusRow(videoIdentity: video.identity)
             }
             LoopControls(windowModel: windowModel)
-#if HYPNOS_YOUTUBE && !os(tvOS)
-            if windowModel.youTubeID != nil, windowModel.playbackRenderer == .nativeMetal,
-               !windowModel.shouldUsePseudo3D, !windowModel.shouldUse3DMode {
-                flashbackButton
-            }
-#endif
             Divider()
         }
+
+#if HYPNOS_YOUTUBE && !os(tvOS)
+        if windowModel.youTubeID != nil, windowModel.playbackRenderer == .nativeMetal,
+           !windowModel.shouldUsePseudo3D, !windowModel.shouldUse3DMode {
+            PlayerPopoverSectionHeader("Find")
+            flashbackButton
+            Divider()
+        }
+#endif
 
         PlayerPopoverSectionHeader("Picture")
         flipButton
@@ -187,7 +190,7 @@ struct VideoOrnamentsView: View {
             windowModel.scanFlashbacks()
             showingFlashbacks = true
         } label: {
-            Label("Find Brief Interruptions", systemImage: "backward.end")
+            Label("Find Flashbacks", systemImage: "backward.end")
         }
     }
 
