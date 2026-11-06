@@ -178,24 +178,37 @@ private actor YouTubeCaptionListing {
 }
 
 enum YouTubeCaptionConverter {
-    /// `json3` events as SubRip. Automatic captions carry newline-only
-    /// "append" events and cues that run on past the next line's start,
-    /// so those are dropped and each cue ends where the next begins.
+    /// `json3` events as SubRip. Automatic captions are a two-line roll-up:
+    /// each event is one new line, newline-only "append" events scroll the
+    /// window, and the line before stays on screen under the new one, so
+    /// events overlap. Showing only the new line made the box change height
+    /// on every cue (a long line wraps to two rows, the next short one is
+    /// one), so a roll-up track is rebuilt the way YouTube draws it: each
+    /// cue is the previous line over the current one, while the previous
+    /// line was still up when this one began. Cues end where the next begins.
+    /// Tracks without append events (made by a person) are left as they are.
     static func subRip(fromJSON3 data: Data) -> String {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let events = json["events"] as? [[String: Any]] else { return "" }
+        let isRollUp = events.contains { ($0["aAppend"] as? NSNumber)?.intValue == 1 }
         var cues: [(start: Int, end: Int, text: String)] = []
+        var previous: (end: Int, line: String)?
         for event in events {
             guard let start = (event["tStartMs"] as? NSNumber)?.intValue,
                   let segs = event["segs"] as? [[String: Any]] else { continue }
-            let text = segs.compactMap { $0["utf8"] as? String }.joined()
+            let lines = segs.compactMap { $0["utf8"] as? String }.joined()
                 .split(separator: "\n", omittingEmptySubsequences: true)
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty }
-                .joined(separator: "\n")
-            guard !text.isEmpty else { continue }
+            guard !lines.isEmpty else { continue }
             let duration = (event["dDurationMs"] as? NSNumber)?.intValue ?? 2000
-            cues.append((start, start + max(duration, 1), text))
+            let end = start + max(duration, 1)
+            var text = lines.joined(separator: "\n")
+            if isRollUp {
+                if let previous, previous.end > start { text = previous.line + "\n" + text }
+                previous = (end, lines.last!)
+            }
+            cues.append((start, end, text))
         }
         for index in cues.indices.dropLast() {
             cues[index].end = min(cues[index].end, max(cues[index + 1].start, cues[index].start + 1))

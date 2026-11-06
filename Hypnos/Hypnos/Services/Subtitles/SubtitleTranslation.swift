@@ -61,7 +61,7 @@ final class SubtitleTranslator {
         var start: Double
         var end: Double
         var text: String
-        var prefix: String
+        var speaker: Int?
     }
 
     @ObservationIgnored private weak var controller: SubtitleController?
@@ -97,7 +97,7 @@ final class SubtitleTranslator {
                 do {
                     let cues = try await controller.autoCaptionCues()
                     guard let self, !Task.isCancelled else { return }
-                    self.setSources(cues.map { SourceCue(start: $0.start, end: $0.end, text: $0.plainText, prefix: "") })
+                    self.setSources(cues.map { SourceCue(start: $0.start, end: $0.end, text: $0.plainText, speaker: nil) })
                 } catch {
                     guard let self, !Task.isCancelled else { return }
                     self.fail(error)
@@ -134,7 +134,7 @@ final class SubtitleTranslator {
     func generatedChanged(_ captions: [RAVEGeneratedCaption]) {
         guard track != nil, loader == nil else { return }
         setSources(captions.map {
-            SourceCue(start: $0.start, end: $0.end, text: $0.text, prefix: $0.speaker.map { "Speaker \($0): " } ?? "")
+            SourceCue(start: $0.start, end: $0.end, text: $0.text, speaker: $0.speaker)
         })
     }
 
@@ -226,7 +226,7 @@ final class SubtitleTranslator {
         guard let controller, let track, controller.selected == track else { return }
         let cues = sources.compactMap { cue -> RAVESubtitleCue? in
             guard let translated = cache[cue.text] else { return nil }
-            return RAVESubtitleCue(start: cue.start, end: cue.end, text: AttributedString(cue.prefix + translated))
+            return RAVESubtitleCue(start: cue.start, end: cue.end, text: SubtitleController.speakerText(translated, speaker: cue.speaker))
         }
         translatedCount = cues.count
         controller.showTranslated(RAVESubtitleTrack(cues: cues))

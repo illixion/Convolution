@@ -43,6 +43,7 @@ import GeneratedCaptions
 import RAVEFilm
 import DebugTrace
 import Foundation
+import SwiftUI
 import MatroskaRemux
 import Observation
 import RAVEUI
@@ -246,6 +247,16 @@ final class SubtitleController {
     private(set) var canGenerate = false
     /// Translated subtitles (iOS and macOS; a no-op shell elsewhere).
     let translator = SubtitleTranslator()
+    /// Speaker 1 (and a line with no speaker) keeps the player's own colour;
+    /// each other speaker gets its own, cycling, instead of a "Speaker N:" label.
+    static let speakerColors: [Color] = [.yellow, .cyan, .green, .pink, .orange, .purple]
+    static func speakerText(_ text: String, speaker: Int?) -> AttributedString {
+        var attributed = AttributedString(text)
+        if let speaker, speaker > 1 {
+            attributed.foregroundColor = speakerColors[(speaker - 2) % speakerColors.count]
+        }
+        return attributed
+    }
     private static let generatedTrack = LibrarySubtitleTrack(id: -10000, sourceId: "generated", language: nil, name: "AI Captions")
 
     init() {
@@ -258,8 +269,8 @@ final class SubtitleController {
             #endif
             guard let self, self.selected == Self.generatedTrack else { return }
             self.cues = RAVESubtitleTrack(cues: self.generated.captions.map { caption in
-                let prefix = caption.speaker.map { "Speaker \($0): " } ?? ""
-                return RAVESubtitleCue(start: caption.start, end: caption.end, text: AttributedString(prefix + caption.text))
+                RAVESubtitleCue(start: caption.start, end: caption.end,
+                                text: Self.speakerText(caption.text, speaker: caption.speaker))
             })
         }
     }
