@@ -2,14 +2,14 @@
  Hypnos - YouTube picture quality (sideload builds only: `HYPNOS_YOUTUBE`)
 
  The saved preference, for every video. YouTube's master playlist offers
- every rendition the video has and the player picks by bandwidth, so on a
- fast link it plays 4K even when that is more than AI 3D can convert in time.
+ every rendition the video has. Auto picks the highest one deterministically,
+ avoiding bandwidth-based selection above what AI 3D can convert in time.
 
  The video window lists the renditions the video actually has and plays the
- one picked (`YouTubeRenditions`); a video opens at the highest it has at or
- below the preference. tvOS and the Mac's system players cap the player item
- at it instead (`preferredMaximumResolution`). `auto` leaves it to the
- player, and the video window lowers a cap when 3D can't keep up.
+ one picked (`YouTubeRenditions`); Auto opens at the highest available, or
+ the highest at or below 1080p while AI 3D is enabled. An explicit preference
+ is honored subject to that same AI 3D ceiling. tvOS and the Mac's system
+ players cap the player item at it instead (`preferredMaximumResolution`).
  */
 
 #if HYPNOS_YOUTUBE

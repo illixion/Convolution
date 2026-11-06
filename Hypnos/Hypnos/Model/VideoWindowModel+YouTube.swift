@@ -43,10 +43,10 @@ extension VideoWindowModel {
         }
         // A copy cut earlier this launch (a popped-out window): its master.
         let master = YouTubeRenditions.source(of: video.streamURL) ?? video.streamURL
-        // Auto waits too where HDR may need cutting: the master isn't read yet.
-        let waits = youTubeChosenHeight != nil || master != video.streamURL || YouTubeRenditions.prefersHDR
-        readYouTubeRenditions(master: master, resolvesRenderer: waits)
-        return waits
+        // Read the master before resolving playback so Auto can be cut to a
+        // deterministic best rendition instead of letting bandwidth decide.
+        readYouTubeRenditions(master: master, resolvesRenderer: true)
+        return true
     }
 
     /// True when the window is replaying its rendition without HDR: the
@@ -109,9 +109,18 @@ extension VideoWindowModel {
             if let text, !renditions.isEmpty {
                 self.youTubeMaster = (master, text)
                 self.youTubeRenditions = renditions
+                let maximumHeight = self.pseudo3DEnabled ? 1080 : nil
                 if let chosen = self.youTubeChosenHeight {
-                    // The highest the video has at or below the choice, else its lowest.
-                    self.youTubeChosenHeight = renditions.first { $0.height <= chosen }?.height ?? renditions.last?.height
+                    // Honor an explicit quality choice, bounded by AI 3D's
+                    // 1080p ceiling.
+                    let limit = min(chosen, maximumHeight ?? chosen)
+                    self.youTubeChosenHeight = renditions.first { $0.height <= limit }?.height ?? renditions.last?.height
+                } else {
+                    // Auto means the highest available rendition, with a
+                    // lower ceiling while AI 3D is active.
+                    self.youTubeAutoHeight = maximumHeight.map { limit in
+                        renditions.first { $0.height <= limit }?.height
+                    } ?? renditions.first?.height
                 }
                 AppLogger.youtube.info("Renditions: \(renditions.map(\.title).joined(separator: ", "), privacy: .public); playing \(self.youTubeChosenHeight.map { "\($0)p" } ?? "Auto", privacy: .public)\(YouTubeRenditions.offersHDR(text) ? " in HDR" : "", privacy: .public)")
             } else {
@@ -154,7 +163,7 @@ extension VideoWindowModel {
     private func playChosenYouTubeRendition(swapping: Bool) async {
         guard let master = youTubeMaster else { return }
         var target = master.url
-        let height = youTubeChosenHeight
+        let height = youTubeChosenHeight ?? youTubeAutoHeight
         let hdr = YouTubeRenditions.prefersHDR
         if height != nil || YouTubeRenditions.offersHDR(master.text, preferringHDR: hdr) {
             if let copy = await YouTubeRenditions.publish(master.text, from: master.url, keepingHeight: height,
@@ -200,10 +209,14 @@ extension VideoWindowModel {
     /// YouTube video (the nearest level at or below it), and played now,
     /// swapped in at the playhead.
     func setYouTubeQuality(height: Int?) {
-        guard height != youTubeChosenHeight else { return }
-        YouTubeQuality.preferred = height.map(YouTubeQuality.level(height:)) ?? .auto
-        youTubeChosenHeight = height
-        youTubeAutoHeight = nil
+        let boundedHeight = pseudo3DEnabled ? height.map { min($0, 1080) } : height
+        let autoHeight: Int? = boundedHeight == nil
+            ? youTubeRenditions.first { !pseudo3DEnabled || $0.height <= 1080 }?.height
+            : nil
+        guard boundedHeight != youTubeChosenHeight || autoHeight != youTubeAutoHeight else { return }
+        YouTubeQuality.preferred = boundedHeight.map(YouTubeQuality.level(height:)) ?? .auto
+        youTubeChosenHeight = boundedHeight
+        youTubeAutoHeight = autoHeight
         dismissQualityNotice()
         AppLogger.youtube.info("Quality set to \(height.map { "\($0)p" } ?? "Auto", privacy: .public)")
         updatePictureResolutionCap()

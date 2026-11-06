@@ -915,9 +915,11 @@ final class VideoWindowModel {
         switchToVideo(galleryVideos[currentIndex])
     }
 
-    /// Switch to a different video, resetting per-window viewing state. The
-    /// WebVideoPlayerView reloads automatically because its `videoURL` changes.
+    /// Switch videos while carrying the window's AI 3D and Smooth Motion
+    /// choices. The WebVideoPlayerView reloads because its `videoURL` changes.
     func switchToVideo(_ newVideo: GalleryVideo) {
+        let carriesAI3D = pseudo3DEnabled
+        let carriesSmoothMotion = smoothMotionOverride
         pictureNeedsSystemRenderer = false
         appModel.lastViewedVideoId = newVideo.id
         // Keep the open-window registry pointed at what this window actually
@@ -942,15 +944,21 @@ final class VideoWindowModel {
         // big screen too)
         stereoscopicOverride = nil
         video3DSettings = nil
-        pseudo3DEnabled = false
-        pseudo3DDepthMode = .realtime
+        // Keep the viewing choices as the window moves through a gallery.
+        // A cached depth source belongs to one video, so resolve a fresh mode
+        // for this identity while retaining the enabled state.
+        if carriesAI3D, let mode = Self.depthMode(forVideoIdentity: newVideo.identity) {
+            pseudo3DDepthMode = mode
+        } else {
+            pseudo3DDepthMode = .realtime
+        }
         pseudo3DEngageResumeTime = nil
         pseudo3DEngagePaused = false
         progressiveEngageTask?.cancel()
         progressiveEngageTask = nil
         dismissDepthReadyPrompt()
         pseudo3DSettings = .default
-        smoothMotionOverride = nil
+        smoothMotionOverride = carriesSmoothMotion
         pendingPseudo3DEngage = nil
         // A different video starts from its own beginning.
         streamRenewalGeneration += 1
