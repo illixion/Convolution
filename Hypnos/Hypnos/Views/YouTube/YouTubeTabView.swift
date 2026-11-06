@@ -597,6 +597,18 @@ struct YouTubeVideoCard: View {
                         .padding(6)
                 }
             }
+            .overlay(alignment: .bottomLeading) {
+                if let views = video.viewCountText {
+                    Label(views, systemImage: "eye.fill")
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.black.opacity(0.75), in: .rect(cornerRadius: 4))
+                        .padding(6)
+                }
+            }
             .overlay(alignment: .bottom) {
                 if let fraction = watchedFraction {
                     watchedBar(fraction)
@@ -612,7 +624,6 @@ struct YouTubeVideoCard: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
             VStack(alignment: .leading, spacing: 2) {
-                if let views = video.viewCountText { Text(views) }
                 if let channel = video.author { Text(channel) }
                 if let published = publishedLine { Text(published) }
             }
