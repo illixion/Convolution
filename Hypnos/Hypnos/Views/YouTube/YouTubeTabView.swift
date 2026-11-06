@@ -52,6 +52,8 @@ struct YouTubeTabView: View {
     @State private var tvReporter: YouTubeWatchReporter?
     #endif
     @OpenWindowProxy private var openWindow
+    @PushWindowProxy private var pushWindow
+    @Environment(AppModel.self) private var appModel
     @AppStorage(YouTubeConsent.defaultsKey) private var consentGranted = false
 
     private var pastedID: YouTubeVideoID? { YouTubeVideoID(parsing: query) }
@@ -512,7 +514,14 @@ struct YouTubeTabView: View {
         #else
         var value = VideoWindowValue(video: video, galleryVideos: [video])
         value.startSeconds = start
-        openWindow(id: "video-detail", value: value)
+        // Same rule as the galleries: in place (push, back returns here) unless
+        // Settings → Open Media in New Windows is on.
+        if appModel.openMediaInNewWindows {
+            openWindow(id: "video-detail", value: value)
+        } else {
+            value.wasPushed = true
+            pushWindow(id: "video-detail", value: value)
+        }
         #endif
     }
 
