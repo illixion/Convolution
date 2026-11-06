@@ -50,7 +50,7 @@ struct SettingsTabView: View {
 
     enum Page: Hashable {
         case jellyfin, stash, nextcloud, photoLibrary, localFiles, deviceSetup
-        case general, gallery, photos, videos, ai3D, aiCaptions, slideshows, windowGroups
+        case general, gallery, photos, videos, ai3D, aiCaptions, subtitles, slideshows, windowGroups
         case cache, backup, developer
         #if HYPNOS_YOUTUBE
         case youtube
@@ -101,6 +101,7 @@ struct SettingsTabView: View {
                 }
 
                 Section {
+                    row(.subtitles, "Subtitles", systemImage: "textformat.size")
                     row(.aiCaptions, "AI Captions", systemImage: "captions.bubble")
                 }
 
@@ -161,6 +162,7 @@ struct SettingsTabView: View {
         case .photos: PhotoSettingsPage()
         case .videos: VideoSettingsPage()
         case .ai3D: AI3DSettingsPage()
+        case .subtitles: SubtitleSettingsPage()
         case .aiCaptions: AICaptionSettingsPage()
         case .slideshows: SlideshowSettingsPage()
         case .windowGroups: WindowGroupsSettingsPage()

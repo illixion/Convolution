@@ -25,6 +25,7 @@ struct SubtitleMenu: View {
     #endif
     #if !os(tvOS)
     @State private var showsFileImporter = false
+    @State private var showsAppearance = false
     #endif
     /// The menu opened or closed, for a caller that has to move a stereo
     /// picture out of its way (the same signal the video ornament's menus use).
@@ -117,6 +118,16 @@ struct SubtitleMenu: View {
             if let error = controller.fileError {
                 Text(error).font(.caption).foregroundStyle(.red)
             }
+            Button {
+                close()
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(350))
+                    showsAppearance = true
+                }
+            } label: {
+                Label("Subtitle Appearance…", systemImage: "textformat.size")
+            }
+            .accessibilityIdentifier("player.subtitles.appearance")
             if controller.selected != nil {
                 Divider()
                 SubtitleDelayControl(controller: controller)
@@ -136,6 +147,8 @@ struct SubtitleMenu: View {
         // The picker is a menu too as far as the chrome is concerned: it
         // must not hide, and take the picker with it, while it is up.
         .onChange(of: showsFileImporter) { _, shown in onOpenChanged(shown) }
+        .sheet(isPresented: $showsAppearance) { SubtitleAppearanceSheet() }
+        .onChange(of: showsAppearance) { _, shown in onOpenChanged(shown) }
         #endif
         #if os(iOS) || os(macOS)
         .sheet(isPresented: $showsTranslate) { SubtitleTranslateSheet(controller: controller) }
@@ -232,6 +245,7 @@ struct SubtitleOverlay: View {
         RAVESubtitleOverlay(track: controller.cues, pictureAspect: pictureAspect) {
             controller.cueTime(forFilmTime: filmTime())
         }
+        .subtitleStyled()
     }
 }
 
@@ -409,6 +423,7 @@ struct StereoSubtitleFeeder: View {
     @AppStorage(SubtitleHDRBrightness.key) private var hdrWhiteNits = SubtitleHDRBrightness.defaultNits
     @AppStorage(SubtitleStereoDepth.key) private var textDepth = 0.0
     @AppStorage(SubtitleStereoDepth.discKey) private var discDepth = 0.0
+    @AppStorage(SubtitleAppearance.key) private var styleJSON = ""
     @State private var version = 0
 
     private var depth: Double { controller.selected?.isBitmap == true ? discDepth : textDepth }
@@ -420,6 +435,7 @@ struct StereoSubtitleFeeder: View {
                 .onChange(of: hdrWhiteNits) { publish(showing) }
                 .onChange(of: textDepth) { publish(showing) }
                 .onChange(of: discDepth) { publish(showing) }
+                .onChange(of: styleJSON) { publish(showing) }
                 .onChange(of: controller.selected) { publish(showing) }
         }
         .frame(width: 0, height: 0)
@@ -434,9 +450,10 @@ struct StereoSubtitleFeeder: View {
             return
         }
         version += 1
+        let style = SubtitleAppearance.style(fromJSON: styleJSON)
         frame = StereoSubtitleFrame(version: version, hdrWhiteNits: hdrWhiteNits,
                                         depthOffset: SubtitleStereoDepth.depthOffset(depth)) { eyeSize in
-            Self.render(cues, eyeSize: eyeSize)
+            Self.render(cues, eyeSize: eyeSize, style: style)
         }
     }
 
@@ -444,7 +461,7 @@ struct StereoSubtitleFeeder: View {
     /// twentieth of the picture's height, one image per edge. A bitmap cue
     /// (a disc's PGS) goes where the disc put it, at its own size.
     @MainActor
-    static func render(_ cues: [RAVESubtitleCue], eyeSize: CGSize) -> [StereoSubtitle] {
+    static func render(_ cues: [RAVESubtitleCue], eyeSize: CGSize, style: RAVESubtitleStyle = .standard) -> [StereoSubtitle] {
         let bitmaps = cues.compactMap { cue -> StereoSubtitle? in
             guard let image = cue.image, let cgImage = image.makeImage() else { return nil }
             return StereoSubtitle(image: cgImage, placement: cue.placement == .top ? .top : .bottom,
@@ -458,7 +475,7 @@ struct StereoSubtitleFeeder: View {
         ]
         return bitmaps + groups.compactMap { placement, group in
             guard !group.isEmpty else { return nil }
-            let renderer = ImageRenderer(content: RAVESubtitleText(cues: group, fontSize: fontSize))
+            let renderer = ImageRenderer(content: RAVESubtitleText(cues: group, fontSize: fontSize).environment(\.raveSubtitleStyle, style))
             renderer.proposedSize = ProposedViewSize(width: eyeSize.width, height: nil)
             // A point per eye pixel: the image is drawn 1:1 into the eye.
             renderer.scale = 1
@@ -482,6 +499,7 @@ struct SubtitleBand: View {
         RAVESubtitlePanel(track: controller.cues, fontSize: 30) {
             controller.cueTime(forFilmTime: filmTime())
         }
+        .subtitleStyled()
         .frame(height: Self.height, alignment: .top)
     }
 }
