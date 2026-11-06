@@ -18,6 +18,7 @@
  corner (`PlayerTitleButton`, VideoWindowView).
  */
 
+import CoreGraphics
 import RAVEMedia
 import RAVEUI
 import SwiftUI
@@ -222,13 +223,26 @@ struct VideoOrnamentsView: View {
                                     showingFlashbacks = false
                                 } label: {
                                     HStack {
-                                        Image(systemName: "arrow.uturn.backward")
-                                        Text(String(format: "%02d:%02d", Int(candidate.time) / 60, Int(candidate.time) % 60))
-                                        Spacer()
-                                        Text(String(format: "%.2f s", candidate.duration))
-                                            .foregroundStyle(.secondary)
+                                        if let image = flashbackPreviewImage(candidate) {
+                                            image
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 120, height: 68)
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                                .accessibilityHidden(true)
+                                        }
+                                        VStack(alignment: .leading, spacing: 5) {
+                                            Text(String(format: "%02d:%02d", Int(candidate.time) / 60, Int(candidate.time) % 60))
+                                                .font(.headline.monospacedDigit())
+                                            Label(String(format: "%.2f s", candidate.duration), systemImage: "arrow.uturn.backward")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer(minLength: 0)
                                     }
+                                    .padding(.vertical, 4)
                                 }
+                                .accessibilityLabel("Flashback at \(String(format: "%02d:%02d", Int(candidate.time) / 60, Int(candidate.time) % 60)), lasting \(String(format: "%.2f seconds", candidate.duration))")
                             }
                         }
                     }
@@ -249,6 +263,22 @@ struct VideoOrnamentsView: View {
                 }
             }
             .presentationDetents([.medium, .large])
+    }
+
+    private func flashbackPreviewImage(_ candidate: YouTubeFlashbackCandidate) -> Image? {
+        guard let provider = CGDataProvider(data: candidate.previewPixels as CFData),
+              let cgImage = CGImage(width: YouTubeFlashback.previewWidth,
+                                    height: YouTubeFlashback.previewHeight,
+                                    bitsPerComponent: 8,
+                                    bitsPerPixel: 8,
+                                    bytesPerRow: YouTubeFlashback.previewWidth,
+                                    space: CGColorSpaceCreateDeviceGray(),
+                                    bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+                                    provider: provider,
+                                    decode: nil,
+                                    shouldInterpolate: true,
+                                    intent: .defaultIntent) else { return nil }
+        return Image(decorative: cgImage, scale: 1)
     }
 #endif
 

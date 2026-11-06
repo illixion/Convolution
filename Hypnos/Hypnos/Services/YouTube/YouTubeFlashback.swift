@@ -14,6 +14,7 @@ import Foundation
 struct YouTubeFlashbackFrame {
     let time: Double
     let tiles: [UInt8]
+    let previewPixels: Data
 }
 
 struct YouTubeFlashbackCandidate: Identifiable, Sendable {
@@ -21,10 +22,13 @@ struct YouTubeFlashbackCandidate: Identifiable, Sendable {
     let time: Double
     let duration: Double
     let change: Double
+    let previewPixels: Data
 }
 
 enum YouTubeFlashback {
     static let window: Double = 10
+    static let previewWidth = 96
+    static let previewHeight = 54
     private static let columns = 24
     private static let rows = 14
     private static let maximumInterruptionDuration = 3.0
@@ -42,6 +46,15 @@ enum YouTubeFlashback {
         let stride = CVPixelBufferGetBytesPerRow(buffer)
         let pixels = base.assumingMemoryBound(to: UInt8.self)
         var values = [UInt8](repeating: 0, count: columns * rows)
+        var preview = [UInt8](repeating: 0, count: previewWidth * previewHeight)
+        for y in 0..<previewHeight {
+            let sourceY = min(height - 1, y * height / previewHeight)
+            for x in 0..<previewWidth {
+                let sourceX = min(width - 1, x * width / previewWidth)
+                let offset = sourceY * stride + sourceX * 4
+                preview[y * previewWidth + x] = UInt8((29 * Int(pixels[offset]) + 150 * Int(pixels[offset + 1]) + 77 * Int(pixels[offset + 2])) >> 8)
+            }
+        }
         for row in 0..<rows {
             for column in 0..<columns {
                 let x0 = column * width / columns
@@ -61,7 +74,7 @@ enum YouTubeFlashback {
                 values[row * columns + column] = UInt8(luma / 4)
             }
         }
-        return YouTubeFlashbackFrame(time: time, tiles: values)
+        return YouTubeFlashbackFrame(time: time, tiles: values, previewPixels: Data(preview))
     }
 
     /// Sensitivity is 0...1; higher values admit smaller visual changes.
@@ -93,7 +106,8 @@ enum YouTubeFlashback {
             }
             if let returned {
                 found.append(YouTubeFlashbackCandidate(id: found.count, time: onset.time,
-                    duration: max(0, frames[returned].time - onset.time), change: onsetDifference))
+                    duration: max(0, frames[returned].time - onset.time), change: onsetDifference,
+                    previewPixels: onset.previewPixels))
                 index = returned + 1
             } else {
                 index += 1
