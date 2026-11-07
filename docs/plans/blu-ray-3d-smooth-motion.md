@@ -472,10 +472,11 @@ and fallback shaders" and phase 0's disparity work is the flow network's.
 
 ## Later: a Mac helping the headset (idea, 2026-11-01)
 
-**Superseded by `jellyfin-analysis-workers.md` (2026-11-07), which is current.** Agreed by the user
-on 2026-11-01, then scoped to Jellyfin only: the plugin coordinates analysis workers (M2 Max, servo,
-optionally CUDA PCs), each a Jellyfin client of its own, so the direct `RAVECompanion`
-channel below is no longer the plan. The original note, kept for history:
+**Superseded by `analysis-workers.md` (2026-11-07), which is current.** Agreed by the user on
+2026-11-01, then reshaped: a coordinator outside the media servers hands analysis work for Jellyfin
+and Stash titles to workers that read the media themselves, and a Vergence desktop app (Mac and
+Windows) hosts it for Quest users. The direct headset-to-Mac channel below is no longer the plan.
+The original note, kept for history:
 
 A paired Mac (Convolution's own macOS build, in a background worker
 mode) computes flow, disparity, depth and gain maps **ahead of the playhead** and sends only the
