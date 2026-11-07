@@ -1,6 +1,6 @@
 # Analysis workers and the Vergence desktop app
 
-Status: steps 1–6, 8 (not yet run on a headset) and 9 built on 2026-11-07 (see "Progress"); 7 not started. Plan revised 2026-11-07. It started on 2026-11-01 as "a Mac helping the headset", agreed then
+Status: steps 1–6, 8 (not yet run on a headset) and 9 built on 2026-11-07 (see "Progress"); 7 built for the Mac worker and the Vision Pro (not yet on a headset; AI HDR's pass not yet in the players). Plan revised 2026-11-07. It started on 2026-11-01 as "a Mac helping the headset", agreed then
 and kept as a short note in `blu-ray-3d-smooth-motion.md`. Decided with the user on 2026-11-07:
 - **Media servers only: Jellyfin and Stash.** Both have direct and transcode URLs. Nextcloud could
   join later the same way; files that exist only on a headset are out.
@@ -331,9 +331,14 @@ which a live player can't do.
   non-commercial only. If so, offer them only as an opt-in download with the licence shown, never
   bundled.
 
-### AI HDR for video, in short (proposed 2026-11-07, not started)
+### AI HDR for video, in short (proposed 2026-11-07; the grid, a worker and a lookup pass built)
 
 It is meant to work on a Vision Pro alone too, with workers as a quality upgrade.
+- **The grid as built** (Vergence `GainGrid`, the `gainMap` record): eye mono, float16, 8 channels
+  (luma bins) of 16×9 cells, each the log2 of the linear gain for pixels in that cell whose
+  non-linear luma (BT.709 weights on full-range R′G′B′) falls in that bin. Cells and bins are
+  sampled at their centres, trilinearly, clamped to the edges: a 16×9×8 3D texture read at
+  (u, v, Y′). HDR = SDR linear × 2^g. About 1 KB a frame.
 - **Gain grid, not gain image:**
   - GMNet runs on keyframes: every cut, plus about every 0.5–1 s.
   - Its gain map is fitted into a bilateral grid, gain over (x, y, luma), e.g. 16×9×8.
@@ -365,7 +370,7 @@ It is meant to work on a Vision Pro alone too, with workers as a quality upgrade
 | 5. Desktop app | Mac build runs: coordinator, settings, pairing, worker sidecar, convert queue, the paired TLS-PSK port. Windows x64 builds (cross-compiled, `desktop/scripts/package-windows.sh`, a zip as Apparition ships) and ran on a Windows PC: window, coordinator, paired channel (an OpenSSL client exchange through it), worker found; it runs `vergence-worker.exe` and `vergence-convert.exe` there. Tray and a conversion not tried on Windows. Updater pins the release keys (Apparition's two), no release site yet | vergence `desktop/` (181599a), 0867eef, db4af4a |
 | 5. `vergence convert` | Built: all layouts, HDR kept, audio copied, resume, depth track. No subtitles, no Smooth Motion bake | vergence 0607bc0 |
 | 6. ONNX worker | Built; Windows compiles. CUDA, TensorRT, DirectML never run. No Windows converter yet | vergence `worker/` (2a7892b) |
-| 7. More kinds | Not started | |
+| 7. More kinds | Built on the Mac, three workloads, each checked end to end against the dev Jellyfin (a coordinator's chunks against the worker's own whole-file run). **`smooth-motion-2d`**: RIFE 4.25 lite 960×576 on the GPU, flow stored at 240×144; chunks identical to the whole-file run; the Vision Pro reads it for 2D Library titles (flat and AI 3D, film player AI 3D too) through a fields-first mono pass that leaves uncovered pairs to the device's interpolator. **`ai-3d-depth`**: the offline depth pipeline per piece (a second of context before it) with Depth Anything V2 Small at 770×574; chunks within 0.005 mean, 0.05 max (shot-space units) of a whole-file conversion; the Vision Pro warps it in real-time AI 3D and runs its own model only for frames it lacks. **`ai-hdr`**: GMNet on keyframes (0.5 s and cuts) fitted to the pinned grid, eased within shots; chunks identical; a tested Metal lookup pass with the brightness cap. Not done: AI HDR in the players (the lookup inside `imageFragmentShader` and the stereo warp, ramp-in, step-down), the ONNX worker's 2D flow, depth and GMNet, and any headset run | vergence 352dd73, 3e20c96, 308f15e; Hypnos 9ec9b9d, 2178727; RAVESDK b6ab5e6, a4e89b4 |
 | 8. Quest | Built, not run on a headset. Pairs by the six-digit code (NSD, a typed address or link) and keeps the token in the Keystore, or takes an HTTP address and token; talks over the paired TLS-PSK channel (Bouncy Castle) or HTTP; reports the playhead, reads partial chunks (VGAT in C++); a GLES 3 shared-field pass at the display's rate for stereo titles. Tested off the headset against VergenceCore and vergence-worker tracks, vergence-companion's vectors and a real `vergenced` over TLS-PSK. The desktop app announces `_vergence-pair._tcp` while pairing on macOS and Linux; on Windows the Quest pairs by address. No stereo warp or gain lookup yet (their kinds aren't pinned) | Hypnos 1cc42b1, vergence 6a80077, Controller Bridge 4ed9722 |
 | 9. Plugin | Routes pass through to a coordinator; the nightly task queues there | Hypnos 16640ed |
 
@@ -378,7 +383,15 @@ Answers so far:
   conversion runs in float16 (up to about 1 px of flow, mean 0.004). So ONNX titles get their own
   profile, unless RIFE gets a float32 Core ML conversion.
 - **Question 4 (throughput):** the M2 Max's Core ML worker does 1080p 3D Smooth Motion at about
-  37 fps; ONNX Runtime on the same Mac 16–17 fps. CUDA is unmeasured.
+  37 fps; ONNX Runtime on the same Mac 16–17 fps. CUDA is unmeasured. By kind on the M2 Max (whole
+  files, model load included, the Mac busy with other work):
+  - 2D flow, RIFE 4.25 lite 960×576: about 40 fps for 720p on the GPU (16–17 on the Neural Engine
+    or with Core ML choosing, so the worker puts it on the GPU), 24–40 fps for 1080p; about 30 KB a
+    frame. The full RIFE 4.25 at that size runs as fast on the GPU.
+  - AI 3D depth, Depth Anything V2 Small 770×574 through the offline pipeline: about 9 fps (13.5 at
+    Apple's 518×392), and each piece also converts a second of context, so a worker makes about a
+    third of real time: ahead and backfill work, not a live lead, on one M2 Max. 43 KB a frame.
+  - AI HDR, GMNet on keyframes every 0.5 s: about 30 fps for 1080p, 1 KB a frame.
 - **Question 5 (TLS-PSK in Rust):** OpenSSL, through the `openssl` and `tokio-openssl` crates: the
   server's PSK callback picks each device's key by the identity it presents, so the coordinator knows
   the device from the handshake and needs no identify message. Windows builds OpenSSL in
@@ -388,6 +401,12 @@ Answers so far:
   EGL renders into directly, and the decoder feeds a SurfaceTexture as an external texture with no
   copy through Vulkan interop. Vulkan would only pay if the passes grew into compute work. Frame time
   on a Quest 3 is unmeasured (the renderer logs it).
+- **Question 10 (depth model licences):** only Depth Anything V2 Small (Apache-2.0) goes into a
+  worker profile, made larger by its input size instead (770×574, `scripts/convert-depth-model.py`).
+  Depth Anything V2 Base and Large, and Video Depth Anything Base and Large, are CC-BY-NC-4.0 by their
+  model cards (Video Depth Anything Small is Apache-2.0); Depth Pro's weights come under Apple's own
+  research licence. None of those is bundled or offered; an opt-in download with its licence shown
+  stays the user's decision.
 - **Question 11 (conversion speed):** 1080p at about 30 fps on the M2 Max, a two-hour film in about
   100 minutes.
 
