@@ -1743,6 +1743,9 @@ class AppModel {
 
         // Drain any depth model dropped into Documents (devicectl push / Files)
         // into the managed store so it's switchable/deletable like a download.
+        #if HYPNOS_NC_MODELS
+        NonCommercialDepthModels.register()
+        #endif
         DepthModelManager.shared.importInboxIfNeeded()
 
         // Load saved views and window groups from UserDefaults

@@ -17,6 +17,10 @@ struct DepthModelManagerSheet: View {
     @Environment(AppModel.self) private var appModel
     @State private var depthModels = DepthModelManager.shared
     @State private var modelPendingDelete: String?
+    #if HYPNOS_NC_MODELS
+    /// A non-commercial model whose licence is being shown before it downloads.
+    @State private var licensedPendingDownload: DepthModelManager.Variant?
+    #endif
 
     var body: some View {
         NavigationStack {
@@ -40,6 +44,21 @@ struct DepthModelManagerSheet: View {
                     }
                 }
 
+                #if HYPNOS_NC_MODELS
+                let licensed = DepthModelManager.additionalVariants.filter { !depthModels.isInstalled($0) }
+                if !licensed.isEmpty {
+                    Section {
+                        ForEach(licensed) { variant in
+                            downloadRow(variant)
+                        }
+                    } header: {
+                        Text("Non-Commercial Models")
+                    } footer: {
+                        Text("Larger Depth Anything V2 models, licensed CC-BY-NC-4.0: use them, and the 3D pictures and conversions you make with them, for non-commercial purposes only. Downloaded from a third party's Core ML conversion on Hugging Face.")
+                    }
+                }
+                #endif
+
                 if let error = depthModels.errorMessage {
                     Text(error)
                         .font(.caption)
@@ -62,6 +81,27 @@ struct DepthModelManagerSheet: View {
             .onAppear {
                 depthModels.importInboxIfNeeded()
             }
+            #if HYPNOS_NC_MODELS
+            .alert(
+                "\(licensedPendingDownload?.displayName ?? "") is non-commercial",
+                isPresented: Binding(
+                    get: { licensedPendingDownload != nil },
+                    set: { if !$0 { licensedPendingDownload = nil } }
+                ),
+                presenting: licensedPendingDownload
+            ) { variant in
+                Button("Accept and Download") {
+                    licensedPendingDownload = nil
+                    Task { await depthModels.download(variant) }
+                }
+                if let licence = variant.licence {
+                    Link("Read the \(licence.name) Licence", destination: licence.url)
+                }
+                Button("Cancel", role: .cancel) { licensedPendingDownload = nil }
+            } message: { variant in
+                Text("Its weights are licensed \(variant.licence?.name ?? "CC-BY-NC-4.0"): non-commercial use only. \(variant.licence?.attribution ?? ""). By downloading it you agree to use it, and what you make with it, only for non-commercial purposes.")
+            }
+            #endif
             .confirmationDialog(
                 "Delete \(DepthModelManager.displayName(for: modelPendingDelete ?? ""))?",
                 isPresented: Binding(
@@ -125,6 +165,12 @@ struct DepthModelManagerSheet: View {
                     .frame(width: 80)
             } else {
                 Button {
+                    #if HYPNOS_NC_MODELS
+                    if variant.licence?.nonCommercial == true {
+                        licensedPendingDownload = variant
+                        return
+                    }
+                    #endif
                     Task { await depthModels.download(variant) }
                 } label: {
                     Image(systemName: "arrow.down.circle")

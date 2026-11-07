@@ -48,4 +48,13 @@ FFMPEG_CONDITION =
 // or in the gitignored scripts/build-signing.conf / LocalSigning.xcconfig.
 DOVI_CONDITION =
 
-SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(PRIVATE_API_CONDITION) $(YOUTUBE_CONDITION) $(FFMPEG_CONDITION) $(DOVI_CONDITION)
+// Larger depth models whose weights are licensed for non-commercial use only
+// (Depth Anything V2 Base and Large, CC-BY-NC-4.0), offered as downloads with
+// their licence shown, for sideload builds only (CLAUDE.md, "Larger depth
+// models are sideload-only"). Empty here, so no build names them or offers
+// them unless asked. Opt in with
+// `~/bin/build-and-sign --set NC_MODELS_CONDITION=HYPNOS_NC_MODELS`, or in the
+// gitignored scripts/build-signing.conf / LocalSigning.xcconfig.
+NC_MODELS_CONDITION =
+
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(PRIVATE_API_CONDITION) $(YOUTUBE_CONDITION) $(FFMPEG_CONDITION) $(DOVI_CONDITION) $(NC_MODELS_CONDITION)

@@ -426,12 +426,31 @@ Answers so far:
   EGL renders into directly, and the decoder feeds a SurfaceTexture as an external texture with no
   copy through Vulkan interop. Vulkan would only pay if the passes grew into compute work. Frame time
   on a Quest 3 is unmeasured (the renderer logs it).
-- **Question 10 (depth model licences):** only Depth Anything V2 Small (Apache-2.0) goes into a
-  worker profile, made larger by its input size instead (770×574, `scripts/convert-depth-model.py`).
-  Depth Anything V2 Base and Large, and Video Depth Anything Base and Large, are CC-BY-NC-4.0 by their
-  model cards (Video Depth Anything Small is Apache-2.0); Depth Pro's weights come under Apple's own
-  research licence. None of those is bundled or offered; an opt-in download with its licence shown
-  stays the user's decision.
+- **Question 10 (depth model licences):** answered by the user on 2026-11-07: offer the larger
+  models, sideload only, behind build flags. Depth Anything V2 Base and Large, and Video Depth
+  Anything Base and Large, are CC-BY-NC-4.0 by their model cards (Video Depth Anything Small is
+  Apache-2.0); Depth Pro's weights are research-only. So:
+  - **Convolution:** with `NC_MODELS_CONDITION=HYPNOS_NC_MODELS` (sideload builds only, like
+    `HYPNOS_YOUTUBE`), Settings › AI Models offers Depth Anything V2 Base and Large as downloads
+    after showing the licence and "non-commercial use only"; a submission build has no name, address
+    or UI of them. The Core ML conversions are a third party's on Hugging Face (`.tar.gz`, checked
+    against the repo's SHA-256, unpacked on the device); nothing is re-hosted.
+  - **Vergence:** `vergence convert` and `vergence worker` take such a model only when built with
+    `-Xswiftc -DVERGENCE_NONCOMMERCIAL_MODELS`, and say its licence; a worker's profile names the
+    licence, so its titles never mix with Small's. No weights in the repo.
+  - **Measured on the M2 Max** (offline pipeline, 1080p, warm, Mac shared with other work): Small
+    23–35 fps, Base 5–16 fps (our own `convert-depth-model.py --variant base` at 518×392) and 9–12
+    fps (the third-party all-float16 518×518 archive). Base resolves fine structure Small misses
+    (dandelion fibres, thin stems); our conversion was sharper and haloed less than the archive's,
+    and can be dropped into Documents instead of downloaded.
+  - **Not offered:** Video Depth Anything (reads 32-frame clips, not one frame: not a drop-in for the
+    per-frame pipeline) and Depth Pro (1536×1536 input at seconds a frame, an image output the
+    provider doesn't read).
+  - **Not done:** the Rust side. The ONNX worker and `vergence-convert` should take Base/Large
+    (`onnx-community/depth-anything-v2-base` / `-large`, CC-BY-NC-4.0) only behind a cargo feature
+    `noncommercial-models`, off by default, with the same name rule and licence line, and the
+    desktop app show the licence before downloading one. Left for the helpers in `worker/` and
+    `convert/`.
 - **Question 8 (the Windows converter's depth maths):** a Rust port. The GPU kernels had to be
   rewritten anyway (Metal to WGSL); VergenceCore's part is about 400 lines of plain maths, ported and
   tested against fixtures VergenceCore writes (`scripts/make-convert-fixtures.sh`), all passing.
@@ -467,7 +486,7 @@ Answers so far:
 8. **The Windows converter's depth maths:** answered: a Rust port (see "Answers so far").
 9. **Spatial video on Windows:** answered: no usable MV-HEVC encoder through ffmpeg yet, so spatial
    output stays Mac only (see "Answers so far").
-10. **Depth model licences** for anything beyond Depth Anything V2 Small.
+10. **Depth model licences:** answered (see "Answers so far"): sideload and opt-in builds only.
 11. **Conversion speed** on the M2 Max and on CUDA per model and resolution: answered for Depth
     Anything V2 Small (see "Answers so far"): an evening's job at 1080p on either, a night's at 4K
     HDR on the 3080.
