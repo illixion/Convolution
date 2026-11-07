@@ -243,7 +243,14 @@ extension VideoWindowModel {
         // The pump measures the source's own rate from its frame times; the
         // readout's, since the stereo picture has no other renderer to ask.
         if showsStereoPicture, sample.sourceFramesPerSecond > 0 {
-            notePictureFrameRate(sample.sourceFramesPerSecond)
+            // With Smooth Motion the pump learns its spacing from the frames it
+            // shows, in-between ones included, so it reads 47.952 for a 23.976
+            // film. The readout wants the film's own rate (it doubles that
+            // itself: "24 → 48"); only a source under the interpolator's
+            // ceiling is ever doubled, so a rate above it is the doubled one.
+            var rate = sample.sourceFramesPerSecond
+            if smoothMotionDoubling, rate > InterpolatingFrameSource.maxSourceFrameRate { rate /= 2 }
+            notePictureFrameRate(rate)
         }
         // Faster than 1× the pump measures against the video's 1× frame
         // rate (all real-time AI 3D shows then), so this holds at any speed.
