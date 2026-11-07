@@ -472,7 +472,11 @@ and fallback shaders" and phase 0's disparity work is the flow network's.
 
 ## Later: a Mac helping the headset (idea, 2026-11-01)
 
-Proposed, not agreed or started. A paired Mac (Convolution's own macOS build, in a background worker
+**Moved to its own plan, `mac-companion-compute.md` (2026-11-07), which is current.** Agreed by the
+user on 2026-11-01; the transport (`RAVECompanion`) and the format were built since. The original
+note, kept for history:
+
+A paired Mac (Convolution's own macOS build, in a background worker
 mode) computes flow, disparity, depth and gain maps **ahead of the playhead** and sends only the
 results; it opens the same Jellyfin/Stash/disc URL and decodes the video itself, so no frames cross.
 - Results are small: a 512×288 flow field or a 518×392 depth map is 0.4–0.6 MB raw, likely 50–150 KB
