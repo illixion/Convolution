@@ -29,6 +29,9 @@ struct AnalysisCoordinator: Sendable {
     static let urlKey = "analysisCoordinatorURL"
     static let playerKey = "analysisCoordinatorPlayer"
     static let smoothMotion3D = "smooth-motion-3d"
+    /// Smooth Motion for a 2D title (flat or AI 3D): the whole picture's flow,
+    /// RIFE at 960×576 on a worker.
+    static let smoothMotion2D = "smooth-motion-2d"
 
     /// The configured coordinator, or nil when there is none.
     static func current() -> AnalysisCoordinator? {
@@ -104,9 +107,10 @@ struct AnalysisCoordinator: Sendable {
     /// pieces around `seconds` first. Throws for a title it won't work on
     /// (not stereo, a disc, a server it doesn't know).
     @discardableResult
-    func playing(itemId: String, seconds: Double, rate: Double = 1) async throws -> Status {
+    func playing(itemId: String, seconds: Double, rate: Double = 1,
+                 workload: String = smoothMotion3D) async throws -> Status {
         let reply = try await send("POST", "v1/playing", json: [
-            "server": "jellyfin", "id": itemId, "workload": Self.smoothMotion3D,
+            "server": "jellyfin", "id": itemId, "workload": workload,
             "seconds": max(seconds, 0), "rate": rate, "player": player,
         ])
         guard reply.status == 200 else { throw Failure.http(reply.status) }
@@ -126,9 +130,9 @@ struct AnalysisCoordinator: Sendable {
         return reply.status == 404 || reply.status == 200
     }
 
-    /// Chunk `index` of an item's Smooth Motion track, whole or not.
-    func chunk(itemId: String, index: Int) async throws -> StreamingAnalysisChunk {
-        let reply = try await send("GET", "v1/titles/jellyfin/\(itemId)/\(Self.smoothMotion3D)/chunks/\(index)")
+    /// Chunk `index` of an item's track for `workload`, whole or not.
+    func chunk(itemId: String, index: Int, workload: String = smoothMotion3D) async throws -> StreamingAnalysisChunk {
+        let reply = try await send("GET", "v1/titles/jellyfin/\(itemId)/\(workload)/chunks/\(index)")
         switch reply.status {
         case 200:
             return StreamingAnalysisChunk(data: reply.body, isComplete: reply.headers["vergence-chunk-complete"] != "false")
@@ -144,6 +148,7 @@ struct AnalysisCoordinator: Sendable {
 final class AnalysisPlayheadReporter: @unchecked Sendable {
     private let coordinator: AnalysisCoordinator
     private let itemId: String
+    private let workload: String
     private let lock = NSLock()
     private var lastSent: (seconds: Double, at: Date)?
     private var sending = false
@@ -152,9 +157,11 @@ final class AnalysisPlayheadReporter: @unchecked Sendable {
     /// A playhead this far from where the last report says it should be is a seek.
     private static let seekSeconds = 3.0
 
-    init(coordinator: AnalysisCoordinator, itemId: String, startSeconds: Double) {
+    init(coordinator: AnalysisCoordinator, itemId: String, workload: String = AnalysisCoordinator.smoothMotion3D,
+         startSeconds: Double) {
         self.coordinator = coordinator
         self.itemId = itemId
+        self.workload = workload
         lastSent = (startSeconds, Date())
     }
 
@@ -177,10 +184,10 @@ final class AnalysisPlayheadReporter: @unchecked Sendable {
         sending = true
         lastSent = (seconds, now)
         lock.unlock()
-        let coordinator = coordinator, itemId = itemId
+        let coordinator = coordinator, itemId = itemId, workload = workload
         Task.detached(priority: .utility) { [weak self] in
             do {
-                try await coordinator.playing(itemId: itemId, seconds: seconds)
+                try await coordinator.playing(itemId: itemId, seconds: seconds, workload: workload)
             } catch {
                 AppLogger.filmPlayer.info("Smooth Motion: the analysis server didn't take the playhead (\(error.logCode, privacy: .public))")
             }

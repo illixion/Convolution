@@ -212,7 +212,7 @@ struct VideoWindowView: View {
                             startAtSeconds: liveLayout == nil ? windowModel.pseudo3DEngageResumeTime : nil,
                             startPaused: liveLayout == nil && windowModel.pseudo3DEngagePaused,
                             packedStereo: liveLayout,
-                            sharedFields: windowModel.liveStereoSharedFields,
+                            sharedFields: windowModel.stereoPlayerSharedFields,
                             isFlipped: windowModel.isFlipped,
                             loopController: windowModel.loopController,
                             playbackModel: windowModel,
@@ -262,6 +262,7 @@ struct VideoWindowView: View {
                                 loops: windowModel.loopsAtEnd,
                                 interpolatesFrames: windowModel.smoothMotion,
                                 interpolationEngine: appModel.smoothMotionEngine,
+                                sharedFields: windowModel.monoSharedFields,
                                 onPlaybackError: {
                                     windowModel.forceWebKitPlayback()
                                 }

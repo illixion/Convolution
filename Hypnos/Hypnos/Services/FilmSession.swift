@@ -88,6 +88,9 @@ final class FilmSession {
     /// analysis track (`SmoothMotionTracks`); nil without one, and then a
     /// packed 3D picture plays without in-between frames.
     private(set) var sharedFields: AnalysisTrackFieldProvider?
+    /// A 2D film's fields from an analysis coordinator (`smooth-motion-2d`),
+    /// for Smooth Motion in AI 3D; nil for a 3D film or without a coordinator.
+    private(set) var monoSharedFields: AnalysisTrackFieldProvider?
     @ObservationIgnored private var sharedFieldsTask: Task<Void, Never>?
     private(set) var isLoading = false
     private(set) var error: String?
@@ -398,11 +401,17 @@ final class FilmSession {
     private func loadSharedFields() {
         sharedFieldsTask?.cancel()
         sharedFields = nil
+        monoSharedFields = nil
         guard let item = loadedItem else { return }
         sharedFieldsTask = Task { [weak self] in
             let fields = await SmoothMotionTracks.fields(name: item.name, id: item.id)
             guard !Task.isCancelled, let self, self.loadedItem?.id == item.id else { return }
             self.sharedFields = fields
+            // No 3D track: a 2D film's comes from the coordinator (which refuses a 3D one).
+            guard fields == nil else { return }
+            let mono = await SmoothMotionTracks.monoFields(id: item.id)
+            guard !Task.isCancelled, self.loadedItem?.id == item.id else { return }
+            self.monoSharedFields = mono
         }
     }
 

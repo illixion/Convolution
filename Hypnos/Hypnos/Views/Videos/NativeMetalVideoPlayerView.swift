@@ -208,6 +208,9 @@ struct NativeMetalVideoPlayerView {
     var interpolatesFrames: Bool = false
     /// Which interpolator Smooth Motion uses (Settings › Videos).
     var interpolationEngine: SmoothMotionEngine = .automatic
+    /// A 2D Library title's fields from an analysis coordinator: pairs they
+    /// cover are made from them, the rest by `interpolationEngine`.
+    var sharedFields: SharedFieldProvider? = nil
     var onPlaybackError: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
@@ -253,6 +256,7 @@ struct NativeMetalVideoPlayerView {
         coordinator.speed = Float(playbackModel?.playbackSpeed ?? 1)
         coordinator.loops = loops
         coordinator.interpolationEngine = interpolationEngine
+        coordinator.sharedFields = sharedFields
         coordinator.interpolatesFrames = interpolatesFrames
         coordinator.resumesAfterInterruptions = playbackModel == nil
         coordinator.maximumResolution = playbackModel?.maximumPictureResolution ?? .zero
@@ -395,6 +399,15 @@ struct NativeMetalVideoPlayerView {
         }
         var interpolationEngine: SmoothMotionEngine = .automatic {
             didSet { if oldValue != interpolationEngine, interpolatesFrames { rebuildFramePresenter() } }
+        }
+        /// Fields made ahead for this 2D picture; a track arriving after the
+        /// picture started rebuilds the presenter with it.
+        var sharedFields: SharedFieldProvider? {
+            didSet {
+                if oldValue.map(ObjectIdentifier.init) != sharedFields.map(ObjectIdentifier.init), interpolatesFrames {
+                    rebuildFramePresenter()
+                }
+            }
         }
         /// Doubles a 24-30 fps picture while Smooth Motion is on (nil: frames
         /// straight from the output).
@@ -1305,7 +1318,7 @@ struct NativeMetalVideoPlayerView {
                let videoOutput, let playerItem {
                 let source = InterpolatingFrameSource.wrappingIfSupported(
                     AVPlayerFrameSource(output: videoOutput, item: playerItem), thresholds: .flat,
-                    engine: interpolationEngine.vergenceEngine
+                    engine: interpolationEngine.vergenceEngine, sharedFields: sharedFields
                 )
                 if source is InterpolatingFrameSource {
                     framePresenter = InterpolatedFramePresenter(source: source)

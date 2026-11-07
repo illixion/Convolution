@@ -37,27 +37,41 @@ enum SmoothMotionTracks {
         return await coordinatorFields(coordinator, id: id, startSeconds: startSeconds)
     }
 
-    private static func coordinatorFields(_ coordinator: AnalysisCoordinator, id: String,
-                                          startSeconds: Double) async -> AnalysisTrackFieldProvider? {
+    /// The fields for a 2D Library title (flat, or played as AI 3D): only an
+    /// analysis coordinator makes them (`smooth-motion-2d`, the whole
+    /// picture's flow), while it plays. Nil without a coordinator, or for a
+    /// title it won't take (a 3D one). Pairs the track doesn't cover yet get
+    /// the device's own interpolator.
+    static func monoFields(id: String, startSeconds: Double = 0) async -> AnalysisTrackFieldProvider? {
+        guard let coordinator = AnalysisCoordinator.current() else { return nil }
+        return await coordinatorFields(coordinator, id: id, startSeconds: startSeconds,
+                                       workload: AnalysisCoordinator.smoothMotion2D)
+    }
+
+    private static func coordinatorFields(_ coordinator: AnalysisCoordinator, id: String, startSeconds: Double,
+                                          workload: String = AnalysisCoordinator.smoothMotion3D) async -> AnalysisTrackFieldProvider? {
         let status: AnalysisCoordinator.Status
         do {
-            status = try await coordinator.playing(itemId: id, seconds: startSeconds)
+            status = try await coordinator.playing(itemId: id, seconds: startSeconds, workload: workload)
         } catch {
-            // Not a title it works on (2D, a disc), or the server is away.
-            AppLogger.filmPlayer.info("Smooth Motion: no analysis server track (\(error.logCode, privacy: .public))")
+            // Not a title it works on (2D for 3D work and the reverse, a disc), or the server is away.
+            AppLogger.filmPlayer.info("Smooth Motion: no analysis server track for \(workload, privacy: .public) (\(error.logCode, privacy: .public))")
             return nil
         }
         guard status.chunks > 0, status.chunkSeconds > 0 else { return nil }
-        let reporter = AnalysisPlayheadReporter(coordinator: coordinator, itemId: id, startSeconds: startSeconds)
+        let reporter = AnalysisPlayheadReporter(coordinator: coordinator, itemId: id, workload: workload,
+                                                startSeconds: startSeconds)
         let track = StreamingAnalysisTrack(chunkSeconds: status.chunkSeconds, chunkCount: status.chunks,
                                            retrySeconds: 1.5, partialRefetchSeconds: 1.5,
                                            onDemand: { reporter.note($0) }) { index in
-            try await coordinator.chunk(itemId: id, index: index)
+            try await coordinator.chunk(itemId: id, index: index, workload: workload)
         }
         track.prefetch(at: startSeconds)
         AppLogger.filmPlayer.info(
-            "Smooth Motion: analysis server track \(status.state, privacy: .public), \(status.piecesDone, privacy: .public) of \(status.pieces, privacy: .public) pieces, \(status.chunks, privacy: .public) chunks")
-        return AnalysisTrackFieldProvider(lookup: track, frameRate: status.frameRate, inflate: AnalysisDeflate.inflate)
+            "Smooth Motion: analysis server track (\(workload, privacy: .public)) \(status.state, privacy: .public), \(status.piecesDone, privacy: .public) of \(status.pieces, privacy: .public) pieces, \(status.chunks, privacy: .public) chunks")
+        return AnalysisTrackFieldProvider(lookup: track, frameRate: status.frameRate,
+                                          needsDisparity: workload == AnalysisCoordinator.smoothMotion3D,
+                                          inflate: AnalysisDeflate.inflate)
     }
 
     private static func localFields(name: String, id: String) async -> AnalysisTrackFieldProvider? {

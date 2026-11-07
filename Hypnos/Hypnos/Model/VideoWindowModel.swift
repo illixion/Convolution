@@ -218,6 +218,14 @@ final class VideoWindowModel {
     @ObservationIgnored private var sharedFieldsTask: Task<Void, Never>?
     /// The track, while live 3D plays (what the stereo player is handed).
     var liveStereoSharedFields: SharedFieldProvider? { liveStereoLayout != nil ? sharedFields : nil }
+    /// A 2D Library title's fields from an analysis coordinator
+    /// (`SmoothMotionTracks.monoFields`), for Smooth Motion in the flat
+    /// player and in AI 3D: pairs they cover skip the device's interpolator.
+    private(set) var monoSharedFields: AnalysisTrackFieldProvider?
+    /// What the stereo player is handed: live 3D's track, or AI 3D's 2D one.
+    var stereoPlayerSharedFields: SharedFieldProvider? {
+        liveStereoLayout != nil ? sharedFields : monoSharedFields
+    }
     /// True while the user is dragging the scrubber — suppresses incoming
     /// timeupdate writes so the thumb doesn't fight the drag.
     var isScrubbing: Bool = false {
@@ -583,12 +591,22 @@ final class VideoWindowModel {
     }
 
     /// Looks for the analysis track of a 3D Library title: by its Jellyfin
-    /// item id, else its name.
+    /// item id, else its name. A 2D Library title's comes from an analysis
+    /// coordinator, if one is set.
     private func loadSharedFields() {
         sharedFieldsTask?.cancel()
         sharedFields = nil
-        guard video.isStereoscopic, let itemId = libraryItemId else { return }
+        monoSharedFields = nil
+        guard let itemId = libraryItemId else { return }
         let identity = video.identity, name = video.title ?? ""
+        guard video.isStereoscopic else {
+            sharedFieldsTask = Task { [weak self] in
+                let fields = await SmoothMotionTracks.monoFields(id: itemId)
+                guard !Task.isCancelled, let self, self.video.identity == identity else { return }
+                self.monoSharedFields = fields
+            }
+            return
+        }
         sharedFieldsTask = Task { [weak self] in
             let fields = await SmoothMotionTracks.fields(name: name, id: itemId)
             guard !Task.isCancelled, let self, self.video.identity == identity else { return }

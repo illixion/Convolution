@@ -244,10 +244,10 @@ struct Pseudo3DVideoPlayerView: View {
         .onChange(of: engine.showsDoubledFrames, initial: true) { _, doubled in
             playbackModel?.noteSmoothMotionDoubling(doubled)
         }
-        // A track found after live 3D started: rebuild the pump with it.
+        // A track found after the picture started (live 3D's, or AI 3D's 2D one): rebuild the pump with it.
         .onChange(of: sharedFields.map(ObjectIdentifier.init)) { _, _ in
             engine.sharedFields = sharedFields
-            if packedStereo != nil, smoothMotion { engine.reloadDepthPipeline() }
+            if smoothMotion { engine.reloadDepthPipeline() }
         }
         .onAppear {
             playbackModel?.stereoPictureStarted()

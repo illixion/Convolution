@@ -272,6 +272,13 @@ struct FilmPlayerView: View {
                     startStereo()
                 }
             }
+            // A 2D film's track arriving after AI 3D started is handed to the running picture.
+            .onChange(of: session.monoSharedFields.map(ObjectIdentifier.init)) { _, _ in
+                if stereoSource != nil, stereoLayout == nil, smoothMotion {
+                    stopStereo(keepingPosition: false)
+                    startStereo()
+                }
+            }
             .task(id: stereoSource.map(ObjectIdentifier.init)) {
                 guard let source = stereoSource else { return }
                 while !Task.isCancelled {
@@ -501,7 +508,8 @@ struct FilmPlayerView: View {
                         subtitles: stereoSubtitles,
                         interpolatesFrames: smoothMotion,
                         speed: player.speed,
-                        sharedFields: stereoLayout != nil ? session.sharedFields : nil,
+                        // A 2D film in AI 3D gets its 2D track (pairs it doesn't cover: the device's own).
+                        sharedFields: stereoLayout != nil ? session.sharedFields : session.monoSharedFields,
                         onUnavailable: { failure in
                             guard stereoSource === source else { return }
                             stopStereo()
