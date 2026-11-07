@@ -12,6 +12,9 @@ namespace Jellyfin.Plugin.AtmosObjects;
 ///   POST /SmoothMotion/{itemId}/Analyze          analyse it in the background (202), or 409 with the reason it can't be
 ///   GET  /SmoothMotion/{itemId}/Chunks/{n}       seconds [n·chunkSeconds, (n+1)·chunkSeconds) as a track of its own
 ///   GET  /SmoothMotion/{itemId}/Track            the whole track (ranges supported), for a download
+///
+/// With an analysis coordinator configured (<see cref="SmoothMotionCoordinator"/>), an item this server has no
+/// finished track for is answered by the coordinator: its status, its whole chunks, and Analyze queues it there.
 /// </summary>
 [ApiController]
 [Route("SmoothMotion")]
@@ -19,20 +22,43 @@ namespace Jellyfin.Plugin.AtmosObjects;
 public class SmoothMotionController : ControllerBase
 {
     private readonly SmoothMotionService _smoothMotion;
+    private readonly SmoothMotionCoordinator _coordinator;
 
-    public SmoothMotionController(SmoothMotionService smoothMotion)
+    public SmoothMotionController(SmoothMotionService smoothMotion, SmoothMotionCoordinator coordinator)
     {
         _smoothMotion = smoothMotion;
+        _coordinator = coordinator;
     }
 
     [HttpGet("{itemId}")]
     [Produces(MediaTypeNames.Application.Json)]
-    public ActionResult GetStatus([FromRoute] Guid itemId)
-        => new JsonResult(_smoothMotion.GetStatus(itemId), AtmosSceneService.JsonOptions);
+    public async Task<ActionResult> GetStatus([FromRoute] Guid itemId, CancellationToken ct)
+    {
+        var status = _smoothMotion.GetStatus(itemId);
+        if (status.State != "ready" && SmoothMotionCoordinator.IsConfigured
+            && await _coordinator.GetStatusAsync(itemId, ct).ConfigureAwait(false) is { State: not "none" } remote)
+        {
+            status = remote;
+        }
+
+        return new JsonResult(status, AtmosSceneService.JsonOptions);
+    }
 
     [HttpPost("{itemId}/Analyze")]
-    public ActionResult Analyze([FromRoute] Guid itemId)
+    public async Task<ActionResult> Analyze([FromRoute] Guid itemId, CancellationToken ct)
     {
+        if (SmoothMotionCoordinator.IsConfigured && _smoothMotion.GetStatus(itemId).State != "ready")
+        {
+            var (queued, problem) = await _coordinator.EnqueueAsync(itemId, ct).ConfigureAwait(false);
+            if (!queued)
+            {
+                return Conflict(new { reason = problem });
+            }
+
+            var remote = await _coordinator.GetStatusAsync(itemId, ct).ConfigureAwait(false) ?? new SmoothMotionStatus("queued", null);
+            return new JsonResult(remote, AtmosSceneService.JsonOptions) { StatusCode = StatusCodes.Status202Accepted };
+        }
+
         if (!_smoothMotion.Enqueue(itemId, out var reason))
         {
             return Conflict(new { reason });
@@ -46,6 +72,12 @@ public class SmoothMotionController : ControllerBase
     {
         if (_smoothMotion.GetChunk(itemId, index) is not { } chunk)
         {
+            if (SmoothMotionCoordinator.IsConfigured && await _coordinator.GetChunkAsync(itemId, index, ct).ConfigureAwait(false) is { } remote)
+            {
+                Response.Headers.CacheControl = "private, max-age=86400";
+                return File(remote, "application/octet-stream");
+            }
+
             return NotFound();
         }
 

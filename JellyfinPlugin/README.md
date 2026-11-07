@@ -611,6 +611,19 @@ title once and serves the result:
   turns analysis off. Elsewhere every title reports `unsupported` with the
   reason.
 
+- **With an analysis coordinator:** set `AnalysisCoordinatorUrl`
+  (`http://host:8420`) and `AnalysisCoordinatorToken` (made with
+  `vergenced token add jellyfin --grants play`) and this server no longer
+  analyses titles itself. Vergence's coordinator (`vergenced`) hands each
+  title to worker machines in 2 s pieces, nearest a player's playhead first
+  (Hypnos `docs/plans/analysis-workers.md`). For any item without a finished
+  track here, the routes above answer from the coordinator: its status, its
+  whole chunks, and `Analyze` queues the item there. The nightly task
+  queues every 3D title there instead of analysing. A track already
+  finished here is still served from here. Checked on the dev instance:
+  status and Analyze pass through, and a chunk read through Jellyfin is
+  byte for byte the coordinator's.
+
 The player (`SmoothMotionTracks` in the app, Vergence's
 `StreamingAnalysisTrack`) keeps the chunk at the playhead, three after it
 and one before, fetching the nearest missing two at a time; a seek passes

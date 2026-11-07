@@ -8,16 +8,19 @@ namespace Jellyfin.Plugin.AtmosObjects;
 /// another (about 3.5 hours a film on an M1). Runs nightly; cancelling it
 /// stops the film being analysed, which starts over next time. A title
 /// whose analysis failed is skipped until its failed.txt is removed or a
-/// client asks for it again.
+/// client asks for it again. With an analysis coordinator configured, it
+/// queues the titles there instead (<see cref="SmoothMotionCoordinator"/>).
 /// </summary>
 public class SmoothMotionTask : IScheduledTask
 {
     private readonly SmoothMotionService _smoothMotion;
+    private readonly SmoothMotionCoordinator _coordinator;
     private readonly ILogger<SmoothMotionTask> _logger;
 
-    public SmoothMotionTask(SmoothMotionService smoothMotion, ILogger<SmoothMotionTask> logger)
+    public SmoothMotionTask(SmoothMotionService smoothMotion, SmoothMotionCoordinator coordinator, ILogger<SmoothMotionTask> logger)
     {
         _smoothMotion = smoothMotion;
+        _coordinator = coordinator;
         _logger = logger;
     }
 
@@ -37,6 +40,29 @@ public class SmoothMotionTask : IScheduledTask
         }
 
         var items = _smoothMotion.Candidates();
+        if (SmoothMotionCoordinator.IsConfigured)
+        {
+            // The coordinator's workers do the analysis; this only queues the titles there, as backfill.
+            var queued = 0;
+            for (var i = 0; i < items.Count; i++)
+            {
+                progress.Report(100.0 * i / items.Count);
+                var (ok, reason) = await _coordinator.EnqueueAsync(items[i].Id, cancellationToken).ConfigureAwait(false);
+                if (ok)
+                {
+                    queued++;
+                }
+                else
+                {
+                    _logger.LogInformation("Smooth Motion: the analysis coordinator didn't take {ItemId}: {Reason}", items[i].Id, reason);
+                }
+            }
+
+            _logger.LogInformation("Smooth Motion: {Queued} of {Count} 3D titles queued on the analysis coordinator", queued, items.Count);
+            progress.Report(100);
+            return;
+        }
+
         _logger.LogInformation("Smooth Motion: {Count} 3D titles to analyse", items.Count);
         for (var i = 0; i < items.Count; i++)
         {

@@ -87,6 +87,15 @@ public class PluginConfiguration : MediaBrowser.Model.Plugins.BasePluginConfigur
 
     /// <summary>Folder of the Smooth Motion Core ML models. Empty means smooth-motion-models beside vergence.</summary>
     public string SmoothMotionModelsPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// A Vergence analysis coordinator (http://host:8420). When set with a token, titles are analysed by its
+    /// workers instead of on this server, and the SmoothMotion routes pass through to it.
+    /// </summary>
+    public string AnalysisCoordinatorUrl { get; set; } = string.Empty;
+
+    /// <summary>The coordinator token (<c>vergenced token add jellyfin --grants play</c>).</summary>
+    public string AnalysisCoordinatorToken { get; set; } = string.Empty;
 }
 
 public class PluginServiceRegistrator : IPluginServiceRegistrator
@@ -98,5 +107,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<SpatialStreamService>();
         serviceCollection.AddSingleton<SubtitleStreamService>();
         serviceCollection.AddSingleton<SmoothMotionService>();
+        serviceCollection.AddSingleton<SmoothMotionCoordinator>();
     }
 }
