@@ -426,11 +426,22 @@ Answers so far:
   title through one `vergenced`: pieces from both, mean 0.010 from a Core ML whole-file run. Speed
   on that 9-piece title: the 3080 alone 35 s (3.6 s a piece), the M2 Max alone 95–113 s, together
   45 s, because the Mac's first piece (45 s, its model loading) came last; on long titles the two
-  rates add (about 13 + 5 fps of title). Two problems the split run found, not fixed: the Mac
-  worker's `ai-3d-depth` fails every piece with context on two other dev titles ("the depth pass
-  gave 57 of 74 frames"; the Rust worker makes them), and the coordinator takes a title's frame count
-  from the container's duration, so a title whose video ends before its audio has pieces no worker
-  can make (the 4K demo: 2548 frames, 55 pieces queued).
+  rates add (about 13 + 5 fps of title). Two problems the split run found, both fixed
+  (vergence 4a68244): the Mac worker's `ai-3d-depth` lost frames on Matroska titles ("the depth pass
+  gave 57 of 74 frames": the ProRes intermediate kept the source's millisecond timestamps, uneven,
+  and the depth pass reads by time; frame k now sits at k / rate), and the coordinator took a title's
+  length from the container, so the 4K demo (109.8 s of container, 2548 frames of picture) had pieces
+  no worker could make. A worker whose decode ends cleanly inside a piece now says `videoEndFrame` in
+  its track header; within 10 s (or 2 %) of the title's end the coordinator takes the short piece,
+  ends the title there and stores the pieces past it empty. On the 4K demo every piece was made and
+  the title went ready; against a whole-file run its depth differs by 0.012 on average but 0.12 at
+  p99 (0.55 at most), in long dark shots where a second of context doesn't let Stable Depth's
+  anchoring settle (its hold time is 3 s): a longer context, at its cost in speed, is the open
+  question there. Both workers on one Mac don't add up: on a 600 s 640×360 title over 240 s each, the Core ML
+  worker alone made 164 depth pieces (about 33 fps of title), the ONNX worker on the CPU alone 19
+  (about 4), and the two together 85 (72 + 13): the CPU worker takes the cores the Core ML worker's
+  decoding and refinement need. Rates add across machines (the M2 Max and the 3080 above), not
+  between engines on one; a Mac should run only `vergence worker`.
 - **Question 4 (throughput):** the M2 Max's Core ML worker does 1080p 3D Smooth Motion at about
   37 fps; ONNX Runtime on the same Mac 16–17 fps. On an RTX 3080, whole pieces from a coordinator
   (decode and seek included): TensorRT 55 fps, DirectML 52, CUDA 47, for 0.45–0.9 GB of GPU memory;
