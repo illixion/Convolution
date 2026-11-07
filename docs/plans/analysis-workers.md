@@ -10,6 +10,8 @@ and kept as a short note in `blu-ray-3d-smooth-motion.md`. Decided with the user
   into a service of its own, and the plugin keeps its routes during the move.
 - **A Vergence desktop app for Mac and Windows,** so Quest users can run the analysis on their own
   computer. Apparition's desktop shell is its base, and Longwave's pairing and companion work feed it.
+- **The desktop app also converts files:** point it at any video or film and it writes an AI 3D
+  side-by-side copy that any 3D player can play (see "AI 3D to side-by-side files").
 - **CUDA PCs are optional:** one on the LAN and one remote, only if the M2 Max and the M5 prove
   insufficient. Which machines these are is kept out of this public repo.
 
@@ -177,7 +179,8 @@ for the passes.
 - pair the headset by its six-digit code;
 - pick the GPU and the profiles;
 - watch the queue, throughput and cache;
-- start at login, hidden.
+- start at login, hidden;
+- **convert files to AI 3D side by side** (below), which needs no headset, server or pairing.
 
 On the user's own setup the same coordinator also runs headless on the home server, and the desktop
 app on the Mac only adds a worker.
@@ -210,6 +213,79 @@ The UI is plain HTML and JS embedded in the app, with no remote scripts, like Ap
 **Shared code:** if Longwave's companion later moves onto the same shell, the shared parts (pairing,
 tray, updater) can become a crate both repos use. Until there's a second consumer, they're
 Vergence's.
+
+### AI 3D to side-by-side files (asked for 2026-11-07)
+
+Drop a video, a film or a folder on the window, or use "Open with" from Finder or Explorer. The app
+writes a 3D copy beside it, or into a chosen folder, that plays in any SBS-capable player: a Quest's
+own player or Skybox, Jellyfin, a 3D TV. This needs no headset, media server or pairing, so it is
+also the simplest way to try Vergence.
+
+**Pipeline:** the offline AI 3D path Convolution's Pre-Process uses, run to a file instead of a
+cache:
+1. **Decode.**
+2. **Depth:** inference, then the pre-processed refinement:
+   - joint-bilateral filtering on the frame's own edges;
+   - ±2-frame lookahead, cut-aware;
+   - Stable Depth anchoring and the soft-knee depth budget.
+3. **Warp each eye:** the depth-displaced mesh, with the layered or boundary warp once those are
+   validated.
+4. **Encode** HEVC side by side, and mux.
+
+Two passes over a file are fine offline. Depth can be made over the whole shot before warping,
+which a live player can't do.
+
+**What exists:**
+- **VergenceApple** has every stage: `DepthConverter` with its two-stage pipeline and two-pass cache,
+  `DepthRefinement` (VergenceCore), the Metal warps, `StereoPixelBufferMaker`, and VideoToolbox
+  encode. The README lists "2D to 3D from estimated depth (the library; the command line comes
+  later)".
+- **`vergence sbs`** already writes side-by-side HEVC MP4 with an `st3d` box and the
+  `.3D.FSBS`/`.3D.HSBS` names that Jellyfin and players read.
+- **`vergence make`** turns side-by-side into MV-HEVC spatial video.
+
+**What's new:**
+- **A `vergence convert` command** (Mac) joining those stages: decode, depth, warp and encode. The
+  desktop app runs it like the worker, as a sidecar.
+- **Windows:** the same stages in the Rust engine:
+  - ONNX Runtime depth, as for the workers;
+  - the warp in WGSL through wgpu (D3D12 or Vulkan);
+  - ffmpeg with NVENC (or another hardware HEVC encoder) to encode.
+  - The depth maths (anchoring, budget, cut detection, percentiles) is VergenceCore Swift, so it is
+    either ported to Rust against fixtures VergenceCore produces, or VergenceCore is built for
+    Windows and called through a C ABI. Decide once a spike shows which is less work; the
+    Package.swift comment claims Windows but it has never been built there.
+  - **Parity:** the same frames and depth through Metal and wgpu must give the same picture within
+    a set PSNR, checked on the paused-frame fixtures.
+- **The depth also feeds Vision Pros:** the conversion writes its depth as analysis-track `depth`
+  records too, so a title converted for a Quest also serves a Vision Pro's live AI 3D through the
+  coordinator.
+
+**Options in the app** (defaults first):
+
+| Option | Choices |
+| --- | --- |
+| Layout | full SBS; half SBS (for players and TVs that want the original width); top-and-bottom; **spatial video** (MV-HEVC, Mac first, through `make`, for a Vision Pro or iPhone) |
+| Depth | Convolution's Subtle strength and convergence (`Pseudo3DSettings` defaults) with a slider, and the model (see licences below) |
+| Preview | a frame shown side by side or as anaglyph before starting, and a 10 s sample render |
+| Smooth Motion | off by default; can bake in-between frames (24 → 48 fps) with the same flow models |
+| HDR | an HDR source stays HDR (10-bit HEVC, its transfer and primaries copied); depth runs on a tone-mapped copy |
+| Audio | every track copied as is. MP4 when the audio fits in it, else MKV (TrueHD, DTS) |
+| Subtitles | text tracks copied; optionally burned in at the right depth with Vergence's `StereoSubtitleCompositor`, so they sit in front of the scene and not inside it |
+
+**Running:**
+- A queue in the same window, with progress and time left per file.
+- Pause, resume after a quit, cancel.
+- It yields to games and other GPU use like a worker does.
+- An interrupted conversion picks up from its depth cache instead of starting over.
+- Conversions run below live analysis work, which has a playhead waiting.
+
+**Model licences:**
+- The shipping model, Depth Anything V2 Small from Apple's Core ML repo, is Apache-2.0.
+- Larger depth models (Depth Anything V2 Base/Large, Video Depth Anything Large, Depth Pro) need
+  their weights' licences checked before the app offers them. Several are, as far as known,
+  non-commercial only. If so, offer them only as an opt-in download with the licence shown, never
+  bundled.
 
 ### AI HDR for video, in short (proposed 2026-11-07, not started)
 
@@ -249,6 +325,12 @@ It is meant to work on a Vision Pro alone too, with workers as a quality upgrade
 6. **Quest player passes:** GLES vs Vulkan in the Quest port's renderer (Spatial SDK, Media3
    surfaces); see `quest-parity-roadmap.md`.
 7. **Stash stereo layout:** detection only, or a tag convention as well.
+8. **The Windows converter's depth maths:** a Rust port, or VergenceCore built for Windows.
+9. **Spatial video on Windows:** whether a usable MV-HEVC encoder exists there. Until then, spatial
+   output is Mac only.
+10. **Depth model licences** for anything beyond Depth Anything V2 Small.
+11. **Conversion speed** on the M2 Max and on CUDA per model and resolution (unmeasured). It sets
+    whether a film is an evening's or a night's job.
 
 ## Order
 
@@ -264,8 +346,12 @@ It is meant to work on a Vision Pro alone too, with workers as a quality upgrade
    the worker.
 5. **Desktop app on Apparition's shell:** tray, sign-in, pairing, queue view, updater; a Mac build
    first, then Windows.
+   - **`vergence convert` and the convert window.** This can start in parallel with steps 1–4,
+     since it needs no coordinator, server or pairing: the CLI first, then drag-and-drop, options,
+     preview and queue on the Mac.
 6. **ONNX Runtime engine:** export the models, check parity against Core ML, CUDA on Windows. This is
-   also where the CUDA PCs come in, if step 2's measurements fall short.
+   also where the CUDA PCs come in, if step 2's measurements fall short. Then the Windows converter
+   (wgpu warp, NVENC encode, the depth-maths decision), checked against the Mac's output.
 7. **More kinds:** mono flow, depth and gain grids, one at a time with their Vision Pro passes.
 8. **Quest:** C pairing client, coordinator fetch, GLES passes (see `quest-parity-roadmap.md`).
 9. **Retire the plugin's own analysis:** its nightly work becomes coordinator backfill, and its
