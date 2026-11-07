@@ -482,7 +482,7 @@ Answers so far:
   p99 0.0064, max 0.094 (through the fade, frames 1473–1485: p99 0.004), in 496 s against 713 s
   with a second of context. AI HDR keeps its keyframes on both workers (identical records, less
   decoding). Smooth Motion's flow isn't sticky (it decodes one frame past a piece; nothing to
-  save). The Rust worker's depth isn't sticky yet: its pipeline is the converter crate's. Both workers on one Mac don't add up: on a 600 s 640×360 title over 240 s each, the Core ML
+  save). The Rust worker's depth is sticky too (vergence 135d56b, the converter crate's depth pass seeded the same way): on the dev Jellyfin's 18 s title on a Mac CPU, 8 of 9 pieces carried on, 809 s against 1120 s with a second of context, the two within mean 0.0028, p99 0.011. Both workers on one Mac don't add up: on a 600 s 640×360 title over 240 s each, the Core ML
   worker alone made 164 depth pieces (about 33 fps of title), the ONNX worker on the CPU alone 19
   (about 4), and the two together 85 (72 + 13): the CPU worker takes the cores the Core ML worker's
   decoding and refinement need. Rates add across machines (the M2 Max and the 3080 above), not
