@@ -145,10 +145,54 @@ for the passes.
   - `play` (fetch chunks, report the playhead);
   - `work` (claim pieces, upload);
   - `admin` (the desktop app's own UI).
-- **Transport:** the chunk and worker API runs over the paired TLS-PSK channel. rustls has no
-  external-PSK support, so the Rust side needs OpenSSL bindings or a port. The Windows Companion hit
-  the same wall in .NET and uses BouncyCastle.
+- **Transport:** the chunk and worker API runs over the paired TLS-PSK channel (below). rustls has
+  no external-PSK support, so the Rust side uses OpenSSL (`openssl` + `tokio-openssl`). The Windows
+  Companion hit the same wall in .NET and uses BouncyCastle. Plain HTTP with a bearer token stays for
+  scripts, workers set up by hand and the Jellyfin plugin.
 - **Remote workers** reach a home coordinator over the user's VPN; nothing is exposed publicly.
+
+### The paired channel (built 2026-11-07)
+
+What a paired device speaks to a coordinator (`vergenced`, or the desktop app's). Exact, so a client
+can be written from it; the reference is vergence `coordinator/src/paired.rs`, and
+`coordinator/tests/paired.rs` drives it with a raw client.
+
+1. **Pairing** is RAVECompanion's, in Vergence's namespace: service stem `vergence`, label prefix
+   `Vergence`, link scheme `vergence://pair?…`, direct pairing port **4869** (open only while
+   pairing: `vergenced pair`, or Pair a Headset in the desktop app). A headset asks for `play`. The
+   grant's `token` is the device's pairing token; keep it in the platform's secret store. The
+   device id is the `headsetID` the device sent in its commit.
+2. **Connect** TCP to the coordinator on port **8421** (the desktop app's `pairedPort`, vergenced's
+   `pairedListen`), at the address the pairing ran over first, then the grant's `addresses`.
+3. **TLS 1.2 only**, one cipher suite: `TLS_PSK_WITH_AES_128_GCM_SHA256` (0x00A8; OpenSSL
+   `PSK-AES128-GCM-SHA256`). No certificate, no SNI needed, no identity hint from the server.
+   - **PSK identity:** the UTF-8 bytes of `VergenceAPI/v1/<device id>`. The bare `VergenceAPI/v1`
+     (a shared token) is refused.
+   - **PSK:** `HKDF-SHA256(ikm = pairing token as UTF-8, salt = "Vergence-API-PSK-v1",
+     info = "psk")`, 32 bytes. That is `RAVECompanionChannel(identityBase: "VergenceAPI/v1",
+     salt: "Vergence-API-PSK-v1")`.
+   - An unknown device, a wrong key or a forgotten device fails the handshake.
+4. **Then plain HTTP/1.1** on the TLS stream, straight away: no identify message, no
+   `Authorization` header (one sent is ignored). The handshake's identity is the device; its grants
+   are the ones it was paired with, read again for every request.
+   - Requests carry `Content-Length` (0 for none). One request at a time per connection,
+     keep-alive; the server closes a connection idle for 60 s, so a client reconnects and resends
+     a request that got no byte back.
+   - Responses carry `Content-Length` (a client should still accept `chunked`).
+   - Routes are the HTTP port's (vergence `coordinator/src/api.rs`): `POST /v1/playing`,
+     `GET /v1/titles/{server}/{id}/{workload}`, `GET …/chunks/{n}` with `Vergence-Chunk-Complete`
+     and `Vergence-Pieces`, and the worker routes for a device paired with `work`. A device's
+     player names are `device-<device id>/<player>`.
+   - `403` means the device is no longer paired or lacks the grant: pair again.
+5. **The derived HTTP token** lets the same device use the plain port (8420) instead:
+   `hex(HKDF-SHA256(ikm = pairing token, salt = "Vergence-HTTP-Token-v1", info = device id))`,
+   lowercase, as `Authorization: Bearer <token>`. The coordinator recognises it from its paired
+   devices.
+
+Built: vergence 8f23a62 (coordinator, vergenced `pair` and `devices`, the desktop app), RAVESDK 2c052d6
+`RAVECompanionHTTPClient` (the Swift client), Convolution's Settings pairing and `AnalysisPairing` (9a719c4).
+`companion/interop/run.sh` pairs the Swift client with `vergenced pair` and calls the API over the
+channel.
 
 ## Workers and engines
 
@@ -317,17 +361,17 @@ It is meant to work on a Vision Pro alone too, with workers as a quality upgrade
 | 1. Coordinator | Built. Jellyfin and Stash adapters, pieces, leases, priorities, profiles, upload checks, partial and whole chunks, the plugin's routes, bearer tokens. Tested against both dev servers | vergence `coordinator/` (3b85410) |
 | 2. Mac worker | Built. Same records as `vergence analyze` over the whole file (disparity identical, flow within Core ML noise); about 37 fps, seeks included | vergence `worker` mode (289a191), `scripts/check-worker.sh` |
 | 3. Vision Pro | Client built: reports the playhead, reads partial chunks. **The lead after open and seek is not measured yet** (device QA) | Hypnos 65e6851, vergence e01ad52 |
-| 4. Pairing | Rust port matches every golden vector; pairs with the Swift code both ways, TLS-PSK included. Not yet used for the chunk API (still HTTP + token) | vergence `companion/` (cf954fa) |
-| 5. Desktop app | Mac build runs: coordinator, settings, pairing, worker sidecar, convert queue. No Windows build; updater has no release key yet | vergence `desktop/` (181599a) |
+| 4. Pairing | Rust port matches every golden vector; pairs with the Swift code both ways. The chunk and worker API runs over the paired TLS-PSK channel ("The paired channel"); `vergenced pair` and the desktop app pair, the Vision Pro pairs in Settings and uses it. HTTP + token stays for scripts and the plugin. Not yet on a headset | vergence `companion/` (cf954fa), 8f23a62; RAVESDK `RAVECompanionHTTPClient` |
+| 5. Desktop app | Mac build runs: coordinator, settings, pairing, worker sidecar, convert queue, the paired TLS-PSK port. Windows x64 builds (cross-compiled, `desktop/scripts/package-windows.sh`, a zip as Apparition ships) and ran on a Windows PC: window, coordinator, paired channel (an OpenSSL client exchange through it), worker found; it runs `vergence-worker.exe` and `vergence-convert.exe` there. Tray and a conversion not tried on Windows. Updater pins the release keys (Apparition's two), no release site yet | vergence `desktop/` (181599a), 0867eef, db4af4a |
 | 5. `vergence convert` | Built: all layouts, HDR kept, audio copied, resume, depth track. No subtitles, no Smooth Motion bake | vergence 0607bc0 |
 | 6. ONNX worker | Built; Windows compiles. CUDA, TensorRT, DirectML never run. No Windows converter yet | vergence `worker/` (2a7892b) |
 | 7. More kinds | Not started | |
 | 8. Quest | Built, not run on a headset. Pairs by the six-digit code (NSD, a typed address or link) and keeps the token in the Keystore, or takes an HTTP address and token; talks over the paired TLS-PSK channel (Bouncy Castle) or HTTP; reports the playhead, reads partial chunks (VGAT in C++); a GLES 3 shared-field pass at the display's rate for stereo titles. Tested off the headset against VergenceCore and vergence-worker tracks, vergence-companion's vectors and a real `vergenced` over TLS-PSK. The desktop app announces `_vergence-pair._tcp` while pairing on macOS and Linux; on Windows the Quest pairs by address. No stereo warp or gain lookup yet (their kinds aren't pinned) | Hypnos 1cc42b1, vergence 6a80077, Controller Bridge 4ed9722 |
 | 9. Plugin | Routes pass through to a coordinator; the nightly task queues there | Hypnos 16640ed |
 
-A paired headset's HTTP token is derived from its pairing token, not sent as is: HKDF-SHA256 with salt
-`Vergence-HTTP-Token-v1` and the device id as info (`desktop/src/pairing.rs`). The Vision Pro and Quest
-clients compute the same.
+A paired headset uses the TLS-PSK channel; its HTTP token, for the plain port, is derived from its
+pairing token, not sent as is: HKDF-SHA256 with salt `Vergence-HTTP-Token-v1` and the device id as
+info (`coordinator/src/paired.rs`). The Vision Pro and Quest clients compute the same.
 
 Answers so far:
 - **Question 3 (Core ML vs ONNX):** NeuFlow agrees within noise; RIFE does not, because the Core ML
@@ -335,6 +379,10 @@ Answers so far:
   profile, unless RIFE gets a float32 Core ML conversion.
 - **Question 4 (throughput):** the M2 Max's Core ML worker does 1080p 3D Smooth Motion at about
   37 fps; ONNX Runtime on the same Mac 16–17 fps. CUDA is unmeasured.
+- **Question 5 (TLS-PSK in Rust):** OpenSSL, through the `openssl` and `tokio-openssl` crates: the
+  server's PSK callback picks each device's key by the identity it presents, so the coordinator knows
+  the device from the handshake and needs no identify message. Windows builds OpenSSL in
+  (`vendored-openssl`); macOS and Linux link the system's.
 - **Question 6 (Quest passes):** GLES 3.0, not Vulkan. The passes are a few texture reads per pixel;
   the Quest's video surfaces are Android ones (Home's SurfaceView, Spatial SDK's video panel), which
   EGL renders into directly, and the decoder feeds a SurfaceTexture as an external texture with no
@@ -354,7 +402,7 @@ Answers so far:
    backend family gets its own profile, and a title sticks to one family.
 4. **Worker throughput by kind** (unmeasured): the M2 Max for mono flow at 960×576, larger depth and
    GMNet; every model on ONNX Runtime with CUDA.
-5. **TLS-PSK in Rust:** OpenSSL bindings, or which other library.
+5. **TLS-PSK in Rust:** answered: OpenSSL (see "Answers so far").
 6. **Quest player passes:** GLES vs Vulkan in the Quest port's renderer (Spatial SDK, Media3
    surfaces); see `quest-parity-roadmap.md`.
 7. **Stash stereo layout:** detection only, or a tag convention as well.
