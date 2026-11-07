@@ -7,6 +7,7 @@
  */
 
 import Photos
+import RAVEUI
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
@@ -20,6 +21,10 @@ import ImageIO
 struct GalleryGridView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(SceneDelegate.self) private var sceneDelegate: SceneDelegate?
+    #if os(visionOS)
+    @Environment(\.raveWindowShell) private var shell
+    @State private var lastWindowPresentation: UUID?
+    #endif
     var onImageSelected: ((GalleryImage) -> Void)? = nil
 
     @State private var showBulkDeleteConfirmation = false
@@ -234,6 +239,15 @@ struct GalleryGridView: View {
                     await appModel.refreshGallery()
                 }
                 .onAppear {
+                    #if os(visionOS)
+                    if let shell, shell.scene == nil { return }
+                    let presentation = shell?.presentationID
+                    let returning = lastWindowPresentation != nil && lastWindowPresentation != presentation
+                    lastWindowPresentation = presentation
+                    // The live scroll view already has the right offset when
+                    // its window is reattached. Do not scroll it to the item.
+                    guard !returning else { return }
+                    #endif
                     if let lastId = appModel.lastViewedImageId {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             withAnimation(.easeInOut(duration: 0.2)) {
@@ -518,6 +532,9 @@ struct GalleryGridView: View {
     }
 
     private var resolvedWindowScene: PlatformWindowScene? {
+        #if os(visionOS)
+        if let scene = shell?.scene { return scene }
+        #endif
         if let sceneDelegate {
             return sceneDelegate.windowScene
         }

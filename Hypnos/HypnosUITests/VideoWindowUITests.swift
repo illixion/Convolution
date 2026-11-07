@@ -26,6 +26,45 @@ final class VideoWindowUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// Return must reattach the existing Videos gallery, rather than make a
+    /// new ContentView (which starts on Pictures).
+    func testRetainedGalleryReturnsOnVideosWithAdjustmentsOpen() throws {
+        try XCTSkipUnless(Self.devStashIsUp(), "Dev Stash isn't running: scripts/dev-stash.sh up")
+        let app = AppLauncher.launch(welcome: .dismissed, defaults: [
+            "stashServerURL": Self.devStash, "librarySource": "stash",
+            "autoHideDelay": "0", "openMediaInNewWindows": "0"
+        ])
+        app.buttons[RAVEA11y.tab("videos")].require("The Videos tab").tap()
+        app.images.matching(identifier: "play.circle.fill").firstMatch
+            .require("A video thumbnail", timeout: 20).tap()
+        app.buttons["More"].require("More", timeout: 20).tap()
+        app.buttons["All Adjustments…"].require("All Adjustments").tap()
+        // Accessory windows are independent of the gallery's shell.
+        app.staticTexts["Brightness"].firstMatch.require("The adjustments window")
+        app.buttons["Videos"].require("Return to Videos", timeout: 20).tap()
+        let thumbnail = app.images.matching(identifier: "play.circle.fill").firstMatch
+        thumbnail.require("The retained Videos gallery", timeout: 20)
+        app.buttons["Gallery"].require("The same player is now standalone")
+        XCTAssertTrue(app.staticTexts["Brightness"].firstMatch.exists, "Adjustments remains attached to the player")
+
+    }
+
+    func testRetainedGalleryReturnsWhenPushedPlayerCloses() throws {
+        try XCTSkipUnless(Self.devStashIsUp(), "Dev Stash isn't running: scripts/dev-stash.sh up")
+        let app = AppLauncher.launch(welcome: .dismissed, defaults: [
+            "stashServerURL": Self.devStash, "librarySource": "stash",
+            "autoHideDelay": "0", "openMediaInNewWindows": "0"
+        ])
+        app.buttons[RAVEA11y.tab("videos")].require("The Videos tab").tap()
+        let thumbnail = app.images.matching(identifier: "play.circle.fill").firstMatch
+        thumbnail.require("A video thumbnail", timeout: 20).tap()
+        app.buttons["More"].require("More", timeout: 20).tap()
+        app.buttons["Pop Out"].require("Pop Out").tap()
+        thumbnail.require("Videos returns when its pushed scene closes", timeout: 20)
+        app.buttons["More"].require("The popped out player's controls", timeout: 20).tap()
+        app.buttons["Gallery"].require("The popped out player remains open")
+    }
+
     func testControlStripKeepsItsEssentialsOnOneRowAndTheRestInMore() throws {
         try XCTSkipUnless(Self.devStashIsUp(), "Dev Stash isn't running: scripts/dev-stash.sh up")
 

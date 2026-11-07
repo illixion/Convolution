@@ -128,6 +128,7 @@ struct HypnosApp: App {
             UUID()
         }
         .defaultSize(width: 1200, height: 800)
+        .raveWindowPushPlacement(id: "main")
         .windowResizability(.contentMinSize)
         .windowStyle(.plain)
         .defaultLaunchBehavior(.presented)
@@ -486,11 +487,12 @@ private struct MainWindowView: View {
     var body: some View {
         ContentView()
             .environment(appModel)
+            .raveRetainedWindowContent(sceneID: "main", value: windowId ?? fallbackWindowId)
             .frame(minWidth: 320, maxWidth: 3000, minHeight: 320, maxHeight: 3000)
             .registerAsMainWindow()
             .manageWindow(ManagedWindows.main(windowId ?? fallbackWindowId))
-            // The gallery pushes viewers in its own place (Settings → Always
-            // Open In New Window off) and hides behind them until they close.
+            // Park the live gallery hierarchy while a viewer is open. Return
+            // reattaches it to a fresh shell at the user, preserving the grid.
             .raveWindowPushHost(sceneID: "main", value: windowId ?? fallbackWindowId)
             .onAppear {
                 RAVEWindowSessionRegistry.shared.openWindow = openWindow

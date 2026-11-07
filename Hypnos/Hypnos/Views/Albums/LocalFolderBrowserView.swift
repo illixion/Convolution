@@ -17,12 +17,16 @@
  */
 
 import DebugTrace
+import RAVEUI
 import SwiftUI
 
 struct LocalFolderBrowserView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(MainWindowModel.self) private var windowModel
     @Environment(SceneDelegate.self) private var sceneDelegate: SceneDelegate?
+    #if os(visionOS)
+    @Environment(\.raveWindowShell) private var shell
+    #endif
     @PushWindowProxy private var pushWindow
     @OpenWindowProxy private var openWindow
 
@@ -381,6 +385,9 @@ struct LocalFolderBrowserView: View {
     }
 
     private var resolvedWindowScene: PlatformWindowScene? {
+        #if os(visionOS)
+        if let scene = shell?.scene { return scene }
+        #endif
         if let sceneDelegate {
             return sceneDelegate.windowScene
         }

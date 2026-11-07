@@ -18,8 +18,9 @@
    separate windows, not one window that swaps its content;
  - a push on visionOS is RAVEUI's `ravePushWindow`, not SwiftUI's
    `pushWindow`, which visionOS 27 stopped honouring (the viewer opened beside
-   the gallery instead of in its place). RAVEUI opens the viewer and hides the
-   caller until the viewer closes; every scene a push starts from or lands in
+   the gallery instead of in its place). The gallery retains its live content
+   in memory and retires its shell; return reattaches it to a fresh window at
+   the user. Every scene a push starts from or lands in
    carries `.raveWindowPushHost(sceneID:value:)` in `HypnosApp`;
  - on iOS and tvOS each proxy talks to `IOSWindowRouter`, which turns a window
    value into a full-screen cover (viewers) or a sheet (tool panels) inside the
@@ -104,10 +105,16 @@ struct WindowPushAction {
 /// Stand-in for SwiftUI's `DismissWindowAction`.
 @MainActor
 struct WindowDismissAction {
+    #if os(visionOS)
+    var stackedAction: RAVEDismissWindowAction? = nil
+    #endif
     #if os(visionOS) || os(macOS)
     let action: DismissWindowAction
 
     func callAsFunction() {
+        #if os(visionOS)
+        if let stackedAction { return stackedAction() }
+        #endif
         action()
     }
 
@@ -141,10 +148,19 @@ struct WindowDismissAction {
 
 @propertyWrapper
 struct OpenWindowProxy: DynamicProperty {
+    #if os(visionOS)
+    @Environment(\.raveWindowShell) private var shell
+    #endif
     #if os(visionOS) || os(macOS)
     @Environment(\.openWindow) private var action
 
-    var wrappedValue: WindowOpenAction { WindowOpenAction(action: action) }
+    @MainActor var wrappedValue: WindowOpenAction {
+        #if os(visionOS)
+        WindowOpenAction(action: shell?.openWindow ?? action)
+        #else
+        WindowOpenAction(action: action)
+        #endif
+    }
     #else
     @Environment(IOSWindowRouter.self) private var router: IOSWindowRouter?
 
@@ -175,10 +191,20 @@ struct PushWindowProxy: DynamicProperty {
 
 @propertyWrapper
 struct DismissWindowProxy: DynamicProperty {
+    #if os(visionOS)
+    @Environment(\.raveWindowShell) private var shell
+    @Environment(\.raveDismissWindow) private var stackedAction
+    #endif
     #if os(visionOS) || os(macOS)
     @Environment(\.dismissWindow) private var action
 
-    var wrappedValue: WindowDismissAction { WindowDismissAction(action: action) }
+    @MainActor var wrappedValue: WindowDismissAction {
+        #if os(visionOS)
+        WindowDismissAction(stackedAction: stackedAction, action: shell?.dismissWindow ?? action)
+        #else
+        WindowDismissAction(action: action)
+        #endif
+    }
     #else
     @Environment(IOSWindowRouter.self) private var router: IOSWindowRouter?
     @Environment(\.iosWindowToken) private var token

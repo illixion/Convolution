@@ -19,6 +19,10 @@ import SwiftUI
 struct WindowsTabView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(SceneDelegate.self) private var sceneDelegate: SceneDelegate?
+    #if os(visionOS)
+    @Environment(\.raveWindowShell) private var shell
+    private var currentScene: UIWindowScene? { shell?.scene ?? sceneDelegate?.windowScene }
+    #endif
 
     var body: some View {
         #if os(visionOS)
@@ -32,7 +36,7 @@ struct WindowsTabView: View {
                 .disabled(!hasSecondaryWindows && !appModel.allWindowsHidden)
 
                 Button("Close All Windows", role: .destructive) {
-                    let closed = RAVEWindowScenes.destroyAll(except: sceneDelegate?.windowScene?.session)
+                    let closed = RAVEWindowScenes.destroyAll(except: currentScene?.session)
                     appModel.allWindowsHidden = false
                     AppLogger.settings.info("Closed \(closed, privacy: .public) secondary windows")
                 }
@@ -57,7 +61,7 @@ struct WindowsTabView: View {
     /// got a layout pass never registered, and those are exactly the ones the
     /// bulk controls need to reach.
     private var hasSecondaryWindows: Bool {
-        RAVEWindowScenes.hasWindows(besides: sceneDelegate?.windowScene?.session)
+        RAVEWindowScenes.hasWindows(besides: currentScene?.session)
     }
     #endif
 }

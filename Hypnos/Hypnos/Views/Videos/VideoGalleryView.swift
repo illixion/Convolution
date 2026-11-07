@@ -6,9 +6,14 @@
  */
 
 import Photos
+import RAVEUI
 import SwiftUI
 
 struct VideoGalleryView: View {
+    #if os(visionOS)
+    @Environment(\.raveWindowShell) private var shell
+    @State private var lastWindowPresentation: UUID?
+    #endif
     @Environment(AppModel.self) private var appModel
     @PushWindowProxy private var pushWindow
     @OpenWindowProxy private var openWindow
@@ -140,6 +145,13 @@ struct VideoGalleryView: View {
                         await appModel.refreshVideos()
                     }
                     .onAppear {
+                        #if os(visionOS)
+                        if let shell, shell.scene == nil { return }
+                        let presentation = shell?.presentationID
+                        let returning = lastWindowPresentation != nil && lastWindowPresentation != presentation
+                        lastWindowPresentation = presentation
+                        guard !returning else { return }
+                        #endif
                         if let lastViewedId = appModel.lastViewedVideoId {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                                 withAnimation(.easeInOut(duration: 0.2)) {
