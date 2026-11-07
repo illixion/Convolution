@@ -118,7 +118,10 @@ final class VideoWindowModel {
     /// decodable videos (the `.nativeMetal` renderer).
     var pseudo3DEnabled: Bool = false {
         // Leaving fake-3D mounts a fresh flat player, which starts at 0.
-        didSet { if oldValue, !pseudo3DEnabled { carryPositionToNextRenderer(reason: "leaving fake-3D") } }
+        didSet {
+            if oldValue, !pseudo3DEnabled { carryPositionToNextRenderer(reason: "leaving fake-3D") }
+            if !oldValue, pseudo3DEnabled { loadDepthTrack() }
+        }
     }
     /// Depth/convergence tuning for the fake-3D warp.
     var pseudo3DSettings: Pseudo3DSettings = .default
@@ -222,6 +225,12 @@ final class VideoWindowModel {
     /// (`SmoothMotionTracks.monoFields`), for Smooth Motion in the flat
     /// player and in AI 3D: pairs they cover skip the device's interpolator.
     private(set) var monoSharedFields: AnalysisTrackFieldProvider?
+    /// AI 3D's depth for a 2D Library title from an analysis coordinator
+    /// (`SmoothMotionTracks.depthTrack`), asked for when real-time AI 3D
+    /// engages; `depthTrackID` changes with it, for the player to pick it up.
+    private(set) var depthTrack: AnalysisDepthTrack?
+    private(set) var depthTrackID = 0
+    @ObservationIgnored private var depthTrackTask: Task<Void, Never>?
     /// What the stereo player is handed: live 3D's track, or AI 3D's 2D one.
     var stereoPlayerSharedFields: SharedFieldProvider? {
         liveStereoLayout != nil ? sharedFields : monoSharedFields
@@ -597,6 +606,7 @@ final class VideoWindowModel {
         sharedFieldsTask?.cancel()
         sharedFields = nil
         monoSharedFields = nil
+        loadDepthTrack()
         guard let itemId = libraryItemId else { return }
         let identity = video.identity, name = video.title ?? ""
         guard video.isStereoscopic else {
@@ -611,6 +621,26 @@ final class VideoWindowModel {
             let fields = await SmoothMotionTracks.fields(name: name, id: itemId)
             guard !Task.isCancelled, let self, self.video.identity == identity else { return }
             self.sharedFields = fields
+        }
+    }
+
+    /// Asks the analysis coordinator for this 2D Library title's AI 3D depth
+    /// while real-time AI 3D is on (the worker's depth costs it far more than
+    /// flow, so nothing is asked for otherwise).
+    private func loadDepthTrack() {
+        depthTrackTask?.cancel()
+        if depthTrack != nil {
+            depthTrack = nil
+            depthTrackID += 1
+        }
+        guard pseudo3DEnabled, pseudo3DDepthMode == .realtime, !video.isStereoscopic,
+              let itemId = libraryItemId else { return }
+        let identity = video.identity
+        depthTrackTask = Task { [weak self] in
+            let track = await SmoothMotionTracks.depthTrack(id: itemId, startSeconds: self?.pseudo3DEngageResumeTime ?? 0)
+            guard !Task.isCancelled, let self, self.video.identity == identity, let track else { return }
+            self.depthTrack = track
+            self.depthTrackID += 1
         }
     }
 

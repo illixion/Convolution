@@ -213,6 +213,8 @@ struct VideoWindowView: View {
                             startPaused: liveLayout == nil && windowModel.pseudo3DEngagePaused,
                             packedStereo: liveLayout,
                             sharedFields: windowModel.stereoPlayerSharedFields,
+                            depthTrack: liveLayout == nil ? windowModel.depthTrack : nil,
+                            depthTrackID: windowModel.depthTrackID,
                             isFlipped: windowModel.isFlipped,
                             loopController: windowModel.loopController,
                             playbackModel: windowModel,

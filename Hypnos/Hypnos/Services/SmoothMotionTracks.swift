@@ -48,14 +48,36 @@ enum SmoothMotionTracks {
                                        workload: AnalysisCoordinator.smoothMotion2D)
     }
 
+    /// AI 3D's depth for a 2D Library title from an analysis coordinator
+    /// (`ai-3d-depth`: the offline pipeline with a larger model), read as it
+    /// fills; the player warps it and runs its own model only for frames it
+    /// doesn't hold yet. Nil without a coordinator, or for a 3D title.
+    static func depthTrack(id: String, startSeconds: Double = 0) async -> AnalysisDepthTrack? {
+        guard let coordinator = AnalysisCoordinator.current(),
+              let (track, status) = await coordinatorTrack(coordinator, id: id, startSeconds: startSeconds,
+                                                           workload: AnalysisCoordinator.aiDepth) else { return nil }
+        return AnalysisDepthTrack(lookup: track, frameRate: status.frameRate)
+    }
+
     private static func coordinatorFields(_ coordinator: AnalysisCoordinator, id: String, startSeconds: Double,
                                           workload: String = AnalysisCoordinator.smoothMotion3D) async -> AnalysisTrackFieldProvider? {
+        guard let (track, status) = await coordinatorTrack(coordinator, id: id, startSeconds: startSeconds,
+                                                           workload: workload) else { return nil }
+        return AnalysisTrackFieldProvider(lookup: track, frameRate: status.frameRate,
+                                          needsDisparity: workload == AnalysisCoordinator.smoothMotion3D,
+                                          inflate: AnalysisDeflate.inflate)
+    }
+
+    /// A title's track for `workload`, read from the coordinator in chunks
+    /// around the playhead, which it is told as the track is read.
+    private static func coordinatorTrack(_ coordinator: AnalysisCoordinator, id: String, startSeconds: Double,
+                                         workload: String) async -> (StreamingAnalysisTrack, AnalysisCoordinator.Status)? {
         let status: AnalysisCoordinator.Status
         do {
             status = try await coordinator.playing(itemId: id, seconds: startSeconds, workload: workload)
         } catch {
             // Not a title it works on (2D for 3D work and the reverse, a disc), or the server is away.
-            AppLogger.filmPlayer.info("Smooth Motion: no analysis server track for \(workload, privacy: .public) (\(error.logCode, privacy: .public))")
+            AppLogger.filmPlayer.info("Analysis server: no \(workload, privacy: .public) track (\(error.logCode, privacy: .public))")
             return nil
         }
         guard status.chunks > 0, status.chunkSeconds > 0 else { return nil }
@@ -68,10 +90,8 @@ enum SmoothMotionTracks {
         }
         track.prefetch(at: startSeconds)
         AppLogger.filmPlayer.info(
-            "Smooth Motion: analysis server track (\(workload, privacy: .public)) \(status.state, privacy: .public), \(status.piecesDone, privacy: .public) of \(status.pieces, privacy: .public) pieces, \(status.chunks, privacy: .public) chunks")
-        return AnalysisTrackFieldProvider(lookup: track, frameRate: status.frameRate,
-                                          needsDisparity: workload == AnalysisCoordinator.smoothMotion3D,
-                                          inflate: AnalysisDeflate.inflate)
+            "Analysis server track (\(workload, privacy: .public)) \(status.state, privacy: .public), \(status.piecesDone, privacy: .public) of \(status.pieces, privacy: .public) pieces, \(status.chunks, privacy: .public) chunks")
+        return (track, status)
     }
 
     private static func localFields(name: String, id: String) async -> AnalysisTrackFieldProvider? {

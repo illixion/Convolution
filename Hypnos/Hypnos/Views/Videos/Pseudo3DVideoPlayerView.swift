@@ -47,6 +47,9 @@ struct Pseudo3DVideoPlayerView: View {
     var packedStereo: PackedStereoLayout? = nil
     /// A packed pair's analysis track: Smooth Motion for live 3D.
     var sharedFields: SharedFieldProvider? = nil
+    /// A worker's AI 3D depth (`ai-3d-depth`), and a number that changes with it.
+    var depthTrack: AnalysisDepthTrack? = nil
+    var depthTrackID: Int = 0
     var isFlipped: Bool = false
     var loopController: VideoLoopController? = nil
     var playbackModel: VideoWindowModel? = nil
@@ -128,6 +131,7 @@ struct Pseudo3DVideoPlayerView: View {
                 engine.setSubtitles(subtitleFrame)
                 engine.interpolatesFrames = smoothMotion
                 engine.sharedFields = sharedFields
+                engine.depthTrack = depthTrack
                 // In a holder, so a plane lent to the big screen comes back
                 // to the same place (the engine re-adds it to its parent).
                 let home = Entity()
@@ -243,6 +247,11 @@ struct Pseudo3DVideoPlayerView: View {
         // The readout says "24 → 48 fps" while the pump doubles.
         .onChange(of: engine.showsDoubledFrames, initial: true) { _, doubled in
             playbackModel?.noteSmoothMotionDoubling(doubled)
+        }
+        // A worker's depth found after AI 3D started: rebuild the pump with it in front of the model.
+        .onChange(of: depthTrackID) { _, _ in
+            engine.depthTrack = depthTrack
+            if packedStereo == nil, case .realtime = depthMode { engine.reloadDepthPipeline() }
         }
         // A track found after the picture started (live 3D's, or AI 3D's 2D one): rebuild the pump with it.
         .onChange(of: sharedFields.map(ObjectIdentifier.init)) { _, _ in
@@ -480,6 +489,8 @@ struct Pseudo3DVideoPlayerView: View {
     var startPaused: Bool = false
     var packedStereo: PackedStereoLayout? = nil
     var sharedFields: SharedFieldProvider? = nil
+    var depthTrack: AnalysisDepthTrack? = nil
+    var depthTrackID: Int = 0
     var isFlipped: Bool = false
     var loopController: VideoLoopController? = nil
     var playbackModel: VideoWindowModel? = nil

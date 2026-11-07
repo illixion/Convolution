@@ -32,6 +32,9 @@ struct AnalysisCoordinator: Sendable {
     /// Smooth Motion for a 2D title (flat or AI 3D): the whole picture's flow,
     /// RIFE at 960×576 on a worker.
     static let smoothMotion2D = "smooth-motion-2d"
+    /// AI 3D's depth for a 2D title, made by the offline pipeline with a
+    /// larger model than the headset runs (`AnalysisDepthTrack`).
+    static let aiDepth = "ai-3d-depth"
 
     /// The configured coordinator, or nil when there is none.
     static func current() -> AnalysisCoordinator? {
