@@ -7,14 +7,17 @@ import RAVEMedia
 /// for both eyes from one motion field (Vergence's `SharedFieldInterpolator`;
 /// `docs/plans/blu-ray-3d-smooth-motion.md`).
 ///
-/// Two places, in order:
+/// Three places, in order:
 /// - A file in Documents/Smooth Motion (the Files app shows it under the
 ///   app), named after the film as the Library shows it, or after its
 ///   Jellyfin item id: `Bumblebee.vgat`. Indexed whole, from a mapped file.
 /// - The Jellyfin server, whose Convolution plugin analyses every 3D title
 ///   once (`SmoothMotionService`, a nightly task on a Mac server) and serves
 ///   the track in chunks, read around the playhead as the film plays
-///   (Vergence's `StreamingAnalysisTrack`).
+///   (Vergence's `StreamingAnalysisTrack`), once it is whole.
+/// - An analysis coordinator (`AnalysisCoordinator`, `vergenced`), when one
+///   is set: told where the film is playing, it has workers make the pieces
+///   around the playhead first and serves chunks while they fill.
 enum SmoothMotionTracks {
     static var folder: URL {
         URL.documentsDirectory.appending(path: "Smooth Motion", directoryHint: .isDirectory)
@@ -26,8 +29,35 @@ enum SmoothMotionTracks {
     ///   first chunks are fetched before the player asks.
     static func fields(name: String, id: String, startSeconds: Double = 0) async -> AnalysisTrackFieldProvider? {
         if let local = await localFields(name: name, id: id) { return local }
-        guard let library = await MainActor.run(body: { LibraryService.current() }) else { return nil }
-        return await serverFields(library: library, id: id, startSeconds: startSeconds)
+        if let library = await MainActor.run(body: { LibraryService.current() }),
+           let server = await serverFields(library: library, id: id, startSeconds: startSeconds) {
+            return server
+        }
+        guard let coordinator = AnalysisCoordinator.current() else { return nil }
+        return await coordinatorFields(coordinator, id: id, startSeconds: startSeconds)
+    }
+
+    private static func coordinatorFields(_ coordinator: AnalysisCoordinator, id: String,
+                                          startSeconds: Double) async -> AnalysisTrackFieldProvider? {
+        let status: AnalysisCoordinator.Status
+        do {
+            status = try await coordinator.playing(itemId: id, seconds: startSeconds)
+        } catch {
+            // Not a title it works on (2D, a disc), or the server is away.
+            AppLogger.filmPlayer.info("Smooth Motion: no analysis server track (\(error.logCode, privacy: .public))")
+            return nil
+        }
+        guard status.chunks > 0, status.chunkSeconds > 0 else { return nil }
+        let reporter = AnalysisPlayheadReporter(coordinator: coordinator, itemId: id, startSeconds: startSeconds)
+        let track = StreamingAnalysisTrack(chunkSeconds: status.chunkSeconds, chunkCount: status.chunks,
+                                           retrySeconds: 1.5, partialRefetchSeconds: 1.5,
+                                           onDemand: { reporter.note($0) }) { index in
+            try await coordinator.chunk(itemId: id, index: index)
+        }
+        track.prefetch(at: startSeconds)
+        AppLogger.filmPlayer.info(
+            "Smooth Motion: analysis server track \(status.state, privacy: .public), \(status.piecesDone, privacy: .public) of \(status.pieces, privacy: .public) pieces, \(status.chunks, privacy: .public) chunks")
+        return AnalysisTrackFieldProvider(lookup: track, frameRate: status.frameRate, inflate: AnalysisDeflate.inflate)
     }
 
     private static func localFields(name: String, id: String) async -> AnalysisTrackFieldProvider? {

@@ -226,6 +226,7 @@ struct VideoSettingsPage: View {
             } footer: {
                 Text("Adds an in-between frame to 24–30 fps videos, in 2D and AI 3D, so slow pans move in smaller steps, and to 50–60 fps 2D videos, which then play at 100–120 fps on a display that has that refresh rate. Works up to 1080p, and in 2D for non-HDR videos; cuts and seeks are never blended. Automatic uses the system's interpolator for 24–30 fps and a faster GPU one for 50–60 fps; Fast (GPU) uses the GPU one for every 2D video. Each video can change Smooth Motion in its View Mode menu.")
             }
+            AnalysisServerSection()
             #endif
         }
     }
