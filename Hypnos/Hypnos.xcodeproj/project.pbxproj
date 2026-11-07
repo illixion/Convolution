@@ -22,6 +22,7 @@
 		AA14000000000000000000A3 /* GeneratedCaptions in Frameworks */ = {isa = PBXBuildFile; productRef = AA14000000000000000000A2 /* GeneratedCaptions */; };
 		AA11000000000000000000A3 /* RAVEFilm in Frameworks */ = {isa = PBXBuildFile; productRef = AA11000000000000000000A2 /* RAVEFilm */; };
 		AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */ = {isa = PBXBuildFile; productRef = AA12000000000000000000A2 /* RAVEDeviceSetup */; };
+		AA18000000000000000000A3 /* RAVECompanion in Frameworks */ = {isa = PBXBuildFile; productRef = AA18000000000000000000A2 /* RAVECompanion */; };
 		967834AC244B65FE72E57FB4 /* DebugTrace in Frameworks */ = {isa = PBXBuildFile; productRef = 7ECF8E7CC7BA800706D085EF /* DebugTrace */; };
 		C3D000000000000000000B01 /* VergenceApple in Frameworks */ = {isa = PBXBuildFile; productRef = C3D000000000000000000D01 /* VergenceApple */; };
 		F50CD95ACADCD0B6D7944C97 /* DebugTraceServer in Frameworks */ = {isa = PBXBuildFile; productRef = 35FAAC11FBCE4C04FDB901C5 /* DebugTraceServer */; };
@@ -80,6 +81,7 @@
 				AA11000000000000000000A3 /* RAVEFilm in Frameworks */,
 				AA14000000000000000000A3 /* GeneratedCaptions in Frameworks */,
 				AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */,
+				AA18000000000000000000A3 /* RAVECompanion in Frameworks */,
 				967834AC244B65FE72E57FB4 /* DebugTrace in Frameworks */,
 				C3D000000000000000000B01 /* VergenceApple in Frameworks */,
 				F50CD95ACADCD0B6D7944C97 /* DebugTraceServer in Frameworks */,
@@ -178,6 +180,7 @@
 				AA17000000000000000000A2 /* RAVESearch */,
 				AA11000000000000000000A2 /* RAVEFilm */,
 				AA12000000000000000000A2 /* RAVEDeviceSetup */,
+				AA18000000000000000000A2 /* RAVECompanion */,
 				AA14000000000000000000A2 /* GeneratedCaptions */,
 				7ECF8E7CC7BA800706D085EF /* DebugTrace */,
 				C3D000000000000000000D01 /* VergenceApple */,
@@ -715,6 +718,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AA01000000000000000000A1 /* XCLocalSwiftPackageReference "../../RAVESDK" */;
 			productName = RAVEDeviceSetup;
+		};
+		AA18000000000000000000A2 /* RAVECompanion */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA01000000000000000000A1 /* XCLocalSwiftPackageReference "../../RAVESDK" */;
+			productName = RAVECompanion;
 		};
 		C3D000000000000000000D01 /* VergenceApple */ = {
 			isa = XCSwiftPackageProductDependency;

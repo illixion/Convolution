@@ -39,6 +39,9 @@ enum KeychainStore {
         case jellyfinAccessToken
         /// A Vergence analysis coordinator's token (`AnalysisCoordinator`).
         case analysisCoordinatorToken
+        /// The token a Vergence coordinator minted for this device when they paired
+        /// (`AnalysisPairing`). It keys the paired TLS-PSK channel and never crosses the network.
+        case analysisCoordinatorPairingToken
         #if HYPNOS_YOUTUBE
         /// The optional YouTube backend's (web-yt-dlp) token.
         case youtubeBackendToken

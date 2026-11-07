@@ -1,5 +1,6 @@
 import DebugTrace
 import Foundation
+import RAVECompanion
 import RAVEMedia
 
 /// A Vergence analysis coordinator (`vergenced`): a service on the home
@@ -10,11 +11,18 @@ import RAVEMedia
 /// 3D title's Smooth Motion fields arrive while it plays instead of after a
 /// night's analysis.
 ///
-/// Set in Settings (the address in defaults, the token in the Keychain); it
-/// knows Jellyfin items by their id, as the Library does.
+/// Two ways to reach it, set in Settings: **paired** (`AnalysisPairing`: the
+/// API over TLS-PSK on port 8421, keyed from the pairing, nothing secret on
+/// the wire), which wins when present, or an **address and token** (plain
+/// HTTP, the token in the Keychain). It knows Jellyfin items by their id, as
+/// the Library does.
 struct AnalysisCoordinator: Sendable {
-    let baseURL: URL
-    let token: String
+    enum Transport: Sendable {
+        case http(baseURL: URL, token: String)
+        case paired(RAVECompanionHTTPClient)
+    }
+
+    let transport: Transport
     /// This device among the coordinator's players.
     let player: String
 
@@ -24,10 +32,13 @@ struct AnalysisCoordinator: Sendable {
 
     /// The configured coordinator, or nil when there is none.
     static func current() -> AnalysisCoordinator? {
+        if let client = AnalysisPairing.client() {
+            return AnalysisCoordinator(transport: .paired(client), player: playerID())
+        }
         guard let text = UserDefaults.standard.string(forKey: urlKey)?.trimmingCharacters(in: .whitespaces),
               !text.isEmpty, let url = URL(string: text), url.scheme == "http" || url.scheme == "https",
               let token = KeychainStore.string(for: .analysisCoordinatorToken), !token.isEmpty else { return nil }
-        return AnalysisCoordinator(baseURL: url, token: token, player: playerID())
+        return AnalysisCoordinator(transport: .http(baseURL: url, token: token), player: playerID())
     }
 
     private static func playerID() -> String {
@@ -53,12 +64,39 @@ struct AnalysisCoordinator: Sendable {
         case notReady
     }
 
-    private func request(_ path: String, method: String = "GET") -> URLRequest {
-        var request = URLRequest(url: baseURL.appending(path: path))
-        request.httpMethod = method
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.timeoutInterval = 15
-        return request
+    /// A response, whichever way it came.
+    struct Reply: Sendable {
+        let status: Int
+        /// Header names lowercased.
+        let headers: [String: String]
+        let body: Data
+    }
+
+    /// One request; `path` has no leading slash.
+    func send(_ method: String, _ path: String, json: [String: any Sendable]? = nil) async throws -> Reply {
+        let body = try json.map { try JSONSerialization.data(withJSONObject: $0) }
+        switch transport {
+        case .paired(let client):
+            let headers = body == nil ? [:] : ["Content-Type": "application/json"]
+            let response = try await client.send(method, "/" + path, headers: headers, body: body)
+            return Reply(status: response.status, headers: response.headers, body: response.body)
+        case .http(let baseURL, let token):
+            var request = URLRequest(url: baseURL.appending(path: path))
+            request.httpMethod = method
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.timeoutInterval = 15
+            if let body {
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = body
+            }
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let http = response as? HTTPURLResponse
+            var headers: [String: String] = [:]
+            for (name, value) in http?.allHeaderFields ?? [:] {
+                if let name = name as? String, let value = value as? String { headers[name.lowercased()] = value }
+            }
+            return Reply(status: http?.statusCode ?? -1, headers: headers, body: data)
+        }
     }
 
     /// Says where this device is playing a Jellyfin item, which queues the
@@ -67,38 +105,35 @@ struct AnalysisCoordinator: Sendable {
     /// (not stereo, a disc, a server it doesn't know).
     @discardableResult
     func playing(itemId: String, seconds: Double, rate: Double = 1) async throws -> Status {
-        var request = request("v1/playing", method: "POST")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
+        let reply = try await send("POST", "v1/playing", json: [
             "server": "jellyfin", "id": itemId, "workload": Self.smoothMotion3D,
             "seconds": max(seconds, 0), "rate": rate, "player": player,
         ])
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-        guard status == 200 else { throw Failure.http(status) }
-        return try JSONDecoder().decode(Status.self, from: data)
+        guard reply.status == 200 else { throw Failure.http(reply.status) }
+        return try JSONDecoder().decode(Status.self, from: reply.body)
     }
 
     /// This device stopped playing.
     func stopped() async {
-        var request = request("v1/playing", method: "POST")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+        _ = try? await send("POST", "v1/playing", json: [
             "server": "jellyfin", "id": "", "seconds": 0, "player": player, "stopped": true,
         ])
-        _ = try? await URLSession.shared.data(for: request)
+    }
+
+    /// Whether the coordinator answers and lets this device play (a check for Settings).
+    func check() async throws -> Bool {
+        let reply = try await send("GET", "v1/titles/jellyfin/check/\(Self.smoothMotion3D)")
+        return reply.status == 404 || reply.status == 200
     }
 
     /// Chunk `index` of an item's Smooth Motion track, whole or not.
     func chunk(itemId: String, index: Int) async throws -> StreamingAnalysisChunk {
-        let (data, response) = try await URLSession.shared.data(
-            for: request("v1/titles/jellyfin/\(itemId)/\(Self.smoothMotion3D)/chunks/\(index)"))
-        let http = response as? HTTPURLResponse
-        switch http?.statusCode {
+        let reply = try await send("GET", "v1/titles/jellyfin/\(itemId)/\(Self.smoothMotion3D)/chunks/\(index)")
+        switch reply.status {
         case 200:
-            return StreamingAnalysisChunk(data: data, isComplete: http?.value(forHTTPHeaderField: "Vergence-Chunk-Complete") != "false")
+            return StreamingAnalysisChunk(data: reply.body, isComplete: reply.headers["vergence-chunk-complete"] != "false")
         case 404: throw Failure.notReady
-        case let status: throw Failure.http(status ?? -1)
+        case let status: throw Failure.http(status)
         }
     }
 }
