@@ -1,6 +1,6 @@
 # Analysis workers and the Vergence desktop app
 
-Status: plan, revised 2026-11-07. It started on 2026-11-01 as "a Mac helping the headset", agreed then
+Status: steps 1–6 and 9 built on 2026-11-07 (see "Progress"); 7 and 8 not started. Plan revised 2026-11-07. It started on 2026-11-01 as "a Mac helping the headset", agreed then
 and kept as a short note in `blu-ray-3d-smooth-motion.md`. Decided with the user on 2026-11-07:
 - **Media servers only: Jellyfin and Stash.** Both have direct and transcode URLs. Nextcloud could
   join later the same way; files that exist only on a headset are out.
@@ -309,6 +309,34 @@ It is meant to work on a Vision Pro alone too, with workers as a quality upgrade
   switch it off mid-shot.
 - **Unknown cost:** the photo path's 0.63 s includes CPU resampling of a full-resolution photo and
   enumerated input shapes. The first step is a fixed-shape 512×288 conversion timed on the headset.
+
+## Progress (2026-11-07)
+
+| Step | State | Where |
+| --- | --- | --- |
+| 1. Coordinator | Built. Jellyfin and Stash adapters, pieces, leases, priorities, profiles, upload checks, partial and whole chunks, the plugin's routes, bearer tokens. Tested against both dev servers | vergence `coordinator/` (3b85410) |
+| 2. Mac worker | Built. Same records as `vergence analyze` over the whole file (disparity identical, flow within Core ML noise); about 37 fps, seeks included | vergence `worker` mode (289a191), `scripts/check-worker.sh` |
+| 3. Vision Pro | Client built: reports the playhead, reads partial chunks. **The lead after open and seek is not measured yet** (device QA) | Hypnos 65e6851, vergence e01ad52 |
+| 4. Pairing | Rust port matches every golden vector; pairs with the Swift code both ways, TLS-PSK included. Not yet used for the chunk API (still HTTP + token) | vergence `companion/` (cf954fa) |
+| 5. Desktop app | Mac build runs: coordinator, settings, pairing, worker sidecar, convert queue. No Windows build; updater has no release key yet | vergence `desktop/` (181599a) |
+| 5. `vergence convert` | Built: all layouts, HDR kept, audio copied, resume, depth track. No subtitles, no Smooth Motion bake | vergence 0607bc0 |
+| 6. ONNX worker | Built; Windows compiles. CUDA, TensorRT, DirectML never run. No Windows converter yet | vergence `worker/` (2a7892b) |
+| 7. More kinds | Not started | |
+| 8. Quest | Not started | |
+| 9. Plugin | Routes pass through to a coordinator; the nightly task queues there | Hypnos 16640ed |
+
+A paired headset's HTTP token is derived from its pairing token, not sent as is: HKDF-SHA256 with salt
+`Vergence-HTTP-Token-v1` and the device id as info (`desktop/src/pairing.rs`). The Vision Pro and Quest
+clients compute the same.
+
+Answers so far:
+- **Question 3 (Core ML vs ONNX):** NeuFlow agrees within noise; RIFE does not, because the Core ML
+  conversion runs in float16 (up to about 1 px of flow, mean 0.004). So ONNX titles get their own
+  profile, unless RIFE gets a float32 Core ML conversion.
+- **Question 4 (throughput):** the M2 Max's Core ML worker does 1080p 3D Smooth Motion at about
+  37 fps; ONNX Runtime on the same Mac 16–17 fps. CUDA is unmeasured.
+- **Question 11 (conversion speed):** 1080p at about 30 fps on the M2 Max, a two-hour film in about
+  100 minutes.
 
 ## Open questions
 
