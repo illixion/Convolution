@@ -328,6 +328,8 @@ actor CaptionWorker {
     private var ended = false
     private var words: [RAVEGeneratedCaption] = []
     private var volatileWords: [RAVEGeneratedCaption] = []
+    /// Where the volatile guess's result starts: a final that reaches past it settles the whole guess.
+    private var volatileStart: Double?
     private var speakers: [(start: Double, end: Double, id: Int)] = []
     private var analysisError: String?
 
@@ -411,18 +413,28 @@ actor CaptionWorker {
             guard let range = run.audioTimeRange else { continue }
             let text = String(result.text[run.range].characters)
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
-            fresh.append(.init(start: range.start.seconds, end: range.end.seconds, text: text, speaker: nil))
+            // A result can open with the punctuation of a word it dropped
+            // ("..", then " it ends here"); that is no caption.
+            if fresh.isEmpty, !text.contains(where: { $0.isLetter || $0.isNumber }) { continue }
+            // A final arrives a word to a run; a volatile guess is ONE run over
+            // its whole range, which put the whole guess on screen at once and
+            // moved words between lines when the finals replaced it.
+            fresh += Self.timedWords(text, from: range.start.seconds, through: range.end.seconds)
         }
         if fresh.isEmpty { fresh.append(.init(start: start, end: end, text: String(result.text.characters), speaker: nil)) }
         if result.isFinal {
             words.removeAll { $0.start >= start - 0.001 && $0.end <= end + 0.001 }
             // The guess for this stretch is settled; what the recognizer
             // still guesses beyond it comes with its next volatile result.
+            // A guess is one result, so one that starts inside the final goes
+            // whole (its words carry estimated times, not the recognizer's).
+            if let volatileStart, volatileStart < end - 0.001 { volatileWords = [] }
             volatileWords.removeAll { $0.start < end - 0.001 }
             words += fresh
             words.sort { $0.start < $1.start }
         } else {
             volatileWords = fresh
+            volatileStart = start
         }
         noteAnalyzed(end)
     }
@@ -430,18 +442,124 @@ actor CaptionWorker {
         words.removeAll { $0.end < time - 60 }
         volatileWords.removeAll { $0.end < time - 60 }
         speakers.removeAll { $0.end < time - 60 }
-        var result: [RAVEGeneratedCaption] = []
         // Final words, then the guess after the last of them.
-        for var word in (words + volatileWords).sorted(by: { $0.start < $1.start }) {
-            word.speaker = speakers.max { overlap($0, word) < overlap($1, word) }.flatMap { overlap($0, word) > 0 ? $0.id : nil }
-            if let last = result.last, last.speaker == word.speaker, word.start - last.end < 0.7,
-               word.end - last.start < 3.5, (last.text + word.text).count < 90 {
-                result[result.count - 1].text += word.text
-                result[result.count - 1].end = max(last.end, word.end)
-            } else { result.append(word) }
+        var sequence = (words + volatileWords).sorted { $0.start < $1.start }
+        for index in sequence.indices {
+            let word = sequence[index]
+            sequence[index].speaker = speakers.max { overlap($0, word) < overlap($1, word) }.flatMap { overlap($0, word) > 0 ? $0.id : nil }
         }
-        return result
+        return Self.lines(from: sequence)
     }
+
+    /// The words as caption lines. They break where the speech does (a pause,
+    /// another speaker, the end of a sentence), so the breaks anchor to the
+    /// speech and don't move when older words fall out of the window; the
+    /// greedy cut from the head of the list they replaced shifted every line
+    /// after it. Only a sentence too long for a line is cut, in even parts at
+    /// its commas, never leaving a word or two alone at the end.
+    static func lines(from words: [RAVEGeneratedCaption]) -> [RAVEGeneratedCaption] {
+        var units: [[RAVEGeneratedCaption]] = []
+        for word in words {
+            if let unit = units.last, let last = unit.last, !startsUnit(word, after: unit, last: last) {
+                units[units.count - 1].append(word)
+            } else {
+                units.append([word])
+            }
+        }
+        return units.flatMap(split)
+    }
+
+    private static func startsUnit(_ word: RAVEGeneratedCaption, after unit: [RAVEGeneratedCaption], last: RAVEGeneratedCaption) -> Bool {
+        if last.speaker != word.speaker || word.start - last.end >= 0.7 { return true }
+        // After a sentence. A short one ("Okay.") keeps the next with it, so it
+        // doesn't flash by alone.
+        return endsSentence(last.text) && unit.reduce(0) { $0 + $1.text.count } >= 24
+    }
+
+    private static let maxLineCharacters = 90
+    private static let maxLineSeconds = 4.0
+
+    private static func split(_ unit: [RAVEGeneratedCaption]) -> [RAVEGeneratedCaption] {
+        func line(_ part: ArraySlice<RAVEGeneratedCaption>) -> RAVEGeneratedCaption {
+            var text = part.first!.text.drop { $0.isWhitespace }.description
+            for word in part.dropFirst() { text = join(text, word.text) }
+            return .init(start: part.first!.start, end: part.map(\.end).max()!, text: text, speaker: part.first!.speaker)
+        }
+        let whole = line(unit[...])
+        guard unit.count > 1, whole.text.count >= maxLineCharacters || whole.end - whole.start >= maxLineSeconds else { return [whole] }
+        let parts = min(unit.count, max(Int((Double(whole.text.count) / Double(maxLineCharacters - 10)).rounded(.up)),
+                                        Int(((whole.end - whole.start) / (maxLineSeconds - 0.3)).rounded(.up)), 2))
+        // Characters up to and including each word.
+        var through: [Int] = []
+        var count = 0
+        for word in unit { count += word.text.count; through.append(count) }
+        var lines: [RAVEGeneratedCaption] = []
+        var from = 0
+        for part in 1..<parts {
+            let target = Double(count) * Double(part) / Double(parts)
+            // Break after word `index`, leaving a word for every part to come.
+            var best = from
+            var bestScore = Double.infinity
+            for index in from ..< (unit.count - (parts - part)) {
+                let clause = endsSentence(unit[index].text) || endsClause(unit[index].text)
+                let score = abs(Double(through[index]) - target) - (endsSentence(unit[index].text) ? Double(count) * 0.4 : clause ? Double(count) * 0.12 : 0)
+                if score < bestScore { bestScore = score; best = index }
+            }
+            lines.append(line(unit[from ... best]))
+            from = best + 1
+        }
+        lines.append(line(unit[from...]))
+        return lines
+    }
+
+    private static func endsSentence(_ text: String) -> Bool {
+        guard let end = text.last(where: { !$0.isWhitespace }) else { return false }
+        return ".?!…。？！".contains(end)
+    }
+
+    private static func endsClause(_ text: String) -> Bool {
+        guard let end = text.last(where: { !$0.isWhitespace }) else { return false }
+        return ",;:，、；".contains(end)
+    }
+
+    /// `a` and `b` as one line. The recognizer's runs carry a leading space
+    /// ("Today", " we"), except a volatile guess's first word, which came out
+    /// bare ("show." + "the headset": "show.the headset"). A space goes where
+    /// neither side has one, but not where the text isn't written with spaces
+    /// (Chinese, Japanese, Thai) or the next piece is closing punctuation.
+    static func join(_ a: String, _ b: String) -> String {
+        guard let tail = a.last, let head = b.first, !tail.isWhitespace, !head.isWhitespace,
+              !".,!?;:)]}…%".contains(head), !"([{".contains(tail),
+              !(tail.isUnspaced || head.isUnspaced) else { return a + b }
+        return a + " " + b
+    }
+
+    /// A volatile guess's words with times. The recognizer gives the guess one
+    /// range, which runs on past the speech (to wherever audio has been fed),
+    /// so the words are spread at a speaking pace from its start, squeezed
+    /// only if that would pass its end. A run that is one word, as every final
+    /// word is, and text written without spaces stay as they are.
+    static func timedWords(_ text: String, from start: Double, through end: Double) -> [RAVEGeneratedCaption] {
+        var pieces: [String] = []
+        var piece = ""
+        var seenText = false
+        for character in text {
+            if character.isWhitespace, seenText { pieces.append(piece); piece = ""; seenText = false }
+            piece.append(character)
+            if !character.isWhitespace { seenText = true }
+        }
+        if !piece.isEmpty { pieces.append(piece) }
+        guard pieces.count > 1, end > start else { return [.init(start: start, end: end, text: text, speaker: nil)] }
+        let durations = pieces.map { 0.05 + 0.055 * Double($0.trimmingCharacters(in: .whitespaces).count) }
+        let paced = durations.reduce(0, +)
+        let scale = min(1, (end - start) / paced)
+        var time = start
+        return zip(pieces, durations).map { piece, duration in
+            defer { time += duration * scale }
+            return .init(start: time, end: time + duration * scale, text: piece, speaker: nil)
+        }
+    }
+
     private func overlap(_ segment: (start: Double, end: Double, id: Int), _ word: RAVEGeneratedCaption) -> Double {
         max(0, min(segment.end, word.end) - max(segment.start, word.start))
     }
@@ -572,5 +690,15 @@ actor CaptionWorker {
             packet?.restarted = next.sequenceWasRestarted
             return packet
         }
+    }
+}
+
+private extension Character {
+    /// Written without spaces between words: Han, kana and Thai.
+    var isUnspaced: Bool {
+        guard let value = unicodeScalars.first?.value else { return false }
+        return (0x3040...0x30FF).contains(value) || (0x3400...0x9FFF).contains(value)
+            || (0xF900...0xFAFF).contains(value) || (0x0E00...0x0E7F).contains(value)
+            || (0x20000...0x2FA1F).contains(value)
     }
 }
