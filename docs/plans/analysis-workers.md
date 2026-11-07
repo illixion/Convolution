@@ -364,6 +364,18 @@ and "Upscale 2×" plus a "2D (upscale only)" layout in the desktop app:
   fit PAL audio). Every `convert` now detects this and drops one in five (the Mac's own picker,
   ffmpeg `decimate` on the PC), writing 24.99 fps in sync with the audio; `--keep-repeated-frames`
   keeps them.
+- **Watched on the Vision Pro (2026-11-07):** eyes fine (the title sequence's eyes really differ in
+  the source); diagonals aliased: the source's stair steps (SD CG, NTSC deinterlacing) came out
+  sharpened. Added (vergence eaf98c7, 26085b0):
+  - `--antialias` (both converters): each field's missing lines re-made by ffmpeg's `estdif`
+    (edge-slope tracing, no weights), both fields averaged, kept along edges (blurred Sobel mask).
+    Edge raggedness on the bed edge after upscaling 0.0655 → 0.0564, detail elsewhere −7 %; NNEDI3
+    the same way (GPL weights) 0.0612, both directions 0.0592 with more detail lost. ~73 fps.
+  - `--ai-hdr` (Mac only so far): the `ai-hdr` worker's producer makes the grids (left eye of a 3D
+    source), `GainGridPass` applies them (cap 2.5×), 10-bit BT.2020 PQ, SDR white 203 nits, HDR10
+    metadata (P3 1,000 nits mastering, MaxCLL 1015, MaxFALL 507). Grids ~34 fps; baking is free.
+  - A 10-minute piece (20:00–30:00) with both and `--upscale 2x`: 40.6 min on the M2 Max; on the
+    headset for the user to judge (ledger).
 - **Not done:** temporal stabilisation (a flow-warped detail blend cut flicker by a third in the
   experiment but needs flow per frame); the fusion on the PC's GPU (it is CPU-bound); a stereo SR
   network (NAFSSR is trained on clean bicubic downscaling, not compressed video); upscaling MV-HEVC
