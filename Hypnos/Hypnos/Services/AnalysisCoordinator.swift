@@ -116,18 +116,24 @@ struct AnalysisCoordinator: Sendable {
                  workload: String = smoothMotion3D) async throws -> Status {
         let reply = try await send("POST", "v1/playing", json: [
             "server": "jellyfin", "id": itemId, "workload": workload,
-            "seconds": max(seconds, 0), "rate": rate, "player": player,
+            "seconds": max(seconds, 0), "rate": rate, "player": playerName(for: workload),
         ])
         guard reply.status == 200 else { throw Failure.http(reply.status) }
         return try JSONDecoder().decode(Status.self, from: reply.body)
     }
 
-    /// This device stopped playing.
-    func stopped() async {
+    /// This device stopped playing `workload`'s title.
+    func stopped(workload: String = smoothMotion3D) async {
         _ = try? await send("POST", "v1/playing", json: [
-            "server": "jellyfin", "id": "", "seconds": 0, "player": player, "stopped": true,
+            "server": "jellyfin", "id": "", "seconds": 0, "player": playerName(for: workload), "stopped": true,
         ])
     }
+
+    /// The coordinator keeps one playhead per player name, and AI 3D plays one
+    /// title with several workloads at once (fields, depth, gain grids), so each
+    /// reports under its own name; otherwise one would overwrite or stop the
+    /// others. The Quest port names them the same way.
+    private func playerName(for workload: String) -> String { "\(player)/\(workload)" }
 
     /// Whether the coordinator answers and lets this device play (a check for Settings).
     func check() async throws -> Bool {
@@ -171,8 +177,8 @@ final class AnalysisPlayheadReporter: @unchecked Sendable {
     }
 
     deinit {
-        let coordinator = coordinator
-        Task.detached(priority: .utility) { await coordinator.stopped() }
+        let coordinator = coordinator, workload = workload
+        Task.detached(priority: .utility) { await coordinator.stopped(workload: workload) }
     }
 
     /// Called on the player's thread for every frame; sends only now and then.
