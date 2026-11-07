@@ -22,6 +22,12 @@ struct ContentView: View {
     /// hides its content itself (RAVEUI's push host); the tab bar ornament
     /// has to be hidden here.
     @Environment(\.raveIsPushedAway) private var isPushedAway
+    /// The scene shell this retained content is currently in. A new
+    /// `presentationID` means the content moved to a fresh scene.
+    @Environment(\.raveWindowShell) private var shell
+    /// True while the tab bar ornament is being re-presented after the content
+    /// moved to a new scene (see `body`).
+    @State private var ornamentResetting = false
     #endif
     #if !os(visionOS)
     @Environment(IOSWindowRouter.self) private var router: IOSWindowRouter?
@@ -76,7 +82,7 @@ struct ContentView: View {
         .ornament(
             // Nothing behind the welcome flow is useful yet, and a visible tab
             // bar under it invites an escape into an empty gallery.
-            visibility: showWelcome || isPushedAway ? .hidden : .visible,
+            visibility: showWelcome || isPushedAway || ornamentResetting ? .hidden : .visible,
             attachmentAnchor: .scene(.bottomFront),
             contentAlignment: .top,
             ornament: {
@@ -85,6 +91,18 @@ struct ContentView: View {
                     .environment(windowModel)
             }
         )
+        #endif
+        #if os(visionOS)
+        // An ornament presented from content that is moved into another scene
+        // is not re-presented by the new scene. Taking it away and giving it
+        // back once the move has settled makes the new scene present it again.
+        .onChange(of: shell?.presentationID) { _, _ in
+            ornamentResetting = true
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(400))
+                ornamentResetting = false
+            }
+        }
         #endif
         .background(
             GeometryReader { geo in

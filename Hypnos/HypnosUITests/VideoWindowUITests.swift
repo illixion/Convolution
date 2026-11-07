@@ -61,6 +61,10 @@ final class VideoWindowUITests: XCTestCase {
         app.buttons["More"].require("More", timeout: 20).tap()
         app.buttons["Pop Out"].require("Pop Out").tap()
         thumbnail.require("Videos returns when its pushed scene closes", timeout: 20)
+        // The tab bar is an ornament of the scene, not of the retained content:
+        // it must come back with the gallery, or the window has no way to
+        // change tab.
+        app.buttons[RAVEA11y.tab("videos")].require("The tab bar ornament returns with the gallery", timeout: 20)
         app.buttons["More"].require("The popped out player's controls", timeout: 20).tap()
         app.buttons["Gallery"].require("The popped out player remains open")
     }
