@@ -41,6 +41,16 @@ these session/backend boundaries are established.
 - The native OpenXR presentation is retained behind the DEBUG fixture's
   `presentation: "native"`; normal playback uses Home or Spatial SDK.
 
+- Smooth Motion (2026-11-07, analysis-workers step 8; README "Smooth Motion from
+  an analysis computer"): per-frame analysis data stays native. VGAT chunks are
+  parsed in C++ (`cpp/analysis/`) and go straight into GL textures; never route
+  fields through the Swift core's JSON. The decoder borrows
+  `SmoothMotionRenderer`'s SurfaceTexture only while a coordinator track exists;
+  release the renderer before a presentation's surface is destroyed
+  (`PlaybackSession.releaseSmooth`). The pairing C is a vendored copy of
+  Controller Bridge's `protocol/` (`cpp/third_party/controller-bridge/VENDORED.md`):
+  change it upstream first. The paired channel is TLS 1.2 PSK through Bouncy Castle.
+
 ## Device-proven details to preserve
 
 Quest 3 on Meta VR OS SDK 207 confirmed Home HEVC and packed SBS playback,

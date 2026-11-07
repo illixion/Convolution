@@ -275,6 +275,7 @@ fun SpatialSettingsPanel(onClose: () -> Unit, onSignOut: () -> Unit, spatialWind
             SettingsRow("Playback", "Choose stream quality and subtitle language before playback.")
             SettingsRow("Presentation", "Play beside Home, or switch to the movable spatial screen.")
             SettingsRow("Library", "Jellyfin · ${LibrarySession.catalog.size} titles")
+            AnalysisSettingsSection()
             OutlinedButton(onClick = onSignOut) { Text("Sign out") }
             Text(if (spatialWindowsSupported) "This settings panel is a separate Horizon window. Drag it beside your library." else "This headset is using the inline settings fallback because spatial windows are unavailable.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }

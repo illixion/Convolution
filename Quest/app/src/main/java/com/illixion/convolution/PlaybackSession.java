@@ -62,6 +62,11 @@ public final class PlaybackSession {
     private volatile JSONObject skipSuggestion;
     private volatile boolean skipCheckPending = false;
     private long lastSkipCheck = 0;
+    /** Smooth Motion for 3D titles: an analysis coordinator's fields, drawn by a GLES renderer between the decoder and the presentation's surface. */
+    private AnalysisTrackStream analysis;
+    private SmoothMotionRenderer smooth;
+    private Surface smoothOutput;
+    private boolean analysisRequested = false, smoothFailed = false;
     private PlaybackSession(Context context, JSONObject plan) {
         this.context = context; this.plan = plan;
         String format = plan.optString("stereo");
@@ -71,7 +76,7 @@ public final class PlaybackSession {
         onMainSync(() -> {
             if (host != null && host != owner) suspendVideo();
             host = owner; videoSurface = video; subtitles = captions;
-            if (player != null) { player.setVideoSurface(videoSurface); updatePicture(player.getVideoSize()); }
+            if (player != null) { applyVideoSurface(); updatePicture(player.getVideoSize()); }
         });
     }
     public void detach(Host owner) {
@@ -99,7 +104,7 @@ public final class PlaybackSession {
                 .setConnectTimeoutMs(20000).setReadTimeoutMs(20000);
             player = new ExoPlayer.Builder(context).setMediaSourceFactory(
                 new DefaultMediaSourceFactory(new DefaultDataSource.Factory(context,http))).build();
-            player.setVideoSurface(videoSurface);
+            applyVideoSurface();
             player.setAudioAttributes(new AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),true);
             // Media3 keeps the pitch at any speed.
             player.setPlaybackSpeed(speed);
@@ -135,7 +140,7 @@ public final class PlaybackSession {
             player.seekTo((long)(plan.optDouble("position",0)*1000));
             player.prepare(); player.setPlayWhenReady(active && intendedPlay);
             report("started");
-            loadSubtitles(); main.post(tick);
+            loadSubtitles(); requestAnalysis(); main.post(tick);
     }
     private void updatePicture(VideoSize size) {
         // Half packing already declares the squeeze. Some encoders also mark
@@ -240,6 +245,8 @@ public final class PlaybackSession {
                             // Keep the original reporting session; a renderer change never resets watch state.
                             plan.put("quality",quality); plan.put("url",next.getString("url"));
                             firstFrame = false;
+                            // A transcode's timestamps aren't the file's: Smooth Motion stops for it.
+                            applyVideoSurface();
                             player.setMediaItem(MediaItem.fromUri(next.getString("url")),position);
                             player.prepare(); player.setPlayWhenReady(active && intendedPlay);
                             report("seekGrace");
@@ -300,11 +307,11 @@ public final class PlaybackSession {
     public void suspendVideo() { onMainSync(() -> {
         active = false;
         main.removeCallbacks(tick);
-        if (player != null) { player.pause(); player.clearVideoSurface(); report("progress"); }
+        if (player != null) { player.pause(); releaseSmooth(); player.clearVideoSurface(); report("progress"); }
     }); }
     public void resumeVideo() { main.post(() -> {
         active = true; createDecoder();
-        if (player != null) { player.setVideoSurface(videoSurface); player.setPlayWhenReady(intendedPlay); drawCaptions(captionText,topCaptionText); }
+        if (player != null) { applyVideoSurface(); player.setPlayWhenReady(intendedPlay); drawCaptions(captionText,topCaptionText); }
         main.removeCallbacks(tick); main.post(tick);
     }); }
     public void close() { onMainSync(this::releaseVideo); worker.shutdown(); if (current == this) current = null; }
@@ -314,10 +321,56 @@ public final class PlaybackSession {
         main.post(() -> { try { action.run(); } finally { done.countDown(); } });
         try { done.await(3,TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
     }
+    /**
+     * Asks the analysis coordinator, once per session, for this title's Smooth
+     * Motion fields: packed stereo only (the 3D workload), not a spatial video
+     * the plugin converts as it plays, and only when Settings has it on.
+     */
+    private void requestAnalysis() {
+        if (analysisRequested || layout == 0 || plan.optBoolean("spatialVideo") || !AnalysisSettings.INSTANCE.smoothMotion(context)) return;
+        analysisRequested = true;
+        final String item = plan.optString("itemID");
+        final double start = plan.optDouble("position", 0);
+        if (item.isEmpty()) return;
+        Thread thread = new Thread(() -> {
+            AnalysisTrackStream stream = AnalysisTrackStream.Companion.open(context, item, start);
+            main.post(() -> {
+                if (stopped) { if (stream != null) stream.close(); return; }
+                analysis = stream;
+                if (stream != null) applyVideoSurface();
+            });
+        }, "analysis-open");
+        thread.setDaemon(true);
+        thread.start();
+    }
+    /** The coordinator's times are the file's: a direct stream or a download, never a Jellyfin transcode (HLS). */
+    private boolean smoothEligible() {
+        return analysis != null && !smoothFailed && !plan.optString("url").contains(".m3u8");
+    }
+    /** Gives the decoder the presentation's surface, or the Smooth Motion renderer's input drawing into it. */
+    private void applyVideoSurface() {
+        if (player == null) return;
+        boolean wanted = videoSurface != null && smoothEligible();
+        if (smooth != null && (!wanted || smoothOutput != videoSurface)) releaseSmooth();
+        if (wanted && smooth == null) {
+            smooth = SmoothMotionRenderer.Companion.create(context, videoSurface, layout);
+            if (smooth == null) smoothFailed = true;
+            else { smoothOutput = videoSurface; smooth.setTrack(analysis); player.setVideoFrameMetadataListener(smooth); }
+        }
+        player.setVideoSurface(smooth != null ? smooth.getInput() : videoSurface);
+    }
+    /** The renderer lets go of the presentation's surface before its owner destroys it. */
+    private void releaseSmooth() {
+        if (smooth == null) return;
+        if (player != null) { player.clearVideoFrameMetadataListener(smooth); player.clearVideoSurface(smooth.getInput()); }
+        smooth.release(); smooth = null; smoothOutput = null;
+    }
     private void releaseVideo() {
         if (stopped) return;
         stopped = true; main.removeCallbacks(tick);
-        if (player != null) { report("stopped"); player.clearVideoSurface(); player.release(); player = null; }
+        if (player != null) { report("stopped"); releaseSmooth(); player.clearVideoSurface(); player.release(); player = null; }
+        releaseSmooth();
+        if (analysis != null) { analysis.close(); analysis = null; }
         subtitles = null; videoSurface = null; host = null;
     }
 }

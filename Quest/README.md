@@ -82,6 +82,26 @@ export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
 ./Quest/gradlew -p Quest :app:assembleDebug
 ```
 
+If `build-core.sh` crashes compiling RAVESDK's `Package.swift` (`unknown argument:
+'-target-arch-variant'`, signal 11), the open-source 6.3.3 toolchain is reading a
+newer Xcode's macOS SDK. Point it at an older SDK for that run, for example
+`SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk ./Quest/build-core.sh`
+(found 2026-11-07 with Xcode's macOS 27.2 SDK).
+
+Off-device tests:
+
+```sh
+./Quest/gradlew -p Quest :app:testDebugUnitTest   # JVM: coordinator rules, pairing links, paired-channel keys
+./Quest/native-tests/run.sh                        # desktop C/C++: VGAT reader, chunk store, pairing maths
+```
+
+`native-tests/run.sh <track.vgat>` also prints a real track's first-pair sums for
+comparison with `swift run --package-path Quest/native-tests/fixtures/swift MakeFixtures --sums <track.vgat>`.
+The paired-channel test talks TLS-PSK to a real coordinator when
+`VERGENCE_PAIRED_TEST=host:port`, `VERGENCE_PAIRED_DEVICE` and
+`VERGENCE_PAIRED_TOKEN_FILE` name one (a throwaway `vergenced` with that device
+in its `devices.json`); otherwise it is skipped.
+
 The default RAVESDK path is `../../RAVESDK` relative to `Quest/`, matching the
 Apple worktree layout. Override with `RAVE_SDK_PATH` if needed. The build creates
 an arm64-only SDK descriptor to avoid SwiftPM 6.3.3 selecting armv7 resources
@@ -91,6 +111,41 @@ ignored by Git.
 The Quest implementation is integrated into Hypnos and RAVESDK `main` as of
 2026-10-08. Build against the matching sibling RAVESDK checkout containing
 `RAVEMediaCore` and `RAVEQuestCore`; the original work branches are historical.
+
+## Smooth Motion from an analysis computer
+
+3D (packed stereo) Library titles get in-between frames at the headset's display
+rate from fields a Vergence analysis coordinator prepares on another machine
+(the Vergence desktop app on a Mac or PC, or `vergenced` on a server;
+`docs/plans/analysis-workers.md`). The Quest runs no network; it only warps and
+blends.
+
+- **Settings → Analysis computer** pairs with the coordinator by RAVECompanion's
+  six-digit comparison (Find computers over NSD, `_vergence-pair._tcp`; or an
+  address or `vergence://pair` link typed in), or takes an HTTP address and a
+  `play` token as the Vision Pro does. The pairing token is sealed with an
+  Android Keystore key (`SecureStore`); the pairing maths is Controller Bridge's
+  C (`cpp/third_party/controller-bridge`, vendored, see `VENDORED.md`).
+- A paired Quest reaches the coordinator over its paired channel: TLS 1.2 PSK on
+  port 8421 (`PairedChannel.kt`, Bouncy Castle), HTTP/1.1 inside, no bearer token.
+  A typed-in server uses plain HTTP with `Authorization: Bearer`.
+- `PlaybackSession` asks the coordinator once per stereo title (`POST /v1/playing`),
+  reports the playhead every 5 s and at once after a seek, and reads 10 s chunks
+  around the playhead, partial ones again every 1.5 s (`AnalysisWindow.kt`, the
+  Vision Pro's rules). The chunks are parsed and looked up in C++
+  (`cpp/analysis/analysis_track.*`, `libconvolution_analysis.so`).
+- With a track, the decoder writes into `SmoothMotionRenderer`'s SurfaceTexture
+  instead of the presentation's surface. A GLES 3 thread copies each frame, and on
+  every vsync draws either the real frame or the shared-field pass
+  (`assets/smooth-motion/shared_field.frag`, the port of Vergence's Metal
+  `SharedFieldInterpolator`) into the Home SurfaceView or the Spatial SDK panel.
+  Frames without fields yet, HLS transcodes and spatial videos play as before.
+- Logcat: `adb logcat -s ConvolutionAnalysis ConvolutionPairing ConvolutionSmooth`.
+  Every 5 s the renderer logs how many refreshes were interpolated, the draw's
+  CPU time and the pass's GPU time (`GL_EXT_disjoint_timer_query`).
+
+None of this has run on a headset yet (2026-11-07): the pairing UI, the
+renderer in both presentations and its frame time are open device checks.
 
 ## Run on USB
 

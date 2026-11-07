@@ -87,7 +87,7 @@ class MainActivity : ComponentActivity() {
             }
             if (settingsOpen) SpatialWindow(
                 key = "convolution-settings",
-                modifier = WindowModifier.size(440.dp, 560.dp),
+                modifier = WindowModifier.size(480.dp, 720.dp),
                 fallbackStrategy = WindowFallback.Inline,
             ) {
                 SpatialSettingsPanel(onClose = { settingsOpen = false }, onSignOut = { signOut(); settingsOpen = false }, spatialWindowsSupported = layoutSupported)

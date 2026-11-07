@@ -20,7 +20,11 @@ android {
     buildFeatures { prefab true; buildConfig true; compose true }
     kotlinOptions { jvmTarget = '17' }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
-    packaging { jniLibs { pickFirsts += ['**/libc++_shared.so', '**/libopenxr_loader.so'] } }
+    packaging {
+        jniLibs { pickFirsts += ['**/libc++_shared.so', '**/libopenxr_loader.so'] }
+        // Bouncy Castle's jars each carry the same OSGi manifest.
+        resources { excludes += ['META-INF/versions/9/OSGI-INF/MANIFEST.MF'] }
+    }
 }
 dependencies {
     implementation platform('com.meta.metavrx:metavrx-bom:1.2026.0.0')
@@ -40,4 +44,7 @@ dependencies {
     implementation 'org.khronos.openxr:openxr_loader_for_android:1.1.53'
     implementation 'androidx.media3:media3-exoplayer:1.5.1'
     implementation 'androidx.media3:media3-exoplayer-hls:1.5.1'
+    // TLS 1.2 with an external PSK for the Vergence coordinator's paired channel (Conscrypt has no PSK client).
+    implementation 'org.bouncycastle:bctls-jdk18on:1.78.1'
+    testImplementation 'junit:junit:4.13.2'
 }

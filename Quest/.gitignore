@@ -4,3 +4,7 @@ app/.cxx/
 app/src/main/jniLibs/
 local.properties
 build/
+native-tests/fixtures/rust/Cargo.lock
+native-tests/fixtures/rust/target/
+native-tests/fixtures/swift/.build/
+native-tests/fixtures/swift/Package.resolved
