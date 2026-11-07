@@ -332,6 +332,12 @@ final class VideoWindowModel {
         stereoEngine?.cleanup()
         stereoEngine = nil
         #endif
+        // The flat Metal player's MTKView kept drawing at up to 120 Hz for the
+        // dead scene, with its frame presenter, interpolator pools and
+        // textures alive: ~2 GB held after the window closed, and each video
+        // opened and closed added another until jetsam's 5 GB limit.
+        releaseRendererCommand?()
+        releaseRendererCommand = nil
         cleanup()
     }
 
@@ -371,6 +377,11 @@ final class VideoWindowModel {
     @ObservationIgnored var setMutedCommand: (@MainActor (Bool) -> Void)?
     @ObservationIgnored var setVolumeCommand: (@MainActor (Double) -> Void)?
     @ObservationIgnored var setSpeedCommand: (@MainActor (Double) -> Void)?
+    /// Bound by `NativeMetalVideoPlayerView`: stops its draw loop and drops the
+    /// player, frame presenter, interpolator pools and textures. A scene the
+    /// system disconnected gets no `dismantleUIView`, so this is the only way
+    /// the flat Metal renderer is ever released (device, 2026-11-07).
+    @ObservationIgnored var releaseRendererCommand: (@MainActor () -> Void)?
     /// Floats the picture over other apps, or brings it back (iOS, macOS;
     /// the native renderer's `VideoPictureInPicture`).
     @ObservationIgnored var togglePictureInPictureCommand: (@MainActor () -> Void)?
@@ -964,6 +975,7 @@ final class VideoWindowModel {
         setMutedCommand = nil
         setVolumeCommand = nil
         setSpeedCommand = nil
+        releaseRendererCommand = nil
         // Release the standalone Adjustments window's ref to us (also makes that
         // window dismiss itself), so this closed window's model isn't retained.
         if appModel.videoAdjustmentsTarget === self {

@@ -298,6 +298,9 @@ struct NativeMetalVideoPlayerView {
             playbackModel.setSpeedCommand = { [weak coordinator] speed in
                 coordinator?.setSpeed(Float(speed))
             }
+            playbackModel.releaseRendererCommand = { [weak coordinator] in
+                coordinator?.releaseForDisconnectedScene()
+            }
             #if os(iOS) || os(macOS)
             playbackModel.togglePictureInPictureCommand = { [weak coordinator] in
                 coordinator?.pictureInPicture.toggle()
@@ -813,6 +816,18 @@ struct NativeMetalVideoPlayerView {
                 wasPlayingBeforeRoomExit = analysisBuffering ? intendsToPlay : player?.timeControlStatus != .paused
                 pause()
             }
+        }
+
+        /// The window's scene was disconnected, so SwiftUI will never dismantle
+        /// this view: stop the display link first (an unpaused MTKView keeps
+        /// calling `draw(in:)` at the drawn rate for a window nobody sees),
+        /// then release everything `cleanup()` does.
+        func releaseForDisconnectedScene() {
+            mtkView?.isPaused = true
+            mtkView?.delegate = nil
+            host?.metalView.isPaused = true
+            host?.metalView.delegate = nil
+            cleanup()
         }
 
         func cleanup() {
