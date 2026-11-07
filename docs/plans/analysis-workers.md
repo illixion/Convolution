@@ -357,8 +357,9 @@ and "Upscale 2×" plus a "2D (upscale only)" layout in the desktop app:
   less detail. `animevideov3` (BSD-3): +13–26 % detail, no more disagreement or flicker than
   Lanczos, twice as fast. RRDB x2plus/x4plus: slower (4–12×), more flicker. RealBasicVSR (Apache-2.0
   code, video model): most detail but up to 2× the disagreement and flicker, 10× slower.
-- **Speed:** M2 Max 9.3 fps for a 720×400 3D pair; RTX 3080 PC 6.9 fps (DirectML), the CPU fusion
-  setting the pace.
+- **Speed:** M2 Max 9.4 fps for a 720×400 3D pair: the whole 81-minute film (121,493 frames after
+  the repeats were dropped) in 3 h 36 min, audio in sync to the end. RTX 3080 PC 6.9 fps (DirectML),
+  the CPU fusion setting the pace.
 - **Repeated frames:** that film repeats one frame in five (NTSC pulldown retimed to 31.24 fps to
   fit PAL audio). Every `convert` now detects this and drops one in five (the Mac's own picker,
   ffmpeg `decimate` on the PC), writing 24.99 fps in sync with the audio; `--keep-repeated-frames`
