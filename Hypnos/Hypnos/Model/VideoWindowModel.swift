@@ -215,6 +215,20 @@ final class VideoWindowModel {
     var smoothMotionOverride: Bool?
     /// Whether AI 3D interpolates this video's frames.
     var smoothMotion: Bool { smoothMotionOverride ?? appModel.smoothMotion }
+
+    /// Critical memory pressure (`AppModel`'s dispatch source): turn Smooth
+    /// Motion off for this window. Its presenter, interpolator pools and
+    /// read-ahead frames are the biggest allocation a playing picture owns
+    /// (hundreds of MB at 1080p, over a GB at 4K), and the picture plays on
+    /// without them at its own frame rate. It goes through the same override
+    /// the View Mode menu sets, so the renderers drop it the way they do for a
+    /// tap and the menu shows it off; the viewer can turn it back on.
+    func shedMemoryForPressure() {
+        guard smoothMotion, smoothMotionApplies else { return }
+        smoothMotionOverride = false
+        AppLogger.videoWindow.warning("Memory pressure: Smooth Motion turned off for this window")
+    }
+
     /// A 3D Library title's analysis track (`SmoothMotionTracks`), which lets
     /// live 3D get in-between frames for both eyes. Nil for anything else.
     private(set) var sharedFields: AnalysisTrackFieldProvider?
@@ -601,6 +615,7 @@ final class VideoWindowModel {
         didStart = true
         subtitles.playhead = { [weak self] in self?.currentTime ?? 0 }
         appModel.lastViewedVideoId = video.id
+        appModel.registerWindowModel(self)
         if let popOutWindowValue {
             appModel.registerVideoWindow(video: video, windowValue: popOutWindowValue)
         }
@@ -947,6 +962,7 @@ final class VideoWindowModel {
         audioTracksTask?.cancel()
         sharedFieldsTask?.cancel()
         serverTranscodeTask?.cancel()
+        appModel.unregisterWindowModel(self)
         if popOutWindowValue != nil {
             appModel.unregisterVideoWindow(video: video, windowValueId: windowValueId)
         }

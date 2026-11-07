@@ -581,6 +581,21 @@ class AppModel {
         activePhotoWindowModels.removeValue(forKey: ObjectIdentifier(model))
     }
 
+    // MARK: - Video Window Model Registry (for Memory Pressure)
+
+    /// The live video windows, held weakly (a model that never reaches
+    /// `cleanup()` must not be kept alive by this list). The memory pressure
+    /// handler asks each to give back what its picture can do without.
+    private let activeVideoWindowModels = NSHashTable<VideoWindowModel>.weakObjects()
+
+    func registerWindowModel(_ model: VideoWindowModel) {
+        activeVideoWindowModels.add(model)
+    }
+
+    func unregisterWindowModel(_ model: VideoWindowModel) {
+        activeVideoWindowModels.remove(model)
+    }
+
     // MARK: - Remote Viewer Window Open Queue
 
     struct RemoteViewerOpenRequest: Identifiable {
@@ -1858,6 +1873,19 @@ class AppModel {
                 // Unclaimed spatial-3D handoffs are pure cache — the windows
                 // still showing an instance own it themselves.
                 Spatial3DImageHandoff.shared.evictAll()
+                // Decoded images refill from the disk caches.
+                Task { await ImageLoader.shared.clearMemoryCache() }
+                // A playing video is the largest thing the app holds, and the
+                // handler used to leave it alone: on the headset (2026-11-07)
+                // critical pressure came two minutes before jetsam killed the
+                // app at its 5 GB limit, with nothing shed in between. Smooth
+                // Motion's interpolator pools and read-ahead frames go first;
+                // the picture keeps playing at its own rate.
+                if self.respectMemoryAlerts {
+                    for model in self.activeVideoWindowModels.allObjects {
+                        model.shedMemoryForPressure()
+                    }
+                }
             } else if event.contains(.warning) {
                 AppLogger.appModel.info("DispatchSource: warning memory pressure — no action (OS handles page eviction)")
             }
