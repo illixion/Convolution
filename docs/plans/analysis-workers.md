@@ -369,7 +369,8 @@ It is meant to work on a Vision Pro alone too, with workers as a quality upgrade
 | 4. Pairing | Rust port matches every golden vector; pairs with the Swift code both ways. The chunk and worker API runs over the paired TLS-PSK channel ("The paired channel"); `vergenced pair` and the desktop app pair, the Vision Pro pairs in Settings and uses it. HTTP + token stays for scripts and the plugin. Not yet on a headset | vergence `companion/` (cf954fa), 8f23a62; RAVESDK `RAVECompanionHTTPClient` |
 | 5. Desktop app | Mac build runs: coordinator, settings, pairing, worker sidecar, convert queue, the paired TLS-PSK port. Windows x64 builds (cross-compiled, `desktop/scripts/package-windows.sh`, a zip as Apparition ships) and ran on a Windows PC: window, coordinator, paired channel (an OpenSSL client exchange through it), worker found; it runs `vergence-worker.exe` and `vergence-convert.exe` there. Tray and a conversion not tried on Windows. Updater pins the release keys (Apparition's two), no release site yet | vergence `desktop/` (181599a), 0867eef, db4af4a |
 | 5. `vergence convert` | Built: all layouts, HDR kept, audio copied, resume, depth track. No subtitles, no Smooth Motion bake | vergence 0607bc0 |
-| 6. ONNX worker | Built; Windows compiles. CUDA, TensorRT, DirectML never run. No Windows converter yet | vergence `worker/` (2a7892b) |
+| 6. ONNX worker | Built and run on a Windows PC with an RTX 3080 against a coordinator on the Mac: CUDA, TensorRT and DirectML each made a whole title, 47–55 fps for 1080p 3D pieces, records matching Core ML's (Question 3). It yields for real there: a game, an app launched through Sunshine, SteamVR or another program keeping the GPU busy makes it give back its piece and unload its models; a desktop stream alone doesn't (the user's call). Only `smooth-motion-3d`; the 2D flow, depth and GMNet kinds are Mac-only | vergence `worker/` (2a7892b), ab2ffbc, 5f870d3, 44c3b73 |
+| 6. Windows converter | Built: `vergence-convert`, the same flags, names, output lines and progress as `vergence convert` (so the desktop app runs either), ONNX depth, the refinement ported to Rust, a wgpu warp, NVENC. Within 49 dB PSNR, SSIM 0.985 of the Mac's output per eye (tolerance 40 dB, 0.97). No spatial video, no HDR10 mastering metadata through NVENC (x265 keeps it) | vergence `convert/` (99539a1), 876a7bd, 03cd136 |
 | 7. More kinds | Built on the Mac, three workloads, each checked end to end against the dev Jellyfin (a coordinator's chunks against the worker's own whole-file run). **`smooth-motion-2d`**: RIFE 4.25 lite 960×576 on the GPU, flow stored at 240×144; chunks identical to the whole-file run; the Vision Pro reads it for 2D Library titles (flat and AI 3D, film player AI 3D too) through a fields-first mono pass that leaves uncovered pairs to the device's interpolator. **`ai-3d-depth`**: the offline depth pipeline per piece (a second of context before it) with Depth Anything V2 Small at 770×574; chunks within 0.005 mean, 0.05 max (shot-space units) of a whole-file conversion; the Vision Pro warps it in real-time AI 3D and runs its own model only for frames it lacks. **`ai-hdr`**: GMNet on keyframes (0.5 s and cuts) fitted to the pinned grid, eased within shots; chunks identical; a tested Metal lookup pass with the brightness cap. Not done: AI HDR in the players (the lookup inside `imageFragmentShader` and the stereo warp, ramp-in, step-down), the ONNX worker's 2D flow, depth and GMNet, and any headset run | vergence 352dd73, 3e20c96, 308f15e; Hypnos 9ec9b9d, 2178727; RAVESDK b6ab5e6, a4e89b4 |
 | 8. Quest | Built, not run on a headset. Pairs by the six-digit code (NSD, a typed address or link) and keeps the token in the Keystore, or takes an HTTP address and token; talks over the paired TLS-PSK channel (Bouncy Castle) or HTTP; reports the playhead, reads partial chunks (VGAT in C++); a GLES 3 shared-field pass at the display's rate for stereo titles. Tested off the headset against VergenceCore and vergence-worker tracks, vergence-companion's vectors and a real `vergenced` over TLS-PSK. The desktop app announces `_vergence-pair._tcp` while pairing on macOS and Linux; on Windows the Quest pairs by address. No stereo warp or gain lookup yet (their kinds aren't pinned) | Hypnos 1cc42b1, vergence 6a80077, Controller Bridge 4ed9722 |
 | 9. Plugin | Routes pass through to a coordinator; the nightly task queues there | Hypnos 16640ed |
@@ -381,9 +382,16 @@ info (`coordinator/src/paired.rs`). The Vision Pro and Quest clients compute the
 Answers so far:
 - **Question 3 (Core ML vs ONNX):** NeuFlow agrees within noise; RIFE does not, because the Core ML
   conversion runs in float16 (up to about 1 px of flow, mean 0.004). So ONNX titles get their own
-  profile, unless RIFE gets a float32 Core ML conversion.
+  profile, unless RIFE gets a float32 Core ML conversion. On the RTX 3080 (same title, whole):
+  CUDA, TensorRT (fp32) and DirectML agree with each other within 0.06 px of flow and 0.03 px of
+  disparity (one or two storage steps), and with Core ML's disparity within 0.03 px (mean 0.0005);
+  their flow is as far from Core ML's as the Mac's ONNX CPU run (max 1 px, p99 0.06). So every
+  ONNX provider shares one profile, Core ML another.
 - **Question 4 (throughput):** the M2 Max's Core ML worker does 1080p 3D Smooth Motion at about
-  37 fps; ONNX Runtime on the same Mac 16–17 fps. CUDA is unmeasured. By kind on the M2 Max (whole
+  37 fps; ONNX Runtime on the same Mac 16–17 fps. On an RTX 3080, whole pieces from a coordinator
+  (decode and seek included): TensorRT 55 fps, DirectML 52, CUDA 47, for 0.45–0.9 GB of GPU memory;
+  the models alone run at 103–111, 94 and 81 fps. TensorRT builds its engines for about 100 s the
+  first time, then loads from its cache. By kind on the M2 Max (whole
   files, model load included, the Mac busy with other work):
   - 2D flow, RIFE 4.25 lite 960×576: about 40 fps for 720p on the GPU (16–17 on the Neural Engine
     or with Core ML choosing, so the worker puts it on the GPU), 24–40 fps for 1080p; about 30 KB a
@@ -407,8 +415,20 @@ Answers so far:
   model cards (Video Depth Anything Small is Apache-2.0); Depth Pro's weights come under Apple's own
   research licence. None of those is bundled or offered; an opt-in download with its licence shown
   stays the user's decision.
+- **Question 8 (the Windows converter's depth maths):** a Rust port. The GPU kernels had to be
+  rewritten anyway (Metal to WGSL); VergenceCore's part is about 400 lines of plain maths, ported and
+  tested against fixtures VergenceCore writes (`scripts/make-convert-fixtures.sh`), all passing.
+  Building VergenceCore for Windows would have meant shipping the Swift runtime and a C ABI for the
+  smaller half. The two differ only where a threshold flips (a shot's anchor fit accepted on one,
+  rejected on the other), which shifts pixels by at most the strength.
+- **Question 9 (spatial video on Windows):** nothing usable yet. NVIDIA's Video Codec SDK 13 can
+  encode two-view MV-HEVC through its own API, but ffmpeg 8.1's `hevc_nvenc` doesn't expose it (and
+  whether an RTX 3080 supports it is unverified); x265 4's `--multiview-config` needs a separate GPL
+  x265 plus a muxer writing Apple's spatial metadata. Either is new work, so spatial stays Mac only.
 - **Question 11 (conversion speed):** 1080p at about 30 fps on the M2 Max, a two-hour film in about
-  100 minutes.
+  100 minutes. On an RTX 3080 (CUDA depth, NVENC): 1080p SDR at about 42 fps steady (depth 68,
+  picture 110), a two-hour film in about 70 minutes; 1080p HDR10 28–33 fps; 4K SDR 18 fps; 4K HDR10
+  12 fps, about 3.6 hours a film. 1.0–2.7 GB of GPU memory.
 
 ## Open questions
 
@@ -418,19 +438,22 @@ Answers so far:
 2. **Mapping a transcode to media time,** for Jellyfin HLS and Stash's live transcode, to within a
    frame.
 3. **Core ML vs ONNX Runtime parity** for each model. If they don't agree within tolerance, each
-   backend family gets its own profile, and a title sticks to one family.
-4. **Worker throughput by kind** (unmeasured): the M2 Max for mono flow at 960×576, larger depth and
-   GMNet; every model on ONNX Runtime with CUDA.
+   backend family gets its own profile, and a title sticks to one family. Answered for the 3D
+   Smooth Motion models (see "Answers so far"); open for the 2D flow, depth and GMNet kinds, which
+   have no ONNX worker yet.
+4. **Worker throughput by kind:** measured on the M2 Max for every kind and on an RTX 3080 for 3D
+   Smooth Motion (see "Answers so far"); the other kinds on CUDA wait for their ONNX ports.
 5. **TLS-PSK in Rust:** answered: OpenSSL (see "Answers so far").
 6. **Quest player passes:** GLES vs Vulkan in the Quest port's renderer (Spatial SDK, Media3
    surfaces); see `quest-parity-roadmap.md`.
 7. **Stash stereo layout:** detection only, or a tag convention as well.
-8. **The Windows converter's depth maths:** a Rust port, or VergenceCore built for Windows.
-9. **Spatial video on Windows:** whether a usable MV-HEVC encoder exists there. Until then, spatial
-   output is Mac only.
+8. **The Windows converter's depth maths:** answered: a Rust port (see "Answers so far").
+9. **Spatial video on Windows:** answered: no usable MV-HEVC encoder through ffmpeg yet, so spatial
+   output stays Mac only (see "Answers so far").
 10. **Depth model licences** for anything beyond Depth Anything V2 Small.
-11. **Conversion speed** on the M2 Max and on CUDA per model and resolution (unmeasured). It sets
-    whether a film is an evening's or a night's job.
+11. **Conversion speed** on the M2 Max and on CUDA per model and resolution: answered for Depth
+    Anything V2 Small (see "Answers so far"): an evening's job at 1080p on either, a night's at 4K
+    HDR on the 3080.
 
 ## Order
 
