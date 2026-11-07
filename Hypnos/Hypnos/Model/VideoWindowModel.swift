@@ -229,6 +229,17 @@ final class VideoWindowModel {
     /// (`SmoothMotionTracks.depthTrack`), asked for when real-time AI 3D
     /// engages; `depthTrackID` changes with it, for the player to pick it up.
     private(set) var depthTrack: AnalysisDepthTrack?
+    /// AI HDR's gain grids for an SDR Library title, from an analysis
+    /// coordinator (`SmoothMotionTracks.gainGrids`), while Settings › AI HDR
+    /// for Videos is on. The players apply them only to SDR frames.
+    private(set) var aiHDR: GainGridPlayback?
+    @ObservationIgnored private var aiHDRTask: Task<Void, Never>?
+    /// What AI 3D's stereo player is handed from workers (live 3D has its own picture).
+    var stereoWorkerAnalysis: StereoWorkerAnalysis {
+        liveStereoLayout == nil
+            ? StereoWorkerAnalysis(depthTrack: depthTrack, depthTrackID: depthTrackID, gainGrids: aiHDR)
+            : StereoWorkerAnalysis(depthTrackID: depthTrackID)
+    }
     private(set) var depthTrackID = 0
     @ObservationIgnored private var depthTrackTask: Task<Void, Never>?
     /// What the stereo player is handed: live 3D's track, or AI 3D's 2D one.
@@ -607,6 +618,7 @@ final class VideoWindowModel {
         sharedFields = nil
         monoSharedFields = nil
         loadDepthTrack()
+        loadAIHDR()
         guard let itemId = libraryItemId else { return }
         let identity = video.identity, name = video.title ?? ""
         guard video.isStereoscopic else {
@@ -641,6 +653,22 @@ final class VideoWindowModel {
             guard !Task.isCancelled, let self, self.video.identity == identity, let track else { return }
             self.depthTrack = track
             self.depthTrackID += 1
+        }
+    }
+
+    /// Asks the analysis coordinator for this SDR Library title's gain grids
+    /// while AI HDR for Videos is on (and lets them go when it's off).
+    func loadAIHDR() {
+        aiHDRTask?.cancel()
+        aiHDR = nil
+        guard appModel.aiHDRVideos, !video.isStereoscopic, let itemId = libraryItemId else { return }
+        // A title the Library knows is HDR already has its own highlights.
+        if let range = librarySource?.range, range.kind != .sdr { return }
+        let identity = video.identity
+        aiHDRTask = Task { [weak self] in
+            let grids = await SmoothMotionTracks.gainGrids(id: itemId)
+            guard !Task.isCancelled, let self, self.video.identity == identity else { return }
+            self.aiHDR = grids
         }
     }
 

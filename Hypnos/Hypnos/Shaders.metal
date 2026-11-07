@@ -124,11 +124,7 @@ struct AAUniforms {
     float peak;         // as ImageUniforms.peak
 };
 
-fragment float4 imageFragmentShader(
-    VertexOut in [[stage_in]],
-    texture2d<float> tex [[texture(0)]],
-    constant AAUniforms &uniforms [[buffer(0)]]
-) {
+static float4 imageResolveAndTone(VertexOut in, texture2d<float> tex, constant AAUniforms &uniforms) {
     constexpr sampler texSampler(mag_filter::linear, min_filter::linear);
     float4 color;
 
@@ -163,4 +159,43 @@ fragment float4 imageFragmentShader(
 
     color.rgb = clamp(color.rgb, 0.0, uniforms.peak);
     return color;
+}
+
+fragment float4 imageFragmentShader(
+    VertexOut in [[stage_in]],
+    texture2d<float> tex [[texture(0)]],
+    constant AAUniforms &uniforms [[buffer(0)]]
+) {
+    return imageResolveAndTone(in, tex, uniforms);
+}
+
+// MARK: - AI HDR for video (imageFragmentShader with a gain grid)
+//
+// An SDR video made HDR by a worker's gain grid (Vergence `GainGrid`, the
+// `ai-hdr` workload): the picture is resolved and toned in SDR exactly as
+// above, then each pixel's gain is read from the 16×9×8 grid at its own
+// (u, v, luma) and multiplies its linear light, into an EDR rgba16Float
+// drawable in extended linear BT.709 (1.0 = SDR white). gainResult[1] is the
+// scale on the grid's log gains (Vergence `GainGridPass.encodeMean`: the
+// frame-average cap and the ramp-in). Kept in step with Vergence's
+// `GainGridPass.lookupSource`.
+static float gainGridLog2(texture3d<float> grid, float2 uv, float3 sdr) {
+    constexpr sampler s(coord::normalized, address::clamp_to_edge, filter::linear);
+    float luma = dot(saturate(sdr), float3(0.2126, 0.7152, 0.0722));
+    return grid.sample(s, float3(uv, luma)).r;
+}
+
+fragment float4 aiHDRImageFragmentShader(
+    VertexOut in [[stage_in]],
+    texture2d<float> tex [[texture(0)]],
+    texture3d<float> grid [[texture(1)]],
+    constant AAUniforms &uniforms [[buffer(0)]],
+    device const float *gainResult [[buffer(1)]]
+) {
+    constexpr sampler texSampler(mag_filter::linear, min_filter::linear);
+    // The grid was fitted on the picture as decoded, so it is read with that luma.
+    float3 decoded = tex.sample(texSampler, in.texCoord).rgb;
+    float4 color = imageResolveAndTone(in, tex, uniforms);
+    float gain = exp2(gainGridLog2(grid, in.texCoord, decoded) * gainResult[1]);
+    return float4(pow(saturate(color.rgb), 2.4) * gain, color.a);
 }

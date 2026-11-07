@@ -41,6 +41,8 @@ final class MetalImageRenderer: Sendable {
     let pipelineState: MTLRenderPipelineState
     /// Pass-2 pipeline, 16-bit drawable.
     let pipelineState16: MTLRenderPipelineState
+    /// Pass-2 with AI HDR's gain grid (`aiHDRImageFragmentShader`), into an EDR 16-bit drawable.
+    let aiHDRPipelineState16: MTLRenderPipelineState?
     /// Pass-1 RCAS pipeline, renders to an 8-bit intermediate.
     let rcasPipelineState: MTLRenderPipelineState
     /// Pass-1 RCAS pipeline, renders to a 16-bit intermediate.
@@ -158,6 +160,14 @@ final class MetalImageRenderer: Sendable {
             self.pipelineState = try device.makeRenderPipelineState(descriptor: finalDesc)
             finalDesc.colorAttachments[0].pixelFormat = .rgba16Float
             self.pipelineState16 = try device.makeRenderPipelineState(descriptor: finalDesc)
+
+            // AI HDR for SDR video: the same pass with a gain grid, into an EDR drawable.
+            if let aiHDRFn = library.makeFunction(name: "aiHDRImageFragmentShader") {
+                finalDesc.fragmentFunction = aiHDRFn
+                self.aiHDRPipelineState16 = try? device.makeRenderPipelineState(descriptor: finalDesc)
+            } else {
+                self.aiHDRPipelineState16 = nil
+            }
 
             rcasDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
             self.rcasPipelineState = try device.makeRenderPipelineState(descriptor: rcasDesc)

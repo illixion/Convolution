@@ -213,8 +213,7 @@ struct VideoWindowView: View {
                             startPaused: liveLayout == nil && windowModel.pseudo3DEngagePaused,
                             packedStereo: liveLayout,
                             sharedFields: windowModel.stereoPlayerSharedFields,
-                            depthTrack: liveLayout == nil ? windowModel.depthTrack : nil,
-                            depthTrackID: windowModel.depthTrackID,
+                            workerAnalysis: windowModel.stereoWorkerAnalysis,
                             isFlipped: windowModel.isFlipped,
                             loopController: windowModel.loopController,
                             playbackModel: windowModel,
@@ -265,6 +264,7 @@ struct VideoWindowView: View {
                                 interpolatesFrames: windowModel.smoothMotion,
                                 interpolationEngine: appModel.smoothMotionEngine,
                                 sharedFields: windowModel.monoSharedFields,
+                                aiHDR: windowModel.aiHDR,
                                 onPlaybackError: {
                                     windowModel.forceWebKitPlayback()
                                 }
@@ -546,6 +546,7 @@ struct VideoWindowView: View {
                 filmTime: { windowModel.currentTime }
             ) { videoOrnament }
         }
+        .onChange(of: appModel.aiHDRVideos) { _, _ in windowModel.loadAIHDR() }
         .onChange(of: ornamentBottomPadding) { old, new in
             resizeWindowHeight(by: new - old)
         }

@@ -48,8 +48,8 @@ struct Pseudo3DVideoPlayerView: View {
     /// A packed pair's analysis track: Smooth Motion for live 3D.
     var sharedFields: SharedFieldProvider? = nil
     /// A worker's AI 3D depth (`ai-3d-depth`), and a number that changes with it.
-    var depthTrack: AnalysisDepthTrack? = nil
-    var depthTrackID: Int = 0
+    /// A worker's AI 3D depth and AI HDR gain grids, when there are any.
+    var workerAnalysis = StereoWorkerAnalysis()
     var isFlipped: Bool = false
     var loopController: VideoLoopController? = nil
     var playbackModel: VideoWindowModel? = nil
@@ -131,7 +131,8 @@ struct Pseudo3DVideoPlayerView: View {
                 engine.setSubtitles(subtitleFrame)
                 engine.interpolatesFrames = smoothMotion
                 engine.sharedFields = sharedFields
-                engine.depthTrack = depthTrack
+                engine.depthTrack = workerAnalysis.depthTrack
+                engine.gainGrids = workerAnalysis.gainGrids
                 // In a holder, so a plane lent to the big screen comes back
                 // to the same place (the engine re-adds it to its parent).
                 let home = Entity()
@@ -248,9 +249,13 @@ struct Pseudo3DVideoPlayerView: View {
         .onChange(of: engine.showsDoubledFrames, initial: true) { _, doubled in
             playbackModel?.noteSmoothMotionDoubling(doubled)
         }
+        // Gain grids found (or let go) after the picture started: the pump takes them at its next frame.
+        .onChange(of: workerAnalysis.gainGrids.map(ObjectIdentifier.init)) { _, _ in
+            engine.gainGrids = workerAnalysis.gainGrids
+        }
         // A worker's depth found after AI 3D started: rebuild the pump with it in front of the model.
-        .onChange(of: depthTrackID) { _, _ in
-            engine.depthTrack = depthTrack
+        .onChange(of: workerAnalysis.depthTrackID) { _, _ in
+            engine.depthTrack = workerAnalysis.depthTrack
             if packedStereo == nil, case .realtime = depthMode { engine.reloadDepthPipeline() }
         }
         // A track found after the picture started (live 3D's, or AI 3D's 2D one): rebuild the pump with it.
@@ -489,8 +494,8 @@ struct Pseudo3DVideoPlayerView: View {
     var startPaused: Bool = false
     var packedStereo: PackedStereoLayout? = nil
     var sharedFields: SharedFieldProvider? = nil
-    var depthTrack: AnalysisDepthTrack? = nil
-    var depthTrackID: Int = 0
+    /// A worker's AI 3D depth and AI HDR gain grids, when there are any.
+    var workerAnalysis = StereoWorkerAnalysis()
     var isFlipped: Bool = false
     var loopController: VideoLoopController? = nil
     var playbackModel: VideoWindowModel? = nil
@@ -511,3 +516,11 @@ struct Pseudo3DVideoPlayerView: View {
 }
 
 #endif
+
+/// What analysis workers made for an AI 3D picture: a depth track (with a
+/// number that changes when a new one arrives) and AI HDR's gain grids.
+struct StereoWorkerAnalysis {
+    var depthTrack: AnalysisDepthTrack?
+    var depthTrackID = 0
+    var gainGrids: GainGridPlayback?
+}

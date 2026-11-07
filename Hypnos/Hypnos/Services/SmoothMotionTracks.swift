@@ -59,6 +59,16 @@ enum SmoothMotionTracks {
         return AnalysisDepthTrack(lookup: track, frameRate: status.frameRate)
     }
 
+    /// AI HDR's gain grids for an SDR Library title from an analysis
+    /// coordinator (`ai-hdr`), read as they fill. Nil without a coordinator
+    /// or for a title it won't take (a 3D one).
+    static func gainGrids(id: String, startSeconds: Double = 0) async -> GainGridPlayback? {
+        guard let coordinator = AnalysisCoordinator.current(),
+              let (track, status) = await coordinatorTrack(coordinator, id: id, startSeconds: startSeconds,
+                                                           workload: AnalysisCoordinator.aiHDR) else { return nil }
+        return GainGridPlayback(lookup: track, frameRate: status.frameRate, inflate: AnalysisDeflate.inflate)
+    }
+
     private static func coordinatorFields(_ coordinator: AnalysisCoordinator, id: String, startSeconds: Double,
                                           workload: String = AnalysisCoordinator.smoothMotion3D) async -> AnalysisTrackFieldProvider? {
         guard let (track, status) = await coordinatorTrack(coordinator, id: id, startSeconds: startSeconds,

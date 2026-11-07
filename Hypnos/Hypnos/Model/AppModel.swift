@@ -981,6 +981,19 @@ class AppModel {
     }
     static let smoothMotionKey = "smoothMotion"
 
+    /// AI HDR for SDR videos: a Library title's gain grids from an analysis
+    /// server's workers (the `ai-hdr` workload, GMNet on keyframes), applied
+    /// in the flat player's final pass and AI 3D's eyes. Off by default: it
+    /// changes how every SDR title looks and costs a worker, so it is asked for.
+    var aiHDRVideos: Bool {
+        didSet {
+            if aiHDRVideos != oldValue {
+                UserDefaults.standard.set(aiHDRVideos, forKey: Self.aiHDRVideosKey)
+            }
+        }
+    }
+    static let aiHDRVideosKey = "aiHDRVideos"
+
     /// Which interpolator Smooth Motion uses for a flat 2D video
     /// (`NativeMetalVideoPlayerView`). Automatic: VideoToolbox's for 24-30 fps,
     /// the GPU one (Vergence's `FlowMidFrameInterpolator`) for 50-60 fps, which
@@ -1508,6 +1521,7 @@ class AppModel {
         let loadedDefaultRealtimePseudo3D = loadBool("defaultRealtimePseudo3D", default: false)
         let loadedStableDepth = loadBool(DepthRefinement.enabledDefaultsKey, default: true)
         let loadedSmoothMotion = loadBool(Self.smoothMotionKey, default: false)
+        let loadedAIHDRVideos = loadBool(Self.aiHDRVideosKey, default: false)
         let loadedSmoothMotionEngine = UserDefaults.standard.string(forKey: Self.smoothMotionEngineKey)
             .flatMap(SmoothMotionEngine.init(rawValue:)) ?? .automatic
         let loadedVideoAutoplayMuted = loadBool("videoAutoplayMuted", default: true)
@@ -1629,6 +1643,7 @@ class AppModel {
         self.defaultRealtimePseudo3D = loadedDefaultRealtimePseudo3D
         self.stableDepth = loadedStableDepth
         self.smoothMotion = loadedSmoothMotion
+        self.aiHDRVideos = loadedAIHDRVideos
         self.smoothMotionEngine = loadedSmoothMotionEngine
         self.videoAutoplayMuted = loadedVideoAutoplayMuted
         self.rememberImageEnhancements = loadedRememberImageEnhancements

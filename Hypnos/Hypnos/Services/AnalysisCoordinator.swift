@@ -35,6 +35,8 @@ struct AnalysisCoordinator: Sendable {
     /// AI 3D's depth for a 2D title, made by the offline pipeline with a
     /// larger model than the headset runs (`AnalysisDepthTrack`).
     static let aiDepth = "ai-3d-depth"
+    /// AI HDR for an SDR title: a gain grid per frame (`GainGridPlayback`).
+    static let aiHDR = "ai-hdr"
 
     /// The configured coordinator, or nil when there is none.
     static func current() -> AnalysisCoordinator? {

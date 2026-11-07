@@ -211,6 +211,9 @@ struct NativeMetalVideoPlayerView {
     /// A 2D Library title's fields from an analysis coordinator: pairs they
     /// cover are made from them, the rest by `interpolationEngine`.
     var sharedFields: SharedFieldProvider? = nil
+    /// AI HDR for an SDR picture: a worker's gain grids (`ai-hdr`), applied
+    /// in the final pass into an EDR drawable. Nil plays SDR as it is.
+    var aiHDR: GainGridPlayback? = nil
     var onPlaybackError: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
@@ -257,6 +260,7 @@ struct NativeMetalVideoPlayerView {
         coordinator.loops = loops
         coordinator.interpolationEngine = interpolationEngine
         coordinator.sharedFields = sharedFields
+        coordinator.aiHDR = aiHDR
         coordinator.interpolatesFrames = interpolatesFrames
         coordinator.resumesAfterInterruptions = playbackModel == nil
         coordinator.maximumResolution = playbackModel?.maximumPictureResolution ?? .zero
@@ -400,6 +404,30 @@ struct NativeMetalVideoPlayerView {
         var interpolationEngine: SmoothMotionEngine = .automatic {
             didSet { if oldValue != interpolationEngine, interpolatesFrames { rebuildFramePresenter() } }
         }
+        /// AI HDR's gain grids; arriving or leaving switches the drawable
+        /// between plain BGRA and EDR half float.
+        var aiHDR: GainGridPlayback? {
+            didSet {
+                guard oldValue.map(ObjectIdentifier.init) != aiHDR.map(ObjectIdentifier.init) else { return }
+                if dynamicRange != .unknown { configureMetalView(for: dynamicRange) }
+                needsPictureRedraw = true
+            }
+        }
+        /// Made on first use; nil where Metal can't run its kernels.
+        private lazy var gainPass: GainGridPass? = renderer.flatMap { GainGridPass(device: $0.device) }
+        /// The media time of the frame on screen, for its gain grid.
+        private var lastFrameSeconds: Double = 0
+
+        /// AI HDR applies: grids are set, the picture is SDR, and this
+        /// platform draws EDR (tvOS carries HDR by the TV's own mode instead).
+        private var appliesAIHDR: Bool {
+            #if os(tvOS)
+            false
+            #else
+            aiHDR != nil && dynamicRange == .sdr && !usesSystemLayer && renderer?.aiHDRPipelineState16 != nil
+            #endif
+        }
+
         /// Fields made ahead for this 2D picture; a track arriving after the
         /// picture started rebuilds the presenter with it.
         var sharedFields: SharedFieldProvider? {
@@ -935,6 +963,8 @@ struct NativeMetalVideoPlayerView {
         // a new drawable after suspension, before decoding resumes.
         private var lastPixelBuffer: CVPixelBuffer?
         private var needsPictureRedraw = true
+        /// AI HDR is still ramping in: draw again next tick.
+        private var needsRampRedraw = false
 
         func draw(in view: MTKView) {
             // A new frame first: the view ticks at up to 120 Hz, and a tick
@@ -947,14 +977,17 @@ struct NativeMetalVideoPlayerView {
             if let framePresenter {
                 if let frame = framePresenter.frame(forHostTime: CACurrentMediaTime()) {
                     lastPixelBuffer = frame.pixelBuffer
+                    lastFrameSeconds = frame.itemTime.seconds
                     needsPictureRedraw = true
                     newFrame = true
                 }
             } else {
                 let itemTime = output.itemTime(forHostTime: CACurrentMediaTime())
+                var shownTime = CMTime.invalid
                 if output.hasNewPixelBuffer(forItemTime: itemTime),
-                   let buffer = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil) {
+                   let buffer = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: &shownTime) {
                     lastPixelBuffer = buffer
+                    lastFrameSeconds = shownTime.isValid ? shownTime.seconds : itemTime.seconds
                     needsPictureRedraw = true
                     newFrame = true
                 }
@@ -1027,12 +1060,31 @@ struct NativeMetalVideoPlayerView {
                 }
             }
 
+            // AI HDR: the frame's grid, its mean gain held to the cap and the
+            // ramp, worked out on the GPU before the final pass applies them.
+            var gainSlot: GainGridPass.Slot?
+            if appliesAIHDR, view.colorPixelFormat == .rgba16Float, let aiHDR, let gainPass {
+                // Interpolation backs off before HDR updates do.
+                let steppedDown = (framePresenter?.source as? InterpolatingFrameSource)?.isBackedOff ?? false
+                let frame = aiHDR.grid(at: lastFrameSeconds, steppedDown: steppedDown)
+                gainSlot = gainPass.encodeMean(of: sourceTexture, grid: frame.grid, cap: aiHDR.cap,
+                                               strength: frame.strength, into: commandBuffer)
+                // Until the ramp is done the next tick redraws, paused or not.
+                if frame.strength < 1 { needsRampRedraw = true }
+            }
+
             guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: finalPassDesc) else {
                 return
             }
 
             let didSupersample = pass2InputTexture.width > drawableW || pass2InputTexture.height > drawableH
-            encoder.setRenderPipelineState(view.colorPixelFormat == .rgba16Float ? renderer.pipelineState16 : renderer.pipelineState)
+            if let gainSlot, let aiHDRPipeline = renderer.aiHDRPipelineState16 {
+                encoder.setRenderPipelineState(aiHDRPipeline)
+                encoder.setFragmentTexture(gainSlot.grid, index: 1)
+                encoder.setFragmentBuffer(gainSlot.result, offset: 0, index: 1)
+            } else {
+                encoder.setRenderPipelineState(view.colorPixelFormat == .rgba16Float ? renderer.pipelineState16 : renderer.pipelineState)
+            }
             encoder.setFragmentTexture(pass2InputTexture, index: 0)
             var uniforms = VideoAAUniforms(
                 brightness: Float(visualAdjustments.brightness),
@@ -1044,7 +1096,8 @@ struct NativeMetalVideoPlayerView {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
             encoder.endEncoding()
 
-            needsPictureRedraw = false
+            needsPictureRedraw = needsRampRedraw
+            needsRampRedraw = false
             commandBuffer.present(drawable)
             commandBuffer.commit()
         }
@@ -1192,6 +1245,10 @@ struct NativeMetalVideoPlayerView {
         /// draws: plain BGRA for SDR, half float in an EDR layer for HDR.
         private func configureMetalView(for range: NativeVideoDynamicRange) {
             guard let view = mtkView, let layer = view.layer as? CAMetalLayer else { return }
+            if appliesAIHDR {
+                configureForAIHDR(view, layer)
+                return
+            }
             let format: MTLPixelFormat = range.isHDR ? .rgba16Float : .bgra8Unorm
             if view.colorPixelFormat != format {
                 view.colorPixelFormat = format
@@ -1221,6 +1278,25 @@ struct NativeMetalVideoPlayerView {
             // macOS 26 tone-maps a layer to SDR unless it asks for more.
             layer.preferredDynamicRange = range.isHDR ? .high : .standard
             #endif
+        }
+
+        /// AI HDR: an SDR picture drawn as extended linear BT.709 half floats
+        /// (1.0 = SDR white) into an EDR layer, its highlights past 1.0 up to
+        /// the cap the gain pass holds the frame's average to.
+        private func configureForAIHDR(_ view: MTKView, _ layer: CAMetalLayer) {
+            if view.colorPixelFormat != .rgba16Float {
+                view.colorPixelFormat = .rgba16Float
+                intermediate = nil
+            }
+            layer.colorspace = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)
+            #if !os(tvOS)
+            layer.wantsExtendedDynamicRangeContent = true
+            layer.edrMetadata = nil
+            #endif
+            #if os(macOS)
+            layer.preferredDynamicRange = .high
+            #endif
+            AppLogger.videoWindow.info("Native player: AI HDR on (an SDR picture through a worker's gain grids)")
         }
 
         #if !os(tvOS)
