@@ -21,6 +21,8 @@ private actor FragmentedCaptionAudio {
     private var file: URL?
     private var timeOffset = 0.0
     private var converter: AVAudioConverter?
+    /// The reader hands out linear PCM itself (see `readsPCM`).
+    private var decodesInReader = false
 
     init(next: @escaping @Sendable () async throws -> Data?) { fragment = next }
 
@@ -33,7 +35,7 @@ private actor FragmentedCaptionAudio {
         while true {
             try Task.checkCancellation()
             if let output, let sample = output.copyNextSampleBuffer() {
-                if let buffer = try decode(sample) {
+                if let buffer = try decodesInReader ? pcm(sample) : decode(sample) {
                     return RAVECaptionAudioChunk(buffer: buffer, time: timeOffset + CMSampleBufferGetPresentationTimeStamp(sample).seconds)
                 }
                 continue
@@ -61,7 +63,14 @@ private actor FragmentedCaptionAudio {
                 // Keep one codec decoder across fragments. Asking each reader
                 // for PCM applies AAC priming trims at every segment boundary,
                 // dropping speech there (96 ms per segment at 22.05 kHz).
-                let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+                let readsPCM = try await track.load(.formatDescriptions).contains {
+                    CMFormatDescriptionGetMediaSubType($0) == kAudioFormatAppleLossless
+                }
+                decodesInReader = readsPCM
+                let output = AVAssetReaderTrackOutput(track: track, outputSettings: readsPCM ? [
+                    AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true,
+                    AVLinearPCMIsNonInterleaved: true, AVLinearPCMIsBigEndianKey: false,
+                ] : nil)
                 output.alwaysCopiesSampleData = false
                 reader.add(output)
                 guard reader.startReading() else { throw reader.error ?? URLError(.cannotDecodeContentData) }
@@ -72,6 +81,24 @@ private actor FragmentedCaptionAudio {
                 throw error
             }
         }
+    }
+
+    /// ALAC (what the remux makes of DTS and TrueHD) is read as PCM by the
+    /// reader. Our own converter can't take it: it fails every packet as bad
+    /// data ('!dat', 560226676), with the cookie wrapped or not and the packet
+    /// descriptions as they are. ALAC has no priming to trim, which is the
+    /// reason the other codecs keep one converter across fragments.
+    private func pcm(_ sample: CMSampleBuffer) throws -> AVAudioPCMBuffer? {
+        let frames = CMSampleBufferGetNumSamples(sample)
+        // From the CoreMedia description, which carries a 5.1 layout that a
+        // bare stream description can't (that init fails for 6 channels).
+        guard frames > 0, let description = CMSampleBufferGetFormatDescription(sample),
+              let buffer = AVAudioPCMBuffer(pcmFormat: AVAudioFormat(cmAudioFormatDescription: description),
+                                            frameCapacity: AVAudioFrameCount(frames)) else { return nil }
+        buffer.frameLength = AVAudioFrameCount(frames)
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(sample, at: 0, frameCount: Int32(frames), into: buffer.mutableAudioBufferList)
+        guard status == noErr else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
+        return buffer
     }
 
     private func decode(_ sample: CMSampleBuffer) throws -> AVAudioPCMBuffer? {

@@ -15,6 +15,7 @@ let package = Package(
             .product(name: "VergenceApple", package: "vergence"),
             .product(name: "FluidAudio", package: "FluidAudio"),
         ]),
-        .testTarget(name: "GeneratedCaptionsTests", dependencies: ["GeneratedCaptions"]),
+        .testTarget(name: "GeneratedCaptionsTests", dependencies: ["GeneratedCaptions"],
+                resources: [.copy("Fixtures")]),
     ]
 )
