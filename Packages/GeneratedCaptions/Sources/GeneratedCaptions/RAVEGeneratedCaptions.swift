@@ -165,6 +165,7 @@ public final class RAVEGeneratedCaptions {
                 var lastWall = Date.now
                 var holdingSince: Date?
                 var reportedAudio = false
+                var reportedFrontPair = false
                 while !Task.isCancelled, generation == token, isCurrent() {
                     if source != nil, let audioGroup,
                        item?.currentMediaSelection.selectedMediaOption(in: audioGroup) != audioOption {
@@ -191,6 +192,10 @@ public final class RAVEGeneratedCaptions {
                     guard generation == token else { return }
                     captions = state.captions
                     onChange?()
+                    if state.frontPairDialogue != reportedFrontPair {
+                        reportedFrontPair = state.frontPairDialogue
+                        onDiagnostic?(reportedFrontPair ? "AI captions: centre channel empty, listening to the front pair" : "AI captions: listening to the centre channel")
+                    }
                     var policy = RAVEAnalysisBufferPolicy()
                     if ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical {
                         policy.resumeSeconds = 4
@@ -306,6 +311,8 @@ actor CaptionWorker {
         var readyThrough: Double
         var audioThrough: Double
         var finished: Bool
+        /// The centre channel is empty, so the front pair carries the speech.
+        var frontPairDialogue = false
     }
     private let transcriber: SpeechTranscriber
     private let analyzer: SpeechAnalyzer
@@ -332,6 +339,8 @@ actor CaptionWorker {
     private var volatileStart: Double?
     private var speakers: [(start: Double, end: Double, id: Int)] = []
     private var analysisError: String?
+    private var mixer = DialogueMixer()
+    private var voice = VoiceActivity()
 
     init(transcriber: SpeechTranscriber) {
         AppLogger.minimumLevel = .fault
@@ -419,7 +428,11 @@ actor CaptionWorker {
             // A final arrives a word to a run; a volatile guess is ONE run over
             // its whole range, which put the whole guess on screen at once and
             // moved words between lines when the finals replaced it.
-            fresh += Self.timedWords(text, from: range.start.seconds, through: range.end.seconds)
+            // A guess's range opens at the last final, in the pause before
+            // the speech: start its words where the voice does.
+            let runStart = range.start.seconds, runEnd = range.end.seconds
+            let from = result.isFinal ? runStart : (voice.onset(from: runStart, through: runEnd) ?? runStart)
+            fresh += Self.timedWords(text, from: from, through: runEnd)
         }
         if fresh.isEmpty { fresh.append(.init(start: start, end: end, text: String(result.text.characters), speaker: nil)) }
         if result.isFinal {
@@ -442,6 +455,7 @@ actor CaptionWorker {
         words.removeAll { $0.end < time - 60 }
         volatileWords.removeAll { $0.end < time - 60 }
         speakers.removeAll { $0.end < time - 60 }
+        voice.forget(before: time - 60)
         // Final words, then the guess after the last of them.
         var sequence = (words + volatileWords).sorted { $0.start < $1.start }
         for index in sequence.indices {
@@ -602,7 +616,13 @@ actor CaptionWorker {
             guard packet.time + 0.05 >= begin else { continue }
             fedThrough = packet.time + Double(packet.buffer.frameLength) / packet.buffer.format.sampleRate
             guard let speechFormat else { break }
-            let speech = try Self.convert(packet.buffer, to: speechFormat, converter: &converter)
+            // One dialogue channel for the recognizer and the diarizer both.
+            let mono = mixer.mono(packet.buffer) ?? packet.buffer
+            if mono.format.channelCount == 1, let data = mono.floatChannelData {
+                voice.add(UnsafeBufferPointer(start: data[0], count: Int(mono.frameLength)),
+                          sampleRate: mono.format.sampleRate, at: packet.time)
+            }
+            let speech = try Self.convert(mono, to: speechFormat, converter: &converter)
             // Resampling may round a packet by one output sample. Keep
             // adjacent inputs non-overlapping using exact sample durations.
             let decodedTime = CMTime(seconds: packet.time, preferredTimescale: 1_000_000_000)
@@ -613,9 +633,9 @@ actor CaptionWorker {
             if let diarizer {
                 speakerOrigin = speakerOrigin ?? packet.time
                 let origin = speakerOrigin ?? begin
-                let mono = try Self.convert(packet.buffer, to: AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)!, converter: &speakerConverter)
-                if let data = mono.floatChannelData {
-                    if let update = try diarizer.process(samples: UnsafeBufferPointer(start: data[0], count: Int(mono.frameLength))) {
+                let speakerAudio = try Self.convert(mono, to: AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)!, converter: &speakerConverter)
+                if let data = speakerAudio.floatChannelData {
+                    if let update = try diarizer.process(samples: UnsafeBufferPointer(start: data[0], count: Int(speakerAudio.frameLength))) {
                         updateSpeakers(update, origin: origin)
                     }
                     speakerThrough = origin + Double(diarizer.timeline.finalizedDuration)
@@ -623,7 +643,7 @@ actor CaptionWorker {
             }
         }
         return State(captions: snapshot(near: playhead), readyThrough: min(analyzedThrough, speakerThrough),
-                     audioThrough: fedThrough, finished: ended)
+                     audioThrough: fedThrough, finished: ended, frontPairDialogue: mixer.usesFrontPair)
     }
     private func updateSpeakers(_ update: DiarizerTimelineUpdate, origin: Double) {
         let boundary = origin + Double(update.chunkResult.startFrame) * 0.08
