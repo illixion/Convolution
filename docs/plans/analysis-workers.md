@@ -1,6 +1,6 @@
 # Analysis workers and the Vergence desktop app
 
-Status: steps 1–6 and 9 built on 2026-11-07 (see "Progress"); 7 and 8 not started. Plan revised 2026-11-07. It started on 2026-11-01 as "a Mac helping the headset", agreed then
+Status: steps 1–6, 8 (not yet run on a headset) and 9 built on 2026-11-07 (see "Progress"); 7 not started. Plan revised 2026-11-07. It started on 2026-11-01 as "a Mac helping the headset", agreed then
 and kept as a short note in `blu-ray-3d-smooth-motion.md`. Decided with the user on 2026-11-07:
 - **Media servers only: Jellyfin and Stash.** Both have direct and transcode URLs. Nextcloud could
   join later the same way; files that exist only on a headset are out.
@@ -322,7 +322,7 @@ It is meant to work on a Vision Pro alone too, with workers as a quality upgrade
 | 5. `vergence convert` | Built: all layouts, HDR kept, audio copied, resume, depth track. No subtitles, no Smooth Motion bake | vergence 0607bc0 |
 | 6. ONNX worker | Built; Windows compiles. CUDA, TensorRT, DirectML never run. No Windows converter yet | vergence `worker/` (2a7892b) |
 | 7. More kinds | Not started | |
-| 8. Quest | Not started | |
+| 8. Quest | Built, not run on a headset. Pairs by the six-digit code (NSD, a typed address or link) and keeps the token in the Keystore, or takes an HTTP address and token; talks over the paired TLS-PSK channel (Bouncy Castle) or HTTP; reports the playhead, reads partial chunks (VGAT in C++); a GLES 3 shared-field pass at the display's rate for stereo titles. Tested off the headset against VergenceCore and vergence-worker tracks, vergence-companion's vectors and a real `vergenced` over TLS-PSK. The desktop app announces `_vergence-pair._tcp` while pairing on macOS and Linux; on Windows the Quest pairs by address. No stereo warp or gain lookup yet (their kinds aren't pinned) | Hypnos 1cc42b1, vergence 6a80077, Controller Bridge 4ed9722 |
 | 9. Plugin | Routes pass through to a coordinator; the nightly task queues there | Hypnos 16640ed |
 
 A paired headset's HTTP token is derived from its pairing token, not sent as is: HKDF-SHA256 with salt
@@ -335,6 +335,11 @@ Answers so far:
   profile, unless RIFE gets a float32 Core ML conversion.
 - **Question 4 (throughput):** the M2 Max's Core ML worker does 1080p 3D Smooth Motion at about
   37 fps; ONNX Runtime on the same Mac 16–17 fps. CUDA is unmeasured.
+- **Question 6 (Quest passes):** GLES 3.0, not Vulkan. The passes are a few texture reads per pixel;
+  the Quest's video surfaces are Android ones (Home's SurfaceView, Spatial SDK's video panel), which
+  EGL renders into directly, and the decoder feeds a SurfaceTexture as an external texture with no
+  copy through Vulkan interop. Vulkan would only pay if the passes grew into compute work. Frame time
+  on a Quest 3 is unmeasured (the renderer logs it).
 - **Question 11 (conversion speed):** 1080p at about 30 fps on the M2 Max, a two-hour film in about
   100 minutes.
 
