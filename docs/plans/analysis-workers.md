@@ -374,7 +374,32 @@ and "Upscale 2×" plus a "2D (upscale only)" layout in the desktop app:
   - `--ai-hdr` (Mac only so far): the `ai-hdr` worker's producer makes the grids (left eye of a 3D
     source), `GainGridPass` applies them (cap 2.5×), 10-bit BT.2020 PQ, SDR white 203 nits, HDR10
     metadata (P3 1,000 nits mastering, MaxCLL 1015, MaxFALL 507). Grids ~34 fps; baking is free.
-  - A 10-minute piece (20:00–30:00) with both and `--upscale 2x`: 40.6 min on the M2 Max; on the
+  - A 10-minute piece (20:00–30:00) with both and `--upscale 2x`: 40.6 min on the M2 Max.
+- **Watched again (2026-11-07): "no highlight effect at all" and "the jagged lines are still
+  there".** Fixed 2026-11-08 (vergence b457fd1, 001141c):
+  - *AI HDR:* the grid, the cap and the PQ encode were faithful to GMNet (grid within 1 % of the
+    full-resolution map on average, −10–15 % at the single brightest pixel; mean gain 1.12–1.46, so
+    the 2.5× cap never engaged; output nits matched GMNet's own prediction frame for frame). The
+    weak look is GMNet's on film: its gain is near one curve over luma (code 0.4–0.6 → 1.3–1.8×,
+    the top → 2–3×), keeping 4–5× for clipped areas, which this graded film seldom has (p99 code
+    0.64–0.98). So the picture brightened as a whole and a light rose only ~1.5× over a lit wall.
+    Grids now keep only the gain above each cell's mid-tone gain (luma 0.5), doubled in log2, held
+    to 5× (`GainGrid.expandingHighlights`, worker profile `… hl2`, Rust worker too): mid-tones stay
+    as SDR. Two minutes of the film (source 22:57–25:01): per-frame p99.9 685 → 960 nits (median),
+    pixels above 800 nits 0.09 % → 1.6 %, frame mean 46 nits unchanged. The players get it from the
+    tracks; nothing changed on their side. Still to check on the headset: whether the system's PQ
+    path puts 203 nits at the display's SDR white (Convolution's flat Metal player declares
+    `opticalOutputScale` 100, which would put it at 2×, near the top of a ~2.5–3× headroom).
+  - *Antialiasing:* the `estdif` pre-pass replaced by `EdgeAntialias` on each finished eye (both
+    converters): the structure tensor (luma blurred σ 2, products σ 8) gives each edge's direction
+    and straightness; strong straight edges are averaged along themselves over ±24 px. A line in
+    4-px stairs ends 0.12 px RMS off its line (1.14 before); on five spots of the film (bed edge
+    23:00, arena rail 25:00, deck planks 21:40, rooftop stripes 27:50, city 28:20) the sawtooth is
+    gone, staircase measure −22–41 %, texture within 1–9 %. Tried and dropped: FXAA (3–5 %), the
+    old pre-pass (≤ 30 %, −4–15 % texture), the same smoothing at source size before upscaling
+    (similar, needs re-upscaling), `animevideov3` (−21…+12 %, −17–32 % texture). Cost ~5 % of the
+    Mac picture pass; on the PC ~70 ms a pair on the CPU, beside the network.
+  - A 2-minute sample with both (`… sample2.2x.aa.hdr.3D.FSBS.mp4`, source 23:06–25:10) is on the
     headset for the user to judge (ledger).
 - **Not done:** temporal stabilisation (a flow-warped detail blend cut flicker by a third in the
   experiment but needs flow per frame); the fusion on the PC's GPU (it is CPU-bound); a stereo SR
@@ -389,6 +414,9 @@ It is meant to work on a Vision Pro alone too, with workers as a quality upgrade
   non-linear luma (BT.709 weights on full-range R′G′B′) falls in that bin. Cells and bins are
   sampled at their centres, trilinearly, clamped to the edges: a 16×9×8 3D texture read at
   (u, v, Y′). HDR = SDR linear × 2^g. About 1 KB a frame.
+  Since 2026-11-08 a worker stores GMNet's gain over each cell's mid-tone gain, doubled
+  (`GainGrid.expandingHighlights`, profile `… hl2`): mid-tones stay as SDR, highlights spread to
+  5× (see Upscaling, "Watched again").
 - **The players as built:** Settings › Viewing › AI HDR for Videos (off by default) asks an analysis
   server for an SDR Library title's `ai-hdr` track. Vergence's `GainGridPlayback` picks each frame's
   grid, ramps it in over a second of media time after engaging and after every seek, holds the last
@@ -438,7 +466,7 @@ It is meant to work on a Vision Pro alone too, with workers as a quality upgrade
 | 5. `vergence convert` | Built: all layouts, HDR kept, audio copied, resume, depth track. No subtitles, no Smooth Motion bake | vergence 0607bc0 |
 | 6. ONNX worker | Built and run on a Windows PC with an RTX 3080 against a coordinator on the Mac: CUDA, TensorRT and DirectML each made a whole title, 47–55 fps for 1080p 3D pieces, records matching Core ML's (Question 3). It yields for real there: a game, an app launched through Sunshine, SteamVR or another program keeping the GPU busy makes it give back its piece and unload its models; a desktop stream alone doesn't (the user's call). The 2D workloads too (2D flow, AI 3D depth through the converter's Rust depth pipeline, AI HDR with GMNet exported to ONNX), 2D flow and AI HDR under their own ONNX profiles, depth under one shared with the Mac worker (Small and Base; a Mac and the PC split a title): on the 3080, 2D flow 58 fps (TensorRT), depth 13 fps of title (CUDA), AI HDR 59 fps (CUDA), matching the Core ML worker's chunks (Question 3) | vergence `worker/` (2a7892b), ab2ffbc, 5f870d3, 44c3b73, 79d3dff, 0822638, 8c92b4b |
 | 6. Windows converter | Built: `vergence-convert`, the same flags, names, output lines and progress as `vergence convert` (so the desktop app runs either), ONNX depth, the refinement ported to Rust, a wgpu warp, NVENC. Within 49 dB PSNR, SSIM 0.985 of the Mac's output per eye (tolerance 40 dB, 0.97). No spatial video, no HDR10 mastering metadata through NVENC (x265 keeps it) | vergence `convert/` (99539a1), 876a7bd, 03cd136 |
-| 5/6. Upscaling in convert | Built on both converters: `--upscale 2x` (Real-ESRGAN compact, weights fetched, network written without Python), 3D sources eye by eye with the eyes' detail fused, `--layout 2d`, pulldown repeats dropped; desktop app option. Checked against PyTorch on a fixture net (Core ML and ONNX), Mac vs PC copies at 40–43 dB. Not watched on a headset yet | vergence afe0b10, e54c438, 2986334, e3bc32b, 3c36aeb |
+| 5/6. Upscaling in convert | Built on both converters: `--upscale 2x` (Real-ESRGAN compact, weights fetched, network written without Python), 3D sources eye by eye with the eyes' detail fused, `--layout 2d`, pulldown repeats dropped; desktop app option. Checked against PyTorch on a fixture net (Core ML and ONNX), Mac vs PC copies at 40–43 dB. `--antialias` (edge-tangent smoothing of each finished eye, both converters) and `--ai-hdr` (Mac) for the SD 3D film; its 2-minute sample is on the headset, not judged yet | vergence afe0b10, e54c438, 2986334, e3bc32b, 3c36aeb, b457fd1, 001141c |
 | 7. More kinds | Built on the Mac, three workloads, each checked end to end against the dev Jellyfin (a coordinator's chunks against the worker's own whole-file run). **`smooth-motion-2d`**: RIFE 4.25 lite 960×576 on the GPU, flow stored at 240×144; chunks identical to the whole-file run; the Vision Pro reads it for 2D Library titles (flat and AI 3D, film player AI 3D too) through a fields-first mono pass that leaves uncovered pairs to the device's interpolator. **`ai-3d-depth`**: the offline depth pipeline per piece (a second of context before it) with Depth Anything V2 Small at 770×574; chunks within 0.005 mean, 0.05 max (shot-space units) of a whole-file conversion; the Vision Pro warps it in real-time AI 3D and runs its own model only for frames it lacks. **`ai-hdr`**: GMNet on keyframes (0.5 s and cuts) fitted to the pinned grid, eased within shots; chunks identical; used in the players behind Settings › AI HDR for Videos: the flat player's final pass into EDR and AI 3D's eyes as BT.2020 PQ, ramped in, capped, stepped down after interpolation, snapped at cuts (checked through the pump on the visionOS simulator). The ONNX worker makes all three too (row 6). Not done: any headset run | vergence 352dd73, 3e20c96, 308f15e, 39c4240; Hypnos 9ec9b9d, 2178727, 964a8b5; RAVESDK b6ab5e6, a4e89b4, 9ea391e |
 | 8. Quest | Built, not run on a headset. Pairs by the six-digit code (NSD, a typed address or link) and keeps the token in the Keystore, or takes an HTTP address and token; talks over the paired TLS-PSK channel (Bouncy Castle) or HTTP; reports the playhead per workload, reads partial chunks (VGAT in C++). GLES 3 passes: the shared field at the display's rate for 3D titles and its mono form for 2D ones (`smooth-motion-2d`); the gain-grid lookup with the cap into a BT.2020 PQ window, asked for (`ai-hdr`) only when the display reports HDR; the AI 3D mesh warp, built but not wired, as the Quest has no AI 3D presentation yet (so no `ai-3d-depth` requests). Tested off the headset against VergenceCore and vergence-worker tracks, the Mac worker's 2D-flow, depth and gain tracks, vergence-companion's vectors and a real `vergenced` over TLS-PSK. The desktop app announces `_vergence-pair._tcp` while pairing on macOS, Linux and Windows | Hypnos 1cc42b1, 857297a; vergence 6a80077 (b7d8f28 on Windows); Controller Bridge 4ed9722 |
 | 9. Plugin | Routes pass through to a coordinator; the nightly task queues there | Hypnos 16640ed |
