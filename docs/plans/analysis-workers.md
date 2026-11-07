@@ -1,6 +1,6 @@
 # Analysis workers and the Vergence desktop app
 
-Status: steps 1–6, 8 (not yet run on a headset) and 9 built on 2026-11-07 (see "Progress"); 7 built for the Mac worker and the Vision Pro (not yet on a headset; AI HDR's pass not yet in the players). Plan revised 2026-11-07. It started on 2026-11-01 as "a Mac helping the headset", agreed then
+Status: steps 1–6, 8 (not yet run on a headset) and 9 built on 2026-11-07 (see "Progress"); 7 built for the Mac worker and the Vision Pro (not yet on a headset). Plan revised 2026-11-07. It started on 2026-11-01 as "a Mac helping the headset", agreed then
 and kept as a short note in `blu-ray-3d-smooth-motion.md`. Decided with the user on 2026-11-07:
 - **Media servers only: Jellyfin and Stash.** Both have direct and transcode URLs. Nextcloud could
   join later the same way; files that exist only on a headset are out.
@@ -331,7 +331,7 @@ which a live player can't do.
   non-commercial only. If so, offer them only as an opt-in download with the licence shown, never
   bundled.
 
-### AI HDR for video, in short (proposed 2026-11-07; the grid, a worker and a lookup pass built)
+### AI HDR for video, in short (proposed 2026-11-07; built from workers, not yet on a headset)
 
 It is meant to work on a Vision Pro alone too, with workers as a quality upgrade.
 - **The grid as built** (Vergence `GainGrid`, the `gainMap` record): eye mono, float16, 8 channels
@@ -339,6 +339,23 @@ It is meant to work on a Vision Pro alone too, with workers as a quality upgrade
   non-linear luma (BT.709 weights on full-range R′G′B′) falls in that bin. Cells and bins are
   sampled at their centres, trilinearly, clamped to the edges: a 16×9×8 3D texture read at
   (u, v, Y′). HDR = SDR linear × 2^g. About 1 KB a frame.
+- **The players as built:** Settings › Viewing › AI HDR for Videos (off by default) asks an analysis
+  server for an SDR Library title's `ai-hdr` track. Vergence's `GainGridPlayback` picks each frame's
+  grid, ramps it in over a second of media time after engaging and after every seek, holds the last
+  grid while a piece is missing (strength 0 until the first one after a seek arrives), and while the
+  device is short of time refreshes it only every half second, still snapping at once to a grid
+  that jumps (a cut, which the worker snapped). The frame's average gain is held to 2.5× on the GPU
+  (`GainGridPass.encodeMean`, every fourth pixel).
+  - Flat video: `aiHDRImageFragmentShader`, `imageFragmentShader`'s resolve and tone in SDR plus the
+    lookup, into an EDR `rgba16Float` drawable in extended linear BT.709 (no extra pass; tvOS not,
+    as it has no EDR switch).
+  - AI 3D: the pump warps in SDR into its half-float eyes, then one pass per eye (after every warp
+    variant, so none of their shaders changed) writes BT.2020 PQ, SDR white at 203 nits, into the
+    10-bit `xf20` eyes, tagged PQ with HDR10 static metadata; subtitles then draw as PQ.
+  - Step-down: interpolation backs off first; grid updates step down only while it is backed off;
+    depth is never touched. HDR never switches off mid-shot.
+  - Not done: the photo path's GMNet on the headset alone (no worker), the film player's AI 3D, and
+    a 3D title's own picture.
 - **Gain grid, not gain image:**
   - GMNet runs on keyframes: every cut, plus about every 0.5–1 s.
   - Its gain map is fitted into a bilateral grid, gain over (x, y, luma), e.g. 16×9×8.
@@ -367,11 +384,11 @@ It is meant to work on a Vision Pro alone too, with workers as a quality upgrade
 | 2. Mac worker | Built. Same records as `vergence analyze` over the whole file (disparity identical, flow within Core ML noise); about 37 fps, seeks included | vergence `worker` mode (289a191), `scripts/check-worker.sh` |
 | 3. Vision Pro | Client built: reports the playhead, reads partial chunks. **The lead after open and seek is not measured yet** (device QA) | Hypnos 65e6851, vergence e01ad52 |
 | 4. Pairing | Rust port matches every golden vector; pairs with the Swift code both ways. The chunk and worker API runs over the paired TLS-PSK channel ("The paired channel"); `vergenced pair` and the desktop app pair, the Vision Pro pairs in Settings and uses it. HTTP + token stays for scripts and the plugin. Not yet on a headset | vergence `companion/` (cf954fa), 8f23a62; RAVESDK `RAVECompanionHTTPClient` |
-| 5. Desktop app | Mac build runs: coordinator, settings, pairing, worker sidecar, convert queue, the paired TLS-PSK port. Windows x64 builds (cross-compiled, `desktop/scripts/package-windows.sh`, a zip as Apparition ships) and ran on a Windows PC: window, coordinator, paired channel (an OpenSSL client exchange through it), worker found; it runs `vergence-worker.exe` and `vergence-convert.exe` there. Tray and a conversion not tried on Windows. Updater pins the release keys (Apparition's two), no release site yet | vergence `desktop/` (181599a), 0867eef, db4af4a |
+| 5. Desktop app | Mac build runs: coordinator, settings, pairing, worker sidecar, convert queue, the paired TLS-PSK port. Windows x64 builds (cross-compiled, `desktop/scripts/package-windows.sh`, a zip as Apparition ships) and ran on a Windows PC: window, coordinator, paired channel (an OpenSSL client exchange through it), worker found; it runs `vergence-worker.exe` and `vergence-convert.exe` there, and announces pairing over mDNS (`DnsServiceRegister`, seen from a Mac with `dns-sd`). Tray and a conversion not tried on Windows. Updater pins the release keys (Apparition's two), no release site yet | vergence `desktop/` (181599a), 0867eef, db4af4a, b7d8f28 |
 | 5. `vergence convert` | Built: all layouts, HDR kept, audio copied, resume, depth track. No subtitles, no Smooth Motion bake | vergence 0607bc0 |
 | 6. ONNX worker | Built and run on a Windows PC with an RTX 3080 against a coordinator on the Mac: CUDA, TensorRT and DirectML each made a whole title, 47–55 fps for 1080p 3D pieces, records matching Core ML's (Question 3). It yields for real there: a game, an app launched through Sunshine, SteamVR or another program keeping the GPU busy makes it give back its piece and unload its models; a desktop stream alone doesn't (the user's call). Only `smooth-motion-3d`; the 2D flow, depth and GMNet kinds are Mac-only | vergence `worker/` (2a7892b), ab2ffbc, 5f870d3, 44c3b73 |
 | 6. Windows converter | Built: `vergence-convert`, the same flags, names, output lines and progress as `vergence convert` (so the desktop app runs either), ONNX depth, the refinement ported to Rust, a wgpu warp, NVENC. Within 49 dB PSNR, SSIM 0.985 of the Mac's output per eye (tolerance 40 dB, 0.97). No spatial video, no HDR10 mastering metadata through NVENC (x265 keeps it) | vergence `convert/` (99539a1), 876a7bd, 03cd136 |
-| 7. More kinds | Built on the Mac, three workloads, each checked end to end against the dev Jellyfin (a coordinator's chunks against the worker's own whole-file run). **`smooth-motion-2d`**: RIFE 4.25 lite 960×576 on the GPU, flow stored at 240×144; chunks identical to the whole-file run; the Vision Pro reads it for 2D Library titles (flat and AI 3D, film player AI 3D too) through a fields-first mono pass that leaves uncovered pairs to the device's interpolator. **`ai-3d-depth`**: the offline depth pipeline per piece (a second of context before it) with Depth Anything V2 Small at 770×574; chunks within 0.005 mean, 0.05 max (shot-space units) of a whole-file conversion; the Vision Pro warps it in real-time AI 3D and runs its own model only for frames it lacks. **`ai-hdr`**: GMNet on keyframes (0.5 s and cuts) fitted to the pinned grid, eased within shots; chunks identical; a tested Metal lookup pass with the brightness cap. Not done: AI HDR in the players (the lookup inside `imageFragmentShader` and the stereo warp, ramp-in, step-down), the ONNX worker's 2D flow, depth and GMNet, and any headset run | vergence 352dd73, 3e20c96, 308f15e; Hypnos 9ec9b9d, 2178727; RAVESDK b6ab5e6, a4e89b4 |
+| 7. More kinds | Built on the Mac, three workloads, each checked end to end against the dev Jellyfin (a coordinator's chunks against the worker's own whole-file run). **`smooth-motion-2d`**: RIFE 4.25 lite 960×576 on the GPU, flow stored at 240×144; chunks identical to the whole-file run; the Vision Pro reads it for 2D Library titles (flat and AI 3D, film player AI 3D too) through a fields-first mono pass that leaves uncovered pairs to the device's interpolator. **`ai-3d-depth`**: the offline depth pipeline per piece (a second of context before it) with Depth Anything V2 Small at 770×574; chunks within 0.005 mean, 0.05 max (shot-space units) of a whole-file conversion; the Vision Pro warps it in real-time AI 3D and runs its own model only for frames it lacks. **`ai-hdr`**: GMNet on keyframes (0.5 s and cuts) fitted to the pinned grid, eased within shots; chunks identical; used in the players behind Settings › AI HDR for Videos: the flat player's final pass into EDR and AI 3D's eyes as BT.2020 PQ, ramped in, capped, stepped down after interpolation, snapped at cuts (checked through the pump on the visionOS simulator). Not done: the ONNX worker's 2D flow, depth and GMNet, and any headset run | vergence 352dd73, 3e20c96, 308f15e, 39c4240; Hypnos 9ec9b9d, 2178727 and the AI HDR player commit; RAVESDK b6ab5e6, a4e89b4, 9ea391e |
 | 8. Quest | Built, not run on a headset. Pairs by the six-digit code (NSD, a typed address or link) and keeps the token in the Keystore, or takes an HTTP address and token; talks over the paired TLS-PSK channel (Bouncy Castle) or HTTP; reports the playhead, reads partial chunks (VGAT in C++); a GLES 3 shared-field pass at the display's rate for stereo titles. Tested off the headset against VergenceCore and vergence-worker tracks, vergence-companion's vectors and a real `vergenced` over TLS-PSK. The desktop app announces `_vergence-pair._tcp` while pairing on macOS and Linux; on Windows the Quest pairs by address. No stereo warp or gain lookup yet (their kinds aren't pinned) | Hypnos 1cc42b1, vergence 6a80077, Controller Bridge 4ed9722 |
 | 9. Plugin | Routes pass through to a coordinator; the nightly task queues there | Hypnos 16640ed |
 
