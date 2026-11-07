@@ -48,6 +48,44 @@ if arguments.count == 3, arguments[1] == "--sums" {
                  sum(record.values()), sum(d0.values()), sum(d1.values())))
     exit(0)
 }
+// make-fixtures --expect <fixtures dir>: what VergenceCore reads in the tracks a Mac worker
+// wrote (worker-2d-flow, worker-depth, worker-gain), for test_analysis.cpp to match.
+if arguments.count == 3, arguments[1] == "--expect" {
+    let dir = URL(fileURLWithPath: arguments[2])
+    func index(_ name: String) throws -> AnalysisTrackIndex {
+        try AnalysisTrackIndex(Data(contentsOf: dir.appending(path: name)))
+    }
+    func sum(_ values: [Float]) -> Double { values.reduce(0) { $0 + Double($1) } }
+    var lines: [String] = []
+    let flow = try index("worker-2d-flow.vgat")
+    let pairs = flow.entries.filter { $0.kind == .flowPair && $0.eye == .mono }
+    let pair = try flow.record(pairs[1]).inflated(using: inflate)
+    lines.append(String(format: "flow2d.pairs %d", pairs.count))
+    lines.append(String(format: "flow2d.disparity %d", flow.entries.filter { $0.kind == .disparity }.count))
+    lines.append(String(format: "flow2d.pair1 %.9f %.9f %d %d %d %.6f %.6f %.6f", pair.time.seconds, pair.endTime.seconds,
+                        pair.width, pair.height, pair.channels, sum(pair.values()), pair.values()[0], pair.values()[pair.sampleCount - 1]))
+    let depthTrack = try index("worker-depth.vgat")
+    let maps = depthTrack.entries.filter { $0.kind == .depth && $0.eye == .mono }
+    let map = try depthTrack.record(maps[2]).inflated(using: inflate)
+    let bytes = map.payload.reduce(0) { $0 + Int($1) }
+    lines.append(String(format: "depth.maps %d", maps.count))
+    lines.append(String(format: "depth.map2 %.9f %d %d %.9g %.9g %d %.6f", map.time.seconds, map.width, map.height,
+                        map.scale, map.offset, bytes, sum(map.values())))
+    let gainTrack = try index("worker-gain.vgat")
+    let grids = gainTrack.entries.filter { $0.kind == .gainMap }
+    let record = try gainTrack.record(grids[3]).inflated(using: inflate)
+    guard let grid = GainGrid(record: record) else { fatalError("not a pinned gain grid") }
+    lines.append(String(format: "gain.grids %d", grids.count))
+    var lookups = [String]()
+    for (u, v, l) in [(Float(0.3), Float(0.6), Float(0.5)), (0.95, 0.05, 0.97), (0.02, 0.98, 0.01), (0.5, 0.5, 0.25)] {
+        lookups.append(String(format: "%.6f", grid.lookup(u: u, v: v, luma: l)))
+    }
+    lines.append(String(format: "gain.grid3 %.9f %.6f ", record.time.seconds, sum(grid.log2Gain)) + lookups.joined(separator: " "))
+    lines.append(String(format: "gain.capped %.6f %.6f %.6f", GainGrid.cappedScale(meanGain: 4, cap: 2.5),
+                        GainGrid.cappedScale(meanGain: 2, cap: 2.5), GainGrid.cappedScale(meanGain: 3, cap: 1)))
+    print(lines.joined(separator: "\n"))
+    exit(0)
+}
 guard arguments.count == 2 else { fatalError("usage: make-fixtures <out.vgat> | --sums <track.vgat>") }
 
 let (fw, fh, dw, dh) = (8, 5, 6, 4)

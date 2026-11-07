@@ -64,6 +64,8 @@ public final class PlaybackSession {
     private long lastSkipCheck = 0;
     /** Smooth Motion for 3D titles: an analysis coordinator's fields, drawn by a GLES renderer between the decoder and the presentation's surface. */
     private AnalysisTrackStream analysis;
+    /** AI HDR for a 2D title: the coordinator's gain grids (ai-hdr), shown only on a PQ-capable surface. */
+    private AnalysisTrackStream gainGrids;
     private SmoothMotionRenderer smooth;
     private Surface smoothOutput;
     private boolean analysisRequested = false, smoothFailed = false;
@@ -322,22 +324,30 @@ public final class PlaybackSession {
         try { done.await(3,TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
     }
     /**
-     * Asks the analysis coordinator, once per session, for this title's Smooth
-     * Motion fields: packed stereo only (the 3D workload), not a spatial video
-     * the plugin converts as it plays, and only when Settings has it on.
+     * Asks the analysis coordinator, once per session, for what this title can
+     * use, as the Vision Pro does: Smooth Motion fields for a packed 3D title
+     * (smooth-motion-3d) or a 2D one (smooth-motion-2d), and AI HDR gain grids
+     * (ai-hdr) for a 2D title when the display is HDR. Not for a spatial video
+     * the plugin converts as it plays. There is no AI 3D presentation on Quest
+     * yet, so ai-3d-depth isn't asked for.
      */
     private void requestAnalysis() {
-        if (analysisRequested || layout == 0 || plan.optBoolean("spatialVideo") || !AnalysisSettings.INSTANCE.smoothMotion(context)) return;
+        if (analysisRequested || plan.optBoolean("spatialVideo")) return;
         analysisRequested = true;
         final String item = plan.optString("itemID");
         final double start = plan.optDouble("position", 0);
-        if (item.isEmpty()) return;
+        final boolean fields = AnalysisSettings.INSTANCE.smoothMotion(context);
+        final boolean hdr = layout == 0 && AnalysisSettings.INSTANCE.aiHdr(context) && AnalysisSettings.INSTANCE.displayIsHdr(context);
+        if (item.isEmpty() || (!fields && !hdr)) return;
+        final String workload = layout != 0 ? CoordinatorClient.SMOOTH_MOTION_3D : CoordinatorClient.SMOOTH_MOTION_2D;
         Thread thread = new Thread(() -> {
-            AnalysisTrackStream stream = AnalysisTrackStream.Companion.open(context, item, start);
+            AnalysisTrackStream stream = fields ? AnalysisTrackStream.Companion.open(context, item, start, workload) : null;
+            AnalysisTrackStream grids = hdr ? AnalysisTrackStream.Companion.open(context, item, start, CoordinatorClient.AI_HDR) : null;
             main.post(() -> {
-                if (stopped) { if (stream != null) stream.close(); return; }
+                if (stopped) { if (stream != null) stream.close(); if (grids != null) grids.close(); return; }
                 analysis = stream;
-                if (stream != null) applyVideoSurface();
+                gainGrids = grids;
+                if (stream != null || grids != null) applyVideoSurface();
             });
         }, "analysis-open");
         thread.setDaemon(true);
@@ -345,17 +355,26 @@ public final class PlaybackSession {
     }
     /** The coordinator's times are the file's: a direct stream or a download, never a Jellyfin transcode (HLS). */
     private boolean smoothEligible() {
-        return analysis != null && !smoothFailed && !plan.optString("url").contains(".m3u8");
+        return (analysis != null || gainGrids != null) && !smoothFailed && !plan.optString("url").contains(".m3u8");
     }
-    /** Gives the decoder the presentation's surface, or the Smooth Motion renderer's input drawing into it. */
+    /** Gives the decoder the presentation's surface, or the renderer's input drawing into it. */
     private void applyVideoSurface() {
         if (player == null) return;
         boolean wanted = videoSurface != null && smoothEligible();
         if (smooth != null && (!wanted || smoothOutput != videoSurface)) releaseSmooth();
         if (wanted && smooth == null) {
-            smooth = SmoothMotionRenderer.Companion.create(context, videoSurface, layout);
+            smooth = SmoothMotionRenderer.Companion.create(context, videoSurface, layout, gainGrids != null);
             if (smooth == null) smoothFailed = true;
-            else { smoothOutput = videoSurface; smooth.setTrack(analysis); player.setVideoFrameMetadataListener(smooth); }
+            else if (analysis == null && !smooth.getHdrOutput()) {
+                // Gain grids alone, and the surface can't show HDR: nothing for the renderer to do.
+                releaseSmooth();
+                gainGrids.close(); gainGrids = null;
+            } else {
+                smoothOutput = videoSurface;
+                smooth.setTrack(analysis);
+                smooth.setGain(smooth.getHdrOutput() ? gainGrids : null);
+                player.setVideoFrameMetadataListener(smooth);
+            }
         }
         player.setVideoSurface(smooth != null ? smooth.getInput() : videoSurface);
     }
@@ -371,6 +390,7 @@ public final class PlaybackSession {
         if (player != null) { report("stopped"); releaseSmooth(); player.clearVideoSurface(); player.release(); player = null; }
         releaseSmooth();
         if (analysis != null) { analysis.close(); analysis = null; }
+        if (gainGrids != null) { gainGrids.close(); gainGrids = null; }
         subtitles = null; videoSurface = null; host = null;
     }
 }

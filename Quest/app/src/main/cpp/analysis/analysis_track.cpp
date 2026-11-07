@@ -184,38 +184,45 @@ const Record* Track::nearest(Kind kind, Eye eye, double seconds, double toleranc
     return best;
 }
 
-Error Track::values(const Record& record, std::vector<float>& out) const {
+Error Track::raw(const Record& record, std::vector<uint8_t>& out) const {
     const uint8_t* payload = data_.data() + record.payload_offset;
-    std::vector<uint8_t> plain;
     const size_t raw = record.raw_byte_count();
-    if (record.deflated) {
-        Error error = inflate_raw(payload, record.payload_size, plain, raw);
-        if (error != Error::None) return error;
-        // Undo the row deltas: running sums per row, wrapping in the raw type.
-        const size_t rows = size_t(record.channels) * size_t(record.height), width = size_t(record.width);
-        if (record.bytes_per_sample() == 2) {
-            for (size_t row = 0; row < rows; row++) {
-                uint16_t previous = 0;
-                for (size_t x = 0; x < width; x++) {
-                    uint8_t* p = &plain[2 * (row * width + x)];
-                    previous = uint16_t(previous + load<uint16_t>(p));
-                    p[0] = uint8_t(previous);
-                    p[1] = uint8_t(previous >> 8);
-                }
-            }
-        } else {
-            for (size_t row = 0; row < rows; row++) {
-                uint8_t previous = 0;
-                for (size_t x = 0; x < width; x++) {
-                    previous = uint8_t(previous + plain[row * width + x]);
-                    plain[row * width + x] = previous;
-                }
+    if (!record.deflated) {
+        if (record.payload_size != raw) return Error::PayloadSize;
+        out.assign(payload, payload + raw);
+        return Error::None;
+    }
+    Error error = inflate_raw(payload, record.payload_size, out, raw);
+    if (error != Error::None) return error;
+    // Undo the row deltas: running sums per row, wrapping in the raw type.
+    const size_t rows = size_t(record.channels) * size_t(record.height), width = size_t(record.width);
+    if (record.bytes_per_sample() == 2) {
+        for (size_t row = 0; row < rows; row++) {
+            uint16_t previous = 0;
+            for (size_t x = 0; x < width; x++) {
+                uint8_t* p = &out[2 * (row * width + x)];
+                previous = uint16_t(previous + load<uint16_t>(p));
+                p[0] = uint8_t(previous);
+                p[1] = uint8_t(previous >> 8);
             }
         }
-        payload = plain.data();
-    } else if (record.payload_size != raw) {
-        return Error::PayloadSize;
+    } else {
+        for (size_t row = 0; row < rows; row++) {
+            uint8_t previous = 0;
+            for (size_t x = 0; x < width; x++) {
+                previous = uint8_t(previous + out[row * width + x]);
+                out[row * width + x] = previous;
+            }
+        }
     }
+    return Error::None;
+}
+
+Error Track::values(const Record& record, std::vector<float>& out) const {
+    std::vector<uint8_t> plain;
+    Error error = raw(record, plain);
+    if (error != Error::None) return error;
+    const uint8_t* payload = plain.data();
     const size_t count = record.sample_count();
     out.resize(count);
     switch (record.encoding) {
@@ -314,7 +321,7 @@ bool ChunkStore::disparity_locked(double seconds, double tolerance, std::vector<
     return true;
 }
 
-bool ChunkStore::shared_fields(double start, double end, SharedFields& out) {
+bool ChunkStore::shared_fields(double start, double end, SharedFields& out, bool needs_disparity) {
     if (!(end > start)) return false;
     const double tolerance = (end - start) / 4;
     std::lock_guard<std::mutex> guard(lock_);
@@ -330,6 +337,16 @@ bool ChunkStore::shared_fields(double start, double end, SharedFields& out) {
     }
     int w0 = 0, h0 = 0, w1 = 0, h1 = 0;
     std::vector<uint16_t> d0, d1;
+    if (!needs_disparity) {
+        out.flow_width = fw;
+        out.flow_height = fh;
+        out.flow_rgba = std::move(flow);
+        out.mask = std::move(mask);
+        out.disparity_width = out.disparity_height = 0;
+        out.disparity0.clear();
+        out.disparity1.clear();
+        return true;
+    }
     if (!disparity_locked(start, tolerance, d0, w0, h0)) return false;
     if (!disparity_locked(end, tolerance, d1, w1, h1)) return false;
     if (w0 != w1 || h0 != h1) return false;
@@ -341,6 +358,31 @@ bool ChunkStore::shared_fields(double start, double end, SharedFields& out) {
     out.disparity_height = h0;
     out.disparity0 = std::move(d0);
     out.disparity1 = std::move(d1);
+    return true;
+}
+
+bool ChunkStore::depth(double seconds, double tolerance, DepthMap& out) {
+    std::lock_guard<std::mutex> guard(lock_);
+    Found found = nearest_locked(Kind::Depth, Eye::Mono, seconds, tolerance);
+    if (!found.record || found.record->channels != 1 || found.record->encoding != Encoding::UInt8) return false;
+    if (found.track->raw(*found.record, out.bytes) != Error::None) return false;
+    out.width = found.record->width;
+    out.height = found.record->height;
+    out.scale = found.record->scale;
+    out.offset = found.record->offset;
+    return true;
+}
+
+bool ChunkStore::gain_grid(double seconds, double tolerance, std::vector<uint16_t>& out) {
+    std::lock_guard<std::mutex> guard(lock_);
+    Found found = nearest_locked(Kind::GainMap, Eye::Mono, seconds, tolerance);
+    if (!found.record || found.record->channels != kGainGridBins || found.record->width != kGainGridWidth ||
+        found.record->height != kGainGridHeight) {
+        return false;
+    }
+    if (found.track->values(*found.record, scratch_) != Error::None) return false;
+    out.resize(scratch_.size());
+    for (size_t i = 0; i < scratch_.size(); i++) out[i] = half_bits(scratch_[i]);
     return true;
 }
 

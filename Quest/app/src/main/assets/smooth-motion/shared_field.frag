@@ -15,6 +15,11 @@
  - Right eye: the left eye's field read across the right-to-left disparity,
    mixed between the two real frames' at t.
 
+ A 2D picture (the smooth-motion-2d workload, Vergence's `.mono` packing) is
+ the left eye alone over the whole frame: eyeSize is the frame, eyeOffset
+ lies past its right edge so no pixel is a right eye, and the disparity
+ textures are bound but never read.
+
  Fields are sampled bilinearly with pixel centres at +1/2, clamped to the
  edge (F.interpolate(align_corners=False)); frames bilinearly, clamped to
  each eye's own pixel centres (RIFE's border padding). The frame textures

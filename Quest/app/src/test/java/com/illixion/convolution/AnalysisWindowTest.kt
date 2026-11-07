@@ -88,3 +88,38 @@ class AnalysisWindowTest {
         assertNull(pairTarget(""))
     }
 }
+
+class GainAndWarpRulesTest {
+    @Test fun aiHdrRampsInHoldsAndRampsAgainAfterASeek() {
+        val ramp = GainGridRamp()
+        assertEquals("nothing yet: SDR-looking", 0f, ramp.strength(10.0, found = false), 0f)
+        assertEquals("the first grid starts the ramp", 0f, ramp.strength(10.04, found = true), 0f)
+        assertEquals(0.5f, ramp.strength(10.54, found = true), 1e-4f)
+        assertEquals("a missing grid keeps the last one, still ramping", 0.75f, ramp.strength(10.79, found = false), 1e-4f)
+        assertEquals(1f, ramp.strength(11.5, found = true), 0f)
+        assertEquals("a seek: 0 until a grid arrives", 0f, ramp.strength(100.0, found = false), 0f)
+        assertEquals(0f, ramp.strength(100.04, found = true), 0f)
+        assertEquals(0.25f, ramp.strength(100.29, found = true), 1e-4f)
+        assertEquals("a seek back ramps again too", 0f, ramp.strength(50.0, found = true), 0f)
+    }
+
+    @Test fun theCapMatchesGainGridCappedScale() {
+        // VergenceCore's GainGrid.cappedScale (fixtures/worker-expected.txt, gain.capped).
+        assertEquals(0.660964f, gainCappedScale(4f, 2.5f), 1e-6f)
+        assertEquals(1f, gainCappedScale(2f, 2.5f), 0f)
+        assertEquals(0f, gainCappedScale(3f, 1f), 0f)
+    }
+
+    @Test fun theWarpMeshCoversEveryCellOnce() {
+        val indices = meshGridIndices(4, 3)
+        assertEquals(3 * 2 * 6, indices.size)
+        assertEquals(listOf(0, 4, 1, 1, 4, 5), indices.take(6).toList())
+        assertEquals(11, indices.max())
+        // Both triangles of a cell wind the same way (counter-clockwise on screen, y down).
+        fun cross(a: Int, b: Int, c: Int): Int {
+            val (ax, ay) = a % 4 to a / 4; val (bx, by) = b % 4 to b / 4; val (cx, cy) = c % 4 to c / 4
+            return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+        }
+        for (t in indices.indices step 3) assertTrue(cross(indices[t], indices[t + 1], indices[t + 2]) < 0)
+    }
+}

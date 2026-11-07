@@ -90,17 +90,50 @@ Java_com_illixion_convolution_AnalysisNative_storeHoldsWhole(JNIEnv*, jclass, jl
 JNIEXPORT jint JNICALL
 Java_com_illixion_convolution_AnalysisNative_storeFields(JNIEnv* env, jclass, jlong handle, jdouble start, jdouble end,
                                                         jobject flow, jobject mask, jobject disparity0,
-                                                        jobject disparity1, jintArray dims) {
+                                                        jobject disparity1, jintArray dims, jboolean needsDisparity) {
     if (handle == 0 || dims == nullptr || env->GetArrayLength(dims) < 4) return 0;
     vgat::SharedFields fields;
-    if (!store(handle)->shared_fields(start, end, fields)) return 0;
+    if (!store(handle)->shared_fields(start, end, fields, needsDisparity == JNI_TRUE)) return 0;
     jint sizes[4] = {fields.flow_width, fields.flow_height, fields.disparity_width, fields.disparity_height};
     env->SetIntArrayRegion(dims, 0, 4, sizes);
-    if (!fill(env, flow, fields.flow_rgba) || !fill(env, mask, fields.mask) || !fill(env, disparity0, fields.disparity0) ||
-        !fill(env, disparity1, fields.disparity1)) {
+    if (!fill(env, flow, fields.flow_rgba) || !fill(env, mask, fields.mask) ||
+        (needsDisparity == JNI_TRUE && (!fill(env, disparity0, fields.disparity0) || !fill(env, disparity1, fields.disparity1)))) {
         return -1;
     }
     return 1;
+}
+
+/* A frame's depth map (ai-3d-depth): 1 with the bytes in `out` and `info` =
+   width, height, and `mapping` = scale, offset (sample = byte * scale + offset);
+   0 when none; -1 when `out` is too small (`info` says the size). */
+JNIEXPORT jint JNICALL
+Java_com_illixion_convolution_AnalysisNative_storeDepth(JNIEnv* env, jclass, jlong handle, jdouble seconds,
+                                                       jdouble tolerance, jobject out, jintArray info,
+                                                       jfloatArray mapping) {
+    if (handle == 0 || info == nullptr || mapping == nullptr || env->GetArrayLength(info) < 2 ||
+        env->GetArrayLength(mapping) < 2) {
+        return 0;
+    }
+    vgat::DepthMap map;
+    if (!store(handle)->depth(seconds, tolerance, map)) return 0;
+    jint sizes[2] = {map.width, map.height};
+    jfloat affine[2] = {map.scale, map.offset};
+    env->SetIntArrayRegion(info, 0, 2, sizes);
+    env->SetFloatArrayRegion(mapping, 0, 2, affine);
+    void* address = out == nullptr ? nullptr : env->GetDirectBufferAddress(out);
+    if (address == nullptr || env->GetDirectBufferCapacity(out) < jlong(map.bytes.size())) return -1;
+    std::memcpy(address, map.bytes.data(), map.bytes.size());
+    return 1;
+}
+
+/* A frame's gain grid (ai-hdr) as 16x9x8 half floats into `out` (2304 bytes): 1, or 0 when none. */
+JNIEXPORT jint JNICALL
+Java_com_illixion_convolution_AnalysisNative_storeGainGrid(JNIEnv* env, jclass, jlong handle, jdouble seconds,
+                                                          jdouble tolerance, jobject out) {
+    if (handle == 0) return 0;
+    std::vector<uint16_t> grid;
+    if (!store(handle)->gain_grid(seconds, tolerance, grid)) return 0;
+    return fill(env, out, grid) ? 1 : 0;
 }
 
 JNIEXPORT jdouble JNICALL

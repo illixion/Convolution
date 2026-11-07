@@ -28,7 +28,15 @@ final class AnalysisNative {
      * the sizes).
      */
     static native int storeFields(long store, double start, double end, ByteBuffer flow, ByteBuffer mask,
-                                  ByteBuffer disparity0, ByteBuffer disparity1, int[] dims);
+                                  ByteBuffer disparity0, ByteBuffer disparity1, int[] dims, boolean needsDisparity);
+    /**
+     * A frame's AI 3D depth map (uint8, model size) within `tolerance` seconds:
+     * 1 with the bytes in `out`, `info` = width, height and `mapping` = scale,
+     * offset; 0 when none; -1 when `out` is too small (`info` holds the size).
+     */
+    static native int storeDepth(long store, double seconds, double tolerance, ByteBuffer out, int[] info, float[] mapping);
+    /** A frame's AI HDR gain grid as 16x9x8 half floats (2304 bytes): 1, or 0 when none. */
+    static native int storeGainGrid(long store, double seconds, double tolerance, ByteBuffer out);
     /** Seconds from `seconds` to the nearest flow pair, NaN when none is within 5 s. */
     static native double storeNearestPairOffset(long store, double seconds);
 

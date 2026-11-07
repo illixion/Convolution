@@ -31,6 +31,8 @@ fun AnalysisSettingsSection() {
     val scope = rememberCoroutineScope()
     var summary by remember { mutableStateOf(AnalysisSettings.summary(context)) }
     var smooth by remember { mutableStateOf(AnalysisSettings.smoothMotion(context)) }
+    var hdr by remember { mutableStateOf(AnalysisSettings.aiHdr(context)) }
+    val hdrDisplay = remember { AnalysisSettings.displayIsHdr(context) }
     var found by remember { mutableStateOf<List<CoordinatorDiscovery.Found>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
     var code by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -67,11 +69,20 @@ fun AnalysisSettingsSection() {
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Smooth Motion for 3D titles", style = MaterialTheme.typography.bodyLarge)
-                Text("In-between frames from the analysis computer's fields. Plays as usual where it hasn't any yet.",
+                Text("Smooth Motion", style = MaterialTheme.typography.bodyLarge)
+                Text("In-between frames for 3D and 2D titles from the analysis computer's fields. Plays as usual where it hasn't any yet.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Switch(checked = smooth, onCheckedChange = { smooth = it; AnalysisSettings.setSmoothMotion(context, it) })
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("AI HDR for 2D titles", style = MaterialTheme.typography.bodyLarge)
+                Text(if (hdrDisplay) "Highlights from the analysis computer's gain grids, held below a brightness cap."
+                     else "This headset's display isn't HDR, so 2D titles play as they are.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = hdr && hdrDisplay, enabled = hdrDisplay, onCheckedChange = { hdr = it; AnalysisSettings.setAiHdr(context, it) })
         }
         code?.let { (digits, host) ->
             Text(digits, fontFamily = FontFamily.Monospace, fontSize = 40.sp, color = Color.White)

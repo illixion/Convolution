@@ -14,6 +14,9 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <map>
+#include <sstream>
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -220,6 +223,137 @@ void test_errors(const std::string& path) {
     check(ok && vgat::half_bits(1e6f) == 0x7C00, "half floats round trip");
 }
 
+/* worker-expected.txt: "key v1 v2 ..." lines VergenceCore printed (fixtures/swift --expect). */
+std::map<std::string, std::vector<double>> read_expected(const std::string& path) {
+    std::map<std::string, std::vector<double>> out;
+    std::ifstream in(path);
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream words(line);
+        std::string key;
+        words >> key;
+        double value;
+        while (words >> value) out[key].push_back(value);
+    }
+    return out;
+}
+
+bool near(double a, double b, double tolerance) { return std::fabs(a - b) <= tolerance; }
+
+/* The GL pass samples the grid as a 16x9x8 3D texture, linear, clamp to edge,
+   normalised coordinates; this is that sampling on the CPU (VergenceCore's
+   GainGrid.lookup), to check the layout the texture is uploaded in. */
+float gain_lookup(const std::vector<uint16_t>& grid, float u, float v, float luma) {
+    auto axis = [](float t, int n, int& i0, int& i1, float& f) {
+        float x = std::fmin(std::fmax(t * float(n) - 0.5f, 0.0f), float(n - 1));
+        i0 = int(x);
+        i1 = std::min(i0 + 1, n - 1);
+        f = x - float(i0);
+    };
+    int x0, x1, y0, y1, l0, l1;
+    float fx, fy, fl;
+    axis(u, vgat::kGainGridWidth, x0, x1, fx);
+    axis(v, vgat::kGainGridHeight, y0, y1, fy);
+    axis(luma, vgat::kGainGridBins, l0, l1, fl);
+    auto g = [&](int x, int y, int l) {
+        return vgat::half_value(grid[size_t((l * vgat::kGainGridHeight + y) * vgat::kGainGridWidth + x)]);
+    };
+    auto plane = [&](int l) {
+        float top = g(x0, y0, l) + (g(x1, y0, l) - g(x0, y0, l)) * fx;
+        float bottom = g(x0, y1, l) + (g(x1, y1, l) - g(x0, y1, l)) * fx;
+        return top + (bottom - top) * fy;
+    };
+    float a = plane(l0), b = plane(l1);
+    return a + (b - a) * fl;
+}
+
+/* GainGrid.cappedScale, as the gain pass computes it in GLSL. */
+float capped_scale(float mean, float cap) { return cap <= 1 ? 0 : (mean <= cap ? 1 : std::log2(cap) / std::log2(mean)); }
+
+void test_worker_tracks(const std::string& fixtures) {
+    auto expected = read_expected(fixtures + "/worker-expected.txt");
+    check(expected.size() >= 7, "worker-expected.txt read");
+    std::vector<float> values;
+
+    // smooth-motion-2d: flow pairs only, over the whole picture.
+    {
+        vgat::Error error;
+        auto bytes = read_file(fixtures + "/worker-2d-flow.vgat");
+        auto track = vgat::Track::parse(bytes, &error);
+        check(track != nullptr, std::string("2D flow track parses (") + vgat::error_name(error) + ")");
+        if (track) {
+            size_t pairs = 0, disparities = 0;
+            for (const auto& r : track->records()) {
+                pairs += r.kind == vgat::Kind::FlowPair;
+                disparities += r.kind == vgat::Kind::Disparity;
+            }
+            check(pairs == size_t(expected["flow2d.pairs"][0]) && disparities == 0, "2D flow: pairs and no disparity");
+            auto& e = expected["flow2d.pair1"];
+            const vgat::Record* r = track->nearest(vgat::Kind::FlowPair, vgat::Eye::Mono, e[0], 0.001);
+            double sum = 0;
+            if (r && track->values(*r, values) == vgat::Error::None) for (float v : values) sum += v;
+            check(r && near(r->end.seconds(), e[1], 1e-6) && r->width == int(e[2]) && r->height == int(e[3]) &&
+                      r->channels == int(e[4]) && near(sum, e[5], 0.01) && near(values.front(), e[6], 1e-6) &&
+                      near(values.back(), e[7], 1e-6),
+                  "2D flow: pair 1 decodes as VergenceCore reads it (sum " + std::to_string(sum) + ")");
+
+            vgat::ChunkStore store(10);
+            store.put(0, bytes, true);
+            vgat::SharedFields fields;
+            check(!store.shared_fields(e[0], e[1], fields), "2D flow: a stereo lookup needs disparity");
+            check(store.shared_fields(e[0], e[1], fields, false) && fields.flow_width == int(e[2]) &&
+                      fields.flow_rgba.size() == size_t(4 * e[2] * e[3]) && fields.disparity_width == 0 &&
+                      fields.disparity0.empty(),
+                  "2D flow: the mono lookup gives flow and mask alone");
+        }
+    }
+
+    // ai-3d-depth: one uint8 map per frame, bytes as they are.
+    {
+        auto bytes = read_file(fixtures + "/worker-depth.vgat");
+        vgat::ChunkStore store(10);
+        check(store.put(0, bytes, true) == vgat::Error::None, "depth track parses");
+        auto track = vgat::Track::parse(bytes, nullptr);
+        size_t maps = 0;
+        if (track) for (const auto& r : track->records()) maps += r.kind == vgat::Kind::Depth && r.eye == vgat::Eye::Mono;
+        check(maps == size_t(expected["depth.maps"][0]), "depth: a map per frame");
+        auto& e = expected["depth.map2"];
+        vgat::DepthMap map;
+        bool ok = store.depth(e[0] + 0.004, 0.5 / 23.976, map);
+        long total = 0;
+        double value_sum = 0;
+        for (uint8_t b : map.bytes) { total += b; value_sum += double(b) * map.scale + map.offset; }
+        check(ok && map.width == int(e[1]) && map.height == int(e[2]) && near(map.scale, e[3], 1e-9) &&
+                  near(map.offset, e[4], 1e-9) && total == long(e[5]) && near(value_sum, e[6], 0.05),
+              "depth: map 2's bytes, scale and offset as VergenceCore reads them");
+        check(!store.depth(e[0] + 0.5 * kFrame + 0.001, 0.5 * kFrame - 0.002, map), "depth: nothing between frames past the tolerance");
+        check(!store.depth(5.0, 0.5 / 23.976, map), "depth: no map past the track");
+    }
+
+    // ai-hdr: the pinned 16x9x8 grid, looked up as the GL pass samples it.
+    {
+        auto bytes = read_file(fixtures + "/worker-gain.vgat");
+        vgat::ChunkStore store(10);
+        check(store.put(0, bytes, true) == vgat::Error::None, "gain track parses");
+        auto& e = expected["gain.grid3"];
+        std::vector<uint16_t> grid;
+        bool ok = store.gain_grid(e[0], 0.5 / 23.976, grid) && grid.size() == size_t(vgat::kGainGridCount);
+        double sum = 0;
+        for (uint16_t h : grid) sum += vgat::half_value(h);
+        check(ok && near(sum, e[1], 0.01), "gain: grid 3's cells (sum " + std::to_string(sum) + ")");
+        const float points[4][3] = {{0.3f, 0.6f, 0.5f}, {0.95f, 0.05f, 0.97f}, {0.02f, 0.98f, 0.01f}, {0.5f, 0.5f, 0.25f}};
+        double worst = 0;
+        for (int i = 0; ok && i < 4; i++) worst = std::fmax(worst, std::fabs(gain_lookup(grid, points[i][0], points[i][1], points[i][2]) - e[2 + i]));
+        check(ok && worst < 1e-5, "gain: trilinear lookups match GainGrid.lookup (worst " + std::to_string(worst) + ")");
+        auto& c = expected["gain.capped"];
+        check(near(capped_scale(4, 2.5f), c[0], 1e-6) && near(capped_scale(2, 2.5f), c[1], 1e-6) &&
+                  near(capped_scale(3, 1), c[2], 1e-6),
+              "gain: the cap's scale is GainGrid.cappedScale");
+        vgat::DepthMap map;
+        check(!store.depth(e[0], 0.02, map), "gain: no depth in a gain track");
+    }
+}
+
 int sums(const std::string& path) {
     auto track = vgat::Track::parse(read_file(path), nullptr);
     if (!track) return 1;
@@ -258,6 +392,7 @@ int main(int argc, char** argv) {
     test_store(fixtures + "/worker-fields.vgat");
     test_store(fixtures + "/vergencecore-fields.vgat");
     test_errors(fixtures + "/worker-fields.vgat");
+    test_worker_tracks(fixtures);
     std::printf(failures ? "\n%d failed\n" : "\nall passed\n", failures);
     return failures ? 1 : 0;
 }

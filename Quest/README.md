@@ -97,6 +97,8 @@ Off-device tests:
 
 `native-tests/run.sh <track.vgat>` also prints a real track's first-pair sums for
 comparison with `swift run --package-path Quest/native-tests/fixtures/swift MakeFixtures --sums <track.vgat>`.
+The fixtures include tracks the Mac worker wrote for the 2D-flow, depth and gain
+workloads, checked against what VergenceCore reads in them (`fixtures/README.md`).
 The paired-channel test talks TLS-PSK to a real coordinator when
 `VERGENCE_PAIRED_TEST=host:port`, `VERGENCE_PAIRED_DEVICE` and
 `VERGENCE_PAIRED_TOKEN_FILE` name one (a throwaway `vergenced` with that device
@@ -112,10 +114,10 @@ The Quest implementation is integrated into Hypnos and RAVESDK `main` as of
 2026-10-08. Build against the matching sibling RAVESDK checkout containing
 `RAVEMediaCore` and `RAVEQuestCore`; the original work branches are historical.
 
-## Smooth Motion from an analysis computer
+## Smooth Motion and AI HDR from an analysis computer
 
-3D (packed stereo) Library titles get in-between frames at the headset's display
-rate from fields a Vergence analysis coordinator prepares on another machine
+Library titles get in-between frames at the headset's display rate from fields a
+Vergence analysis coordinator prepares on another machine
 (the Vergence desktop app on a Mac or PC, or `vergenced` on a server;
 `docs/plans/analysis-workers.md`). The Quest runs no network; it only warps and
 blends.
@@ -129,7 +131,15 @@ blends.
 - A paired Quest reaches the coordinator over its paired channel: TLS 1.2 PSK on
   port 8421 (`PairedChannel.kt`, Bouncy Castle), HTTP/1.1 inside, no bearer token.
   A typed-in server uses plain HTTP with `Authorization: Bearer`.
-- `PlaybackSession` asks the coordinator once per stereo title (`POST /v1/playing`),
+- What a title asks for, as the Vision Pro does: a packed 3D title
+  `smooth-motion-3d` (the left eye's flow, each frame's disparity), a 2D title
+  `smooth-motion-2d` (the whole picture's flow, the same pass in its mono form)
+  and, when the display reports HDR, `ai-hdr` (a 16×9×8 gain grid per frame).
+  Each workload reports its playhead as a player of its own. There is no AI 3D
+  presentation on Quest yet, so `ai-3d-depth` isn't asked for; its mesh warp
+  (`DepthWarpPass.kt`, `depth_warp.*`, the port of Vergence's `StereoMeshWarp`)
+  and the depth lookup are built and tested for when there is.
+- `PlaybackSession` asks the coordinator once per title (`POST /v1/playing`),
   reports the playhead every 5 s and at once after a seek, and reads 10 s chunks
   around the playhead, partial ones again every 1.5 s (`AnalysisWindow.kt`, the
   Vision Pro's rules). The chunks are parsed and looked up in C++
@@ -140,6 +150,12 @@ blends.
   (`assets/smooth-motion/shared_field.frag`, the port of Vergence's Metal
   `SharedFieldInterpolator`) into the Home SurfaceView or the Spatial SDK panel.
   Frames without fields yet, HLS transcodes and spatial videos play as before.
+- AI HDR (`gain_mean.frag`, `gain_apply.frag`, the port of Vergence's
+  `GainGridPass`) draws the frame into a target, reduces its gain to a mean
+  through a 64×32 mip chain, scales log gains to hold that mean at 2.5× (the
+  cap), ramps in over a second after opening or a seek, and writes BT.2020 PQ
+  into a 10-bit window surface (`EGL_EXT_gl_colorspace_bt2020_pq`). Without such
+  a surface, or on a display that isn't HDR, it stays off.
 - Logcat: `adb logcat -s ConvolutionAnalysis ConvolutionPairing ConvolutionSmooth`.
   Every 5 s the renderer logs how many refreshes were interpolated, the draw's
   CPU time and the pass's GPU time (`GL_EXT_disjoint_timer_query`).

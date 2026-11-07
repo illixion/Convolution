@@ -193,3 +193,58 @@ internal fun coordinatorBaseUrl(text: String, defaultPort: Int = 8420): String? 
     val bracketed = if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
     return "${uri.scheme}://$bracketed:$port"
 }
+
+/**
+ * How strongly a frame's AI HDR gain grid is applied (VergenceCore's
+ * `GainGridPlayback`, the Vision Pro's rules):
+ * - each frame takes its own grid from the track (the worker already eased
+ *   them within a shot and snapped them at cuts);
+ * - it ramps in over [rampSeconds] of media time from the first grid after
+ *   engaging and after every seek (a jump back, or more than a second on);
+ * - a frame without a grid keeps the last one at the strength it had, so it
+ *   never turns off mid-shot; before the first grid after a seek the
+ *   strength is 0 and the picture stays on its HDR path, SDR-looking.
+ */
+internal class GainGridRamp(private val rampSeconds: Double = 1.0) {
+    private var lastSeconds = Double.NaN
+    private var rampStart = Double.NaN
+    /** A grid has been shown since engaging. */
+    var holding = false
+        private set
+
+    /** The strength for the frame at [seconds]; [found] says whether the track had its grid. */
+    fun strength(seconds: Double, found: Boolean): Float {
+        if (!lastSeconds.isNaN() && (seconds < lastSeconds - 0.1 || seconds > lastSeconds + 1)) rampStart = Double.NaN
+        lastSeconds = seconds
+        if (found) {
+            holding = true
+            if (rampStart.isNaN()) rampStart = seconds
+        }
+        if (!holding || rampStart.isNaN()) return 0f
+        return ((seconds - rampStart) / rampSeconds).coerceIn(0.0, 1.0).toFloat()
+    }
+}
+
+/** GainGrid.cappedScale: what every log gain is scaled by so the frame's mean linear gain stays at [cap]. */
+internal fun gainCappedScale(meanGain: Float, cap: Float): Float =
+    if (cap <= 1f) 0f else if (meanGain <= cap) 1f else (Math.log(cap.toDouble()) / Math.log(meanGain.toDouble())).toFloat()
+
+/**
+ * The depth warp's mesh (VergenceApple's dense grid for track depth,
+ * 769 x 433 points): two triangles per cell, indices into a grid whose point
+ * i sits at column i % columns, row i / columns (the vertex shader places it
+ * from gl_VertexID).
+ */
+internal fun meshGridIndices(columns: Int, rows: Int): IntArray {
+    require(columns >= 2 && rows >= 2) { "a grid has cells" }
+    val out = IntArray((columns - 1) * (rows - 1) * 6)
+    var n = 0
+    for (y in 0 until rows - 1) {
+        for (x in 0 until columns - 1) {
+            val i = y * columns + x
+            out[n++] = i; out[n++] = i + columns; out[n++] = i + 1
+            out[n++] = i + 1; out[n++] = i + columns; out[n++] = i + columns + 1
+        }
+    }
+    return out
+}

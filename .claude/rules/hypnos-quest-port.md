@@ -50,6 +50,9 @@ these session/backend boundaries are established.
   (`PlaybackSession.releaseSmooth`). The pairing C is a vendored copy of
   Controller Bridge's `protocol/` (`cpp/third_party/controller-bridge/VENDORED.md`):
   change it upstream first. The paired channel is TLS 1.2 PSK through Bouncy Castle.
+  2D titles use `smooth-motion-2d` (the same pass, mono) and, on an HDR display,
+  `ai-hdr` (gain grid into a PQ window); one coordinator player name per
+  workload. The AI 3D depth warp exists but isn't wired: no AI 3D presentation yet.
 
 ## Device-proven details to preserve
 

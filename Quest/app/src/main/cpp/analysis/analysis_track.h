@@ -112,6 +112,11 @@ public:
        scaled. */
     Error values(const Record& record, std::vector<float>& out) const;
 
+    /* The record's raw samples (little-endian, as stored), inflated with the
+       deltas undone, before scale and offset: a uint8 depth map's bytes go
+       into a texture as they are. */
+    Error raw(const Record& record, std::vector<uint8_t>& out) const;
+
 private:
     std::vector<uint8_t> data_;
     std::string header_json_;
@@ -138,6 +143,27 @@ struct SharedFields {
     std::vector<uint16_t> disparity1;
 };
 
+/* A `depth` record (the ai-3d-depth workload): the picture's shot-space
+   inverse depth before the depth budget, one uint8 channel at the model's
+   size; a sample is byte * scale + offset (VergenceApple's
+   OfflineDepthConversion.depthRecord). */
+struct DepthMap {
+    int width = 0;
+    int height = 0;
+    float scale = 1;
+    float offset = 0;
+    std::vector<uint8_t> bytes;
+};
+
+/* A `gainMap` record in VergenceCore's pinned GainGrid layout (the ai-hdr
+   workload): eye mono, 8 channels (luma bins) of 16 x 9 cells, log2 of the
+   linear gain, planar bin by bin, rows top first: exactly a 16 x 9 x 8 3D
+   texture. As half floats. */
+constexpr int kGainGridWidth = 16;
+constexpr int kGainGridHeight = 9;
+constexpr int kGainGridBins = 8;
+constexpr int kGainGridCount = kGainGridWidth * kGainGridHeight * kGainGridBins;
+
 /* One title's chunks, held around the playhead. Thread safe: the fetcher puts
    chunks on its own thread while the renderer looks fields up on the GL one. */
 class ChunkStore {
@@ -156,8 +182,16 @@ public:
     bool holds(int index) const;
 
     /* The fields for the real frames at `start` and `end` (seconds on the
-       track's timeline), or false when the records aren't here. */
-    bool shared_fields(double start, double end, SharedFields& out);
+       track's timeline), or false when the records aren't here. A 2D track
+       (smooth-motion-2d) has flow pairs only: `needs_disparity` false leaves
+       the disparity empty. */
+    bool shared_fields(double start, double end, SharedFields& out, bool needs_disparity = true);
+
+    /* The frame's depth map within `tolerance` seconds (half a frame). */
+    bool depth(double seconds, double tolerance, DepthMap& out);
+
+    /* The frame's gain grid within `tolerance` seconds, as kGainGridCount half floats. */
+    bool gain_grid(double seconds, double tolerance, std::vector<uint16_t>& out);
 
     /* For a miss's log line: how far the nearest flow pair is from `seconds`,
        in seconds, or NaN when none is within 5 s. */

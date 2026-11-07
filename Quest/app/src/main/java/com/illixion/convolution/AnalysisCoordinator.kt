@@ -62,6 +62,15 @@ object AnalysisSettings {
     fun smoothMotion(context: Context) = prefs(context).getBoolean("smoothMotion", true)
     fun setSmoothMotion(context: Context, on: Boolean) { prefs(context).edit().putBoolean("smoothMotion", on).apply() }
 
+    /** AI HDR for 2D titles (the ai-hdr workload); it shows only on an HDR display. */
+    fun aiHdr(context: Context) = prefs(context).getBoolean("aiHdr", true)
+    fun setAiHdr(context: Context, on: Boolean) { prefs(context).edit().putBoolean("aiHdr", on).apply() }
+
+    /** Whether the headset's display reports HDR (Quest 3's panels don't, as far as known: then AI HDR stays off). */
+    fun displayIsHdr(context: Context): Boolean =
+        context.getSystemService(android.hardware.display.DisplayManager::class.java)
+            ?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.isHdr == true
+
     /** The configured coordinator, or null when there is none (or its secret can't be opened). Call off the main thread. */
     fun current(context: Context): CoordinatorConfig? {
         val prefs = prefs(context)
@@ -154,31 +163,38 @@ class CoordinatorClient(private val config: CoordinatorConfig) {
     fun healthy(): Boolean = send("GET", "/v1/health").status == 200
 
     /**
-     * Says where this Quest is playing a Jellyfin item: queues the title and
-     * puts the pieces around [seconds] first. Throws for a title it won't
-     * work on (not stereo, a server it doesn't know).
+     * The coordinator keeps one playhead per player name, so each workload a
+     * title plays with reports as a player of its own.
      */
-    fun playing(itemId: String, seconds: Double, rate: Double = 1.0): Status {
-        val response = postPlaying(JSONObject().put("server", "jellyfin").put("id", itemId).put("workload", SMOOTH_MOTION_3D)
-            .put("seconds", Math.max(seconds, 0.0)).put("rate", rate).put("player", config.player))
+    private fun player(workload: String) = "${config.player}/$workload"
+
+    /**
+     * Says where this Quest is playing a Jellyfin item for [workload]: queues
+     * the title and puts the pieces around [seconds] first. Throws for a title
+     * the workload doesn't take (a 3D workload for a 2D title, a server it
+     * doesn't know).
+     */
+    fun playing(itemId: String, seconds: Double, workload: String, rate: Double = 1.0): Status {
+        val response = postPlaying(JSONObject().put("server", "jellyfin").put("id", itemId).put("workload", workload)
+            .put("seconds", Math.max(seconds, 0.0)).put("rate", rate).put("player", player(workload)))
         if (response.status != 200) throw HttpFailure(response.status)
         val json = JSONObject(String(response.body, Charsets.UTF_8))
         return Status(json.optString("state"), json.optDouble("chunkSeconds", 0.0), json.optInt("chunks"),
             json.optDouble("frameRate", 0.0), json.optInt("piecesDone"), json.optInt("pieces"))
     }
 
-    /** This Quest stopped playing. */
-    fun stopped() {
+    /** This Quest stopped playing with [workload]. */
+    fun stopped(workload: String) {
         try {
             postPlaying(JSONObject().put("server", "jellyfin").put("id", "").put("seconds", 0)
-                .put("player", config.player).put("stopped", true))
+                .put("player", player(workload)).put("stopped", true))
         } catch (_: Exception) { }
     }
 
-    /** Chunk [index] of an item's Smooth Motion track, whole or partial; null when none of it is ready (404). */
-    fun chunk(itemId: String, index: Int): Pair<ByteArray, Boolean>? {
+    /** Chunk [index] of an item's [workload] track, whole or partial; null when none of it is ready (404). */
+    fun chunk(itemId: String, index: Int, workload: String): Pair<ByteArray, Boolean>? {
         val id = URLEncoder.encode(itemId, "UTF-8")
-        val response = send("GET", "/v1/titles/jellyfin/$id/$SMOOTH_MOTION_3D/chunks/$index")
+        val response = send("GET", "/v1/titles/jellyfin/$id/$workload/chunks/$index")
         return when (response.status) {
             200 -> response.body to (response.headers["vergence-chunk-complete"] != "false")
             404 -> null
@@ -188,18 +204,29 @@ class CoordinatorClient(private val config: CoordinatorConfig) {
 
     fun close() { channel?.close() }
 
-    companion object { const val SMOOTH_MOTION_3D = "smooth-motion-3d" }
+    companion object {
+        /** Packed 3D titles: the left eye's flow and each frame's disparity. */
+        const val SMOOTH_MOTION_3D = "smooth-motion-3d"
+        /** 2D titles: the whole picture's flow pairs. */
+        const val SMOOTH_MOTION_2D = "smooth-motion-2d"
+        /** 2D titles played as AI 3D: each frame's depth. */
+        const val AI_3D_DEPTH = "ai-3d-depth"
+        /** 2D titles: each frame's AI HDR gain grid. */
+        const val AI_HDR = "ai-hdr"
+    }
 }
 
 /**
- * One title's Smooth Motion track from the coordinator while it plays: the
- * chunks around the playhead in the native store, the playhead reported as
- * it moves. The renderer calls [noteDemand] for each new real frame and
- * [fields] for each pair it interpolates; fetching runs on its own thread.
+ * One title's track for one workload from the coordinator while it plays:
+ * the chunks around the playhead in the native store, the playhead reported
+ * as it moves. The renderer calls [noteDemand] for each new real frame, and
+ * [fields], [depth] or [gainGrid] for what its pass needs; fetching runs on
+ * its own threads.
  */
 class AnalysisTrackStream private constructor(
     private val client: CoordinatorClient,
     private val itemId: String,
+    val workload: String,
     val status: CoordinatorClient.Status,
     startSeconds: Double,
 ) {
@@ -230,7 +257,7 @@ class AnalysisTrackStream private constructor(
             if (report) reporting = true
         }
         if (report) io.execute {
-            try { client.playing(itemId, seconds) } catch (e: Exception) { Log.i(TAG, "playhead_report_failed error=${e.javaClass.simpleName}") }
+            try { client.playing(itemId, seconds, workload) } catch (e: Exception) { Log.i(TAG, "playhead_report_failed error=${e.javaClass.simpleName}") }
             synchronized(window) { reporting = false }
         }
         schedule()
@@ -244,7 +271,7 @@ class AnalysisTrackStream private constructor(
     private fun fetch(n: Int) {
         var success = false; var complete = false; var bytes: ByteArray? = null
         try {
-            val result = client.chunk(itemId, n)
+            val result = client.chunk(itemId, n, workload)
             if (result != null) { bytes = result.first; complete = result.second; success = true }
         } catch (e: Exception) {
             Log.i(TAG, "chunk_failed index=$n error=${e.javaClass.simpleName}")
@@ -254,7 +281,7 @@ class AnalysisTrackStream private constructor(
         if (keep && bytes != null) {
             val error = synchronized(storeLock) { if (store != 0L) AnalysisNative.storePut(store, n, bytes, complete) else 0 }
             if (error != 0) Log.w(TAG, "chunk_unreadable index=$n error=$error")
-            else if (!loggedFirst) { loggedFirst = true; Log.i(TAG, "first_chunk index=$n of=${status.chunks} complete=$complete") }
+            else if (!loggedFirst) { loggedFirst = true; Log.i(TAG, "first_chunk workload=$workload index=$n of=${status.chunks} complete=$complete") }
         }
         schedule()
     }
@@ -272,12 +299,13 @@ class AnalysisTrackStream private constructor(
     /** Called on the GL thread only. */
     fun fields(start: Double, end: Double): Fields? {
         if (closed.get()) return null
-        var result = synchronized(storeLock) { AnalysisNative.storeFields(store, start, end, flow, mask, disparity0, disparity1, dims) }
+        val needsDisparity = workload == CoordinatorClient.SMOOTH_MOTION_3D
+        var result = synchronized(storeLock) { AnalysisNative.storeFields(store, start, end, flow, mask, disparity0, disparity1, dims, needsDisparity) }
         if (result == -1) {
             fun direct(bytes: Int) = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder())
             flow = direct(dims[0] * dims[1] * 8); mask = direct(dims[0] * dims[1] * 2)
             disparity0 = direct(dims[2] * dims[3] * 2); disparity1 = direct(dims[2] * dims[3] * 2)
-            result = synchronized(storeLock) { AnalysisNative.storeFields(store, start, end, flow, mask, disparity0, disparity1, dims) }
+            result = synchronized(storeLock) { AnalysisNative.storeFields(store, start, end, flow, mask, disparity0, disparity1, dims, needsDisparity) }
         }
         if (result != 1) {
             misses++
@@ -294,9 +322,43 @@ class AnalysisTrackStream private constructor(
         return Fields(dims[0], dims[1], flow, mask, dims[2], dims[3], disparity0, disparity1)
     }
 
+    /** Half a frame at the title's rate: how near a depth map's or gain grid's time must be. */
+    private val halfFrame = 0.5 / (if (status.frameRate > 1) status.frameRate else 24.0)
+
+    /** A frame's depth map (ai-3d-depth); its bytes buffer is reused. */
+    class Depth(val width: Int, val height: Int, val scale: Float, val offset: Float, val bytes: ByteBuffer)
+    private var depthBytes: ByteBuffer = ByteBuffer.allocateDirect(0)
+    private val depthInfo = IntArray(2)
+    private val depthMapping = FloatArray(2)
+
+    /** The depth map for the frame at [seconds], or null. GL thread only. */
+    fun depth(seconds: Double): Depth? {
+        if (closed.get()) return null
+        noteDemand(seconds)
+        var result = synchronized(storeLock) { AnalysisNative.storeDepth(store, seconds, halfFrame, depthBytes, depthInfo, depthMapping) }
+        if (result == -1) {
+            depthBytes = ByteBuffer.allocateDirect(depthInfo[0] * depthInfo[1])
+            result = synchronized(storeLock) { AnalysisNative.storeDepth(store, seconds, halfFrame, depthBytes, depthInfo, depthMapping) }
+        }
+        if (result != 1) return null
+        depthBytes.rewind()
+        return Depth(depthInfo[0], depthInfo[1], depthMapping[0], depthMapping[1], depthBytes)
+    }
+
+    private val gridBytes: ByteBuffer = ByteBuffer.allocateDirect(16 * 9 * 8 * 2).order(ByteOrder.nativeOrder())
+
+    /** The frame's gain grid (16x9x8 half floats) at [seconds], or null. GL thread only; the buffer is reused. */
+    fun gainGrid(seconds: Double): ByteBuffer? {
+        if (closed.get()) return null
+        val found = synchronized(storeLock) { AnalysisNative.storeGainGrid(store, seconds, halfFrame, gridBytes) } == 1
+        if (!found) return null
+        gridBytes.rewind()
+        return gridBytes
+    }
+
     fun close() {
         if (!closed.compareAndSet(false, true)) return
-        io.execute { client.stopped(); client.close() }
+        io.execute { client.stopped(workload); client.close() }
         io.shutdown()
         synchronized(storeLock) { AnalysisNative.storeDestroy(store); store = 0 }
     }
@@ -306,17 +368,17 @@ class AnalysisTrackStream private constructor(
          * Asks the coordinator for [itemId] at [startSeconds]; null when there
          * is no coordinator or it won't work on the title. Blocking.
          */
-        fun open(context: Context, itemId: String, startSeconds: Double): AnalysisTrackStream? {
+        fun open(context: Context, itemId: String, startSeconds: Double, workload: String): AnalysisTrackStream? {
             val config = AnalysisSettings.current(context) ?: return null
             val client = CoordinatorClient(config)
-            val status = try { client.playing(itemId, startSeconds) } catch (e: Exception) {
+            val status = try { client.playing(itemId, startSeconds, workload) } catch (e: Exception) {
                 // Not a title it works on (2D, a disc), or the coordinator is away.
-                Log.i(TAG, "no_coordinator_track error=${e.javaClass.simpleName}${(e as? CoordinatorClient.HttpFailure)?.let { " status=" + it.status } ?: ""}")
+                Log.i(TAG, "no_coordinator_track workload=$workload error=${e.javaClass.simpleName}${(e as? CoordinatorClient.HttpFailure)?.let { " status=" + it.status } ?: ""}")
                 return null
             }
             if (status.chunks <= 0 || status.chunkSeconds <= 0) return null
-            Log.i(TAG, "coordinator_track state=${status.state} pieces=${status.piecesDone}/${status.pieces} chunks=${status.chunks} fps=${"%.3f".format(status.frameRate)}")
-            return AnalysisTrackStream(client, itemId, status, startSeconds)
+            Log.i(TAG, "coordinator_track workload=$workload state=${status.state} pieces=${status.piecesDone}/${status.pieces} chunks=${status.chunks} fps=${"%.3f".format(status.frameRate)}")
+            return AnalysisTrackStream(client, itemId, workload, status, startSeconds)
         }
     }
 }
