@@ -334,6 +334,40 @@ which a live player can't do.
   non-commercial only. If so, offer them only as an opt-in download with the licence shown, never
   bundled.
 
+#### Upscaling (built 2026-11-07)
+
+Asked for with a real case: a full side-by-side 3D film at 720×400 per eye (H.264, 7.8 Mbps, AC-3
+5.1, MKV) to watch on a headset. `convert --upscale 2x` in both converters (same flags and lines),
+and "Upscale 2×" plus a "2D (upscale only)" layout in the desktop app:
+- **2D source:** upscaled, then AI 3D as before (depth still at the source's size), or upscaled only
+  (`--layout 2d`, `VIDEO.2x.mp4`).
+- **Side-by-side / top-and-bottom source** (declared, named, or on the Mac seen in its picture;
+  `--input-layout` says it): each eye upscaled, no depth, packed in any output layout
+  (`VIDEO.2x.3D.FSBS.mp4`).
+- **Model:** Real-ESRGAN's compact `realesr-general-x4v3` (BSD-3), run at 4× and averaged to 2×.
+  Vergence ships no weights: `--download-model` fetches the authors' `.pth` (pinned SHA-256), and
+  each converter writes the network itself from it, no Python (Core ML spec on the Mac, compiled
+  once per size, batch split between the Neural Engine and the GPU; an ONNX graph on the PC).
+- **Stereo-consistent:** the eyes' fine detail is pulled halfway together where block-matched
+  disparity (SAD, left-right check) is sure, held to ±10 code values.
+- **Measured** on two 10 s clips of that film against Lanczos (detail = high-pass energy;
+  disagreement = detail difference after warping right onto left by an independent optical flow;
+  flicker = along temporal flow): the general network adds 36–48 % detail with 23–29 % more L/R
+  disagreement and 23–36 % more flicker; fused, disagreement drops to 0.92–1.20× Lanczos for 2–4 %
+  less detail. `animevideov3` (BSD-3): +13–26 % detail, no more disagreement or flicker than
+  Lanczos, twice as fast. RRDB x2plus/x4plus: slower (4–12×), more flicker. RealBasicVSR (Apache-2.0
+  code, video model): most detail but up to 2× the disagreement and flicker, 10× slower.
+- **Speed:** M2 Max 9.3 fps for a 720×400 3D pair; RTX 3080 PC 6.9 fps (DirectML), the CPU fusion
+  setting the pace.
+- **Repeated frames:** that film repeats one frame in five (NTSC pulldown retimed to 31.24 fps to
+  fit PAL audio). Every `convert` now detects this and drops one in five (the Mac's own picker,
+  ffmpeg `decimate` on the PC), writing 24.99 fps in sync with the audio; `--keep-repeated-frames`
+  keeps them.
+- **Not done:** temporal stabilisation (a flow-warped detail blend cut flicker by a third in the
+  experiment but needs flow per frame); the fusion on the PC's GPU (it is CPU-bound); a stereo SR
+  network (NAFSSR is trained on clean bicubic downscaling, not compressed video); upscaling MV-HEVC
+  sources; picture-based 3D detection in the Rust converter (it goes by metadata and name).
+
 ### AI HDR for video, in short (proposed 2026-11-07; built from workers, not yet on a headset)
 
 It is meant to work on a Vision Pro alone too, with workers as a quality upgrade.
@@ -391,6 +425,7 @@ It is meant to work on a Vision Pro alone too, with workers as a quality upgrade
 | 5. `vergence convert` | Built: all layouts, HDR kept, audio copied, resume, depth track. No subtitles, no Smooth Motion bake | vergence 0607bc0 |
 | 6. ONNX worker | Built and run on a Windows PC with an RTX 3080 against a coordinator on the Mac: CUDA, TensorRT and DirectML each made a whole title, 47–55 fps for 1080p 3D pieces, records matching Core ML's (Question 3). It yields for real there: a game, an app launched through Sunshine, SteamVR or another program keeping the GPU busy makes it give back its piece and unload its models; a desktop stream alone doesn't (the user's call). The 2D workloads too (2D flow, AI 3D depth through the converter's Rust depth pipeline, AI HDR with GMNet exported to ONNX), 2D flow and AI HDR under their own ONNX profiles, depth under one shared with the Mac worker (Small and Base; a Mac and the PC split a title): on the 3080, 2D flow 58 fps (TensorRT), depth 13 fps of title (CUDA), AI HDR 59 fps (CUDA), matching the Core ML worker's chunks (Question 3) | vergence `worker/` (2a7892b), ab2ffbc, 5f870d3, 44c3b73, 79d3dff, 0822638, 8c92b4b |
 | 6. Windows converter | Built: `vergence-convert`, the same flags, names, output lines and progress as `vergence convert` (so the desktop app runs either), ONNX depth, the refinement ported to Rust, a wgpu warp, NVENC. Within 49 dB PSNR, SSIM 0.985 of the Mac's output per eye (tolerance 40 dB, 0.97). No spatial video, no HDR10 mastering metadata through NVENC (x265 keeps it) | vergence `convert/` (99539a1), 876a7bd, 03cd136 |
+| 5/6. Upscaling in convert | Built on both converters: `--upscale 2x` (Real-ESRGAN compact, weights fetched, network written without Python), 3D sources eye by eye with the eyes' detail fused, `--layout 2d`, pulldown repeats dropped; desktop app option. Checked against PyTorch on a fixture net (Core ML and ONNX), Mac vs PC copies at 40–43 dB. Not watched on a headset yet | vergence afe0b10, e54c438, 2986334 |
 | 7. More kinds | Built on the Mac, three workloads, each checked end to end against the dev Jellyfin (a coordinator's chunks against the worker's own whole-file run). **`smooth-motion-2d`**: RIFE 4.25 lite 960×576 on the GPU, flow stored at 240×144; chunks identical to the whole-file run; the Vision Pro reads it for 2D Library titles (flat and AI 3D, film player AI 3D too) through a fields-first mono pass that leaves uncovered pairs to the device's interpolator. **`ai-3d-depth`**: the offline depth pipeline per piece (a second of context before it) with Depth Anything V2 Small at 770×574; chunks within 0.005 mean, 0.05 max (shot-space units) of a whole-file conversion; the Vision Pro warps it in real-time AI 3D and runs its own model only for frames it lacks. **`ai-hdr`**: GMNet on keyframes (0.5 s and cuts) fitted to the pinned grid, eased within shots; chunks identical; used in the players behind Settings › AI HDR for Videos: the flat player's final pass into EDR and AI 3D's eyes as BT.2020 PQ, ramped in, capped, stepped down after interpolation, snapped at cuts (checked through the pump on the visionOS simulator). The ONNX worker makes all three too (row 6). Not done: any headset run | vergence 352dd73, 3e20c96, 308f15e, 39c4240; Hypnos 9ec9b9d, 2178727, 964a8b5; RAVESDK b6ab5e6, a4e89b4, 9ea391e |
 | 8. Quest | Built, not run on a headset. Pairs by the six-digit code (NSD, a typed address or link) and keeps the token in the Keystore, or takes an HTTP address and token; talks over the paired TLS-PSK channel (Bouncy Castle) or HTTP; reports the playhead per workload, reads partial chunks (VGAT in C++). GLES 3 passes: the shared field at the display's rate for 3D titles and its mono form for 2D ones (`smooth-motion-2d`); the gain-grid lookup with the cap into a BT.2020 PQ window, asked for (`ai-hdr`) only when the display reports HDR; the AI 3D mesh warp, built but not wired, as the Quest has no AI 3D presentation yet (so no `ai-3d-depth` requests). Tested off the headset against VergenceCore and vergence-worker tracks, the Mac worker's 2D-flow, depth and gain tracks, vergence-companion's vectors and a real `vergenced` over TLS-PSK. The desktop app announces `_vergence-pair._tcp` while pairing on macOS, Linux and Windows | Hypnos 1cc42b1, 857297a; vergence 6a80077 (b7d8f28 on Windows); Controller Bridge 4ed9722 |
 | 9. Plugin | Routes pass through to a coordinator; the nightly task queues there | Hypnos 16640ed |
