@@ -328,12 +328,12 @@ struct SkipVoteButtons: View {
     let onVote: (Bool) -> Void
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 12) {
             VoteGlyphButton(up: true, isSelected: vote == 1, onVote: onVote)
             VoteGlyphButton(up: false, isSelected: vote == 0, onVote: onVote)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
         .background(.regularMaterial, in: Capsule())
     }
 }
@@ -353,8 +353,9 @@ private struct VoteGlyphButton: View {
     var body: some View {
         Button { onVote(up) } label: {
             Image(systemName: symbol)
-                .font(.headline)
-                .frame(width: 34, height: 30)
+                .font(.title2)
+                .frame(width: 60, height: 56)
+                .contentShape(Rectangle())
                 .contentTransition(.symbolEffect(.replace))
         }
         .buttonStyle(.plain)
@@ -375,12 +376,12 @@ struct SkipFeedbackBar: View {
     let onVote: (Bool) -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 18) {
             Text("Was that skip right?").font(.headline).foregroundStyle(.secondary)
             SkipVoteButtons(vote: vote, onVote: onVote)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 8)
         .background(.regularMaterial, in: Capsule())
         .id(feedback.id)
         .transition(.opacity.combined(with: .scale(scale: 0.9)))
