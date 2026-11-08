@@ -415,8 +415,8 @@ struct VideoWindowView: View {
             }
             .animation(.easeInOut(duration: 0.2), value: ornamentPrompt == nil)
             .animation(.easeInOut(duration: 0.2), value: windowModel.offeredSegment)
-            .animation(.easeInOut(duration: 0.2), value: windowModel.segmentSkipper.feedback)
             .animation(.easeInOut(duration: 0.2), value: windowModel.segmentSkipper.undo)
+            .animation(.easeInOut(duration: 0.2), value: windowModel.segmentSkipper.feedback)
             .animation(.easeInOut(duration: 0.2), value: windowModel.qualityNotice)
             #endif
 
@@ -731,15 +731,16 @@ struct VideoWindowView: View {
 
     /// Undo for the skip just made (a SponsorBlock auto-skip too).
     private var undoSkipButton: UndoSkipButton? {
+        guard let undo = windowModel.segmentSkipper.undo else { return nil }
         #if HYPNOS_YOUTUBE
         if let segmentID = undo.segmentID {
             return UndoSkipButton(undo: undo, vote: windowModel.segmentSkipper.votes[segmentID],
                                   onVote: { windowModel.rateSkippedSegment(up: $0) }) { windowModel.undoSkip() }
         }
         #endif
-        guard let undo = windowModel.segmentSkipper.undo else { return nil }
         return UndoSkipButton(undo: undo) { windowModel.undoSkip() }
     }
+
     /// "Was that skip right?", after an undo.
     private var skipFeedbackBar: SkipFeedbackBar? {
         #if HYPNOS_YOUTUBE
@@ -751,7 +752,6 @@ struct VideoWindowView: View {
         return nil
         #endif
     }
-
 
     /// What hangs under the window outside the controls: Auto's quality
     /// notice, and the skip button or the undo for the last skip, side by

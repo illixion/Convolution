@@ -283,11 +283,11 @@ struct NativeMetalVideoPlayerView {
                 coordinator?.seek(to: time)
             }
             #if HYPNOS_YOUTUBE
-            playbackModel.frameImageCommand = { [weak coordinator] time in
-                await coordinator?.frameImage(at: time, maxWidth: 960)
-            }
             playbackModel.flashbackScanCommand = { [weak coordinator] sensitivity in
                 coordinator?.flashbackCandidates(sensitivity: sensitivity) ?? []
+            }
+            playbackModel.frameImageCommand = { [weak coordinator] time in
+                await coordinator?.frameImage(at: time, maxWidth: 960)
             }
             #endif
             playbackModel.setMutedCommand = { [weak coordinator] muted in
@@ -501,6 +501,12 @@ struct NativeMetalVideoPlayerView {
         }
         private var videoOutput: AVPlayerItemVideoOutput?
 #if HYPNOS_YOUTUBE
+        private var flashbackFrames: [YouTubeFlashbackFrame] = []
+        private var lastFlashbackCaptureTime = -Double.infinity
+
+        func flashbackCandidates(sensitivity: Double) -> [YouTubeFlashbackCandidate] {
+            YouTubeFlashback.candidates(in: flashbackFrames, sensitivity: sensitivity)
+        }
 
         private static let thumbnailContext = CIContext()
 
@@ -522,12 +528,6 @@ struct NativeMetalVideoPlayerView {
                 return Self.thumbnailContext.createCGImage(image, from: image.extent)
             }
             return nil
-        }
-        private var flashbackFrames: [YouTubeFlashbackFrame] = []
-        private var lastFlashbackCaptureTime = -Double.infinity
-
-        func flashbackCandidates(sensitivity: Double) -> [YouTubeFlashbackCandidate] {
-            YouTubeFlashback.candidates(in: flashbackFrames, sensitivity: sensitivity)
         }
 #endif
         private var textureCache: CVMetalTextureCache?
