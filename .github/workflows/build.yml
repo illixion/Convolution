@@ -34,11 +34,16 @@ jobs:
       # anything -- which is how this workflow had been failing since
       # RAVEEngine was first linked.
       #
-      # No credentials, and none would help: all three repos are public, while
+      # Vergence (../../vergence) is a fourth sibling: Hypnos.xcodeproj references
+      # it directly, and RAVESDK leaves RAVEMedia out of its package when
+      # ../vergence is missing. Without it resolution fails with exit 74
+      # ("the package at '.../vergence' cannot be accessed").
+      #
+      # No credentials, and none would help: all four repos are public, while
       # github.token is scoped to this repository alone. If any goes private
       # again this needs a PAT or deploy key in secrets instead.
       #
-      # Deliberately unpinned: the apps track these three at HEAD by design --
+      # Deliberately unpinned: the apps track these at HEAD by design --
       # that is the whole point of a path reference -- so pinning here would
       # make CI test a combination no local build ever sees.
       - name: Clone the shared packages as siblings
@@ -46,6 +51,7 @@ jobs:
           git clone --depth 1 https://github.com/illixion/RAVESDK.git ../RAVESDK
           git clone --depth 1 https://github.com/illixion/RAVEEngine.git ../RAVEEngine
           git clone --depth 1 https://github.com/illixion/DebugTrace.git ../DebugTrace
+          git clone --depth 1 https://github.com/illixion/vergence.git ../vergence
 
       - name: Set build info
         run: ./scripts/set-build-info.sh
