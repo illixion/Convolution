@@ -45,6 +45,8 @@ enum KeychainStore {
         #if HYPNOS_YOUTUBE
         /// The optional YouTube backend's (web-yt-dlp) token.
         case youtubeBackendToken
+        /// This installation's private SponsorBlock id (`SponsorBlockIdentity`).
+        case sponsorBlockUserID
         #endif
     }
 

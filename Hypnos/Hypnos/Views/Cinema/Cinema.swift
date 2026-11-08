@@ -99,6 +99,8 @@ struct CinemaPromptKey: Equatable {
     var notices: [String]
     var segment: LibraryMediaSegment?
     var undo: UUID?
+    /// The rate-it bar after an undo, with the vote on it.
+    var feedback: String? = nil
 }
 
 /// Which player the space is serving.

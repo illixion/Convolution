@@ -18,7 +18,8 @@ import RAVEUI
 struct YouTubeSettingsSection: View {
     @Bindable private var backend = YouTubeBackend.shared
     @State private var tokenDraft = ""
-    @AppStorage(SponsorBlock.enabledKey) private var sponsorBlockEnabled = true
+    @AppStorage(SponsorBlock.enabledKey) private var sponsorBlockEnabled = false
+    @AppStorage(SponsorBlock.serverKey) private var sponsorBlockServer = ""
     @AppStorage(YouTubeQuality.defaultsKey) private var quality: YouTubeQuality = .auto
     @State private var categoryModes: [SponsorBlockCategory: SponsorBlockCategory.Mode] =
         Dictionary(uniqueKeysWithValues: SponsorBlockCategory.allCases.map { ($0, $0.mode) })
@@ -104,6 +105,11 @@ struct YouTubeSettingsSection: View {
         Section {
             Toggle("SponsorBlock", isOn: $sponsorBlockEnabled)
             if sponsorBlockEnabled {
+                TextField("Server (\(SponsorBlock.defaultServer))", text: $sponsorBlockServer)
+                    .autocorrectionDisabled()
+                    #if !os(macOS)
+                    .textInputAutocapitalization(.never)
+                    #endif
                 ForEach(SponsorBlockCategory.allCases) { category in
                     Picker(category.displayName, selection: modeBinding(category)) {
                         ForEach(SponsorBlockCategory.Mode.allCases) { mode in
@@ -113,7 +119,7 @@ struct YouTubeSettingsSection: View {
                 }
             }
         } footer: {
-            Text("Skips sponsor reads and other segments marked by the SponsorBlock community. Only a short prefix of the video's hash is sent, so SponsorBlock can't tell which video you're watching.")
+            Text("Off until you turn it on: nothing is sent to SponsorBlock before then. Skips sponsor reads and other segments marked by the SponsorBlock community. Each lookup sends a short prefix of the video's hash to the server above, so it can't tell which video you're watching. On iPhone, iPad, Mac and Vision Pro the player's menu can also send a segment you timed yourself; that sends the video and a private id this device made, which SponsorBlock keeps with the submission.")
         }
     }
 

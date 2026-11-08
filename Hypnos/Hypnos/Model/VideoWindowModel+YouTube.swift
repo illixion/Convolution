@@ -250,6 +250,26 @@ extension VideoWindowModel {
               let hit = segmentSkipper.autoSkip(at: currentTime) else { return }
         skip(hit.segment, name: hit.label)
     }
+
+    /// Thumbs up or down on the segment just skipped (or just undone). A
+    /// downvote also undoes a skip still on screen, so the viewer lands back
+    /// where it left and can watch what was cut; pressing the same thumb
+    /// again takes the vote back.
+    func rateSkippedSegment(up: Bool) {
+        let skipper = segmentSkipper
+        guard let segmentID = skipper.undo?.segmentID ?? skipper.feedback?.segmentID else { return }
+        let previous = skipper.votes[segmentID]
+        let type = skipper.castVote(up: up, for: segmentID)
+        Task { [weak self] in
+            do {
+                try await SponsorBlock.vote(segmentID: segmentID, type: type)
+            } catch {
+                self?.segmentSkipper.restoreVote(previous, for: segmentID)
+                self?.showQualityNotice(error.localizedDescription)
+            }
+        }
+        if !up, type == 0, skipper.undo != nil { undoSkip() }
+    }
 }
 
 #endif

@@ -8,6 +8,7 @@
 
 import AVFoundation
 import AVKit
+import CoreImage
 import CoreVideo
 import DebugTrace
 import MetalKit
@@ -285,6 +286,9 @@ struct NativeMetalVideoPlayerView {
                 coordinator?.seek(to: time)
             }
             #if HYPNOS_YOUTUBE
+            playbackModel.frameImageCommand = { [weak coordinator] time in
+                await coordinator?.frameImage(at: time, maxWidth: 960)
+            }
             playbackModel.flashbackScanCommand = { [weak coordinator] sensitivity in
                 coordinator?.flashbackCandidates(sensitivity: sensitivity) ?? []
             }
@@ -503,6 +507,28 @@ struct NativeMetalVideoPlayerView {
         }
         private var videoOutput: AVPlayerItemVideoOutput?
 #if HYPNOS_YOUTUBE
+
+        private static let thumbnailContext = CIContext()
+
+        /// The picture at `seconds`, for the SponsorBlock editor: seeks there
+        /// exactly, waits for the frame that follows (it is a new decoded one
+        /// only once `lastFrameSeconds` moves off NaN) and scales it down.
+        /// Nil if no frame arrives in three seconds.
+        func frameImage(at seconds: Double, maxWidth: CGFloat) async -> CGImage? {
+            lastFrameSeconds = .nan
+            seek(to: seconds)
+            let deadline = Date().addingTimeInterval(3)
+            while Date() < deadline {
+                try? await Task.sleep(for: .milliseconds(50))
+                guard lastFrameSeconds.isFinite, abs(lastFrameSeconds - seconds) < 0.5,
+                      let buffer = lastPixelBuffer else { continue }
+                var image = CIImage(cvPixelBuffer: buffer)
+                let scale = min(1, maxWidth / image.extent.width)
+                image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+                return Self.thumbnailContext.createCGImage(image, from: image.extent)
+            }
+            return nil
+        }
         private var flashbackFrames: [YouTubeFlashbackFrame] = []
         private var lastFlashbackCaptureTime = -Double.infinity
 

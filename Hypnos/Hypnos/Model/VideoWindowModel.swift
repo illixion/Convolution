@@ -373,6 +373,9 @@ final class VideoWindowModel {
     @ObservationIgnored var seekCommand: (@MainActor (Double) -> Void)?
 #if HYPNOS_YOUTUBE
     @ObservationIgnored var flashbackScanCommand: (@MainActor (Double) -> [YouTubeFlashbackCandidate])?
+    /// The decoded picture at a time (flat Metal player only), for the
+    /// SponsorBlock editor; nil with no native frames to read.
+    @ObservationIgnored var frameImageCommand: (@MainActor (Double) async -> CGImage?)?
     var flashbackCandidates: [YouTubeFlashbackCandidate] = []
     var flashbackSensitivity: Double = 0.5
     var isScanningFlashbacks = false

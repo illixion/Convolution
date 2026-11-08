@@ -40,10 +40,27 @@ final class MediaSegmentSkipper {
         let title: String
         /// When it can no longer be undone.
         let deadline: Date
+        /// The community server's id for the segment, when it can be voted on (SponsorBlock).
+        var segmentID: String? = nil
+        let id = UUID()
+    }
+
+    /// Asked after an undo, so a segment the viewer went back to watch can still be rated.
+    struct Feedback: Equatable {
+        let segmentID: String
+        let deadline: Date
         let id = UUID()
     }
 
     private(set) var undo: Undo?
+    private(set) var feedback: Feedback?
+    /// The viewer's vote on each segment this session: 1 up, 0 down.
+    private(set) var votes: [String: Int] = [:]
+    /// Which server segment each segment is (SponsorBlock only).
+    @ObservationIgnored var segmentIDs: [LibraryMediaSegment: String] = [:]
+    @ObservationIgnored private var feedbackExpiry: Task<Void, Never>?
+    /// How long the rate-it bar stays after an undo.
+    static let feedbackSeconds: Double = 10
     @ObservationIgnored private var undoExpiry: Task<Void, Never>?
     /// Segments the viewer went back into: not offered again.
     @ObservationIgnored private var declined: Set<LibraryMediaSegment> = []
@@ -92,11 +109,14 @@ final class MediaSegmentSkipper {
         loadedItemId = key
         resetSkips()
         segments = []
+        segmentIDs = [:]
         autoSkipLabels = [:]
         autoSkipped = []
         let loaded = await SponsorBlock.segments(for: id)
         guard loadedItemId == key else { return }
         segments = loaded.map(\.librarySegment).filter(LibrarySegmentSkipPolicy.eligible)
+        segmentIDs = Dictionary(loaded.filter { !$0.uuid.isEmpty }.map { ($0.librarySegment, $0.uuid) },
+                                uniquingKeysWith: { first, _ in first })
         for segment in loaded where segment.category.mode == .auto {
             autoSkipLabels[segment.librarySegment] = segment.category.shortName
         }
@@ -144,8 +164,10 @@ final class MediaSegmentSkipper {
     func noteSkipped(_ segment: LibraryMediaSegment, from time: Double, name: String? = nil) {
         let undo = Undo(segment: segment, returnTo: max(0, min(time, segment.endSeconds)),
                         title: "Skipped \(name ?? segment.name)",
-                        deadline: .now.addingTimeInterval(LibrarySegmentSkipPolicy.undoSeconds))
+                        deadline: .now.addingTimeInterval(LibrarySegmentSkipPolicy.undoSeconds),
+                        segmentID: segmentIDs[segment])
         self.undo = undo
+        feedback = nil
         undoExpiry?.cancel()
         undoExpiry = Task { [weak self] in
             try? await Task.sleep(for: .seconds(LibrarySegmentSkipPolicy.undoSeconds))
@@ -161,12 +183,46 @@ final class MediaSegmentSkipper {
         undoExpiry?.cancel()
         self.undo = nil
         declined.insert(undo.segment)
+        if let segmentID = undo.segmentID { askForFeedback(on: segmentID) }
         return undo.returnTo
     }
 
+    private func askForFeedback(on segmentID: String) {
+        let ask = Feedback(segmentID: segmentID, deadline: .now.addingTimeInterval(Self.feedbackSeconds))
+        feedback = ask
+        feedbackExpiry?.cancel()
+        feedbackExpiry = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.feedbackSeconds))
+            guard !Task.isCancelled, let self, self.feedback?.id == ask.id else { return }
+            self.feedback = nil
+        }
+    }
+
+    func dismissFeedback() {
+        feedbackExpiry?.cancel()
+        feedback = nil
+    }
+
+    /// Records a vote for `segmentID` and returns what to send the server:
+    /// 1 up, 0 down, or 20 to take the same vote back.
+    func castVote(up: Bool, for segmentID: String) -> Int {
+        let value = up ? 1 : 0
+        if votes[segmentID] == value {
+            votes[segmentID] = nil
+            return 20
+        }
+        votes[segmentID] = value
+        return value
+    }
+
+    /// Puts a vote back as it was, when the server refused the change.
+    func restoreVote(_ previous: Int?, for segmentID: String) { votes[segmentID] = previous }
+
     private func resetSkips() {
         undoExpiry?.cancel()
+        feedbackExpiry?.cancel()
         undo = nil
+        feedback = nil
         declined = []
     }
 
@@ -180,10 +236,20 @@ final class MediaSegmentSkipper {
 /// the skip button's, with a ring running down the seconds left to undo it.
 struct UndoSkipButton: View {
     let undo: MediaSegmentSkipper.Undo
+    /// The viewer's vote on this segment, and the handler, for skips that can be rated.
+    var vote: Int? = nil
+    var onVote: ((Bool) -> Void)? = nil
     let action: () -> Void
     @State private var remaining: CGFloat = 1
 
     var body: some View {
+        HStack(spacing: 10) {
+            undoButton
+            if let onVote { SkipVoteButtons(vote: vote, onVote: onVote) }
+        }
+    }
+
+    private var undoButton: some View {
         Button(action: action) {
             HStack(spacing: 10) {
                 ZStack {
@@ -219,6 +285,75 @@ struct UndoSkipButton: View {
         .transition(.opacity.combined(with: .scale(scale: 0.9)))
         .accessibilityLabel("\(undo.title). Undo")
         .accessibilityIdentifier("player.undoSkip")
+    }
+}
+
+/// Thumbs up and down for a skipped segment. A vote shows as the filled
+/// glyph; pressing it again takes the vote back, which the slashed glyph
+/// shows while the pointer is over it.
+struct SkipVoteButtons: View {
+    let vote: Int?
+    let onVote: (Bool) -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            VoteGlyphButton(up: true, isSelected: vote == 1, onVote: onVote)
+            VoteGlyphButton(up: false, isSelected: vote == 0, onVote: onVote)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(.regularMaterial, in: Capsule())
+    }
+}
+
+private struct VoteGlyphButton: View {
+    let up: Bool
+    let isSelected: Bool
+    let onVote: (Bool) -> Void
+    @State private var hovering = false
+
+    private var symbol: String {
+        let base = up ? "hand.thumbsup" : "hand.thumbsdown"
+        if isSelected { return hovering ? base + ".slash.fill" : base + ".fill" }
+        return base
+    }
+
+    var body: some View {
+        Button { onVote(up) } label: {
+            Image(systemName: symbol)
+                .font(.headline)
+                .frame(width: 34, height: 30)
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .buttonStyle(.plain)
+        #if !os(tvOS)
+        .onHover { hovering = $0 }
+        #endif
+        .accessibilityLabel(isSelected ? (up ? "Remove upvote" : "Remove downvote") : (up ? "Upvote segment" : "Downvote segment"))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier(up ? "player.skipVoteUp" : "player.skipVoteDown")
+    }
+}
+
+/// After an undo: "Was that skip right?" with the same thumbs, for a segment
+/// the viewer went back to watch.
+struct SkipFeedbackBar: View {
+    let feedback: MediaSegmentSkipper.Feedback
+    let vote: Int?
+    let onVote: (Bool) -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("Was that skip right?").font(.headline).foregroundStyle(.secondary)
+            SkipVoteButtons(vote: vote, onVote: onVote)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(.regularMaterial, in: Capsule())
+        .id(feedback.id)
+        .transition(.opacity.combined(with: .scale(scale: 0.9)))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("player.skipFeedback")
     }
 }
 

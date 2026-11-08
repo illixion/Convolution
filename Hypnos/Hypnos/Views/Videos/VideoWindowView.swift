@@ -416,6 +416,7 @@ struct VideoWindowView: View {
             }
             .animation(.easeInOut(duration: 0.2), value: ornamentPrompt == nil)
             .animation(.easeInOut(duration: 0.2), value: windowModel.offeredSegment)
+            .animation(.easeInOut(duration: 0.2), value: windowModel.segmentSkipper.feedback)
             .animation(.easeInOut(duration: 0.2), value: windowModel.segmentSkipper.undo)
             .animation(.easeInOut(duration: 0.2), value: windowModel.qualityNotice)
             #endif
@@ -731,9 +732,27 @@ struct VideoWindowView: View {
 
     /// Undo for the skip just made (a SponsorBlock auto-skip too).
     private var undoSkipButton: UndoSkipButton? {
+        #if HYPNOS_YOUTUBE
+        if let segmentID = undo.segmentID {
+            return UndoSkipButton(undo: undo, vote: windowModel.segmentSkipper.votes[segmentID],
+                                  onVote: { windowModel.rateSkippedSegment(up: $0) }) { windowModel.undoSkip() }
+        }
+        #endif
         guard let undo = windowModel.segmentSkipper.undo else { return nil }
         return UndoSkipButton(undo: undo) { windowModel.undoSkip() }
     }
+    /// "Was that skip right?", after an undo.
+    private var skipFeedbackBar: SkipFeedbackBar? {
+        #if HYPNOS_YOUTUBE
+        guard let feedback = windowModel.segmentSkipper.feedback else { return nil }
+        return SkipFeedbackBar(feedback: feedback, vote: windowModel.segmentSkipper.votes[feedback.segmentID]) {
+            windowModel.rateSkippedSegment(up: $0)
+        }
+        #else
+        return nil
+        #endif
+    }
+
 
     /// What hangs under the window outside the controls: Auto's quality
     /// notice, and the skip button or the undo for the last skip, side by
@@ -743,10 +762,11 @@ struct VideoWindowView: View {
         let notice = windowModel.qualityNotice
         let skip = skipSegmentButton
         let undo = undoSkipButton
-        guard notice != nil || skip != nil || undo != nil else { return nil }
+        let feedback = skipFeedbackBar
+        guard notice != nil || skip != nil || undo != nil || feedback != nil else { return nil }
         return AnyView(HStack(spacing: 12) {
             notice.map { StreamQualityNotice(text: $0) }
-            if let skip { skip } else { undo }
+            if let skip { skip } else if let undo { undo } else { feedback }
         })
     }
 
@@ -756,7 +776,12 @@ struct VideoWindowView: View {
         CinemaPromptKey(inHUD: Cinema.shared.mode(for: .video(ObjectIdentifier(windowModel))) == .hud,
                         notices: [windowModel.qualityNotice].compactMap { $0 },
                         segment: windowModel.offeredSegment,
-                        undo: windowModel.segmentSkipper.undo?.id)
+                        undo: windowModel.segmentSkipper.undo?.id,
+                        feedback: windowModel.segmentSkipper.feedback.map {
+                            "\($0.id)|\(windowModel.segmentSkipper.votes[$0.segmentID].map(String.init) ?? "-")"
+                        } ?? windowModel.segmentSkipper.undo?.segmentID.map {
+                            "u|\(windowModel.segmentSkipper.votes[$0].map(String.init) ?? "-")"
+                        })
     }
     #endif
 

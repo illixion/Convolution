@@ -37,6 +37,7 @@ struct VideoOrnamentsView: View {
     @State private var depthModels = DepthModelManager.shared
 #if HYPNOS_YOUTUBE && !os(tvOS)
     @State private var showingFlashbacks = false
+    @State private var showingSponsorBlockSubmit = false
 #endif
     #if !os(visionOS)
     /// Set while the ornament's horizontal scroller is being dragged; see
@@ -58,6 +59,7 @@ struct VideoOrnamentsView: View {
             .environment(\.playerChoiceDismissal, windowModel.menuDismissals)
 #if HYPNOS_YOUTUBE && !os(tvOS)
             .sheet(isPresented: $showingFlashbacks) { flashbackSheet }
+            .sheet(isPresented: $showingSponsorBlockSubmit) { SponsorBlockSubmitSheet(windowModel: windowModel) }
 #endif
     }
 
@@ -158,6 +160,13 @@ struct VideoOrnamentsView: View {
            !windowModel.shouldUsePseudo3D, !windowModel.shouldUse3DMode {
             PlayerPopoverSectionHeader("Find")
             flashbackButton
+            Divider()
+        }
+        if windowModel.youTubeID != nil, SponsorBlock.isEnabled {
+            PlayerPopoverSectionHeader("SponsorBlock")
+            Button { showingSponsorBlockSubmit = true } label: {
+                Label("Submit a Segment…", systemImage: "scissors")
+            }
             Divider()
         }
 #endif
