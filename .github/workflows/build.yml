@@ -14,7 +14,11 @@ on:
 
 jobs:
   build:
-    runs-on: macos-26
+    # xcode-27 is GitHub's macOS 27 image (public preview, no SLA; there is no macos-27 label yet).
+    # The app and its sibling packages use version 27 SDK APIs (MetricKit's MetricManager, frame
+    # interpolation limits, HLS sample buffer outputs), which the Xcode 26.x on macos-26 cannot
+    # compile, so this is the runner that builds the full app. Move to macos-27 once it reaches GA.
+    runs-on: xcode-27
     permissions:
       contents: write
     steps:
@@ -23,7 +27,7 @@ jobs:
           fetch-depth: 0
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_26.4.app/Contents/Developer
+        run: sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
 
       # RAVESDK, RAVEEngine and DebugTrace are local Swift package path references
       # (../../RAVESDK, ../../RAVEEngine, ../../DebugTrace relative to Hypnos.xcodeproj), so
