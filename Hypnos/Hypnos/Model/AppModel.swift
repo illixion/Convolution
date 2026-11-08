@@ -1009,34 +1009,6 @@ class AppModel {
     }
     static let aiHDRVideosKey = "aiHDRVideos"
 
-    /// Which interpolator Smooth Motion uses for a flat 2D video
-    /// (`NativeMetalVideoPlayerView`). Automatic: VideoToolbox's for 24-30 fps,
-    /// the GPU one (Vergence's `FlowMidFrameInterpolator`) for 50-60 fps, which
-    /// VideoToolbox is too slow to double. GPU: the GPU one for every rate, to
-    /// compare the two on 24-30 fps. AI 3D has its own (`ai3DSmoothMotionEngine`).
-    var smoothMotionEngine: SmoothMotionEngine {
-        didSet {
-            if smoothMotionEngine != oldValue {
-                UserDefaults.standard.set(smoothMotionEngine.rawValue, forKey: Self.smoothMotionEngineKey)
-            }
-        }
-    }
-    static let smoothMotionEngineKey = "smoothMotionEngine"
-
-    /// Which interpolator Smooth Motion uses in AI 3D (24-30 fps sources).
-    /// Automatic: VideoToolbox's, which shares the Neural Engine with the
-    /// depth model. GPU: Vergence's `FlowMidFrameInterpolator`, whose frames
-    /// carry their motion, so each in-between frame's depth is the previous
-    /// frame's moved along it instead of reused as it was.
-    var ai3DSmoothMotionEngine: SmoothMotionEngine {
-        didSet {
-            if ai3DSmoothMotionEngine != oldValue {
-                UserDefaults.standard.set(ai3DSmoothMotionEngine.rawValue, forKey: Self.ai3DSmoothMotionEngineKey)
-            }
-        }
-    }
-    static let ai3DSmoothMotionEngineKey = "ai3DSmoothMotionEngine"
-
     /// When true (default), videos open with audio muted; autoplay always
     /// starts playback either way. Off = videos open with sound. Applies to
     /// the video player windows and the gallery long-press quick look.
@@ -1551,10 +1523,10 @@ class AppModel {
         let loadedStableDepth = loadBool(DepthRefinement.enabledDefaultsKey, default: true)
         let loadedSmoothMotion = loadBool(Self.smoothMotionKey, default: false)
         let loadedAIHDRVideos = loadBool(Self.aiHDRVideosKey, default: false)
-        let loadedSmoothMotionEngine = UserDefaults.standard.string(forKey: Self.smoothMotionEngineKey)
-            .flatMap(SmoothMotionEngine.init(rawValue:)) ?? .automatic
-        let loadedAI3DSmoothMotionEngine = UserDefaults.standard.string(forKey: Self.ai3DSmoothMotionEngineKey)
-            .flatMap(SmoothMotionEngine.init(rawValue:)) ?? .automatic
+        // Smooth Motion's interpolator choices are gone (2026-11-08): it
+        // picks by the picture's rate. Forget what they were set to.
+        UserDefaults.standard.removeObject(forKey: "smoothMotionEngine")
+        UserDefaults.standard.removeObject(forKey: "ai3DSmoothMotionEngine")
         let loadedVideoAutoplayMuted = loadBool("videoAutoplayMuted", default: true)
 
         // Load default image viewing mode (default: 2D / mono)
@@ -1675,8 +1647,6 @@ class AppModel {
         self.stableDepth = loadedStableDepth
         self.smoothMotion = loadedSmoothMotion
         self.aiHDRVideos = loadedAIHDRVideos
-        self.smoothMotionEngine = loadedSmoothMotionEngine
-        self.ai3DSmoothMotionEngine = loadedAI3DSmoothMotionEngine
         self.videoAutoplayMuted = loadedVideoAutoplayMuted
         self.rememberImageEnhancements = loadedRememberImageEnhancements
         self.autoRestoreSpatial3D = loadedAutoRestoreSpatial3D
@@ -2510,8 +2480,6 @@ class AppModel {
             defaultRealtimePseudo3D: defaultRealtimePseudo3D,
             stableDepth: stableDepth,
             smoothMotion: smoothMotion,
-            smoothMotionEngine: smoothMotionEngine.rawValue,
-            ai3DSmoothMotionEngine: ai3DSmoothMotionEngine.rawValue,
             videoAutoplayMuted: videoAutoplayMuted,
             useLossyTextureCompression: useLossyTextureCompression,
             globalPseudo3DSettings: try? JSONEncoder().encode(globalPseudo3DSettings),
@@ -2562,8 +2530,6 @@ class AppModel {
         if let v = backup.defaultRealtimePseudo3D { defaultRealtimePseudo3D = v }
         if let v = backup.stableDepth { stableDepth = v }
         if let v = backup.smoothMotion { smoothMotion = v }
-        if let v = backup.smoothMotionEngine.flatMap(SmoothMotionEngine.init(rawValue:)) { smoothMotionEngine = v }
-        if let v = backup.ai3DSmoothMotionEngine.flatMap(SmoothMotionEngine.init(rawValue:)) { ai3DSmoothMotionEngine = v }
         if let v = backup.videoAutoplayMuted { videoAutoplayMuted = v }
         if let v = backup.useLossyTextureCompression { useLossyTextureCompression = v }
         if let data = backup.globalPseudo3DSettings,

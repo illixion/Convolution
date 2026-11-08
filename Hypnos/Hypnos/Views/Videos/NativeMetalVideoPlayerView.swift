@@ -207,10 +207,8 @@ struct NativeMetalVideoPlayerView {
     /// Smooth Motion: an in-between frame for each pair of a 24-30 or 50-60
     /// fps SDR picture (visionOS; see the coordinator's `rebuildFramePresenter`).
     var interpolatesFrames: Bool = false
-    /// Which interpolator Smooth Motion uses (Settings › Videos).
-    var interpolationEngine: SmoothMotionEngine = .automatic
     /// A 2D Library title's fields from an analysis coordinator: pairs they
-    /// cover are made from them, the rest by `interpolationEngine`.
+    /// cover are made from them, the rest on the device.
     var sharedFields: SharedFieldProvider? = nil
     /// AI HDR for an SDR picture: a worker's gain grids (`ai-hdr`), applied
     /// in the final pass into an EDR drawable. Nil plays SDR as it is.
@@ -259,7 +257,6 @@ struct NativeMetalVideoPlayerView {
         coordinator.startVolume = Float(playbackModel?.volume ?? 1)
         coordinator.speed = Float(playbackModel?.playbackSpeed ?? 1)
         coordinator.loops = loops
-        coordinator.interpolationEngine = interpolationEngine
         coordinator.sharedFields = sharedFields
         coordinator.aiHDR = aiHDR
         coordinator.interpolatesFrames = interpolatesFrames
@@ -407,9 +404,6 @@ struct NativeMetalVideoPlayerView {
         var interpolatesFrames = false {
             // An HDR picture leaves the system layer to be interpolated.
             didSet { if oldValue != interpolatesFrames { updatePresentation(); rebuildFramePresenter() } }
-        }
-        var interpolationEngine: SmoothMotionEngine = .automatic {
-            didSet { if oldValue != interpolationEngine, interpolatesFrames { rebuildFramePresenter() } }
         }
         /// AI HDR's gain grids; arriving or leaving switches the drawable
         /// between plain BGRA and EDR half float.
@@ -1433,9 +1427,9 @@ struct NativeMetalVideoPlayerView {
         /// on an M5 headset's 120 Hz). It sits before the adjustments and
         /// sharpening, which then apply to every frame alike.
         ///
-        /// Two interpolators, by the picture's rate (`interpolationEngine`):
-        /// VideoToolbox's for 24-30 fps, and for 50-60 fps the GPU one
-        /// (`FlowMidFrameInterpolator`, ~1.5 ms a 1080p frame on an M2 Max),
+        /// Two interpolators, by the picture's rate: VideoToolbox's for
+        /// 24-30 fps, and for 50-60 fps the GPU one (`FlowMidFrameInterpolator`,
+        /// ~5 ms a 1080p frame on an M5 headset),
         /// since VideoToolbox's 5-18 ms doesn't fit an in-between frame every
         /// 16.7 ms. A display without 120 Hz (an M2 headset tops out at 100)
         /// shows a doubled 60 fps picture as best it can.
@@ -1461,7 +1455,7 @@ struct NativeMetalVideoPlayerView {
                let videoOutput, let playerItem {
                 let source = InterpolatingFrameSource.wrappingIfSupported(
                     AVPlayerFrameSource(output: videoOutput, item: playerItem), thresholds: .flat,
-                    engine: interpolationEngine.vergenceEngine, sharedFields: sharedFields
+                    engine: .automatic, sharedFields: sharedFields
                 )
                 if source is InterpolatingFrameSource {
                     framePresenter = InterpolatedFramePresenter(source: source)
@@ -1472,7 +1466,7 @@ struct NativeMetalVideoPlayerView {
             updateDrawRate()
             onSmoothMotionChanged?(has)
             if had || has {
-                AppLogger.videoWindow.info("Native player: Smooth Motion \(has ? "on" : "off", privacy: .public) (\(self.interpolationEngine.rawValue, privacy: .public))")
+                AppLogger.videoWindow.info("Native player: Smooth Motion \(has ? "on" : "off", privacy: .public)")
                 if dynamicRange != .unknown { updateDisplayCriteria() }
             }
             #endif
