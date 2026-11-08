@@ -1,7 +1,8 @@
 import VergenceApple
 
 /// Settings › Videos › Smooth Motion's interpolator for flat 2D videos
-/// (`AppModel.smoothMotionEngine`).
+/// (`AppModel.smoothMotionEngine`), and for AI 3D
+/// (`AppModel.ai3DSmoothMotionEngine`).
 enum SmoothMotionEngine: String, CaseIterable, Codable, Sendable {
     /// VideoToolbox's interpolator for 24-30 fps, the GPU one for 50-60 fps.
     case automatic
@@ -19,6 +20,14 @@ enum SmoothMotionEngine: String, CaseIterable, Codable, Sendable {
     var vergenceEngine: InterpolatingFrameSource.Engine {
         switch self {
         case .automatic: .automatic
+        case .gpu: .gpu
+        }
+    }
+
+    /// AI 3D doubles only 24-30 fps, so Automatic there is VideoToolbox's.
+    var ai3DVergenceEngine: InterpolatingFrameSource.Engine {
+        switch self {
+        case .automatic: .videoToolbox
         case .gpu: .gpu
         }
     }

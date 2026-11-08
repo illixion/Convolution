@@ -130,6 +130,7 @@ struct Pseudo3DVideoPlayerView: View {
                 engine.setSquareCorners(!appModel.roundedCorners)
                 engine.setSubtitles(subtitleFrame)
                 engine.interpolatesFrames = smoothMotion
+                engine.interpolationEngine = appModel.ai3DSmoothMotionEngine.ai3DVergenceEngine
                 engine.sharedFields = sharedFields
                 engine.depthTrack = workerAnalysis.depthTrack
                 engine.gainGrids = workerAnalysis.gainGrids
@@ -245,6 +246,10 @@ struct Pseudo3DVideoPlayerView: View {
             engine.interpolatesFrames = value
             if packedStereo == nil || sharedFields != nil { engine.reloadDepthPipeline() }
         }
+        .onChange(of: appModel.ai3DSmoothMotionEngine) { _, value in
+            engine.interpolationEngine = value.ai3DVergenceEngine
+            if smoothMotion, packedStereo == nil { engine.reloadDepthPipeline() }
+        }
         // The readout says "24 → 48 fps" while the pump doubles.
         .onChange(of: engine.showsDoubledFrames, initial: true) { _, doubled in
             playbackModel?.noteSmoothMotionDoubling(doubled)
@@ -266,6 +271,7 @@ struct Pseudo3DVideoPlayerView: View {
         .onAppear {
             playbackModel?.stereoPictureStarted()
             engine.interpolatesFrames = smoothMotion
+            engine.interpolationEngine = appModel.ai3DSmoothMotionEngine.ai3DVergenceEngine
             engine.startMuted = startMuted
             engine.startVolume = Float(playbackModel?.volume ?? 1)
             engine.startRate = Float(playbackModel?.playbackSpeed ?? 1)

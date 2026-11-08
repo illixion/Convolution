@@ -5,7 +5,8 @@
  Core ML models in Documents/InterpModels (pushed there by
  `scripts/convert-interp-model.py --push` or devicectl): phase E0 of
  `docs/plans/blu-ray-3d-smooth-motion.md`. Returns timings and op placement
- only; the model names are the converter's own file names.
+ only; the model names are the converter's own file names. `interpFlowBench`
+ times the GPU interpolator (`FlowInterpolationBenchmark`) the same way.
  */
 
 import DebugTrace
@@ -39,6 +40,16 @@ enum InterpolationDebugEndpoints {
                 return await InterpolationModelBenchmark.run(folder: modelFolder, units: units,
                                                              iterations: args.int("iterations") ?? 30,
                                                              only: args.string("only"))
+            },
+            .command("interpFlowBench", "Time the GPU frame interpolator (Fast (GPU), Vergence's "
+                     + "FlowMidFrameInterpolator) on synthetic frames, away from playback: GPU and wall ms "
+                     + "(median, p90) at 1080p and 720p, with and without the motion output AI 3D's depth reads.",
+                     parameters: [
+                        .integer("iterations", "timed frames per size", default: 120, range: 10 ... 2000),
+                     ],
+                     timeout: .seconds(300)) { args in
+                await FlowInterpolationBenchmark.run(sizes: [(1920, 1080), (1280, 720)],
+                                                     iterations: args.int("iterations") ?? 120)
             },
         ])
     }

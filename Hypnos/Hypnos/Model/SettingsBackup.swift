@@ -100,6 +100,7 @@ struct SettingsBackup: Codable {
     var stableDepth: Bool?
     var smoothMotion: Bool?
     var smoothMotionEngine: String?
+    var ai3DSmoothMotionEngine: String?
     var videoAutoplayMuted: Bool?
     var useLossyTextureCompression: Bool?
     var globalPseudo3DSettings: Data?
