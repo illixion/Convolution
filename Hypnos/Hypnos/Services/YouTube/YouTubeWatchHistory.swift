@@ -71,8 +71,36 @@ final class YouTubeWatchHistory {
     }
 
     /// What the server knows about each video a tile asked for; a video it
-    /// doesn't know has no entry.
-    private(set) var entries: [YouTubeVideoID: Entry] = [:]
+    /// doesn't know has no entry. Not observed as a whole: views read
+    /// `entry(for:)`, which observes one video's slot. Every tile reading
+    /// this dictionary made each write (a playing video's progress, every
+    /// 10 s, twice) re-render and lay out every tile in the YouTube tab,
+    /// including the gallery parked behind the player: a 300-460 ms
+    /// main-thread stall every 10 s that dropped ~20 frames of the video.
+    @ObservationIgnored private var entries: [YouTubeVideoID: Entry] = [:]
+    /// One observable slot per video a view has read, so a change to one
+    /// video's entry re-renders only the tiles that show it.
+    @ObservationIgnored private var slots: [YouTubeVideoID: EntrySlot] = [:]
+
+    @MainActor
+    @Observable
+    final class EntrySlot {
+        fileprivate(set) var entry: Entry?
+        init(_ entry: Entry?) { self.entry = entry }
+    }
+
+    /// What the server knows about `id`, observed for that video alone.
+    func entry(for id: YouTubeVideoID) -> Entry? {
+        if let slot = slots[id] { return slot.entry }
+        let slot = EntrySlot(entries[id])
+        slots[id] = slot
+        return slot.entry
+    }
+
+    private func setEntry(_ entry: Entry?, for id: YouTubeVideoID) {
+        entries[id] = entry
+        if let slot = slots[id], slot.entry != entry { slot.entry = entry }
+    }
     /// The Watched shelf, newest first.
     private(set) var recent: [Entry] = []
     private(set) var recentNext: Double?
@@ -135,7 +163,7 @@ final class YouTubeWatchHistory {
                 wanted.removeFirst(batch.count)
                 asked.formUnion(batch)
                 if let found = await lookup(batch) {
-                    for (id, entry) in found { entries[id] = entry }
+                    for (id, entry) in found { setEntry(entry, for: id) }
                 } else {
                     asked.subtract(batch)
                 }
@@ -166,7 +194,7 @@ final class YouTubeWatchHistory {
     func resumePosition(for id: YouTubeVideoID) async -> Double? {
         guard isAvailable else { return nil }
         let entry = await lookup([id])?[id] ?? entries[id]
-        if let entry { entries[id] = entry }
+        if let entry { setEntry(entry, for: id) }
         guard let entry, entry.position >= 15 else { return nil }
         if let duration = entry.duration, entry.position >= duration - 10 { return nil }
         return entry.position
@@ -190,13 +218,13 @@ final class YouTubeWatchHistory {
         var seen = Set<String>()
         recent = fresh.filter { seen.insert($0.id).inserted }
         recentNext = reply.next
-        for entry in reply.videos { if let id = YouTubeVideoID(entry.id) { entries[id] = entry } }
+        for entry in reply.videos { if let id = YouTubeVideoID(entry.id) { setEntry(entry, for: id) } }
     }
 
     func remove(_ id: YouTubeVideoID) async {
         struct Reply: Decodable { var removed: Bool }
         recent.removeAll { $0.id == id.rawValue }
-        entries[id] = nil
+        setEntry(nil, for: id)
         outbox[id.rawValue] = nil
         saveOutbox()
         let _: Reply? = await call("DELETE", "api/history/\(id.rawValue)")
@@ -222,11 +250,11 @@ final class YouTubeWatchHistory {
         if var entry = entries[id] {
             entry.position = position
             if let duration = report.duration { entry.duration = duration }
-            entries[id] = entry
+            setEntry(entry, for: id)
         } else {
-            entries[id] = Entry(id: id.rawValue, title: report.title, channel: report.channel,
-                                duration: report.duration, position: position, completed: false,
-                                sortAt: report.at, lastWatchedAt: report.at)
+            setEntry(Entry(id: id.rawValue, title: report.title, channel: report.channel,
+                           duration: report.duration, position: position, completed: false,
+                           sortAt: report.at, lastWatchedAt: report.at), for: id)
         }
         // A start must reach the server even if a later report replaces it
         // in the outbox, or the viewing isn't counted; the server only takes
@@ -263,7 +291,7 @@ final class YouTubeWatchHistory {
                 }
                 if let id = YouTubeVideoID(report.id), entries[id] != reply.video,
                    entries[id] != nil || recent.contains(where: { $0.id == report.id }) {
-                    entries[id] = reply.video
+                    setEntry(reply.video, for: id)
                 }
                 saveOutbox()
             }

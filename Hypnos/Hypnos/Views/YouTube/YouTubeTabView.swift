@@ -642,7 +642,7 @@ struct YouTubeVideoCard: View {
     /// How far it was watched: the watch history's position, or failing
     /// that YouTube's own bar on a signed-in page.
     private var watchedFraction: Double? {
-        if let entry = watchHistory.entries[video.id] { return entry.fraction }
+        if let entry = watchHistory.entry(for: video.id) { return entry.fraction }
         return video.watchedFraction.flatMap { $0 > 0 ? $0 : nil }
     }
 
