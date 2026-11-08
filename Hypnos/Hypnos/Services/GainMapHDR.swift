@@ -16,7 +16,7 @@
 
  Per photo from Adjustments ("AI HDR"), remembered by
  `ImageEnhancementTracker`; photos without a choice of their own follow
- Settings → Photos → "AI HDR" (`enabledKey`), and while that is on the model
+ Settings → AI Features → "AI HDR" (`enabledKey`), and while that is on the model
  is loaded at launch (`prewarm`). Never on RealityKit 3D: its
  `ImagePresentationComponent` takes only an image source and has no material,
  shader or dynamic-range hook (visionOS 27 SDK, checked 2026-10-28).

@@ -70,9 +70,22 @@ struct FilmPlayerView: View {
     @DismissWindowProxy private var dismissWindow
     private var cinema: Cinema { .shared }
     @State private var stereoSource: SampleBufferFrameSource?
-    /// This film's Smooth Motion choice in AI 3D; nil follows Settings → Videos.
+    /// This film's Smooth Motion choice in AI 3D; nil follows Settings → AI
+    /// Features: the default, then Smart Activation by the film's frame rate.
     @State private var smoothMotionOverride: Bool?
-    private var smoothMotion: Bool { smoothMotionOverride ?? appModel.smoothMotion }
+    private var smoothMotion: Bool { smoothMotionOverride ?? smartSmoothMotion ?? appModel.smoothMotion }
+    /// The device's strain when this film opened (`SmartActivation`).
+    @State private var smartStrained = SmartActivation.Conditions.current.isStrained
+    /// What Smooth Motion's Smart Activation rules say for this film, by its
+    /// frame rate and picture; nil when they say nothing.
+    private var smartSmoothMotion: Bool? {
+        guard appModel.smartSmoothMotion, let rate = player.video.frameRate else { return nil }
+        let size = player.video.format.map(CMVideoFormatDescriptionGetDimensions)
+        return SmartActivation.decision(
+            appModel.smartRules.smoothMotion,
+            for: SmartRule.Subject(frameRate: rate, longSide: size.map { Int(max($0.width, $0.height)) },
+                                   isSDR: nil, strained: smartStrained))
+    }
     /// The 3D picture can have in-between frames: a flat film made 3D
     /// always, a 3D film's own pair only with a Smooth Motion track for it.
     private var smoothMotionApplies: Bool { stereoLayout == nil || session.sharedFields != nil }

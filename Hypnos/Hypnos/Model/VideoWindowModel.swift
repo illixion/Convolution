@@ -214,16 +214,68 @@ final class VideoWindowModel {
     /// a new window starts at 1×.
     private(set) var playbackSpeed: Double = 1
     /// This video's Smooth Motion choice, from the View Mode menu; nil
-    /// follows Settings → Videos. Carried to the next video in the window.
+    /// follows Settings → AI Features (its default, then Smart Activation).
+    /// Carried to the next video in the window.
     var smoothMotionOverride: Bool?
     /// Whether this video's frames are interpolated (flat player, AI 3D).
-    var smoothMotion: Bool { smoothMotionOverride ?? appModel.smoothMotion }
+    var smoothMotion: Bool {
+        smoothMotionOverride ?? smartSmoothMotionDecision ?? appModel.smoothMotion
+    }
     /// This video's AI Upscaling choice, from the View Mode menu; nil follows
-    /// Settings → Videos. Carried to the next video like Smooth Motion's.
+    /// Settings → AI Features (its default, then Smart Activation). Carried to
+    /// the next video like Smooth Motion's.
     var aiUpscalingOverride: Bool?
     /// Whether the flat player upscales this video's frames
     /// (`NativeMetalVideoPlayerView`, Vergence's `UpscalingFrameSource`).
-    var aiUpscaling: Bool { aiUpscalingOverride ?? appModel.aiUpscaling }
+    var aiUpscaling: Bool {
+        aiUpscalingOverride ?? smartUpscalingDecision ?? appModel.aiUpscaling
+    }
+
+    // MARK: Smart Activation (`SmartActivation`)
+
+    /// The device's strain and the video's frame rate, as of this video's
+    /// first measurements. Decided once per video so a feature is not turned
+    /// on mid-play (it reloads the 3D pipeline) or flapped by a thermal blip
+    /// or a rate reading that wobbles. Cleared by `switchToVideo`.
+    private var smartStrained: Bool?
+    private var smartFrameRate: Double?
+
+    private func latchSmartConditions() {
+        if smartStrained == nil { smartStrained = SmartActivation.Conditions.current.isStrained }
+        if smartFrameRate == nil { smartFrameRate = pictureFrameRate }
+    }
+
+    /// This video as the Smart Activation rules ask about it.
+    private var smartSubject: SmartRule.Subject {
+        SmartRule.Subject(frameRate: smartFrameRate,
+                          longSide: pictureSize.map { Int(max($0.width, $0.height).rounded()) },
+                          isSDR: pictureFrameRange.map { $0.transfer == .sdr },
+                          strained: smartStrained ?? false)
+    }
+
+    /// What Smooth Motion's rules say for this video: nil with Smart
+    /// Activation off, before anything is measured, or when no rule fits.
+    private var smartSmoothMotionDecision: Bool? {
+        guard appModel.smartSmoothMotion, smartFrameRate != nil else { return nil }
+        return SmartActivation.decision(appModel.smartRules.smoothMotion, for: smartSubject)
+    }
+
+    /// What AI Upscaling's rules say for this video, once its size is known.
+    private var smartUpscalingDecision: Bool? {
+        guard appModel.smartUpscaling, pictureSize != nil, smartStrained != nil else { return nil }
+        return SmartActivation.decision(appModel.smartRules.upscaling, for: smartSubject)
+    }
+
+    /// Smooth Motion is on or off because a Smart Activation rule chose it,
+    /// for the View Mode menu to say so.
+    var smoothMotionIsAutomatic: Bool {
+        smoothMotionOverride == nil && smartSmoothMotionDecision != nil
+    }
+
+    /// AI Upscaling is on or off because a Smart Activation rule chose it.
+    var upscalingIsAutomatic: Bool {
+        aiUpscalingOverride == nil && smartUpscalingDecision != nil && upscalingApplies
+    }
 
     /// Critical memory pressure (`AppModel`'s dispatch source): turn Smooth
     /// Motion off for this window. Its presenter, interpolator pools and
@@ -899,6 +951,7 @@ final class VideoWindowModel {
     func notePictureSize(_ size: CGSize) {
         guard size.width > 0, size.height > 0, size != pictureSize else { return }
         pictureSize = size
+        latchSmartConditions()
     }
 
     /// A measured rate, kept as the standard rate it is; a measurement that
@@ -908,6 +961,7 @@ final class VideoWindowModel {
         let rate = VideoPictureFormat.snapped(measured)
         guard VideoPictureFormat.rateLabel(rate) != pictureFrameRate.flatMap(VideoPictureFormat.rateLabel) else { return }
         pictureFrameRate = rate
+        latchSmartConditions()
     }
 
     // MARK: - Load Status
@@ -1067,6 +1121,8 @@ final class VideoWindowModel {
         endHandled = false
         pictureSize = nil
         pictureFrameRate = nil
+        smartStrained = nil
+        smartFrameRate = nil
         smoothMotionDoubling = false
         upscaledPictureSize = nil
         resetPlaybackInfo()

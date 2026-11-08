@@ -1013,6 +1013,34 @@ class AppModel {
     }
     static let aiUpscalingKey = "aiUpscaling"
 
+    // MARK: Smart Activation (Settings → AI Features)
+
+    /// Smooth Motion follows its Smart Activation rules (`SmartRules`) for
+    /// each video, before the default. Off by default.
+    var smartSmoothMotion: Bool {
+        didSet { if smartSmoothMotion != oldValue { UserDefaults.standard.set(smartSmoothMotion, forKey: Self.smartSmoothMotionKey) } }
+    }
+    static let smartSmoothMotionKey = "smartSmoothMotion"
+
+    /// AI Upscaling follows its Smart Activation rules for each video, before
+    /// the default. Off by default.
+    var smartUpscaling: Bool {
+        didSet { if smartUpscaling != oldValue { UserDefaults.standard.set(smartUpscaling, forKey: Self.smartUpscalingKey) } }
+    }
+    static let smartUpscalingKey = "smartUpscaling"
+
+    /// The rules both features read (`SmartActivation`), edited in Settings →
+    /// AI Features → Smart Activation. Starts as the suggested ones.
+    var smartRules: SmartRules {
+        didSet {
+            guard smartRules != oldValue else { return }
+            if let data = try? JSONEncoder().encode(smartRules) {
+                UserDefaults.standard.set(data, forKey: Self.smartRulesKey)
+            }
+        }
+    }
+    static let smartRulesKey = "smartRules"
+
     /// AI HDR for SDR videos: a Library title's gain grids from an analysis
     /// server's workers (the `ai-hdr` workload, GMNet on keyframes), applied
     /// in the flat player's final pass and AI 3D's eyes. Off by default: it
@@ -1541,6 +1569,10 @@ class AppModel {
         let loadedSmoothMotion = loadBool(Self.smoothMotionKey, default: false)
         let loadedAIUpscaling = loadBool(Self.aiUpscalingKey, default: false)
         let loadedAIHDRVideos = loadBool(Self.aiHDRVideosKey, default: false)
+        let loadedSmartSmoothMotion = loadBool(Self.smartSmoothMotionKey, default: false)
+        let loadedSmartUpscaling = loadBool(Self.smartUpscalingKey, default: false)
+        let loadedSmartRules = UserDefaults.standard.data(forKey: Self.smartRulesKey)
+            .flatMap { try? JSONDecoder().decode(SmartRules.self, from: $0) } ?? .suggested
         // Smooth Motion's interpolator choices are gone (2026-11-08): it
         // picks by the picture's rate. Forget what they were set to.
         UserDefaults.standard.removeObject(forKey: "smoothMotionEngine")
@@ -1666,6 +1698,9 @@ class AppModel {
         self.smoothMotion = loadedSmoothMotion
         self.aiUpscaling = loadedAIUpscaling
         self.aiHDRVideos = loadedAIHDRVideos
+        self.smartSmoothMotion = loadedSmartSmoothMotion
+        self.smartUpscaling = loadedSmartUpscaling
+        self.smartRules = loadedSmartRules
         self.videoAutoplayMuted = loadedVideoAutoplayMuted
         self.rememberImageEnhancements = loadedRememberImageEnhancements
         self.autoRestoreSpatial3D = loadedAutoRestoreSpatial3D
@@ -2500,6 +2535,9 @@ class AppModel {
             stableDepth: stableDepth,
             smoothMotion: smoothMotion,
             aiUpscaling: aiUpscaling,
+            smartSmoothMotion: smartSmoothMotion,
+            smartUpscaling: smartUpscaling,
+            smartRules: try? JSONEncoder().encode(smartRules),
             videoAutoplayMuted: videoAutoplayMuted,
             useLossyTextureCompression: useLossyTextureCompression,
             globalPseudo3DSettings: try? JSONEncoder().encode(globalPseudo3DSettings),
@@ -2551,6 +2589,11 @@ class AppModel {
         if let v = backup.stableDepth { stableDepth = v }
         if let v = backup.smoothMotion { smoothMotion = v }
         if let v = backup.aiUpscaling { aiUpscaling = v }
+        if let v = backup.smartSmoothMotion { smartSmoothMotion = v }
+        if let v = backup.smartUpscaling { smartUpscaling = v }
+        if let data = backup.smartRules, let rules = try? JSONDecoder().decode(SmartRules.self, from: data) {
+            smartRules = rules
+        }
         if let v = backup.videoAutoplayMuted { videoAutoplayMuted = v }
         if let v = backup.useLossyTextureCompression { useLossyTextureCompression = v }
         if let data = backup.globalPseudo3DSettings,

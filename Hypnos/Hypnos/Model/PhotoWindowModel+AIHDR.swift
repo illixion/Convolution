@@ -7,7 +7,7 @@ import Foundation
 /// of the HDR path (`HDRStills`) is the one real HDR photos take.
 ///
 /// A per-image choice, like the other enhancements: an image without one
-/// follows Settings → Photos → AI HDR (`AppModel.aiHDRByDefault`). RealityKit
+/// follows Settings → AI Features → AI HDR (`AppModel.aiHDRByDefault`). RealityKit
 /// 3D can't show it, so the toggle isn't offered there.
 extension PhotoWindowModel {
     /// Turn AI HDR on or off for this image and redraw the picture.

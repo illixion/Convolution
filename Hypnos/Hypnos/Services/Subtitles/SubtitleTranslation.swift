@@ -246,7 +246,7 @@ final class SubtitleTranslator {
 
 #if os(iOS) || os(macOS)
 /// Where translation can run, which languages it offers and the viewer's
-/// destination (Settings → AI Captions → Translate To).
+/// destination (Settings → AI Features → AI Captions → Translate To).
 enum SubtitleTranslationSupport {
     /// `UserDefaults` key; empty means the system's language.
     static let targetKey = "translation.target"

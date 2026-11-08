@@ -34,7 +34,7 @@ struct AnalysisServerSection: View {
         } header: {
             Text("Analysis Server")
         } footer: {
-            Text("A Vergence analysis server lets other computers prepare a 3D Library title's Smooth Motion while it plays, starting where you are watching. Pair with it by its address (run `vergenced pair`, or Pair a Headset in the Vergence app): both screens show the same six digits. Leave it unpaired and empty to use only what the Jellyfin plugin prepared overnight.")
+            Text("A Vergence analysis server lets other computers prepare a Library title's Smooth Motion, AI 3D depth and AI HDR highlights while it plays, starting where you are watching. Pair with it by its address (run `vergenced pair`, or Pair a Headset in the Vergence app): both screens show the same six digits. Leave it unpaired and empty to use only what the Jellyfin plugin prepared overnight.")
         }
         if paired == nil {
             Section {
@@ -119,7 +119,7 @@ struct AnalysisServerSection: View {
                     AnalysisPairing.save(grant, deviceID: pairingDeviceID, connectedAddress: client.connectedAddress)
                     paired = AnalysisPairing.record()
                     pairing = nil
-                    message = "Paired. Library titles now ask this server for Smooth Motion."
+                    message = "Paired. Library titles now ask this server for help with AI features."
                 case .failed(let reason):
                     pairing = nil
                     message = reason

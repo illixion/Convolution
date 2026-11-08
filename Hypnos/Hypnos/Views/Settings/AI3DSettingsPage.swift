@@ -1,10 +1,11 @@
 /*
- Hypnos - Settings → AI 3D (visionOS)
+ Hypnos - Settings → AI Features → AI 3D (visionOS)
 
- Everything about fake 3D in one place: which depth model each pipeline
- uses, installing and removing models (`DepthModelManagerSheet`, which used
- to sit under Developer although AI 3D can't run without it), the playback
- switches, and the pre-processed conversions on disk.
+ Everything about fake 3D's models in one place: which depth model each
+ pipeline uses, installing and removing models (`DepthModelManagerSheet`,
+ which used to sit under Developer although AI 3D can't run without it), the
+ depth switches, and the pre-processed conversions on disk. Whether videos
+ open in AI 3D by default is with the other defaults on the AI Features page.
  */
 
 import RAVEMedia
@@ -45,12 +46,6 @@ struct AI3DSettingsPage: View {
                 Text("Depth Models")
             } footer: {
                 Text("AI 3D needs a depth model (~19–50 MB, downloaded from Apple's Hugging Face repo). Real-Time is used for instant playback, so a fast model is best; Pre-Process converts in the background and can use a larger one. Videos already converted keep playing in 3D without a model.")
-            }
-
-            Section {
-                Toggle("AI 3D for All Videos", isOn: $appModel.defaultRealtimePseudo3D)
-            } footer: {
-                Text("Compatible videos open already in 3D, from their pre-processed conversion when there is one, otherwise in real time.")
             }
 
             Section {

@@ -1,7 +1,7 @@
 /*
  Hypnos - Depth Cache Settings
 
- Management UI for pre-processed fake-3D depth caches (Settings → AI 3D →
+ Management UI for pre-processed fake-3D depth caches (Settings → AI Features → AI 3D →
  Converted Videos): lists converted videos with the model that
  produced them and their on-disk size, with per-entry delete and Clear All.
  Entries from an older pipeline version are marked outdated — they no longer

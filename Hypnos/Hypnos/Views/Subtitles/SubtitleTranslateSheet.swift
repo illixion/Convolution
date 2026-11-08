@@ -4,7 +4,7 @@
 
  Pick what to translate (the video's YouTube automatic captions, or AI
  Captions), the language it is spoken in, and the language to read it in
- (Settings → AI Captions → Translate To sets what this starts with).
+ (Settings → AI Features → AI Captions → Translate To sets what this starts with).
  Languages the system hasn't downloaded yet are fetched here through
  `.translationTask`, which shows Apple's own consent prompt.
  */

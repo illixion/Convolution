@@ -54,7 +54,8 @@ struct Pseudo3DVideoPlayerView: View {
     var loopController: VideoLoopController? = nil
     var playbackModel: VideoWindowModel? = nil
     /// The window's Smooth Motion choice, else the Settings default (slideshows,
-    /// quick look).
+    /// quick look; Smart Activation reads a window's own picture, so it does
+    /// not reach them).
     private var smoothMotion: Bool { playbackModel?.smoothMotion ?? appModel.smoothMotion }
     /// Initial mute state applied when a video loads (autoplay always starts
     /// playback; this only controls whether it opens with audio).

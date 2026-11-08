@@ -5,8 +5,9 @@
  page of its own, the way tvOS's Settings (`TVSettingsView`) already worked:
  one long list had servers in the middle, nineteen unrelated rows under
  "Display", and test tools at the top level for everyone. Libraries and
- servers come first, then Device Setup, how things look and play, AI 3D,
- storage, and Developer last.
+ servers come first, then Device Setup, how things look and play, AI
+ Features (every model-backed feature's defaults, Smart Activation and
+ Compute Assistance), storage, and Developer last.
 
  macOS shows only what its own windows read: the library choice (its sidebar
  has no switch), servers, Device Setup, Cache and Backup.
@@ -50,7 +51,8 @@ struct SettingsTabView: View {
 
     enum Page: Hashable {
         case jellyfin, stash, nextcloud, photoLibrary, localFiles, deviceSetup
-        case general, gallery, photos, videos, ai3D, aiCaptions, subtitles, slideshows, windowGroups
+        case general, gallery, photos, videos, subtitles, slideshows, windowGroups
+        case aiFeatures, ai3D, aiCaptions, smartActivation, compute
         case cache, backup, developer
         #if HYPNOS_YOUTUBE
         case youtube
@@ -94,15 +96,14 @@ struct SettingsTabView: View {
                     }
                 }
 
-                if PlatformCapabilities.supportsStereoVideo {
-                    Section {
-                        row(.ai3D, "AI 3D", systemImage: "cube", value: AI3DSettingsPage.statusLabel)
-                    }
+                Section {
+                    row(.aiFeatures, "AI Features", systemImage: "sparkles", value: aiFeaturesStatus)
+                } footer: {
+                    Text("AI 3D, Smooth Motion, AI Upscaling, AI HDR and AI Captions: their defaults, Smart Activation rules, and the models and computers behind them.")
                 }
 
                 Section {
                     row(.subtitles, "Subtitles", systemImage: "textformat.size")
-                    row(.aiCaptions, "AI Captions", systemImage: "captions.bubble")
                 }
 
                 Section {
@@ -161,9 +162,25 @@ struct SettingsTabView: View {
         case .gallery: GallerySettingsPage()
         case .photos: PhotoSettingsPage()
         case .videos: VideoSettingsPage()
-        case .ai3D: AI3DSettingsPage()
         case .subtitles: SubtitleSettingsPage()
+        case .ai3D: AI3DSettingsPage()
         case .aiCaptions: AICaptionSettingsPage()
+        case .aiFeatures, .smartActivation, .compute:
+            // Never shown on tvOS (`TVSettingsView`), whose AI settings are AI Captions.
+            #if os(tvOS)
+            EmptyView()
+            #else
+            switch page {
+            case .smartActivation: SmartActivationSettingsPage()
+            case .compute:
+                #if os(visionOS)
+                ComputeAssistanceSettingsPage()
+                #else
+                EmptyView()
+                #endif
+            default: AIFeaturesSettingsPage()
+            }
+            #endif
         case .slideshows: SlideshowSettingsPage()
         case .windowGroups: WindowGroupsSettingsPage()
         case .cache: SettingsPage("Cache") { CacheSettingsSection() }
@@ -175,6 +192,14 @@ struct SettingsTabView: View {
             #endif
         case .developer: DeveloperSettingsPage()
         }
+    }
+
+    private var aiFeaturesStatus: String {
+        #if os(tvOS)
+        ""
+        #else
+        AIFeaturesSettingsPage.statusLabel
+        #endif
     }
 
     private var jellyfinStatus: String {

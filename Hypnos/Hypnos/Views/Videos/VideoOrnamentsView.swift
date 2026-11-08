@@ -591,7 +591,7 @@ struct VideoOrnamentsView: View {
                 }
                 .disabled(!windowModel.pseudo3DAvailable)
 
-                // Smooth Motion for this video, the Settings choice its default.
+                // Smooth Motion for this video: the AI Features default, then Smart Activation.
                 if windowModel.smoothMotionApplies {
                     Button {
                         close()
@@ -600,13 +600,16 @@ struct VideoOrnamentsView: View {
                         PlayerChoiceRow(isChecked: windowModel.smoothMotion) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Smooth Motion")
-                                Text("In-between frames, twice the frame rate").font(.caption).foregroundStyle(.secondary)
+                                Text(windowModel.smoothMotionIsAutomatic
+                                     ? (windowModel.smoothMotion ? "On automatically for this video" : "Off automatically for this video")
+                                     : "In-between frames, twice the frame rate")
+                                    .font(.caption).foregroundStyle(.secondary)
                             }
                         }
                     }
                 }
 
-                // AI Upscaling for this video, the Settings choice its default.
+                // AI Upscaling for this video: the AI Features default, then Smart Activation.
                 if windowModel.upscalingApplies {
                     Button {
                         close()
@@ -615,7 +618,10 @@ struct VideoOrnamentsView: View {
                         PlayerChoiceRow(isChecked: windowModel.aiUpscaling) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("AI Upscaling")
-                                Text("A sharper picture, up to 1080p").font(.caption).foregroundStyle(.secondary)
+                                Text(windowModel.upscalingIsAutomatic
+                                     ? (windowModel.aiUpscaling ? "On automatically for this video" : "Off automatically for this video")
+                                     : "A sharper picture, up to 1080p")
+                                    .font(.caption).foregroundStyle(.secondary)
                             }
                         }
                     }

@@ -9,7 +9,7 @@
  - YouTube's own machine translation of a track (`tlang`), on request: a
    "Translate to…" list in the subtitle menu offers every language it
    lists, and when the automatic track isn't in the viewer's language (the
-   one in Settings → AI Captions → Translate To, else the system's) a
+   one in Settings → AI Features → AI Captions → Translate To, else the system's) a
    translation into it is listed beside it. Only a picked language is
    requested, as YouTube answers 429 to a run of them.
 

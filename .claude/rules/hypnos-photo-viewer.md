@@ -109,7 +109,7 @@ photo's own peak instead of 1.0. An SDR photo decodes as before.
   result is an extended linear P3 `CGImage` with `contentHeadroom` set, so the flat view and
   AI 3D take step 1's path unchanged. Shared textures key it as `<url>#aihdr`. Per image
   (`ImageEnhancementTracker`, only choices that differ from the default, when Remember Image
-  Enhancements is on), defaulting to Settings → Photos → AI HDR (`aiHDRPhotos`,
+  Enhancements is on), defaulting to Settings → AI Features → AI HDR (`aiHDRPhotos`,
   `AppModel.aiHDRByDefault`); while that is on the model loads at launch (`prewarm`). Skipped
   for HDR, transparent, animated, auto-enhanced and background-removed pictures, on tvOS (no
   EDR), and on RealityKit 3D: `ImagePresentationComponent` takes only an image source and has

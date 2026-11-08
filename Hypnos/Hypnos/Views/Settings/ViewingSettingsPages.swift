@@ -88,7 +88,7 @@ struct GallerySettingsPage: View {
                     if appModel.thumbnailStyle == .depth {
                         Text(RAVEStillDepthEstimator.shared.isModelAvailable
                              ? "Shows each thumbnail in 3D using the Real-Time depth model."
-                             : "Needs a depth model (Settings → AI 3D → Manage Depth Models). Diorama is used until one is installed.")
+                             : "Needs a depth model (Settings → AI Features → AI 3D → Manage Depth Models). Diorama is used until one is installed.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -124,15 +124,6 @@ struct PhotoSettingsPage: View {
                     if PlatformCapabilities.supportsImmersiveSpaces {
                         Toggle("Fully Immersive 3D Mode", isOn: $appModel.fullyImmersive3DMode)
                     }
-                }
-            }
-
-            if PlatformCapabilities.supportsAIHDR {
-                Section {
-                    Toggle("AI HDR", isOn: $appModel.aiHDRByDefault)
-                } footer: {
-                    Text("Opens photos in HDR, brightening their highlights with a gain map made on this device. "
-                         + "Turn it on or off for a single photo in its Adjustments. Not shown in RealityKit 3D.")
                 }
             }
 
@@ -218,23 +209,12 @@ struct VideoSettingsPage: View {
             #endif
             #if !os(tvOS)
             Section {
-                Toggle("AI Upscaling", isOn: $appModel.aiUpscaling)
+                NavigationLink(value: SettingsTabView.Page.aiFeatures) {
+                    Label("AI Features", systemImage: "sparkles")
+                }
             } footer: {
-                Text("Plays videos of 720p and below sharper, rebuilding detail up to 1080p with the device's own upscaler as each frame is shown. For non-HDR videos in 2D, not in 3D or AI 3D, and only while the window shows the video bigger than it is. Each video can change AI Upscaling in its View Mode menu.")
+                Text("AI Upscaling, Smooth Motion and AI HDR, and when they turn on by themselves, are in AI Features.")
             }
-            #endif
-            #if os(visionOS)
-            Section {
-                Toggle("Smooth Motion", isOn: $appModel.smoothMotion)
-            } footer: {
-                Text("Adds an in-between frame to 24–30 fps videos, so slow pans move in smaller steps, and to 50–60 fps videos, which then play at 100–120 fps, in 2D and AI 3D. Works up to 1080p, and in 2D for non-HDR videos; cuts and seeks are never blended. Each video can change Smooth Motion in its View Mode menu.")
-            }
-            Section {
-                Toggle("AI HDR for Videos", isOn: $appModel.aiHDRVideos)
-            } footer: {
-                Text("Gives SDR Library titles HDR highlights, from gain maps an analysis server's workers make while you watch, in 2D and AI 3D. The highlights fade in after a title starts or you skip, and the picture's average brightness is held below where the window would dim. Needs an analysis server with an AI HDR worker; without one, titles play as they are.")
-            }
-            AnalysisServerSection()
             #endif
         }
     }
