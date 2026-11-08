@@ -262,6 +262,7 @@ struct VideoWindowView: View {
                                 startMuted: windowModel.isMuted,
                                 loops: windowModel.loopsAtEnd,
                                 interpolatesFrames: windowModel.smoothMotion,
+                                upscalesPicture: windowModel.aiUpscaling,
                                 sharedFields: windowModel.monoSharedFields,
                                 aiHDR: windowModel.aiHDR,
                                 onPlaybackError: {

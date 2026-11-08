@@ -216,6 +216,13 @@ struct VideoSettingsPage: View {
                 Text("A panel in the video's top corner, with the controls: whether the original plays as it is or the server converts it, and why, with the picture's size, frame rate and HDR format. When Something's Off shows it only when a video falls back to a conversion or loses HDR.")
             }
             #endif
+            #if !os(tvOS)
+            Section {
+                Toggle("AI Upscaling", isOn: $appModel.aiUpscaling)
+            } footer: {
+                Text("Plays videos of 720p and below sharper, rebuilding detail up to 1080p with the device's own upscaler as each frame is shown. For non-HDR videos in 2D, not in 3D or AI 3D, and only while the window shows the video bigger than it is. Each video can change AI Upscaling in its View Mode menu.")
+            }
+            #endif
             #if os(visionOS)
             Section {
                 Toggle("Smooth Motion", isOn: $appModel.smoothMotion)

@@ -6,7 +6,10 @@
  `scripts/convert-interp-model.py --push` or devicectl): phase E0 of
  `docs/plans/blu-ray-3d-smooth-motion.md`. Returns timings and op placement
  only; the model names are the converter's own file names. `interpFlowBench`
- times the GPU interpolator (`FlowInterpolationBenchmark`) the same way.
+ times the GPU interpolator (`FlowInterpolationBenchmark`) the same way, and
+ `upscaleBench` AI Upscaling's VideoToolbox super resolution
+ (`RealtimeUpscalerBenchmark`): its factors and limits on this device, each
+ size's model load and the time a frame takes with its conversions.
  */
 
 import DebugTrace
@@ -52,5 +55,19 @@ enum InterpolationDebugEndpoints {
                                                      iterations: args.int("iterations") ?? 120)
             },
         ])
+        #if !targetEnvironment(simulator)
+        DebugSurface.shared.register([
+            .command("upscaleBench", "Time AI Upscaling's VideoToolbox super resolution (Vergence's "
+                     + "VTRealtimeUpscaler) on synthetic frames, away from playback: the factors and input limits "
+                     + "this device has, and for 640×360, 854×480, 960×540 and 1280×720 the factor playback uses, the "
+                     + "model load ms and the wall ms a frame takes with its format conversions (median, p90, best).",
+                     parameters: [
+                        .integer("iterations", "timed frames per size", default: 120, range: 10 ... 2000),
+                     ],
+                     timeout: .seconds(300)) { args in
+                await RealtimeUpscalerBenchmark.run(iterations: args.int("iterations") ?? 120)
+            },
+        ])
+        #endif
     }
 }

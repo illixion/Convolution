@@ -982,11 +982,13 @@ class AppModel {
         }
     }
 
-    /// Smooth Motion: AI 3D puts an interpolated frame between each two of a
-    /// 24-30 fps video (Vergence's `InterpolatingFrameSource`, up to 1080p), so
-    /// slow pans move in half the steps. Read when a 3D picture starts, so the
-    /// players reload their pipeline on change. Off by default while it's
-    /// being measured on the headset.
+    /// Smooth Motion (visionOS): an interpolated frame between each two of a
+    /// 24-30 or 50-60 fps video (Vergence's `InterpolatingFrameSource`), so
+    /// slow pans move in half the steps and 60 fps plays at 120, in the flat
+    /// player and AI 3D (and live 3D with an analysis track). The flat player
+    /// applies a change at once; the stereo players reload their pipeline.
+    /// Each window's View Mode menu overrides it for its video. Off by
+    /// default.
     var smoothMotion: Bool {
         didSet {
             if smoothMotion != oldValue {
@@ -995,6 +997,21 @@ class AppModel {
         }
     }
     static let smoothMotionKey = "smoothMotion"
+
+    /// AI Upscaling: a video of 720p or less plays sharper in the flat
+    /// player, each frame rebuilt up to 1080p by VideoToolbox's low-latency
+    /// super resolution as it's shown (Vergence's `UpscalingFrameSource`).
+    /// Not in AI 3D or 3D, and not for HDR. Each window's View Mode menu can
+    /// change it for its video. Off by default until it's been seen on the
+    /// headset.
+    var aiUpscaling: Bool {
+        didSet {
+            if aiUpscaling != oldValue {
+                UserDefaults.standard.set(aiUpscaling, forKey: Self.aiUpscalingKey)
+            }
+        }
+    }
+    static let aiUpscalingKey = "aiUpscaling"
 
     /// AI HDR for SDR videos: a Library title's gain grids from an analysis
     /// server's workers (the `ai-hdr` workload, GMNet on keyframes), applied
@@ -1522,6 +1539,7 @@ class AppModel {
         let loadedDefaultRealtimePseudo3D = loadBool("defaultRealtimePseudo3D", default: false)
         let loadedStableDepth = loadBool(DepthRefinement.enabledDefaultsKey, default: true)
         let loadedSmoothMotion = loadBool(Self.smoothMotionKey, default: false)
+        let loadedAIUpscaling = loadBool(Self.aiUpscalingKey, default: false)
         let loadedAIHDRVideos = loadBool(Self.aiHDRVideosKey, default: false)
         // Smooth Motion's interpolator choices are gone (2026-11-08): it
         // picks by the picture's rate. Forget what they were set to.
@@ -1646,6 +1664,7 @@ class AppModel {
         self.defaultRealtimePseudo3D = loadedDefaultRealtimePseudo3D
         self.stableDepth = loadedStableDepth
         self.smoothMotion = loadedSmoothMotion
+        self.aiUpscaling = loadedAIUpscaling
         self.aiHDRVideos = loadedAIHDRVideos
         self.videoAutoplayMuted = loadedVideoAutoplayMuted
         self.rememberImageEnhancements = loadedRememberImageEnhancements
@@ -2480,6 +2499,7 @@ class AppModel {
             defaultRealtimePseudo3D: defaultRealtimePseudo3D,
             stableDepth: stableDepth,
             smoothMotion: smoothMotion,
+            aiUpscaling: aiUpscaling,
             videoAutoplayMuted: videoAutoplayMuted,
             useLossyTextureCompression: useLossyTextureCompression,
             globalPseudo3DSettings: try? JSONEncoder().encode(globalPseudo3DSettings),
@@ -2530,6 +2550,7 @@ class AppModel {
         if let v = backup.defaultRealtimePseudo3D { defaultRealtimePseudo3D = v }
         if let v = backup.stableDepth { stableDepth = v }
         if let v = backup.smoothMotion { smoothMotion = v }
+        if let v = backup.aiUpscaling { aiUpscaling = v }
         if let v = backup.videoAutoplayMuted { videoAutoplayMuted = v }
         if let v = backup.useLossyTextureCompression { useLossyTextureCompression = v }
         if let data = backup.globalPseudo3DSettings,

@@ -151,6 +151,9 @@ final class VideoWindowModel {
     private(set) var pictureFrameRate: Double?
     /// Smooth Motion doubles what is shown (`noteSmoothMotionDoubling`).
     private(set) var smoothMotionDoubling = false
+    /// The size AI Upscaling shows the picture at while it upscales it
+    /// (`noteUpscaledPictureSize`); nil while frames show as decoded.
+    private(set) var upscaledPictureSize: CGSize?
     /// What the frames on screen are (transfer function, Dolby Vision RPU),
     /// from whichever renderer draws them; nil until one says, and for
     /// WebKit, which can't (`VideoWindowModel+PlaybackInfo`).
@@ -210,11 +213,17 @@ final class VideoWindowModel {
     /// for this window, through every renderer change and the next video;
     /// a new window starts at 1×.
     private(set) var playbackSpeed: Double = 1
-    /// This video's Smooth Motion choice in AI 3D, from the View Mode menu;
-    /// nil follows Settings → AI 3D. Reset with each new video.
+    /// This video's Smooth Motion choice, from the View Mode menu; nil
+    /// follows Settings → Videos. Carried to the next video in the window.
     var smoothMotionOverride: Bool?
-    /// Whether AI 3D interpolates this video's frames.
+    /// Whether this video's frames are interpolated (flat player, AI 3D).
     var smoothMotion: Bool { smoothMotionOverride ?? appModel.smoothMotion }
+    /// This video's AI Upscaling choice, from the View Mode menu; nil follows
+    /// Settings → Videos. Carried to the next video like Smooth Motion's.
+    var aiUpscalingOverride: Bool?
+    /// Whether the flat player upscales this video's frames
+    /// (`NativeMetalVideoPlayerView`, Vergence's `UpscalingFrameSource`).
+    var aiUpscaling: Bool { aiUpscalingOverride ?? appModel.aiUpscaling }
 
     /// Critical memory pressure (`AppModel`'s dispatch source): turn Smooth
     /// Motion off for this window. Its presenter, interpolator pools and
@@ -856,22 +865,35 @@ final class VideoWindowModel {
 
     // MARK: - Picture readout
 
-    /// "1920×1080 · 23.976 fps", once a renderer has said.
+    /// "1920×1080 · 23.976 fps", once a renderer has said; "960×540 →
+    /// 1920×1080" while AI Upscaling shows it bigger, "24 → 48 fps" while
+    /// Smooth Motion doubles it.
     var pictureDetails: String? {
         guard let size = pictureSize else { return nil }
         let format = VideoPictureFormat(width: Int(size.width.rounded()), height: Int(size.height.rounded()),
                                         framesPerSecond: pictureFrameRate)
+        let upscaled = upscaledPictureSize.map { " → \(Int($0.width.rounded()))×\(Int($0.height.rounded()))" } ?? ""
+        let sizeText = "\(format.width)×\(format.height)\(upscaled)"
         // Smooth Motion shows twice the frames: "24 → 48 fps".
         guard smoothMotionDoubling, let rate = pictureFrameRate,
               let from = VideoPictureFormat.rateLabel(rate), let to = VideoPictureFormat.rateLabel(rate * 2)
-        else { return format.summary }
-        return "\(format.width)×\(format.height) · \(from) → \(to) fps"
+        else {
+            guard !upscaled.isEmpty else { return format.summary }
+            return pictureFrameRate.flatMap(VideoPictureFormat.rateLabel).map { "\(sizeText) · \($0) fps" } ?? sizeText
+        }
+        return "\(sizeText) · \(from) → \(to) fps"
     }
 
     /// A renderer's Smooth Motion is doubling the picture (or stopped).
     func noteSmoothMotionDoubling(_ doubling: Bool) {
         guard smoothMotionDoubling != doubling else { return }
         smoothMotionDoubling = doubling
+    }
+
+    /// The flat player started or stopped showing the picture upscaled.
+    func noteUpscaledPictureSize(_ size: CGSize?) {
+        guard upscaledPictureSize != size else { return }
+        upscaledPictureSize = size
     }
 
     func notePictureSize(_ size: CGSize) {
@@ -1027,6 +1049,7 @@ final class VideoWindowModel {
     func switchToVideo(_ newVideo: GalleryVideo) {
         let carriesAI3D = pseudo3DEnabled
         let carriesSmoothMotion = smoothMotionOverride
+        let carriesUpscaling = aiUpscalingOverride
         pictureNeedsSystemRenderer = false
         appModel.lastViewedVideoId = newVideo.id
         // Keep the open-window registry pointed at what this window actually
@@ -1045,6 +1068,7 @@ final class VideoWindowModel {
         pictureSize = nil
         pictureFrameRate = nil
         smoothMotionDoubling = false
+        upscaledPictureSize = nil
         resetPlaybackInfo()
 
         // Reset per-window viewing state (a stereo episode plays 3D on the
@@ -1066,6 +1090,7 @@ final class VideoWindowModel {
         dismissDepthReadyPrompt()
         pseudo3DSettings = .default
         smoothMotionOverride = carriesSmoothMotion
+        aiUpscalingOverride = carriesUpscaling
         pendingPseudo3DEngage = nil
         // A different video starts from its own beginning.
         streamRenewalGeneration += 1
@@ -1169,6 +1194,20 @@ final class VideoWindowModel {
     /// player (visionOS only; see `NativeMetalVideoPlayerView`'s
     /// `rebuildFramePresenter`), or live 3D with an analysis track. Otherwise
     /// live 3D shows the source's own frames.
+    /// AI Upscaling has a picture to act on: the flat native Metal player
+    /// showing one VideoToolbox's upscaler takes (720p or less, 8-bit), on a
+    /// platform whose video window draws through it (not tvOS).
+    var upscalingApplies: Bool {
+        #if os(tvOS)
+        false
+        #else
+        guard playbackRenderer == .nativeMetal, !showsStereoPicture, let size = pictureSize,
+              UpscalingFrameSource.upscaledSize(width: Int(size.width.rounded()),
+                                                height: Int(size.height.rounded())) != nil else { return false }
+        return pictureFrameRange.map { $0.transfer == .sdr } ?? true
+        #endif
+    }
+
     var smoothMotionApplies: Bool {
         #if os(visionOS)
         shouldUsePseudo3D || (playbackRenderer == .nativeMetal && !showsStereoPicture)

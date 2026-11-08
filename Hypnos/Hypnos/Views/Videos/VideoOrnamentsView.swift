@@ -600,7 +600,22 @@ struct VideoOrnamentsView: View {
                         PlayerChoiceRow(isChecked: windowModel.smoothMotion) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Smooth Motion")
-                                Text("In-between frames for 24–30 fps").font(.caption).foregroundStyle(.secondary)
+                                Text("In-between frames, twice the frame rate").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+
+                // AI Upscaling for this video, the Settings choice its default.
+                if windowModel.upscalingApplies {
+                    Button {
+                        close()
+                        windowModel.aiUpscalingOverride = !windowModel.aiUpscaling
+                    } label: {
+                        PlayerChoiceRow(isChecked: windowModel.aiUpscaling) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("AI Upscaling")
+                                Text("A sharper picture, up to 1080p").font(.caption).foregroundStyle(.secondary)
                             }
                         }
                     }

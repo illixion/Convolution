@@ -207,6 +207,9 @@ struct NativeMetalVideoPlayerView {
     /// Smooth Motion: an in-between frame for each pair of a 24-30 or 50-60
     /// fps SDR picture (visionOS; see the coordinator's `rebuildFramePresenter`).
     var interpolatesFrames: Bool = false
+    /// AI Upscaling: a picture of 720p or less is upscaled up to 1080p as it
+    /// plays (see the coordinator's `rebuildFramePresenter`).
+    var upscalesPicture: Bool = false
     /// A 2D Library title's fields from an analysis coordinator: pairs they
     /// cover are made from them, the rest on the device.
     var sharedFields: SharedFieldProvider? = nil
@@ -260,6 +263,7 @@ struct NativeMetalVideoPlayerView {
         coordinator.sharedFields = sharedFields
         coordinator.aiHDR = aiHDR
         coordinator.interpolatesFrames = interpolatesFrames
+        coordinator.upscalesPicture = upscalesPicture
         coordinator.resumesAfterInterruptions = playbackModel == nil
         coordinator.maximumResolution = playbackModel?.maximumPictureResolution ?? .zero
 
@@ -324,6 +328,9 @@ struct NativeMetalVideoPlayerView {
             }
             coordinator.onSmoothMotionChanged = { [weak playbackModel] doubling in
                 playbackModel?.noteSmoothMotionDoubling(doubling)
+            }
+            coordinator.onUpscaledSizeChanged = { [weak playbackModel] size in
+                playbackModel?.noteUpscaledPictureSize(size)
             }
             coordinator.onPlaybackUpdate = { [weak playbackModel] state in
                 playbackModel?.applyPlaybackState(
@@ -405,6 +412,21 @@ struct NativeMetalVideoPlayerView {
             // An HDR picture leaves the system layer to be interpolated.
             didSet { if oldValue != interpolatesFrames { updatePresentation(); rebuildFramePresenter() } }
         }
+        /// AI Upscaling. Takes effect at once, like Smooth Motion: the
+        /// presenter is rebuilt over the same frame output.
+        var upscalesPicture = false {
+            didSet { if oldValue != upscalesPicture { rebuildFramePresenter() } }
+        }
+        /// The upscaling stage while AI Upscaling is on, to turn on and off as
+        /// the window grows past the picture or shrinks to it.
+        private var upscalingSource: UpscalingFrameSource?
+        /// Whether `upscalingSource` was last told the window shows the
+        /// picture bigger than it decodes; nil until it's been told.
+        private var upscalingGateOpen: Bool?
+        /// The decoded size of the frame on screen when an upscaler made it
+        /// bigger (`PumpFrame.sourceSize`); nil when it is the decoded size.
+        private var lastFrameSourceSize: CGSize?
+        private var lastUpscaledSize: CGSize?
         /// AI HDR's gain grids; arriving or leaving switches the drawable
         /// between plain BGRA and EDR half float.
         var aiHDR: GainGridPlayback? {
@@ -461,6 +483,8 @@ struct NativeMetalVideoPlayerView {
         var onFrameRangeKnown: ((VideoFrameRange) -> Void)?
         /// Smooth Motion started or stopped doubling the picture.
         var onSmoothMotionChanged: ((Bool) -> Void)?
+        /// AI Upscaling started showing the picture at this size, or stopped (nil).
+        var onUpscaledSizeChanged: ((CGSize?) -> Void)?
         var onPlaybackUpdate: ((PlaybackState) -> Void)?
         /// The AVPlayer, as each load makes one and teardown drops it.
         var onPlayerChanged: ((AVPlayer?) -> Void)?
@@ -807,7 +831,7 @@ struct NativeMetalVideoPlayerView {
             #else
             let plain = PlaybackFrameRate.normalDrawRate
             #endif
-            let base = framePresenter != nil ? doubledDrawRate : plain
+            let base = doublesFrames ? doubledDrawRate : plain
             mtkView?.preferredFramesPerSecond = Int(PlaybackFrameRate.drawRate(base: base, speed: Double(speed)).rounded())
         }
 
@@ -952,6 +976,8 @@ struct NativeMetalVideoPlayerView {
             presentationSizeObservation?.invalidate()
             presentationSizeObservation = nil
             framePresenter = nil
+            upscalingSource = nil
+            upscalingGateOpen = nil
             criteriaTask?.cancel()
             criteriaTask = nil
             host?.systemView.playerLayer.player = nil
@@ -975,6 +1001,11 @@ struct NativeMetalVideoPlayerView {
             videoOutput = nil
             loadedURL = nil
             lastReportedSize = nil
+            lastFrameSourceSize = nil
+            if lastUpscaledSize != nil {
+                lastUpscaledSize = nil
+                onUpscaledSizeChanged?(nil)
+            }
             loopA = nil
             loopB = nil
         }
@@ -1038,6 +1069,7 @@ struct NativeMetalVideoPlayerView {
             if let framePresenter {
                 if let frame = framePresenter.frame(forHostTime: CACurrentMediaTime()) {
                     lastPixelBuffer = frame.pixelBuffer
+                    lastFrameSourceSize = frame.sourceSize
                     lastFrameSeconds = frame.itemTime.seconds
                     needsPictureRedraw = true
                     newFrame = true
@@ -1048,6 +1080,7 @@ struct NativeMetalVideoPlayerView {
                 if output.hasNewPixelBuffer(forItemTime: itemTime),
                    let buffer = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: &shownTime) {
                     lastPixelBuffer = buffer
+                    lastFrameSourceSize = nil
                     lastFrameSeconds = shownTime.isValid ? shownTime.seconds : itemTime.seconds
                     needsPictureRedraw = true
                     newFrame = true
@@ -1082,6 +1115,7 @@ struct NativeMetalVideoPlayerView {
                 return
             }
             reportSizeIfNeeded(pixelBuffer)
+            updateUpscalingGate(drawableWidth: drawable.texture.width, drawableHeight: drawable.texture.height)
             if dynamicRange == .unknown {
                 noteDynamicRange(of: pixelBuffer)
                 if usesSystemLayer { return }
@@ -1446,31 +1480,59 @@ struct NativeMetalVideoPlayerView {
         /// uses the Neural Engine here, so it keeps up where AI 3D's depth
         /// model sharing it couldn't; the governor (`.flat` thresholds) still
         /// backs off if frames come late.
+        ///
+        /// **AI Upscaling** (every platform but tvOS) puts Vergence's
+        /// `UpscalingFrameSource` under it: an 8-bit picture of 720p or less
+        /// goes through VideoToolbox's low-latency super resolution up to
+        /// 1080p before the interpolator, the adjustments and sharpening, one
+        /// frame ahead of the presenter. It stops for the picture if it takes
+        /// over 60% of a frame's time, and pauses while the window shows the
+        /// picture no bigger than it decodes (`updateUpscalingGate`).
         private func rebuildFramePresenter() {
-            #if os(visionOS)
-            let had = framePresenter != nil
+            #if !os(tvOS)
+            let hadDoubling = doublesFrames
+            let hadUpscaling = upscalingSource != nil
             framePresenter = nil
-            if interpolatesFrames, !usesSystemLayer,
-               FramePixelFormat.isSupported(outputPixelFormat),
+            upscalingSource = nil
+            upscalingGateOpen = nil
+            if !usesSystemLayer, FramePixelFormat.isSupported(outputPixelFormat),
                let videoOutput, let playerItem {
-                let source = InterpolatingFrameSource.wrappingIfSupported(
-                    AVPlayerFrameSource(output: videoOutput, item: playerItem), thresholds: .flat,
-                    engine: .automatic, sharedFields: sharedFields
-                )
-                if source is InterpolatingFrameSource {
+                var source: LookaheadFrameSource = AVPlayerFrameSource(output: videoOutput, item: playerItem)
+                // Half-float (HDR) frames would band through its 8-bit 4:2:0.
+                if upscalesPicture, outputPixelFormat == kCVPixelFormatType_32BGRA,
+                   let upscaling = UpscalingFrameSource.wrappingIfSupported(source) as? UpscalingFrameSource {
+                    upscalingSource = upscaling
+                    source = upscaling
+                }
+                #if os(visionOS)
+                if interpolatesFrames {
+                    source = InterpolatingFrameSource.wrappingIfSupported(
+                        source, thresholds: .flat, engine: .automatic, sharedFields: sharedFields
+                    )
+                }
+                #endif
+                if source is InterpolatingFrameSource || source is UpscalingFrameSource {
                     framePresenter = InterpolatedFramePresenter(source: source)
                 }
             }
-            let has = framePresenter != nil
+            let doubling = doublesFrames
+            let upscaling = upscalingSource != nil
             doubledDrawRate = 96
             updateDrawRate()
-            onSmoothMotionChanged?(has)
-            if had || has {
-                AppLogger.videoWindow.info("Native player: Smooth Motion \(has ? "on" : "off", privacy: .public)")
+            onSmoothMotionChanged?(doubling)
+            if hadUpscaling != upscaling {
+                AppLogger.videoWindow.info("Native player: AI Upscaling \(upscaling ? "on" : "off", privacy: .public)")
+            }
+            if hadDoubling || doubling {
+                AppLogger.videoWindow.info("Native player: Smooth Motion \(doubling ? "on" : "off", privacy: .public)")
                 if dynamicRange != .unknown { updateDisplayCriteria() }
             }
             #endif
         }
+
+        /// Smooth Motion is doubling: the presenter's source interpolates
+        /// (it may also be there only to upscale).
+        private var doublesFrames: Bool { framePresenter?.source is InterpolatingFrameSource }
 
         /// HDR states its format so the picture doesn't dim, and every picture
         /// on visionOS states the rate it shows (doubled by Smooth Motion,
@@ -1482,7 +1544,7 @@ struct NativeMetalVideoPlayerView {
             #if os(visionOS)
             applyDisplayCriteria()
             #elseif os(tvOS)
-            if dynamicRange.isHDR || framePresenter != nil || criteriaSpeed != 1 {
+            if dynamicRange.isHDR || doublesFrames || criteriaSpeed != 1 {
                 applyDisplayCriteria()
             } else {
                 criteriaTask?.cancel()
@@ -1524,7 +1586,7 @@ struct NativeMetalVideoPlayerView {
                 let highest = (self.framePresenter?.source as? InterpolatingFrameSource)?.highestSourceFrameRate ?? 0
                 let doubled = snapped < highest
                 let shown = PlaybackFrameRate.shown(source: snapped, doubled: doubled, speed: self.criteriaSpeed)
-                if self.framePresenter != nil {
+                if self.doublesFrames {
                     let draw = doubled ? max(96, min(PlaybackFrameRate.maximum, snapped * 2)) : 96
                     if draw != self.doubledDrawRate {
                         self.doubledDrawRate = draw
@@ -1537,14 +1599,36 @@ struct NativeMetalVideoPlayerView {
             #endif
         }
 
+        /// The decoded size is the video's size (an upscaled frame carries
+        /// it); the size shown, when bigger, goes to the readout.
         private func reportSizeIfNeeded(_ pixelBuffer: CVPixelBuffer) {
-            let size = CGSize(
+            let shown = CGSize(
                 width: CVPixelBufferGetWidth(pixelBuffer),
                 height: CVPixelBufferGetHeight(pixelBuffer)
             )
+            let upscaled = lastFrameSourceSize != nil ? shown : nil
+            if upscaled != lastUpscaledSize {
+                lastUpscaledSize = upscaled
+                onUpscaledSizeChanged?(upscaled)
+            }
+            let size = lastFrameSourceSize ?? shown
             guard size.width > 0, size.height > 0, lastReportedSize != size else { return }
             lastReportedSize = size
             onVideoSizeKnown?(size)
+        }
+
+        /// AI Upscaling only while the window shows the picture at least a
+        /// quarter bigger than it decodes: smaller, the upscaled frame would
+        /// only be scaled back down (an iPhone in portrait, a small window).
+        private func updateUpscalingGate(drawableWidth: Int, drawableHeight: Int) {
+            guard let upscalingSource, let decoded = lastReportedSize, decoded.width > 0 else { return }
+            let open = Double(drawableWidth) > decoded.width * 1.25 || Double(drawableHeight) > decoded.height * 1.25
+            guard open != upscalingGateOpen else { return }
+            upscalingGateOpen = open
+            upscalingSource.isEnabled = open
+            AppLogger.videoWindow.info(
+                "Native player: AI Upscaling \(open ? "on" : "paused", privacy: .public), drawable \(drawableWidth)×\(drawableHeight) for \(Int(decoded.width))×\(Int(decoded.height))"
+            )
         }
 
         private func ensureIntermediate(
