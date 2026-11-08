@@ -342,6 +342,22 @@ final class Cinema {
         await sync(open: open, dismiss: dismiss)
     }
 
+    /// Whether `player` already plays the HUD's sound.
+    func hudSoundApplied(to player: AVPlayer) -> Bool {
+        let experience = player.intendedSpatialAudioExperience
+        return headLocked ? experience is FixedSpatialAudio : experience is AutomaticSpatialAudio
+    }
+
+    /// The sound a player in the HUD plays with: head-locked (`.fixed`) when
+    /// Head-Locked Sound is on, otherwise AVPlayer's automatic choice. Cheap
+    /// when already right, so it can run every tick.
+    func applyHUDSound(to player: AVPlayer) {
+        guard !hudSoundApplied(to: player) else { return }
+        player.intendedSpatialAudioExperience = headLocked
+            ? .fixed(soundStageSize: .automatic) : AutomaticSpatialAudio.automatic
+        logger.info("Cinema: HUD sound \(self.headLocked ? "head-locked" : "automatic", privacy: .public)")
+    }
+
     func setHeadLocked(_ locked: Bool, for owner: CinemaOwner,
                        open: OpenImmersiveSpaceAction, dismiss: DismissImmersiveSpaceAction) async {
         if headLocked != locked {
@@ -963,10 +979,9 @@ struct CinemaSpaceView: View {
             return
         }
         if cinema.mode == .hud {
-            if !cinema.headLocked, let player = cinema.screenPlayer,
-               !(player.intendedSpatialAudioExperience is AutomaticSpatialAudio) {
-                player.intendedSpatialAudioExperience = AutomaticSpatialAudio.automatic
-            }
+            // Re-asserted every tick: the window's own policy (applied when its
+            // player was made or its scene changed) overwrites the HUD's sound.
+            if let player = cinema.screenPlayer { cinema.applyHUDSound(to: player) }
             // Until the follow has its first pose, the head anchor holds the screen.
             let follow = CinemaHUDFollow.shared
             follow.attach(to: sceneRoot, keeping: screen)
