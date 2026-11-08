@@ -777,8 +777,17 @@ struct NativeMetalVideoPlayerView {
         /// frames 96, or 120 for a doubled 50-60 fps picture once the display
         /// criteria know its rate), and that many times more at a faster
         /// speed, up to 120.
+        /// On visionOS the display runs at the rate the criteria state (24 fps
+        /// → 96 Hz), so the view ticks every refresh and shows each frame on
+        /// the first one after it's due: 60 ticks on 96 Hz would show 24 fps
+        /// frames unevenly. A tick with no new frame costs nothing (`draw`).
         private func updateDrawRate() {
-            let base = framePresenter != nil ? doubledDrawRate : PlaybackFrameRate.normalDrawRate
+            #if os(visionOS)
+            let plain = PlaybackFrameRate.maximum
+            #else
+            let plain = PlaybackFrameRate.normalDrawRate
+            #endif
+            let base = framePresenter != nil ? doubledDrawRate : plain
             mtkView?.preferredFramesPerSecond = Int(PlaybackFrameRate.drawRate(base: base, speed: Double(speed)).rounded())
         }
 
@@ -858,25 +867,42 @@ struct NativeMetalVideoPlayerView {
             frameRateTask?.cancel()
             frameRateTask = Task { @MainActor [weak self, weak item, weak player] in
                 var reported: Double?
+                // A measured rate counts once two readings in a row snap to
+                // the same standard rate: one reading as Smooth Motion came
+                // on measured a 60 fps stream as ~50 and set the display to
+                // 100 Hz, where its frames judder (device, 2026-11-08).
+                var agreeing: (snapped: Double, count: Int)?
                 while !Task.isCancelled {
                     guard let self, let item, let player, self.playerItem === item else { return }
                     var rate: Double = 0
+                    var measured = false
                     if let track = item.tracks.first(where: { $0.assetTrack?.mediaType == .video }) {
                         if let assetTrack = track.assetTrack,
                            let nominal = try? await assetTrack.load(.nominalFrameRate), nominal > 0 {
                             rate = Double(nominal)
                         } else if player.rate == 1, player.timeControlStatus == .playing {
                             rate = Double(track.currentVideoFrameRate)
+                            measured = true
+                        }
+                    }
+                    if rate > 0, measured {
+                        let snapped = PlaybackFrameRate.snapped(rate)
+                        agreeing = agreeing?.snapped == snapped ? (snapped, agreeing!.count + 1) : (snapped, 1)
+                        if agreeing!.count < 2 {
+                            try? await Task.sleep(for: .seconds(1))
+                            continue
                         }
                     }
                     if rate > 0, rate != reported {
+                        let changed = reported.map(PlaybackFrameRate.snapped) != PlaybackFrameRate.snapped(rate)
                         reported = rate
                         self.measuredFrameRate = rate
                         self.onFrameRateKnown?(rate)
                         // An HLS stream's first frame comes before the player
                         // has measured anything: the criteria said 24 Hz for
-                        // a 23.976 fps episode.
-                        if self.criteriaGuessedRate { self.updateDisplayCriteria() }
+                        // a 23.976 fps episode. A stream that changes rate
+                        // (another variant) states the new one.
+                        if self.criteriaGuessedRate || changed { self.updateDisplayCriteria() }
                     }
                     try? await Task.sleep(for: .seconds(2))
                 }
@@ -1426,12 +1452,16 @@ struct NativeMetalVideoPlayerView {
             #endif
         }
 
-        /// HDR states its format so the picture doesn't dim; a doubled picture,
-        /// or one played at another speed, states the rate it shows so the
-        /// display can show it evenly. Plain SDR at normal speed leaves the
-        /// display as it is.
+        /// HDR states its format so the picture doesn't dim, and every picture
+        /// on visionOS states the rate it shows (doubled by Smooth Motion,
+        /// times the speed) so the display can show it evenly: left alone the
+        /// window runs at 90 Hz, where 60 fps frames alternate between two
+        /// refreshes and one (2026-11-08). On tvOS a rate switches the TV's
+        /// mode, blanking it, so plain SDR at normal speed leaves it as it is.
         private func updateDisplayCriteria() {
-            #if os(tvOS) || os(visionOS)
+            #if os(visionOS)
+            applyDisplayCriteria()
+            #elseif os(tvOS)
             if dynamicRange.isHDR || framePresenter != nil || criteriaSpeed != 1 {
                 applyDisplayCriteria()
             } else {
@@ -1458,12 +1488,17 @@ struct NativeMetalVideoPlayerView {
                         if let described = try? await track.load(.formatDescriptions).first { format = described }
                         if let nominal = try? await track.load(.nominalFrameRate), nominal > 0 { rate = Double(nominal) }
                     }
-                    if rate <= 0, let player = self?.player, player.rate > 0 {
-                        rate = Double(playerTrack.currentVideoFrameRate) / Double(player.rate)
-                    }
                 }
                 guard !Task.isCancelled, let self, self.playerItem === item, let format else { return }
+                // A stream's rate only once `measureFrameRate` has it steady:
+                // a single reading can be far off.
                 if rate <= 0, let measured = self.measuredFrameRate { rate = measured }
+                // Played at another speed before any steady reading: what the
+                // player shows now, which the speed multiplies.
+                if rate <= 0, let player = self.player, player.rate > 0, player.rate != 1,
+                   let playerTrack = item?.tracks.first(where: { $0.assetTrack?.mediaType == .video }) {
+                    rate = Double(playerTrack.currentVideoFrameRate) / Double(player.rate)
+                }
                 self.criteriaGuessedRate = rate <= 0
                 let snapped = PlaybackFrameRate.snapped(rate > 0 ? rate : 24)
                 let highest = (self.framePresenter?.source as? InterpolatingFrameSource)?.highestSourceFrameRate ?? 0
