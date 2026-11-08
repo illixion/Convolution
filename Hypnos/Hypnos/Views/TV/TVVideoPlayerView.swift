@@ -123,6 +123,18 @@ struct TVVideoPlayerView: View {
         _rating = State(initialValue: video.stashId.map { TVSceneRating(sceneId: $0, identity: video.identity, rating100: video.rating100) })
     }
 
+    /// SponsorBlock's auto-skip for the tvOS player; nothing else skips by itself.
+    private var autoSkipHandler: ((Double, Double) -> (segment: LibraryMediaSegment, label: String)?)? {
+        #if HYPNOS_YOUTUBE
+        return { [skipper] time, length in
+            skipper.noteVideoDuration(length)
+            return skipper.autoSkip(at: time)
+        }
+        #else
+        return nil
+        #endif
+    }
+
     var body: some View {
         Group {
             if let resolvedURL {
@@ -130,6 +142,7 @@ struct TVVideoPlayerView: View {
                                                       initialSpeed: initialSpeed, onSpeedChange: onSpeedChange,
                                                       maximumResolution: maximumResolution,
                                                       segments: skipper.segments,
+                                                      autoSkip: autoSkipHandler,
                                                       details: details.details, artwork: artwork,
                                                       subtitles: subtitles,
                                                       subtitleSource: { [remuxSource] in
@@ -304,6 +317,9 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
     /// Offered as the player's own contextual action (Skip Intro) while
     /// the playhead is in one.
     var segments: [LibraryMediaSegment] = []
+    /// Asked every tick with the playhead and the video's length: a segment to
+    /// skip by itself (SponsorBlock's auto-skip categories), with its name.
+    var autoSkip: ((Double, Double) -> (segment: LibraryMediaSegment, label: String)?)?
     /// What the Info panel shows (`AVPlayerItem.externalMetadata`).
     var details: PlayerDetails?
     var artwork: UIImage?
@@ -458,6 +474,19 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
                 coordinator.offeredSegment = nil
                 controller.contextualActions = []
             }
+            // A category set to skip by itself (SponsorBlock): skipped once, while
+            // playing, and announced by the same Undo action as a pressed skip.
+            if player.rate != 0, coordinator.undoUntil == nil {
+                let length = player.currentItem?.duration.seconds ?? 0
+                if let hit = coordinator.autoSkip?(time.seconds, length.isFinite ? length : 0) {
+                    let target = MediaSegmentSkipper.target(for: hit.segment, duration: length.isFinite ? length : 0)
+                    player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
+                                toleranceBefore: .zero, toleranceAfter: .zero)
+                    coordinator.offerUndo(of: hit.segment, returnTo: time.seconds, player: player,
+                                          controller: controller, name: hit.label)
+                    return
+                }
+            }
             let segment = LibrarySegmentSkipPolicy.segment(
                 at: time.seconds, in: coordinator.segments.filter { !coordinator.declinedSegments.contains($0) })
             guard segment != coordinator.offeredSegment else { return }
@@ -489,6 +518,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         context.coordinator.onPlayedToEnd = onPlayedToEnd
         context.coordinator.onSpeedChange = onSpeedChange
         context.coordinator.segments = segments
+        context.coordinator.autoSkip = autoSkip
         context.coordinator.showInfo(details, artwork: artwork, on: uiViewController.player)
         if context.coordinator.maximumResolution != maximumResolution {
             context.coordinator.maximumResolution = maximumResolution
@@ -566,6 +596,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         var timeObserver: Any?
         var segmentObserver: Any?
         var segments: [LibraryMediaSegment] = []
+        var autoSkip: ((Double, Double) -> (segment: LibraryMediaSegment, label: String)?)?
         var offeredSegment: LibraryMediaSegment?
         /// While set, the contextual action is the undo for the last skip.
         var undoUntil: Date?
@@ -575,10 +606,10 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         /// After a skip: "Undo Skip" for `LibrarySegmentSkipPolicy.undoSeconds`,
         /// back to where it left from.
         @MainActor func offerUndo(of segment: LibraryMediaSegment, returnTo: Double, player: AVPlayer,
-                                  controller: AVPlayerViewController?) {
+                                  controller: AVPlayerViewController?, name: String? = nil) {
             undoUntil = .now.addingTimeInterval(LibrarySegmentSkipPolicy.undoSeconds)
             controller?.contextualActions = [
-                UIAction(title: "Undo Skip \(segment.name)", image: UIImage(systemName: "arrow.uturn.backward")) {
+                UIAction(title: "Undo Skip \(name ?? segment.name)", image: UIImage(systemName: "arrow.uturn.backward")) {
                     [weak self, weak player, weak controller] _ in
                     guard let self, let player else { return }
                     self.declinedSegments.insert(segment)

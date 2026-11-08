@@ -246,6 +246,7 @@ extension VideoWindowModel {
     /// Skips an auto-skip SponsorBlock segment the playhead just entered;
     /// the undo button under the window says so.
     func autoSkipYouTubeSegmentIfNeeded() {
+        segmentSkipper.noteVideoDuration(duration)
         guard youTubeID != nil, !isScrubbing,
               let hit = segmentSkipper.autoSkip(at: currentTime) else { return }
         skip(hit.segment, name: hit.label)

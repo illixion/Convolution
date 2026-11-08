@@ -103,6 +103,14 @@ final class MediaSegmentSkipper {
     /// to watch it.
     @ObservationIgnored private var autoSkipped: Set<LibraryMediaSegment> = []
 
+    /// Everything the server returned, before the length check.
+    @ObservationIgnored private var sponsorBlockAll: [SponsorBlock.Segment] = []
+    /// The length of the video playing, once a player knows it.
+    @ObservationIgnored private var videoLength: Double = 0
+    /// The server's own tolerance for "the same video" (an edit or re-upload
+    /// that differs by more than this has different timings).
+    private static let lengthTolerance: Double = 2
+
     private func loadSponsorBlock(_ id: YouTubeVideoID) async {
         let key = id.videoIdentity
         guard key != loadedItemId else { return }
@@ -112,16 +120,40 @@ final class MediaSegmentSkipper {
         segmentIDs = [:]
         autoSkipLabels = [:]
         autoSkipped = []
+        sponsorBlockAll = []
+        videoLength = 0
         let loaded = await SponsorBlock.segments(for: id)
         guard loadedItemId == key else { return }
-        segments = loaded.map(\.librarySegment).filter(LibrarySegmentSkipPolicy.eligible)
-        segmentIDs = Dictionary(loaded.filter { !$0.uuid.isEmpty }.map { ($0.librarySegment, $0.uuid) },
-                                uniquingKeysWith: { first, _ in first })
-        for segment in loaded where segment.category.mode == .auto {
-            autoSkipLabels[segment.librarySegment] = segment.category.shortName
-        }
+        sponsorBlockAll = loaded
+        applySponsorBlock()
         if !loaded.isEmpty {
             AppLogger.youtube.info("SponsorBlock: \(loaded.map { "\($0.category.rawValue) \(Int($0.start))-\(Int($0.end))" }.joined(separator: ", "), privacy: .public)")
+        }
+    }
+
+    /// A player reports the video's length: segments cut for a video of a
+    /// different length (a re-upload, a trimmed edit) would land in the wrong
+    /// place, so they are dropped. Segments with no recorded length stay.
+    func noteVideoDuration(_ duration: Double) {
+        guard duration.isFinite, duration > 0, abs(duration - videoLength) > 0.5 else { return }
+        videoLength = duration
+        guard !sponsorBlockAll.isEmpty else { return }
+        applySponsorBlock()
+    }
+
+    private func applySponsorBlock() {
+        let usable = sponsorBlockAll.filter {
+            $0.videoDuration <= 0 || videoLength <= 0 || abs($0.videoDuration - videoLength) <= Self.lengthTolerance
+        }
+        if usable.count != sponsorBlockAll.count {
+            AppLogger.youtube.info("SponsorBlock: ignoring \(self.sponsorBlockAll.count - usable.count, privacy: .public) segment(s) cut for a different length")
+        }
+        segments = usable.map(\.librarySegment).filter(LibrarySegmentSkipPolicy.eligible)
+        segmentIDs = Dictionary(usable.filter { !$0.uuid.isEmpty }.map { ($0.librarySegment, $0.uuid) },
+                                uniquingKeysWith: { first, _ in first })
+        autoSkipLabels = [:]
+        for segment in usable where segment.category.mode == .auto {
+            autoSkipLabels[segment.librarySegment] = segment.category.shortName
         }
     }
 
