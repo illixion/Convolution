@@ -21,6 +21,10 @@ jobs:
     runs-on: xcode-27
     permissions:
       contents: write
+    env:
+      # A run restores only caches saved on its own ref or on main, and a tag's or PR's own
+      # cache is never used again, so only runs on main save them (as Apparition's release does).
+      SAVE_CACHE: ${{ github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,6 +63,46 @@ jobs:
 
       - name: Set build info
         run: ./scripts/set-build-info.sh
+
+      # SwiftPM's cache of binary artifacts: the xcframeworks a package's binary target downloads
+      # from a GitHub release (FluidAudio's NemoTextProcessing, 87 MB), stored under the URL they
+      # came from. A runner starts with none, so every build downloaded them, and a GitHub
+      # release-download outage on 8 November 2026 (releases/download URLs answering 504) stopped
+      # the build at package resolution. With the cache restored SwiftPM finds each zip by URL and
+      # downloads nothing (checked: the cached file is left untouched and still unpacked).
+      # restore-keys takes the nearest older cache when a manifest changes; SwiftPM fetches only
+      # what is missing.
+      - name: Restore SwiftPM binary artifacts
+        id: spm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm/artifacts
+          key: spm-artifacts-${{ runner.os }}-${{ hashFiles('**/Package.swift', '**/Package.resolved') }}
+          restore-keys: spm-artifacts-${{ runner.os }}-
+
+      # Resolved once, with retries, so that a brief outage of GitHub's release downloads does
+      # not fail the build. The archives below reuse what this fetched.
+      - name: Resolve packages
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if xcodebuild -resolvePackageDependencies \
+                -project Hypnos/Hypnos.xcodeproj \
+                -scheme Hypnos; then
+              exit 0
+            fi
+            echo "::warning::package resolution failed (attempt $attempt of 5)"
+            sleep $((attempt * 30))
+          done
+          exit 1
+
+      # Saved here, straight after a successful resolve, not at the end: a cache saved from a
+      # failed run could hold some of the artifacts under a key that every later run then trusts.
+      - name: Save SwiftPM binary artifacts
+        if: env.SAVE_CACHE == 'true' && steps.spm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm/artifacts
+          key: ${{ steps.spm-cache.outputs.cache-primary-key }}
 
       # The Vision Pro app, for the visionOS source at apps.illixion.com (SideStore's
       # visionOS port installs it) and for anyone signing it by hand. Released under one
