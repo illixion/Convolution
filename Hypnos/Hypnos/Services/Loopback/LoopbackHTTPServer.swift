@@ -192,6 +192,7 @@ final class LoopbackHTTPServer: Sendable {
         parameters.allowLocalEndpointReuse = true
         guard let listener = try? NWListener(using: parameters) else { return nil }
         listener.newConnectionHandler = { [weak self] connection in
+            AppLogger.remux.debug("Loopback connection accepted")
             self?.serve(connection)
         }
         let ready: UInt16? = await withCheckedContinuation { continuation in
@@ -255,7 +256,9 @@ final class LoopbackHTTPServer: Sendable {
             }
             let request = Request(String(decoding: buffer, as: UTF8.self))
             Task {
+                let began = ContinuousClock.now
                 let response = await self.respond(to: request)
+                Self.log(request, answeredWith: response, since: began)
                 connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
             }
         }
@@ -279,6 +282,20 @@ final class LoopbackHTTPServer: Sendable {
                 }
             }
         }
+    }
+
+    /// One line per request: what a player asked for and how it was answered. A player that
+    /// reports no picture or a timeout leaves nothing else to go on: no line at all means it
+    /// never got through, a slow line means the handler (the remux's reads) was the wait.
+    /// The last path component is the segment's or playlist's own name, code-defined except for
+    /// a published playlist's uuid.
+    private static func log(_ request: Request, answeredWith response: Data, since began: ContinuousClock.Instant) {
+        let status = String(decoding: response.prefix(12), as: UTF8.self).dropFirst(9)
+        let last = request.path.split(separator: "/").last.map(String.init) ?? ""
+        let name = last.count > 24 ? "playlist" : last
+        let elapsed = began.duration(to: .now)
+        let milliseconds = Int(elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
+        AppLogger.remux.info("Loopback \(request.method, privacy: .public) \(name, privacy: .public) range \(request.range ?? "-", privacy: .public) → \(String(status), privacy: .public), \(response.count, privacy: .public) bytes, \(milliseconds, privacy: .public) ms")
     }
 
     private func respond(to request: Request) async -> Data {

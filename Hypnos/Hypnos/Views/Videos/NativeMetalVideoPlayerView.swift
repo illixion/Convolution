@@ -702,9 +702,18 @@ struct NativeMetalVideoPlayerView {
                     let underlying = (error as NSError).userInfo[NSUnderlyingErrorKey] as? Error
                     return error.logCode + (underlying.map { " (\($0.logCode))" } ?? "")
                 } ?? "-"
+                // What AVFoundation itself saw of the stream (HTTP status codes and errors per
+                // request, bytes moved, stalls), since the item's own error is only the last one.
+                let errorEvents = (observedItem.errorLog()?.events ?? []).suffix(4).map {
+                    "\($0.errorStatusCode) \($0.errorDomain)"
+                }.joined(separator: "; ")
+                let accessEvents = (observedItem.accessLog()?.events ?? []).suffix(2).map {
+                    "\(Int($0.numberOfBytesTransferred)) bytes, \($0.numberOfStalls) stalls, \($0.numberOfMediaRequests) requests"
+                }.joined(separator: "; ")
                 Task { @MainActor [weak self] in
                     guard let self, self.playerItem === observedItem else { return }
                     AppLogger.videoWindow.error("Native player item failed for \(self.loadedURL?.loggableDescription ?? "?"): \(message) [\(code, privacy: .public)]")
+                    AppLogger.videoWindow.error("Native player item log: errors [\(errorEvents.isEmpty ? "none" : errorEvents, privacy: .public)], access [\(accessEvents.isEmpty ? "none" : accessEvents, privacy: .public)]")
                     self.onPlaybackError?()
                 }
             }
