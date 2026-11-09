@@ -5,7 +5,7 @@
 //  GitHub-only build feature, compiled out unless HYPNOS_PRIVATE_API is set.
 //
 
-#if HYPNOS_PRIVATE_API && !os(visionOS)
+#if HYPNOS_PRIVATE_API && os(iOS)
 
 import Photos
 import RealityKit

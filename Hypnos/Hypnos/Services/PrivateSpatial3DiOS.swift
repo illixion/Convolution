@@ -8,7 +8,7 @@
 //  code below calls API that Apple marks unavailable on this platform.
 //
 
-#if HYPNOS_PRIVATE_API && !os(visionOS)
+#if HYPNOS_PRIVATE_API && os(iOS)
 
 import DebugTrace
 import Foundation
