@@ -101,9 +101,68 @@ final class YouTubeWatchHistory {
         return slot.entry
     }
 
-    private func setEntry(_ entry: Entry?, for id: YouTubeVideoID) {
+    /// `refilter: false` for what a playing video's reports change: the tab's
+    /// Hide Watched filter then isn't re-run behind the player (a layout pass
+    /// of the whole grid, mid-playback); it catches up when the tab returns
+    /// (`refreshTiles`).
+    private func setEntry(_ entry: Entry?, for id: YouTubeVideoID, refilter: Bool = true) {
+        let old = entries[id]
         entries[id] = entry
         if let slot = slots[id], slot.entry != entry { slot.entry = entry }
+        if refilter, (old == nil) != (entry == nil) || Self.isNearlyWatched(old) != Self.isNearlyWatched(entry) {
+            filterRevision += 1
+        }
+    }
+
+    // MARK: - Hide Watched
+
+    /// From this far on a video counts as nearly fully watched, which is what
+    /// the tab's Hide Watched filter hides. (The backend's own "completed" is
+    /// 95 %, and stays set once reached, so a replay from the start would
+    /// still be hidden; the position is what is used here.)
+    static let nearlyWatchedFraction = 0.9
+
+    /// Changes whenever a video's watched state changes in a way the filter
+    /// cares about, so a grid that applies it re-filters. The grid reads
+    /// this one number rather than every video's slot: see `entry(for:)`.
+    private(set) var filterRevision = 0
+
+    /// How far `video` was watched, as its tile shows it: the server's
+    /// entry if it has one, else YouTube's own bar on a signed-in page.
+    static func watchedFraction(of video: YouTubeVideoSummary, entry: Entry?) -> Double? {
+        if let entry { return entry.fraction }
+        return video.watchedFraction.flatMap { $0 > 0 ? $0 : nil }
+    }
+
+    private static func isNearlyWatched(_ entry: Entry?) -> Bool {
+        (entry?.fraction ?? 0) >= nearlyWatchedFraction
+    }
+
+    /// Whether the filter hides `video`. Deliberately not observed: the
+    /// caller reads `filterRevision` to know when to ask again.
+    func isNearlyWatched(_ video: YouTubeVideoSummary) -> Bool {
+        (Self.watchedFraction(of: video, entry: entries[video.id]) ?? 0) >= Self.nearlyWatchedFraction
+    }
+
+    /// The server has `id` as watched to the end or nearly (not observed).
+    func isMarkedWatched(_ id: YouTubeVideoID) -> Bool {
+        Self.isNearlyWatched(entries[id])
+    }
+
+    /// Marking needs a length: the server counts a video as watched by its
+    /// position against it.
+    func canMarkWatched(_ video: YouTubeVideoSummary) -> Bool {
+        isAvailable && (entries[video.id]?.duration ?? video.lengthSeconds ?? 0) > 0
+    }
+
+    /// Records `video` as watched to the end, from a tile's menu: a report
+    /// at its last second, like a player's `end`. It lands in the Watched
+    /// shelf and counts as watched on every device.
+    func markWatched(_ video: YouTubeVideoSummary) {
+        guard canMarkWatched(video), let duration = entries[video.id]?.duration ?? video.lengthSeconds else { return }
+        noteOpening(video)
+        send(video.id, position: duration, duration: duration, title: video.title, event: .end)
+        filterRevision += 1
     }
     /// The Watched shelf, newest first.
     private(set) var recent: [Entry] = []
@@ -196,6 +255,8 @@ final class YouTubeWatchHistory {
     /// made on another device shows.
     func refreshTiles() {
         asked.removeAll()
+        // Also where a video just watched leaves a filtered grid.
+        filterRevision += 1
     }
 
     private func lookup(_ ids: [YouTubeVideoID]) async -> [YouTubeVideoID: Entry]? {
@@ -214,7 +275,7 @@ final class YouTubeWatchHistory {
     func resumePosition(for id: YouTubeVideoID) async -> Double? {
         guard isAvailable else { return nil }
         let entry = await lookup([id])?[id] ?? entries[id]
-        if let entry { setEntry(entry, for: id) }
+        if let entry { setEntry(entry, for: id, refilter: false) }
         guard let entry, entry.position >= 15 else { return nil }
         if let duration = entry.duration, entry.position >= duration - 10 { return nil }
         return entry.position
@@ -270,11 +331,11 @@ final class YouTubeWatchHistory {
         if var entry = entries[id] {
             entry.position = position
             if let duration = report.duration { entry.duration = duration }
-            setEntry(entry, for: id)
+            setEntry(entry, for: id, refilter: false)
         } else {
             setEntry(Entry(id: id.rawValue, title: report.title, channel: report.channel,
                            duration: report.duration, position: position, completed: false,
-                           sortAt: report.at, lastWatchedAt: report.at), for: id)
+                           sortAt: report.at, lastWatchedAt: report.at), for: id, refilter: false)
         }
         // A start must reach the server even if a later report replaces it
         // in the outbox, or the viewing isn't counted; the server only takes
@@ -311,7 +372,7 @@ final class YouTubeWatchHistory {
                 }
                 if let id = YouTubeVideoID(report.id), entries[id] != reply.video,
                    entries[id] != nil || recent.contains(where: { $0.id == report.id }) {
-                    setEntry(reply.video, for: id)
+                    setEntry(reply.video, for: id, refilter: false)
                 }
                 saveOutbox()
             }

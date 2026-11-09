@@ -55,6 +55,9 @@ struct YouTubeTabView: View {
     @PushWindowProxy private var pushWindow
     @Environment(AppModel.self) private var appModel
     @AppStorage(YouTubeConsent.defaultsKey, store: HypnosDefaults.store) private var consentGranted = false
+    /// Leaves out videos watched nearly to the end (`YouTubeWatchHistory.nearlyWatchedFraction`)
+    /// from search and the feeds; the Watched shelf and YouTube's own History always show them.
+    @AppStorage("youtube.hideWatched", store: HypnosDefaults.store) private var hideWatched = false
 
     private var pastedID: YouTubeVideoID? { YouTubeVideoID(parsing: query) }
 
@@ -165,7 +168,8 @@ struct YouTubeTabView: View {
             if results.isEmpty {
                 ContentUnavailableView.search(text: submittedQuery)
             } else {
-                grid(results, removable: false)
+                HStack { hideWatchedButton; Spacer() }
+                grid(results, removable: false, filtersWatched: true)
                 if continuation != nil {
                     ProgressView()
                         .frame(maxWidth: .infinity)
@@ -191,6 +195,11 @@ struct YouTubeTabView: View {
                 }
                 shelfButton(watchHistory.isAvailable ? "Watched" : "Recently Watched",
                             systemImage: "play.circle", for: .recent)
+                // Nothing to hide on the shelves that are what was watched.
+                if case .feed(let feed) = shelf, feed != .history {
+                    Divider().frame(height: 24)
+                    hideWatchedButton
+                }
             }
             .padding(.vertical, 8)
         }
@@ -208,12 +217,25 @@ struct YouTubeTabView: View {
     }
 
     @ViewBuilder
+    private var hideWatchedButton: some View {
+        let button = Button { hideWatched.toggle() } label: {
+            Label("Hide Watched", systemImage: hideWatched ? "eye.slash.fill" : "eye.slash")
+        }
+        .accessibilityIdentifier("youtube.hideWatched")
+        if hideWatched {
+            button.buttonStyle(.borderedProminent)
+        } else {
+            button.buttonStyle(.bordered)
+        }
+    }
+
+    @ViewBuilder
     private func feedContent(_ feed: YouTubeFeed) -> some View {
         switch feedModel.phase {
         case .idle, .loading:
             ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
         case .loaded:
-            grid(feedModel.videos, removable: false)
+            grid(feedModel.videos, removable: false, filtersWatched: feed != .history)
             if feedModel.hasMore {
                 ProgressView()
                     .frame(maxWidth: .infinity)
@@ -381,7 +403,35 @@ struct YouTubeTabView: View {
         .buttonStyle(.borderedProminent)
     }
 
-    private func grid(_ videos: [YouTubeVideoSummary], removable: Bool) -> some View {
+    /// `filtersWatched`: this list is one Hide Watched applies to (search and
+    /// the feeds that aren't YouTube's History), not a record of what was watched.
+    @ViewBuilder
+    private func grid(_ videos: [YouTubeVideoSummary], removable: Bool, filtersWatched: Bool = false) -> some View {
+        // The grid, its filter and its menus' Mark as Watched / Unwatched
+        // read the watch history without observing it: a playing video's
+        // reports would re-run every tile. This revision changes only when
+        // a watched state does (see `filterRevision`).
+        let _ = watchHistory.filterRevision
+        if filtersWatched, hideWatched {
+            let visible = videos.filter { !watchHistory.isNearlyWatched($0) }
+            if visible.isEmpty, !videos.isEmpty {
+                Label("Everything loaded so far is watched", systemImage: "checkmark.circle")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 40)
+            } else {
+                videoGrid(visible, removable: removable)
+            }
+            // Asks the server about every video now, not as each tile
+            // scrolls in, so watched ones are never shown first.
+            Color.clear.frame(height: 0)
+                .task(id: videos.count) { for video in videos { watchHistory.want(video.id) } }
+        } else {
+            videoGrid(videos, removable: removable)
+        }
+    }
+
+    private func videoGrid(_ videos: [YouTubeVideoSummary], removable: Bool) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: cardMinimumWidth), spacing: gridSpacing, alignment: .top)],
                   spacing: gridSpacing) {
             ForEach(videos) { video in
@@ -398,6 +448,20 @@ struct YouTubeTabView: View {
                             UIPasteboard.general.string = video.id.watchURL.absoluteString
                         }
                         #endif
+                        // Read without observing: the menu is built when the
+                        // grid is, and a playing video's reports mustn't
+                        // re-run it. `filterRevision` refreshes the grid.
+                        if watchHistory.isAvailable {
+                            if watchHistory.isMarkedWatched(video.id) {
+                                Button("Mark as Unwatched", systemImage: "arrow.counterclockwise") {
+                                    Task { await watchHistory.remove(video.id) }
+                                }
+                            } else if watchHistory.canMarkWatched(video) {
+                                Button("Mark as Watched", systemImage: "checkmark.circle") {
+                                    watchHistory.markWatched(video)
+                                }
+                            }
+                        }
                         if removable {
                             Button("Remove from History", systemImage: "trash", role: .destructive) {
                                 history.remove(video.id)
@@ -642,8 +706,7 @@ struct YouTubeVideoCard: View {
     /// How far it was watched: the watch history's position, or failing
     /// that YouTube's own bar on a signed-in page.
     private var watchedFraction: Double? {
-        if let entry = watchHistory.entry(for: video.id) { return entry.fraction }
-        return video.watchedFraction.flatMap { $0 > 0 ? $0 : nil }
+        YouTubeWatchHistory.watchedFraction(of: video, entry: watchHistory.entry(for: video.id))
     }
 
     /// YouTube's red bar along the bottom of the thumbnail.
