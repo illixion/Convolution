@@ -180,12 +180,35 @@ final class YouTubeFeedModel {
 extension YouTubePageScript.Payload.Card {
     var summary: YouTubeVideoSummary? {
         guard let id = YouTubeVideoID(id) else { return nil }
-        // Usually [views, age]; a lone item is the views only if it says so,
-        // so an age never lands on the tile's views line.
-        var rest = metadata ?? []
-        let viewsIndex = rest.firstIndex { $0.localizedCaseInsensitiveContains("view") || $0.localizedCaseInsensitiveContains("watching") }
-            ?? (rest.count > 1 ? 0 : nil)
-        let views = viewsIndex.map { rest.remove(at: $0) }
+        // The page's byline is [channel, views, age] but a card can lack the
+        // channel (then the first item is the views), so sort the items by
+        // what they say rather than by position.
+        var channel = channel
+        var views: String?
+        var rest: [String] = []
+        for item in (channel.map { [$0] } ?? []) + (metadata ?? []) {
+            if YouTubeVideoSummary.isViewCount(item) {
+                if views == nil { views = item }
+            } else if channel == nil || item != channel {
+                rest.append(item)
+            }
+        }
+        if let first = rest.first, channel == nil, !YouTubeVideoSummary.isAge(first) {
+            channel = first
+            rest.removeFirst()
+        } else if let current = channel, YouTubeVideoSummary.isViewCount(current) {
+            channel = nil
+        }
+        if let current = channel, YouTubeVideoSummary.isAge(current) {
+            rest.insert(current, at: 0)
+            channel = nil
+        }
+        // A title that swallowed the views ("Title 1.2M views") gives them back.
+        var title = title
+        if let stripped = YouTubeVideoSummary.splitTrailingViews(title) {
+            title = stripped.title
+            views = views ?? stripped.views
+        }
         return YouTubeVideoSummary(
             id: id,
             title: title,

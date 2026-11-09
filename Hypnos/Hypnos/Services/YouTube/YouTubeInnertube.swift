@@ -116,6 +116,25 @@ struct YouTubeVideoSummary: Identifiable, Hashable, Codable, Sendable {
     var watchedFraction: Double?
 
     var thumbnailURL: URL { YouTubeInnertube.thumbnailURL(for: id) }
+
+    /// "1.2M views", "523 watching"; not "No views" or an age.
+    static func isViewCount(_ text: String) -> Bool {
+        text.range(of: #"^\s*[\d.,]+\s*[KMB]?\s*(views?|watching|viewers?)\s*$"#,
+                   options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    static func isAge(_ text: String) -> Bool {
+        text.range(of: #"\bago\b|^streamed|^premiered|^scheduled"#, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    /// A title with the view count glued on its end: ("Title", "1.2M views").
+    static func splitTrailingViews(_ title: String) -> (title: String, views: String)? {
+        guard let range = title.range(of: #"[\s•·|-]+[\d.,]+\s*[KMB]?\s*(views?|watching)\s*$"#,
+                                      options: [.regularExpression, .caseInsensitive]) else { return nil }
+        let head = String(title[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+        let views = String(title[range]).trimmingCharacters(in: CharacterSet(charactersIn: " •·|-"))
+        return head.isEmpty ? nil : (head, views)
+    }
 }
 
 struct YouTubeSearchPage: Sendable {

@@ -55,8 +55,9 @@ final class YouTubeWatchHistory {
 
         var summary: YouTubeVideoSummary? {
             guard let videoID = YouTubeVideoID(id) else { return nil }
-            return YouTubeVideoSummary(id: videoID, title: title ?? "YouTube video", author: channel,
-                                       lengthSeconds: duration)
+            let split = title.flatMap(YouTubeVideoSummary.splitTrailingViews)
+            return YouTubeVideoSummary(id: videoID, title: split?.title ?? title ?? "YouTube video", author: channel,
+                                       lengthSeconds: duration, viewCountText: split?.views)
         }
     }
 
