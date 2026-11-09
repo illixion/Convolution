@@ -242,7 +242,7 @@ struct FilmPlayerView: View {
             // film opened with it on opens the space.
             .task {
                 guard cinema.headLocked else { return }
-                await cinema.setHeadLocked(true, for: .film, open: openImmersiveSpace, dismiss: dismissImmersiveSpace)
+                await cinema.setHeadLockedMode(.always, for: .film, open: openImmersiveSpace, dismiss: dismissImmersiveSpace)
             }
             // A 3D film opens in 3D once the server says it is one, and
             // replaces a fake-3D picture the user started before it knew.

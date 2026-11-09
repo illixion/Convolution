@@ -267,6 +267,8 @@ enum FilmDebugEndpoints {
     struct CinemaReply: Encodable {
         var owner: String?
         var headLocked: Bool
+        /// off, always or byLayout.
+        var headLockedMode: String
         var screenPlayer: Bool
         var mode: String
         var open: Bool
@@ -295,7 +297,8 @@ enum FilmDebugEndpoints {
         case nil: nil
         }
         return CinemaReply(
-            owner: owner, headLocked: cinema.headLocked, screenPlayer: cinema.screenPlayer != nil,
+            owner: owner, headLocked: cinema.headLocked, headLockedMode: cinema.headLockedMode.rawValue,
+            screenPlayer: cinema.screenPlayer != nil,
             mode: cinema.mode.rawValue, open: cinema.isOpen, screenAttached: cinema.screenAttached,
             status: cinema.status, head: array(head), window: array(window),
             room: array(position(cinema.roomPose)), screen: array(screen),
@@ -304,7 +307,7 @@ enum FilmDebugEndpoints {
             screenWidthMetres: cinema.screenPose == nil ? nil : cinema.screenWidth
         )
         #else
-        return CinemaReply(headLocked: false, screenPlayer: false, mode: "window", open: false, screenAttached: false,
+        return CinemaReply(headLocked: false, headLockedMode: "off", screenPlayer: false, mode: "window", open: false, screenAttached: false,
                            status: "visionOS only")
         #endif
     }

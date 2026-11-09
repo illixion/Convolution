@@ -7,6 +7,9 @@
  */
 
 #if !os(tvOS)
+#if os(visionOS)
+import RAVEMedia
+#endif
 import SwiftUI
 
 struct SmartActivationSettingsPage: View {
@@ -19,8 +22,32 @@ struct SmartActivationSettingsPage: View {
         if appModel.smartSmoothMotion { on.append("Smooth Motion") }
         #endif
         if appModel.smartUpscaling { on.append("Upscaling") }
+        #if os(visionOS)
+        if Cinema.shared.headLockedMode == .byLayout { on.append("Head-Locked Sound") }
+        #endif
         return on.isEmpty ? "Off" : on.joined(separator: ", ")
     }
+
+    #if os(visionOS)
+    /// Head-locked sound is not a rule list: what decides is the audio's
+    /// layout, and that has only two answers.
+    private var headLockedSoundSection: some View {
+        let cinema = Cinema.shared
+        return Section {
+            Picker("Head-Locked Sound", selection: Binding(
+                get: { cinema.headLockedMode },
+                set: { cinema.applyHeadLockedMode($0) }
+            )) {
+                ForEach(RAVEHeadLockedSound.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.menu)
+        } header: {
+            Text("Head-Locked Sound")
+        } footer: {
+            Text("By Audio Layout turns the sound of mono and stereo videos with your head, which keeps them at full quality, and leaves 5.1 and 7.1 in the room, so they keep their spatial features. Films with object audio count as surround. The Cinema menu on the player's control strip has the same choice for the video you are watching.")
+        }
+    }
+    #endif
 
     var body: some View {
         @Bindable var appModel = appModel
@@ -41,6 +68,10 @@ struct SmartActivationSettingsPage: View {
                 "AI Upscaling", isOn: $appModel.smartUpscaling, rules: $appModel.smartRules.upscaling,
                 boosts: false, defaultOn: appModel.aiUpscaling,
                 note: "Upscaling only ever runs on pictures of 720p and below that are not HDR, so a rule for a bigger picture changes nothing.")
+
+            #if os(visionOS)
+            headLockedSoundSection
+            #endif
 
             Section {
                 Button("Restore Suggested Rules", role: .destructive) {

@@ -23,12 +23,16 @@
    players, the window shows a card with the way back, and the film's room
    has the screen as its front wall. Live 3D and AI 3D move their stereo
    plane onto the screen the same way (the engine lends it and takes it back).
- - **Head-Locked Sound** (`headLocked`, one setting for every player): the
-   sound turns with the head instead of staying in the room. A video window's
-   5.1/7.1 becomes `.fixed` spatial audio (`RAVEMediaPolicy.headLockedSurround`,
-   which every playing `AVPlayer` follows); stereo already plays unspatialized.
+ - **Head-Locked Sound** (`headLockedMode`, one setting for every player): the
+   sound turns with the head instead of staying in the room. `always` makes a
+   video window's 5.1/7.1 `.fixed` spatial audio and leaves stereo
+   unspatialized (`RAVEMediaPolicy.headLockedSound`, which every playing
+   `AVPlayer` follows). `byLayout` (Smart Activation) decides per player from
+   its probed audio: mono and stereo play head-locked, which keeps their full
+   quality, and 5.1/7.1 stays head-tracked, which keeps its spatial features.
    The film's object room is set to the head's pose every frame, which needs
-   the space, so a film with head-locked sound opens it even in Window mode.
+   the space, so a film with `always` opens it even in Window mode; under
+   `byLayout` a film is surround, so its room stays put.
 
  The space asks to coexist with a system environment
  (`immersiveEnvironmentBehavior(.coexist)`, visionOS 26), so Mount Hood and
@@ -82,6 +86,24 @@ enum CinemaMode: String, CaseIterable, Identifiable {
         case .roomSound: "Room Sound"
         case .bigScreen: "Big Screen"
         case .hud: "HUD"
+        }
+    }
+}
+
+extension RAVEHeadLockedSound {
+    var title: String {
+        switch self {
+        case .off: "Off"
+        case .always: "Always"
+        case .byLayout: "By Audio Layout"
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .off: "The sound stays where the video is"
+        case .always: "The sound turns with your head instead of staying in the room"
+        case .byLayout: "Stereo and mono turn with your head and keep full quality; surround stays in the room, with its spatial features"
         }
     }
 }
@@ -239,8 +261,19 @@ final class Cinema {
     var hudCloseAction: (@MainActor () -> Void)?
     var hudFilmChromeVisible = true
 
-    /// The sound turns with the head (see the header).
-    private(set) var headLocked = false
+    /// Where the sound sits (see the header): the one setting for every player.
+    private(set) var headLockedMode = RAVEHeadLockedSound.off
+    /// Every player's sound turns with the head. `.byLayout` is not this: it
+    /// locks stereo and mono players only, never the film (object audio is
+    /// surround, which keeps its spatial features), so what the film's room
+    /// and the space it needs follow is this alone.
+    var headLocked: Bool { headLockedMode == .always }
+
+    /// Whether `player`'s sound turns with the head: `.byLayout` asks what the
+    /// spatial-audio policy found in its audio (stereo until it knows).
+    func headLocked(for player: AVPlayer) -> Bool {
+        headLockedMode.locks(multichannel: player.spatialAudioIsMultichannel)
+    }
     /// Metres from the head to the screen.
     var screenDistance: Float = 15 {
         didSet { save(); if !draggingScreen { refitScreen() } }
@@ -281,8 +314,11 @@ final class Cinema {
         var screenDistance: Float
         var screenWidthDegrees: Float
         var dimsSurroundings: Bool
-        /// Optional: settings saved before it existed decode as off.
+        /// Optional: settings saved before it existed decode as off. Still
+        /// written (true for `.always`) so an older build reads a sensible value.
         var headLocked: Bool?
+        /// Optional: settings saved before it existed take `headLocked`.
+        var headLockedMode: String?
         /// Optional: settings saved before it existed decode as full.
         var hudStabilization: Float?
         /// Optional: where the wearer left the HUD; before, it opened at home.
@@ -296,7 +332,8 @@ final class Cinema {
             screenDistance = settings.screenDistance
             screenWidthDegrees = settings.screenWidthDegrees
             dimsSurroundings = settings.dimsSurroundings
-            headLocked = settings.headLocked ?? false
+            headLockedMode = settings.headLockedMode.flatMap(RAVEHeadLockedSound.init(rawValue:))
+                ?? ((settings.headLocked ?? false) ? .always : .off)
             hudStabilization = min(1, max(0, settings.hudStabilization ?? 1))
             if let offset = settings.hudOffset, offset.count == 3,
                let width = settings.hudWidth, width.isFinite {
@@ -305,12 +342,13 @@ final class Cinema {
                                              requestedWidth: hudWidth, aspect: hudAspect)
             }
         }
-        RAVEMediaPolicy.headLockedSurround = headLocked
+        RAVEMediaPolicy.headLockedSound = headLockedMode
     }
 
     private func save() {
         let settings = Settings(screenDistance: screenDistance, screenWidthDegrees: screenWidthDegrees,
                                 dimsSurroundings: dimsSurroundings, headLocked: headLocked,
+                                headLockedMode: headLockedMode.rawValue,
                                 hudStabilization: hudStabilization,
                                 hudOffset: [hudOffset.x, hudOffset.y, hudOffset.z], hudWidth: hudWidth)
         if let data = try? JSONEncoder().encode(settings) {
@@ -374,31 +412,40 @@ final class Cinema {
     /// Whether `player` already plays the HUD's sound.
     func hudSoundApplied(to player: AVPlayer) -> Bool {
         let experience = player.intendedSpatialAudioExperience
-        return headLocked ? experience is FixedSpatialAudio : experience is AutomaticSpatialAudio
+        return headLocked(for: player) ? experience is FixedSpatialAudio : experience is AutomaticSpatialAudio
     }
 
     /// The sound a player in the HUD plays with: head-locked (`.fixed`) when
-    /// Head-Locked Sound is on, otherwise AVPlayer's automatic choice. Cheap
-    /// when already right, so it can run every tick.
+    /// its sound is head-locked (always, or stereo and mono under By Audio
+    /// Layout), otherwise AVPlayer's automatic choice. Cheap when already
+    /// right, so it can run every tick, which is also what picks up the
+    /// audio probe's answer once it arrives.
     func applyHUDSound(to player: AVPlayer) {
         guard !hudSoundApplied(to: player) else { return }
-        player.intendedSpatialAudioExperience = headLocked
+        let locked = headLocked(for: player)
+        player.intendedSpatialAudioExperience = locked
             ? .fixed(soundStageSize: .automatic) : AutomaticSpatialAudio.automatic
-        logger.info("Cinema: HUD sound \(self.headLocked ? "head-locked" : "automatic", privacy: .public)")
+        logger.info("Cinema: HUD sound \(locked ? "head-locked" : "automatic", privacy: .public)")
     }
 
-    func setHeadLocked(_ locked: Bool, for owner: CinemaOwner,
-                       open: OpenImmersiveSpaceAction, dismiss: DismissImmersiveSpaceAction) async {
-        if headLocked != locked {
-            headLocked = locked
-            save()
-            RAVEMediaPolicy.headLockedSurround = locked
-            logger.info("Cinema: head-locked sound \(locked ? "on" : "off", privacy: .public)")
-        }
+    /// Sets the mode without touching the space: the Settings page's picker,
+    /// where there is no space to open. A film that holds the space for its
+    /// head-locked sound keeps it until the next time the cinema syncs.
+    func applyHeadLockedMode(_ newMode: RAVEHeadLockedSound) {
+        guard headLockedMode != newMode else { return }
+        headLockedMode = newMode
+        save()
+        RAVEMediaPolicy.headLockedSound = newMode
+        logger.info("Cinema: head-locked sound \(newMode.rawValue, privacy: .public)")
+    }
+
+    func setHeadLockedMode(_ newMode: RAVEHeadLockedSound, for owner: CinemaOwner,
+                           open: OpenImmersiveSpaceAction, dismiss: DismissImmersiveSpaceAction) async {
+        applyHeadLockedMode(newMode)
         // Only the film's sound needs the space for it.
         guard owner == .film else { return }
         if self.owner != .film {
-            guard locked else { return }
+            guard headLocked else { return }
             claim(.film)
         }
         await sync(open: open, dismiss: dismiss)
@@ -963,16 +1010,22 @@ struct CinemaButton: View {
                 .disabled(mode.showsPicture && !bigScreenAvailable)
             }
             Divider()
-            Button {
-                close()
-                Task {
-                    await cinema.setHeadLocked(!cinema.headLocked, for: owner,
-                                               open: openImmersiveSpace, dismiss: dismissImmersiveSpace)
+            Text("Head-Locked Sound")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+            ForEach(RAVEHeadLockedSound.allCases, id: \.self) { sound in
+                Button {
+                    close()
+                    Task {
+                        await cinema.setHeadLockedMode(sound, for: owner,
+                                                       open: openImmersiveSpace, dismiss: dismissImmersiveSpace)
+                    }
+                } label: {
+                    PlayerChoiceRow(sound.title, isChecked: sound == cinema.headLockedMode)
                 }
-            } label: {
-                PlayerChoiceRow("Head-Locked Sound", isChecked: cinema.headLocked)
+                .help(sound.help)
             }
-            .help("The sound turns with your head instead of staying in the room")
             if cinema.mode(for: owner) == .hud {
                 Divider()
                 HUDStabilizationControl()
@@ -1090,7 +1143,7 @@ struct CinemaVideoWindowHook: ViewModifier {
             // Let AVPlayer follow its VideoPlayerComponent in the immersive scene
             // instead of the window whose scene was named by the Metal renderer.
             item.allowedAudioSpatializationFormats = .monoStereoAndMultichannel
-            player.intendedSpatialAudioExperience = cinema.headLocked
+            player.intendedSpatialAudioExperience = cinema.headLocked(for: player)
                 ? .fixed(soundStageSize: .automatic) : AutomaticSpatialAudio.automatic
         } else {
             let identifier = sceneDelegate?.spatialAudioSceneIdentifier

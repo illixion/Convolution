@@ -77,7 +77,7 @@ struct AIFeaturesSettingsPage: View {
                     }
                 }
             } footer: {
-                Text("Rules for turning \(Self.smartFeatures) on or off for each video, by its frame rate, size and the device's power. For example, boost 24–30 fps videos to 60 but leave 50–60 fps ones alone.")
+                Text("Rules for turning \(Self.smartFeatures) on or off for each video, by its frame rate, size and the device's power. For example, boost 24–30 fps videos to 60 but leave 50–60 fps ones alone.\(Self.smartSoundNote)")
             }
 
             Section {
@@ -106,6 +106,15 @@ struct AIFeaturesSettingsPage: View {
                 Text("Models & Services")
             }
         }
+    }
+
+    /// Head-locked sound is chosen by the audio's layout, on the same page.
+    private static var smartSoundNote: String {
+        #if os(visionOS)
+        " It also lets stereo and mono sound turn with your head while surround stays in the room."
+        #else
+        ""
+        #endif
     }
 
     private static var smartFeatures: String {
