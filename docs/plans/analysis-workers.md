@@ -4,7 +4,11 @@ Status: steps 1–6, 8 (not yet run on a headset) and 9 built on 2026-11-07 (see
 and kept as a short note in `blu-ray-3d-smooth-motion.md`. Decided with the user on 2026-11-07:
 - **Media servers only: Jellyfin and Stash.** Both have direct and transcode URLs. Nextcloud could
   join later the same way; files that exist only on a headset are out.
-- **Each node connects to the media servers on its own,** with its own credentials.
+- **Each node connects to the media servers on its own,** with its own credentials. The coordinator
+  needs none: the player sends the title's description (`media`: duration, frame rate, stereo layout,
+  file identity) with its first playhead report, since it is already playing the file, and the
+  coordinator checks it for sense (decided 2026-11-10; a coordinator configured with a server key still
+  describes that server's titles itself, which is what makes `POST /v1/scan` possible).
 - **A coordinator outside the media servers.** The Jellyfin plugin was the convenient host, but Stash
   can't host one: its plugins only run tasks and hooks and serve static files. So the queue moves
   into a service of its own, and the plugin keeps its routes during the move.

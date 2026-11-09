@@ -331,6 +331,29 @@ public final class PlaybackSession {
      * the plugin converts as it plays. There is no AI 3D presentation on Quest
      * yet, so ai-3d-depth isn't asked for.
      */
+    /**
+     * The file's description for a coordinator that holds no media key
+     * (`MediaInfo` in vergence's coordinator): from the playback plan's
+     * "runtimeSeconds", "frameRate" and "etag", which the plan's source (the
+     * Jellyfin library core) has to supply; null while it doesn't, and then
+     * only a coordinator with its own key can take the title.
+     */
+    private JSONObject analysisMedia() {
+        double runtime = plan.optDouble("runtimeSeconds", 0), rate = plan.optDouble("frameRate", 0);
+        String etag = plan.optString("etag", "");
+        if (runtime <= 0 || rate <= 0 || etag.isEmpty()) return null;
+        String[] names = {"mono", "halfSideBySide", "fullSideBySide", "halfTopAndBottom", "fullTopAndBottom"};
+        int num = (int) Math.round(rate * 1000), den = 1000;
+        for (int[] known : new int[][]{{24000, 1001}, {30000, 1001}, {60000, 1001}, {48000, 1001}, {120000, 1001}})
+            if (Math.abs(rate - (double) known[0] / known[1]) < 0.005) { num = known[0]; den = known[1]; }
+        try {
+            return new JSONObject().put("durationSeconds", runtime)
+                .put("frameRate", new JSONObject().put("num", num).put("den", den))
+                .put("stereo", names[layout]).put("identity", etag)
+                .put("width", videoWidth()).put("height", videoHeight()).put("mediaSourceId", plan.optString("sourceID"));
+        } catch (JSONException e) { return null; }
+    }
+
     private void requestAnalysis() {
         if (analysisRequested || plan.optBoolean("spatialVideo")) return;
         analysisRequested = true;
@@ -340,9 +363,10 @@ public final class PlaybackSession {
         final boolean hdr = layout == 0 && AnalysisSettings.INSTANCE.aiHdr(context) && AnalysisSettings.INSTANCE.displayIsHdr(context);
         if (item.isEmpty() || (!fields && !hdr)) return;
         final String workload = layout != 0 ? CoordinatorClient.SMOOTH_MOTION_3D : CoordinatorClient.SMOOTH_MOTION_2D;
+        final JSONObject media = analysisMedia();
         Thread thread = new Thread(() -> {
-            AnalysisTrackStream stream = fields ? AnalysisTrackStream.Companion.open(context, item, start, workload) : null;
-            AnalysisTrackStream grids = hdr ? AnalysisTrackStream.Companion.open(context, item, start, CoordinatorClient.AI_HDR) : null;
+            AnalysisTrackStream stream = fields ? AnalysisTrackStream.Companion.open(context, item, start, workload, media) : null;
+            AnalysisTrackStream grids = hdr ? AnalysisTrackStream.Companion.open(context, item, start, CoordinatorClient.AI_HDR, media) : null;
             main.post(() -> {
                 if (stopped) { if (stream != null) stream.close(); if (grids != null) grids.close(); return; }
                 analysis = stream;

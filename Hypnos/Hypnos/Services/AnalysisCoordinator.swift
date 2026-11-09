@@ -3,6 +3,29 @@ import Foundation
 import RAVECompanion
 import RAVEMedia
 
+/// What the Library knows of a Jellyfin item for a coordinator that holds no
+/// media credentials (`JellyfinLibrary.analysisMedia`), kept for the session
+/// so each playhead report doesn't ask the server again. A miss (no Library
+/// signed in, an unreachable server) is retried after a minute.
+actor AnalysisMediaCache {
+    static let shared = AnalysisMediaCache()
+    private var found: [String: [String: any Sendable]] = [:]
+    private var missedAt: [String: Date] = [:]
+
+    func media(for itemId: String) async -> [String: any Sendable]? {
+        if let hit = found[itemId] { return hit }
+        if let missed = missedAt[itemId], Date().timeIntervalSince(missed) < 60 { return nil }
+        let library = await MainActor.run { LibraryService.current() }
+        if let library, let media = await library.analysisMedia(itemId: itemId) {
+            found[itemId] = media
+            missedAt[itemId] = nil
+            return media
+        }
+        missedAt[itemId] = Date()
+        return nil
+    }
+}
+
 /// A Vergence analysis coordinator (`vergenced`): a service on the home
 /// server or a desktop that hands a title's analysis to worker machines in
 /// 2 s pieces and serves the results while they are made, nearest the
@@ -114,10 +137,14 @@ struct AnalysisCoordinator: Sendable {
     @discardableResult
     func playing(itemId: String, seconds: Double, rate: Double = 1,
                  workload: String = smoothMotion3D) async throws -> Status {
-        let reply = try await send("POST", "v1/playing", json: [
+        var body: [String: any Sendable] = [
             "server": "jellyfin", "id": itemId, "workload": workload,
             "seconds": max(seconds, 0), "rate": rate, "player": playerName(for: workload),
-        ])
+        ]
+        // A coordinator with no Jellyfin key describes nothing itself and takes
+        // this; one with a key ignores it.
+        if let media = await AnalysisMediaCache.shared.media(for: itemId) { body["media"] = media }
+        let reply = try await send("POST", "v1/playing", json: body)
         guard reply.status == 200 else { throw Failure.http(reply.status) }
         return try JSONDecoder().decode(Status.self, from: reply.body)
     }

@@ -174,9 +174,12 @@ class CoordinatorClient(private val config: CoordinatorConfig) {
      * the workload doesn't take (a 3D workload for a 2D title, a server it
      * doesn't know).
      */
-    fun playing(itemId: String, seconds: Double, workload: String, rate: Double = 1.0): Status {
-        val response = postPlaying(JSONObject().put("server", "jellyfin").put("id", itemId).put("workload", workload)
-            .put("seconds", Math.max(seconds, 0.0)).put("rate", rate).put("player", player(workload)))
+    fun playing(itemId: String, seconds: Double, workload: String, rate: Double = 1.0, media: JSONObject? = null): Status {
+        val body = JSONObject().put("server", "jellyfin").put("id", itemId).put("workload", workload)
+            .put("seconds", Math.max(seconds, 0.0)).put("rate", rate).put("player", player(workload))
+        // A coordinator with no Jellyfin key describes nothing itself and takes this; one with a key ignores it.
+        if (media != null) body.put("media", media)
+        val response = postPlaying(body)
         if (response.status != 200) throw HttpFailure(response.status)
         val json = JSONObject(String(response.body, Charsets.UTF_8))
         return Status(json.optString("state"), json.optDouble("chunkSeconds", 0.0), json.optInt("chunks"),
@@ -229,6 +232,7 @@ class AnalysisTrackStream private constructor(
     val workload: String,
     val status: CoordinatorClient.Status,
     startSeconds: Double,
+    private val media: JSONObject?,
 ) {
     private val window = ChunkWindow(status.chunkSeconds, status.chunks)
     private val rule = PlayheadRule()
@@ -257,7 +261,7 @@ class AnalysisTrackStream private constructor(
             if (report) reporting = true
         }
         if (report) io.execute {
-            try { client.playing(itemId, seconds, workload) } catch (e: Exception) { Log.i(TAG, "playhead_report_failed error=${e.javaClass.simpleName}") }
+            try { client.playing(itemId, seconds, workload, media = media) } catch (e: Exception) { Log.i(TAG, "playhead_report_failed error=${e.javaClass.simpleName}") }
             synchronized(window) { reporting = false }
         }
         schedule()
@@ -366,19 +370,21 @@ class AnalysisTrackStream private constructor(
     companion object {
         /**
          * Asks the coordinator for [itemId] at [startSeconds]; null when there
-         * is no coordinator or it won't work on the title. Blocking.
+         * is no coordinator or it won't work on the title. Blocking. [media]
+         * describes the file for a coordinator that holds no media key
+         * (see [CoordinatorClient.playing]).
          */
-        fun open(context: Context, itemId: String, startSeconds: Double, workload: String): AnalysisTrackStream? {
+        fun open(context: Context, itemId: String, startSeconds: Double, workload: String, media: JSONObject? = null): AnalysisTrackStream? {
             val config = AnalysisSettings.current(context) ?: return null
             val client = CoordinatorClient(config)
-            val status = try { client.playing(itemId, startSeconds, workload) } catch (e: Exception) {
+            val status = try { client.playing(itemId, startSeconds, workload, media = media) } catch (e: Exception) {
                 // Not a title it works on (2D, a disc), or the coordinator is away.
                 Log.i(TAG, "no_coordinator_track workload=$workload error=${e.javaClass.simpleName}${(e as? CoordinatorClient.HttpFailure)?.let { " status=" + it.status } ?: ""}")
                 return null
             }
             if (status.chunks <= 0 || status.chunkSeconds <= 0) return null
             Log.i(TAG, "coordinator_track workload=$workload state=${status.state} pieces=${status.piecesDone}/${status.pieces} chunks=${status.chunks} fps=${"%.3f".format(status.frameRate)}")
-            return AnalysisTrackStream(client, itemId, workload, status, startSeconds)
+            return AnalysisTrackStream(client, itemId, workload, status, startSeconds, media)
         }
     }
 }

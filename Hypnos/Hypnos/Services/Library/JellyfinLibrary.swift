@@ -773,6 +773,63 @@ actor JellyfinLibrary: MediaServerLibrary {
                                                    resumeSeconds: item.userData.resumeSeconds))
     }
 
+    /// What an analysis coordinator without a media key needs to know of a
+    /// title (`vergence` `MediaInfo`: duration, frame rate, stereo layout and
+    /// an identity that changes when the file is replaced), from the item's
+    /// first media source. Nil when the server doesn't say enough.
+    func analysisMedia(itemId: String) async -> [String: any Sendable]? {
+        struct Page: Decodable {
+            struct Source: Decodable {
+                struct Stream: Decodable {
+                    let `Type`: String?
+                    let Codec: String?
+                    let Width: Int?
+                    let Height: Int?
+                    let RealFrameRate: Double?
+                    let AverageFrameRate: Double?
+                }
+                let Id: String?
+                let ETag: String?
+                let Size: Int64?
+                let RunTimeTicks: Int64?
+                let MediaStreams: [Stream]?
+            }
+            struct Item: Decodable {
+                let RunTimeTicks: Int64?
+                let Video3DFormat: String?
+                let MediaSources: [Source]?
+            }
+            let Items: [Item]
+        }
+        guard let userId = try? await resolveUserId(),
+              let page: Page = try? await get("Items", query: [
+                  .init(name: "Ids", value: itemId), .init(name: "userId", value: userId),
+                  .init(name: "Fields", value: "MediaSources,MediaStreams"),
+              ]),
+              let item = page.Items.first, let source = item.MediaSources?.first,
+              let video = source.MediaStreams?.first(where: { $0.Type == "Video" }) else { return nil }
+        let ticks = item.RunTimeTicks ?? source.RunTimeTicks ?? 0
+        let rate = video.RealFrameRate ?? video.AverageFrameRate ?? 24000.0 / 1001.0
+        guard ticks > 0, rate > 0 else { return nil }
+        // A rational the coordinator can use as the frame grid: the broadcast
+        // rates a float stands for, else the nearest 1/1000.
+        let rational: (Int, Int) = [(24000, 1001), (30000, 1001), (60000, 1001), (48000, 1001), (120000, 1001)]
+            .first { abs(rate - Double($0.0) / Double($0.1)) < 0.005 } ?? (Int((rate * 1000).rounded()), 1000)
+        var media: [String: any Sendable] = [
+            "durationSeconds": Double(ticks) / 10_000_000,
+            "frameRate": ["num": rational.0, "den": rational.1],
+            // Jellyfin reads the file name's 3D token into Video3DFormat itself, so absent means flat.
+            "stereo": [
+                "HalfSideBySide": "halfSideBySide", "FullSideBySide": "fullSideBySide",
+                "HalfTopAndBottom": "halfTopAndBottom", "FullTopAndBottom": "fullTopAndBottom", "MVC": "mvc",
+            ][item.Video3DFormat ?? ""] ?? "mono",
+            "identity": source.ETag ?? "\(source.Size.map(String.init) ?? "nil"):\(ticks)",
+            "width": video.Width ?? 0, "height": video.Height ?? 0, "codec": video.Codec ?? "",
+        ]
+        if let id = source.Id { media["mediaSourceId"] = id }
+        return media
+    }
+
     /// The file's own bitrate, for choosing the first step down from it.
     func sourceBitrate(itemId: String) async -> Int? {
         await sourcePicture(itemId: itemId)?.bitrate
