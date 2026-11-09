@@ -354,6 +354,20 @@ public final class PlaybackSession {
         } catch (JSONException e) { return null; }
     }
 
+    /**
+     * This Quest's Jellyfin sign-in for the coordinator, handed over as a stream starts (sent
+     * only over the paired channel, see CoordinatorClient.playing): the plan's server and the
+     * token in its MediaBrowser authorization. Null when the plan has neither.
+     */
+    private JSONObject analysisCredentials() {
+        String server = plan.optString("server", ""), authorization = plan.optString("authorization", "");
+        java.util.regex.Matcher token = java.util.regex.Pattern.compile("Token=\"([^\"]+)\"").matcher(authorization);
+        if (server.isEmpty() || !token.find()) return null;
+        try {
+            return new JSONObject().put("jellyfin", new JSONObject().put("url", server).put("key", token.group(1)));
+        } catch (JSONException e) { return null; }
+    }
+
     private void requestAnalysis() {
         if (analysisRequested || plan.optBoolean("spatialVideo")) return;
         analysisRequested = true;
@@ -364,9 +378,10 @@ public final class PlaybackSession {
         if (item.isEmpty() || (!fields && !hdr)) return;
         final String workload = layout != 0 ? CoordinatorClient.SMOOTH_MOTION_3D : CoordinatorClient.SMOOTH_MOTION_2D;
         final JSONObject media = analysisMedia();
+        final JSONObject credentials = analysisCredentials();
         Thread thread = new Thread(() -> {
-            AnalysisTrackStream stream = fields ? AnalysisTrackStream.Companion.open(context, item, start, workload, media) : null;
-            AnalysisTrackStream grids = hdr ? AnalysisTrackStream.Companion.open(context, item, start, CoordinatorClient.AI_HDR, media) : null;
+            AnalysisTrackStream stream = fields ? AnalysisTrackStream.Companion.open(context, item, start, workload, media, credentials) : null;
+            AnalysisTrackStream grids = hdr ? AnalysisTrackStream.Companion.open(context, item, start, CoordinatorClient.AI_HDR, media, credentials) : null;
             main.post(() -> {
                 if (stopped) { if (stream != null) stream.close(); if (grids != null) grids.close(); return; }
                 analysis = stream;

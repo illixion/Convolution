@@ -84,7 +84,7 @@ enum SmoothMotionTracks {
                                          workload: String) async -> (StreamingAnalysisTrack, AnalysisCoordinator.Status)? {
         let status: AnalysisCoordinator.Status
         do {
-            status = try await coordinator.playing(itemId: id, seconds: startSeconds, workload: workload)
+            status = try await coordinator.playing(itemId: id, seconds: startSeconds, workload: workload, handOver: true)
         } catch {
             // Not a title it works on (2D for 3D work and the reverse, a disc), or the server is away.
             AppLogger.filmPlayer.info("Analysis server: no \(workload, privacy: .public) track (\(error.logCode, privacy: .public))")

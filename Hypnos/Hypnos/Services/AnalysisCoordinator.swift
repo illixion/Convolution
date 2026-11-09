@@ -39,6 +39,10 @@ actor AnalysisMediaCache {
 /// the wire), which wins when present, or an **address and token** (plain
 /// HTTP, the token in the Keychain). It knows Jellyfin items by their id, as
 /// the Library does.
+///
+/// The coordinator holds no media keys of its own. When a stream starts, a
+/// paired device hands it this device's Jellyfin sign-in (`handOver`), which it
+/// keeps in memory only for its workers; the plain-HTTP way never carries one.
 struct AnalysisCoordinator: Sendable {
     enum Transport: Sendable {
         case http(baseURL: URL, token: String)
@@ -134,9 +138,13 @@ struct AnalysisCoordinator: Sendable {
     /// title (described by the coordinator from the server) and puts the
     /// pieces around `seconds` first. Throws for a title it won't work on
     /// (not stereo, a disc, a server it doesn't know).
+    /// - Parameter handOver: a stream is starting: also hand the coordinator this device's
+    ///   Jellyfin sign-in, which it holds in memory only (forgotten 12 hours after the last
+    ///   stream, or when it quits) so its workers can read the title. Only on the paired
+    ///   channel: a token never goes over plain HTTP.
     @discardableResult
     func playing(itemId: String, seconds: Double, rate: Double = 1,
-                 workload: String = smoothMotion3D) async throws -> Status {
+                 workload: String = smoothMotion3D, handOver: Bool = false) async throws -> Status {
         var body: [String: any Sendable] = [
             "server": "jellyfin", "id": itemId, "workload": workload,
             "seconds": max(seconds, 0), "rate": rate, "player": playerName(for: workload),
@@ -144,6 +152,10 @@ struct AnalysisCoordinator: Sendable {
         // A coordinator with no Jellyfin key describes nothing itself and takes
         // this; one with a key ignores it.
         if let media = await AnalysisMediaCache.shared.media(for: itemId) { body["media"] = media }
+        if handOver, case .paired = transport,
+           let credential = await MainActor.run(body: { LibraryService.current()?.analysisCredential }) {
+            body["credentials"] = ["jellyfin": credential]
+        }
         let reply = try await send("POST", "v1/playing", json: body)
         guard reply.status == 200 else { throw Failure.http(reply.status) }
         return try JSONDecoder().decode(Status.self, from: reply.body)

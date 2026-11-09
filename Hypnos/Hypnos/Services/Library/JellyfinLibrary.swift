@@ -773,6 +773,13 @@ actor JellyfinLibrary: MediaServerLibrary {
                                                    resumeSeconds: item.userData.resumeSeconds))
     }
 
+    /// This device's own Jellyfin sign-in, as an analysis coordinator takes it when a stream
+    /// starts (`credentials` on its report): held there in memory only, so its workers can read
+    /// the title. Only ever sent over the paired channel (`AnalysisCoordinator.playing`).
+    nonisolated var analysisCredential: [String: any Sendable] {
+        ["url": baseURL.absoluteString, "key": authHeaderToken]
+    }
+
     /// What an analysis coordinator without a media key needs to know of a
     /// title (`vergence` `MediaInfo`: duration, frame rate, stereo layout and
     /// an identity that changes when the file is replaced), from the item's
