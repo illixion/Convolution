@@ -42,7 +42,7 @@ enum SubtitleAppearance {
 }
 
 private struct SubtitleStyledModifier: ViewModifier {
-    @AppStorage(SubtitleAppearance.key) private var json = ""
+    @AppStorage(SubtitleAppearance.key, store: HypnosDefaults.store) private var json = ""
 
     func body(content: Content) -> some View {
         content.environment(\.raveSubtitleStyle, SubtitleAppearance.style(fromJSON: json))
@@ -55,9 +55,9 @@ extension View {
 }
 
 struct SubtitleAppearanceEditor: View {
-    @AppStorage(SubtitleAppearance.key) private var json = ""
+    @AppStorage(SubtitleAppearance.key, store: HypnosDefaults.store) private var json = ""
     #if os(visionOS)
-    @AppStorage(SubtitleHDRBrightness.key) private var nits = SubtitleHDRBrightness.defaultNits
+    @AppStorage(SubtitleHDRBrightness.key, store: HypnosDefaults.store) private var nits = SubtitleHDRBrightness.defaultNits
     #endif
 
     private var style: Binding<RAVESubtitleStyle> {

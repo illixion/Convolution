@@ -53,12 +53,12 @@ enum YouTubeSurround {
     /// choice made for the backend's surround carries over.
     static var isEnabled: Bool {
         get {
-            let defaults = UserDefaults.standard
+            let defaults = HypnosDefaults.store
             return defaults.object(forKey: surroundKey) as? Bool
                 ?? defaults.object(forKey: legacySurroundKey) as? Bool
                 ?? true
         }
-        set { UserDefaults.standard.set(newValue, forKey: surroundKey) }
+        set { HypnosDefaults.store.set(newValue, forKey: surroundKey) }
     }
 
     /// The video's surround track served as an HLS playlist, once its URLs

@@ -11,9 +11,9 @@ enum PlayerVolume {
 
     static var saved: Double {
         get {
-            guard UserDefaults.standard.object(forKey: key) != nil else { return 1 }
-            return min(max(UserDefaults.standard.double(forKey: key), 0), 1)
+            guard HypnosDefaults.store.object(forKey: key) != nil else { return 1 }
+            return min(max(HypnosDefaults.store.double(forKey: key), 0), 1)
         }
-        set { UserDefaults.standard.set(min(max(newValue, 0), 1), forKey: key) }
+        set { HypnosDefaults.store.set(min(max(newValue, 0), 1), forKey: key) }
     }
 }

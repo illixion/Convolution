@@ -108,7 +108,7 @@ struct TVLibraryDetailView: View {
                 // Same hook as the home screen's: `tvLibraryScrollToShelf=1`
                 // scrolls to the season/episode rows for a screenshot.
                 .onChange(of: episodes.isEmpty) { _, empty in
-                    guard !empty, UserDefaults.standard.integer(forKey: "tvLibraryScrollToShelf") > 0 else { return }
+                    guard !empty, HypnosDefaults.store.integer(forKey: "tvLibraryScrollToShelf") > 0 else { return }
                     Task {
                         try? await Task.sleep(for: .seconds(1))
                         proxy.scrollTo("seasons", anchor: .top)
@@ -352,7 +352,7 @@ struct TVLibraryDetailView: View {
         // Mirrors `tvLibraryAutoOpenItemId` (`TVLibraryTabView`): with no
         // remote-button injection on the tvOS simulator, this is the only
         // way to drive a press of Play for verification.
-        if UserDefaults.standard.bool(forKey: "tvLibraryAutoPlay"), let target = playTarget {
+        if HypnosDefaults.store.bool(forKey: "tvLibraryAutoPlay"), let target = playTarget {
             await playback.play(target)
         }
         #endif

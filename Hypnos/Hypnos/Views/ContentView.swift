@@ -326,7 +326,7 @@ struct ContentView: View {
         // fresh window instead of recalling the same value.
         if case .backgroundedInOtherRoom = appModel.existingWindowState(for: request.image.fullSizeURL) {
             for value in appModel.popOutWindowValues(for: request.image.fullSizeURL) {
-                dismissWindow(id: "photo-detail", value: value)
+                dismissWindow(id: HypnosSceneID.photoDetail, value: value)
             }
         }
 
@@ -335,7 +335,7 @@ struct ContentView: View {
         // Group restores carry the geometry the window was saved at; the display
         // view applies it on appear.
         value.restoredSize = request.restoredSize.map(RAVECodableSize.init)
-        openWindow(id: "photo-detail", value: value)
+        openWindow(id: HypnosSceneID.photoDetail, value: value)
     }
 
     // MARK: - Video Window Opens
@@ -346,14 +346,14 @@ struct ContentView: View {
     private func handleVideoWindowOpenIfNeeded() {
         guard let request = appModel.activeVideoWindowOpenRequest else { return }
         appModel.advanceVideoWindowOpenQueue()
-        openWindow(id: "video-detail", value: request.windowValue)
+        openWindow(id: HypnosSceneID.videoDetail, value: request.windowValue)
     }
 
     private func summonDuplicatePhotoWindow() {
         guard let request = appModel.activePhotoWindowOpenRequest else { return }
         let existingValues = appModel.popOutWindowValues(for: request.image.fullSizeURL)
         if let existingValue = existingValues.first {
-            openWindow(id: "photo-detail", value: existingValue)
+            openWindow(id: HypnosSceneID.photoDetail, value: existingValue)
         }
         appModel.advancePhotoWindowOpenQueue()
     }
@@ -384,21 +384,21 @@ struct ContentView: View {
         // WindowGroupRestoreSheet.summonExistingWindow).
         if case .backgroundedInOtherRoom = appModel.existingRemoteViewerWindowState(for: request.configId) {
             for value in appModel.remoteViewerWindowValues(for: request.configId) {
-                dismissWindow(id: "remote-viewer", value: value)
+                dismissWindow(id: HypnosSceneID.remoteViewer, value: value)
             }
         }
 
         appModel.advanceRemoteViewerOpenQueue()
         var value = RemoteViewerWindowValue(configId: request.configId)
         value.restoredSize = request.restoredSize.map(RAVECodableSize.init)
-        openWindow(id: "remote-viewer", value: value)
+        openWindow(id: HypnosSceneID.remoteViewer, value: value)
     }
 
     private func summonDuplicateRemoteViewer() {
         guard let request = appModel.activeRemoteViewerOpenRequest else { return }
         let existingValues = appModel.remoteViewerWindowValues(for: request.configId)
         if let existingValue = existingValues.first {
-            openWindow(id: "remote-viewer", value: existingValue)
+            openWindow(id: HypnosSceneID.remoteViewer, value: existingValue)
         }
         appModel.advanceRemoteViewerOpenQueue()
     }

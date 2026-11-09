@@ -126,7 +126,7 @@ final class YouTubeWatchHistory {
     }()
 
     private init() {
-        outbox = UserDefaults.standard.data(forKey: Self.outboxKey)
+        outbox = HypnosDefaults.store.data(forKey: Self.outboxKey)
             .flatMap { try? JSONDecoder().decode([String: Report].self, from: $0) } ?? [:]
     }
 
@@ -299,7 +299,7 @@ final class YouTubeWatchHistory {
     }
 
     private func saveOutbox() {
-        UserDefaults.standard.set(try? JSONEncoder().encode(outbox), forKey: Self.outboxKey)
+        HypnosDefaults.store.set(try? JSONEncoder().encode(outbox), forKey: Self.outboxKey)
     }
 
     // MARK: - YouTube's history page
@@ -307,7 +307,7 @@ final class YouTubeWatchHistory {
     /// Once a day is enough: imports add only what was watched elsewhere.
     var isImportDue: Bool {
         guard isAvailable else { return false }
-        let last = UserDefaults.standard.double(forKey: Self.importedKey)
+        let last = HypnosDefaults.store.double(forKey: Self.importedKey)
         return Date().timeIntervalSince1970 - last > Self.importInterval
     }
 
@@ -322,7 +322,7 @@ final class YouTubeWatchHistory {
                  progress: $0.watchedFraction)
         }, device: "YouTube history via \(Self.deviceName)")
         guard let reply: Reply = await call("POST", "api/history/import", body: body) else { return }
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.importedKey)
+        HypnosDefaults.store.set(Date().timeIntervalSince1970, forKey: Self.importedKey)
         AppLogger.youtube.info("Imported YouTube's history: \(reply.added, privacy: .public) added, \(reply.updated, privacy: .public) updated")
         if reply.added + reply.updated > 0 { refreshTiles() }
     }

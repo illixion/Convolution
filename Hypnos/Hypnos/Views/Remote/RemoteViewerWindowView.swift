@@ -814,8 +814,8 @@ struct RemoteViewerWindowView: View {
                 value.restoredSize = RAVECodableSize(size)
             }
         }
-        openWindow(id: "remote-viewer", value: value)
-        dismissWindow(id: "remote-viewer", value: windowValue)
+        openWindow(id: HypnosSceneID.remoteViewer, value: value)
+        dismissWindow(id: HypnosSceneID.remoteViewer, value: windowValue)
     }
 
     private func nudgeSceneForRenderRecovery() async {

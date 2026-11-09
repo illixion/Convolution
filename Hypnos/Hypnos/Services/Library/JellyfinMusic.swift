@@ -107,15 +107,15 @@ final class JellyfinMusicSession {
     private(set) var currentIndex: Int?
     private(set) var isPlaying = false
     private(set) var isMuted = false
-    private(set) var volume = min(1, max(0, UserDefaults.standard.object(forKey: "jellyfinMusic.volume") as? Double ?? 1))
+    private(set) var volume = min(1, max(0, HypnosDefaults.store.object(forKey: "jellyfinMusic.volume") as? Double ?? 1))
     private(set) var currentTime: Double = 0
     private(set) var duration: Double = 0
-    private(set) var audioMode = JellyfinMusicAudioMode(rawValue: UserDefaults.standard.string(forKey: "jellyfinMusic.audioMode") ?? "") ?? .speaker
-    private(set) var headLocked = UserDefaults.standard.bool(forKey: "jellyfinMusic.headLocked")
+    private(set) var audioMode = JellyfinMusicAudioMode(rawValue: HypnosDefaults.store.string(forKey: "jellyfinMusic.audioMode") ?? "") ?? .speaker
+    private(set) var headLocked = HypnosDefaults.store.bool(forKey: "jellyfinMusic.headLocked")
     /// Even out song loudness with the server's `NormalizationGain` (Jellyfin's LUFS scan).
-    private(set) var soundCheck = UserDefaults.standard.bool(forKey: "jellyfinMusic.soundCheck")
+    private(set) var soundCheck = HypnosDefaults.store.bool(forKey: "jellyfinMusic.soundCheck")
     var isShuffled = false
-    private(set) var repeatMode = MusicRepeatMode(rawValue: UserDefaults.standard.string(forKey: "jellyfinMusic.repeatMode") ?? "") ?? .off
+    private(set) var repeatMode = MusicRepeatMode(rawValue: HypnosDefaults.store.string(forKey: "jellyfinMusic.repeatMode") ?? "") ?? .off
     /// Whether the queue wraps around: Repeat All, and Repeat One once the listener moves on by hand.
     var repeats: Bool { repeatMode != .off }
     var error: String?
@@ -304,14 +304,14 @@ final class JellyfinMusicSession {
         guard value.isFinite else { return }
         volume = min(1, max(0, value))
         applyVolume()
-        UserDefaults.standard.set(volume, forKey: "jellyfinMusic.volume")
+        HypnosDefaults.store.set(volume, forKey: "jellyfinMusic.volume")
     }
 
     // MARK: - Sound Check
 
     func setSoundCheck(_ enabled: Bool) {
         soundCheck = enabled
-        UserDefaults.standard.set(enabled, forKey: "jellyfinMusic.soundCheck")
+        HypnosDefaults.store.set(enabled, forKey: "jellyfinMusic.soundCheck")
         applyVolume()
     }
 
@@ -357,7 +357,7 @@ final class JellyfinMusicSession {
     /// Off, then Repeat All, then Repeat One.
     func toggleRepeat() {
         repeatMode = repeatMode.next
-        UserDefaults.standard.set(repeatMode.rawValue, forKey: "jellyfinMusic.repeatMode")
+        HypnosDefaults.store.set(repeatMode.rawValue, forKey: "jellyfinMusic.repeatMode")
         refreshPreload()
     }
 
@@ -374,7 +374,7 @@ final class JellyfinMusicSession {
     func setAudioMode(_ mode: JellyfinMusicAudioMode) {
         guard audioMode != mode else { return }
         audioMode = mode
-        UserDefaults.standard.set(mode.rawValue, forKey: "jellyfinMusic.audioMode")
+        HypnosDefaults.store.set(mode.rawValue, forKey: "jellyfinMusic.audioMode")
         if current != nil {
             if mode == .music { AudioSessionConfig.configureExclusiveMusicPlayback() }
             else { AudioSessionConfig.configureMixedPlayback() }
@@ -385,7 +385,7 @@ final class JellyfinMusicSession {
 
     func toggleHeadLocked() {
         headLocked.toggle()
-        UserDefaults.standard.set(headLocked, forKey: "jellyfinMusic.headLocked")
+        HypnosDefaults.store.set(headLocked, forKey: "jellyfinMusic.headLocked")
         applySpatialAudioPreference()
     }
 

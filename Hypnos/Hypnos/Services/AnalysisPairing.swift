@@ -51,7 +51,7 @@ enum AnalysisPairing {
     }
 
     static func record() -> Record? {
-        guard let data = UserDefaults.standard.data(forKey: recordKey) else { return nil }
+        guard let data = HypnosDefaults.store.data(forKey: recordKey) else { return nil }
         return try? JSONDecoder().decode(Record.self, from: data)
     }
 
@@ -70,14 +70,14 @@ enum AnalysisPairing {
         let record = Record(deviceID: deviceID, hostID: grant.macID, hostName: grant.macName, addresses: addresses,
                             port: defaultPort, grants: grant.grants ?? [])
         KeychainStore.set(grant.token, for: .analysisCoordinatorPairingToken)
-        UserDefaults.standard.set(try? JSONEncoder().encode(record), forKey: recordKey)
+        HypnosDefaults.store.set(try? JSONEncoder().encode(record), forKey: recordKey)
         AppLogger.settings.info("Paired with an analysis server (\(addresses.count, privacy: .public) addresses)")
     }
 
     /// Forgets the pairing on this side (the coordinator keeps its record until it's removed there).
     static func forget() {
         KeychainStore.set("", for: .analysisCoordinatorPairingToken)
-        UserDefaults.standard.removeObject(forKey: recordKey)
+        HypnosDefaults.store.removeObject(forKey: recordKey)
         Clients.shared.removeAll()
     }
 

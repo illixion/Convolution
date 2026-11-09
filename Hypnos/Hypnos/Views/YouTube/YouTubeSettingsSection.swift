@@ -18,14 +18,14 @@ import RAVEUI
 struct YouTubeSettingsSection: View {
     @Bindable private var backend = YouTubeBackend.shared
     @State private var tokenDraft = ""
-    @AppStorage(SponsorBlock.enabledKey) private var sponsorBlockEnabled = false
-    @AppStorage(SponsorBlock.serverKey) private var sponsorBlockServer = ""
-    @AppStorage(YouTubeQuality.defaultsKey) private var quality: YouTubeQuality = .auto
+    @AppStorage(SponsorBlock.enabledKey, store: HypnosDefaults.store) private var sponsorBlockEnabled = false
+    @AppStorage(SponsorBlock.serverKey, store: HypnosDefaults.store) private var sponsorBlockServer = ""
+    @AppStorage(YouTubeQuality.defaultsKey, store: HypnosDefaults.store) private var quality: YouTubeQuality = .auto
     @State private var categoryModes: [SponsorBlockCategory: SponsorBlockCategory.Mode] =
         Dictionary(uniqueKeysWithValues: SponsorBlockCategory.allCases.map { ($0, $0.mode) })
     @State private var account = YouTubeAccount.shared
     @State private var browser: YouTubeBrowserPurpose?
-    @AppStorage(YouTubeConsent.defaultsKey) private var consentGranted = false
+    @AppStorage(YouTubeConsent.defaultsKey, store: HypnosDefaults.store) private var consentGranted = false
     @State private var surround = YouTubeSurround.isEnabled
 
     var body: some View {

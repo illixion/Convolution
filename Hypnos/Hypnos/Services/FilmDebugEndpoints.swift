@@ -39,6 +39,19 @@ enum FilmDebugEndpoints {
                    + "pose in the space can't be read.") { _ in
                 cinemaReply()
             },
+            .command("cinemaMode", "Puts the film in the cinema's mode: window, roomSound, hud or bigScreen. Only where a host owns the space (Nexus); this app's own space "
+                     + "is opened through the player window's buttons. Returns the cinema's state after it settles.",
+                     parameters: [.string("mode", "window, roomSound, hud or bigScreen", required: true,
+                                          choices: ["window", "roomSound", "hud", "bigScreen"])]) { args in
+                #if os(visionOS)
+                guard let mode = CinemaMode(rawValue: args.string("mode") ?? ""), Cinema.shared.spaceHost != nil else {
+                    return cinemaReply()
+                }
+                await Cinema.shared.setMode(mode, for: .film)
+                try? await Task.sleep(for: .milliseconds(800))
+                #endif
+                return cinemaReply()
+            },
             .command("filmDiscAudio", "For a Blu-ray disc: switch from the plugin's object audio to the disc's own AC-3 "
                      + "5.1, decoded on the device, keeping the position. Returns the film state after the switch.") { _ in
                 _ = await FilmSession.shared.switchToDiscAudio()

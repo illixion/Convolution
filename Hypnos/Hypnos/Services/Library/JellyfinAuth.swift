@@ -27,9 +27,9 @@ enum JellyfinClientIdentity {
     /// "sessions" for the same user across devices.
     static let deviceId: String = {
         let key = "jellyfin.deviceId"
-        if let existing = UserDefaults.standard.string(forKey: key) { return existing }
+        if let existing = HypnosDefaults.store.string(forKey: key) { return existing }
         let fresh = UUID().uuidString
-        UserDefaults.standard.set(fresh, forKey: key)
+        HypnosDefaults.store.set(fresh, forKey: key)
         return fresh
     }()
     static let version = "1.0"
@@ -95,8 +95,8 @@ final class JellyfinAuth {
     private(set) var error: String?
 
     private init() {
-        let userId = UserDefaults.standard.string(forKey: "jellyfin.userId")
-        let userName = UserDefaults.standard.string(forKey: "jellyfin.userName")
+        let userId = HypnosDefaults.store.string(forKey: "jellyfin.userId")
+        let userName = HypnosDefaults.store.string(forKey: "jellyfin.userName")
         let token = KeychainStore.string(for: .jellyfinAccessToken)
         if let userId, let userName, let token {
             session = JellyfinSession(userId: userId, userName: userName, accessToken: token)
@@ -138,8 +138,8 @@ final class JellyfinAuth {
     }
 
     private func persist(_ session: JellyfinSession?) {
-        UserDefaults.standard.set(session?.userId, forKey: "jellyfin.userId")
-        UserDefaults.standard.set(session?.userName, forKey: "jellyfin.userName")
+        HypnosDefaults.store.set(session?.userId, forKey: "jellyfin.userId")
+        HypnosDefaults.store.set(session?.userName, forKey: "jellyfin.userName")
         KeychainStore.set(session?.accessToken, for: .jellyfinAccessToken)
     }
 

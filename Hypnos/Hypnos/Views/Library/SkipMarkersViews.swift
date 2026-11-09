@@ -156,7 +156,7 @@ struct SkipMarkersHint: View {
                 HStack(spacing: 12) {
                     Button("Set Up…", action: onSetUp)
                     Button("Don't Show Again") {
-                        UserDefaults.standard.set(true, forKey: IntroSkipperSetup.hintDismissedKey)
+                        HypnosDefaults.store.set(true, forKey: IntroSkipperSetup.hintDismissedKey)
                         onDismiss()
                     }
                 }

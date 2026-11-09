@@ -81,8 +81,8 @@ enum SponsorBlockCategory: String, CaseIterable, Identifiable, Sendable {
     private var defaultMode: Mode { self == .sponsor ? .auto : .button }
 
     var mode: Mode {
-        get { UserDefaults.standard.string(forKey: defaultsKey).flatMap(Mode.init(rawValue:)) ?? defaultMode }
-        nonmutating set { UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey) }
+        get { HypnosDefaults.store.string(forKey: defaultsKey).flatMap(Mode.init(rawValue:)) ?? defaultMode }
+        nonmutating set { HypnosDefaults.store.set(newValue.rawValue, forKey: defaultsKey) }
     }
 
     /// The segment kind the players' skip button shows.
@@ -105,13 +105,13 @@ enum SponsorBlock {
     /// Settings, because every lookup is a request to a third party. Nothing
     /// here reaches the network while it is off.
     static var isEnabled: Bool {
-        UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? false
+        HypnosDefaults.store.object(forKey: enabledKey) as? Bool ?? false
     }
 
     /// The server to ask: the viewer's own (a self-hosted one, or the dev server
     /// from `scripts/dev-sponsorblock.sh`) or SponsorBlock's.
     static var serverURL: URL {
-        let saved = UserDefaults.standard.string(forKey: serverKey)?
+        let saved = HypnosDefaults.store.string(forKey: serverKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? ""
         if let url = URL(string: saved), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
            url.host != nil {

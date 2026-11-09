@@ -185,7 +185,7 @@ final class YouTubePageSession: NSObject {
     /// read from the registered defaults when the first one is made (no
     /// other web view exists on tvOS for it to affect).
     static func makeLegacyWebView(frame: CGRect) -> UIView {
-        UserDefaults.standard.register(defaults: ["UserAgent": YouTubeAccount.userAgent])
+        HypnosDefaults.store.register(defaults: ["UserAgent": YouTubeAccount.userAgent])
         guard let webViewClass = NSClassFromString("UIWebView") as? UIView.Type else {
             AppLogger.youtube.error("UIWebView is missing on this tvOS")
             return UIView(frame: frame)

@@ -128,7 +128,7 @@ final class MetalImageRenderer: Sendable {
             .outputPremultiplied: true
         ])
 
-        guard let library = device.makeDefaultLibrary(),
+        guard let library = (try? device.makeDefaultLibrary(bundle: HypnosBundle.resources)),
               let vertexFunction = library.makeFunction(name: "imageVertexShader"),
               let aaTonalFn = library.makeFunction(name: "imageFragmentShader"),
               let rcasFn = library.makeFunction(name: "rcasFragmentShader") else {

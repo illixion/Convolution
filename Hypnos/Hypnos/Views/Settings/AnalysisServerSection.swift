@@ -5,7 +5,7 @@ import SwiftUI
 /// with it (`AnalysisPairing`, the six digits compared on both screens), or
 /// its address and a token `vergenced token add NAME --grants play` printed.
 struct AnalysisServerSection: View {
-    @AppStorage(AnalysisCoordinator.urlKey) private var address = ""
+    @AppStorage(AnalysisCoordinator.urlKey, store: HypnosDefaults.store) private var address = ""
     @State private var token = KeychainStore.string(for: .analysisCoordinatorToken) ?? ""
     @State private var paired = AnalysisPairing.record()
     @State private var pairAddress = ""

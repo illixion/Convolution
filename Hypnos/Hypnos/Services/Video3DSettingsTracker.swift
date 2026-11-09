@@ -16,7 +16,7 @@ actor Video3DSettingsTracker {
 
     private init() {
         // Load from UserDefaults
-        if let data = UserDefaults.standard.data(forKey: userDefaultsKey),
+        if let data = HypnosDefaults.store.data(forKey: userDefaultsKey),
            let decoded = try? JSONDecoder().decode([String: Video3DSettings].self, from: data) {
             settingsByVideoId = decoded
             let count = settingsByVideoId.count
@@ -75,7 +75,7 @@ actor Video3DSettingsTracker {
 
     private func save() {
         if let data = try? JSONEncoder().encode(settingsByVideoId) {
-            UserDefaults.standard.set(data, forKey: userDefaultsKey)
+            HypnosDefaults.store.set(data, forKey: userDefaultsKey)
         }
     }
 }

@@ -106,7 +106,7 @@ struct SubtitleTranslateSheet: View {
         languages = await SubtitleTranslationSupport.supportedLanguages()
         target = SubtitleTranslationSupport.target(in: languages)
         speechLocales = await SpeechTranscriber.supportedLocales.sorted { $0.identifier < $1.identifier }
-        let saved = UserDefaults.standard.string(forKey: "captions.locale") ?? Locale.preferredLanguages.first ?? "en-US"
+        let saved = HypnosDefaults.store.string(forKey: "captions.locale") ?? Locale.preferredLanguages.first ?? "en-US"
         let wanted = Locale(identifier: saved)
         speechLocale = speechLocales.first { $0.identifier == wanted.identifier }?.identifier
             ?? speechLocales.first { $0.language.languageCode == wanted.language.languageCode }?.identifier

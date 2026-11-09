@@ -62,7 +62,7 @@ enum WelcomeSample {
 
     private static func locate() -> URL? {
         for ext in fileExtensions {
-            if let url = Bundle.main.url(forResource: name, withExtension: ext) {
+            if let url = HypnosBundle.resources.url(forResource: name, withExtension: ext) {
                 return url
             }
         }
@@ -75,7 +75,12 @@ enum WelcomeSample {
     /// flattened whatever was imported, so there is no depth map or wide-gamut
     /// precision left to preserve, and JPEG encoding is available everywhere.
     private static func materializeFromAssetCatalog() -> URL? {
-        guard let image = UIImage(named: name) else { return nil }
+        #if os(macOS)
+        let found = HypnosBundle.resources.image(forResource: name)
+        #else
+        let found = UIImage(named: name, in: HypnosBundle.resources, compatibleWith: nil)
+        #endif
+        guard let image = found else { return nil }
         guard let data = image.jpegData(compressionQuality: 0.95) else { return nil }
 
         let url = FileManager.default.temporaryDirectory

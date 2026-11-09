@@ -159,7 +159,7 @@ actor SharedMediaCache {
     // MARK: - Manifest Persistence
 
     private func loadManifest() -> [ManifestEntry] {
-        guard let data = UserDefaults.standard.data(forKey: Self.manifestKey),
+        guard let data = HypnosDefaults.store.data(forKey: Self.manifestKey),
               let entries = try? JSONDecoder().decode([ManifestEntry].self, from: data) else {
             return []
         }
@@ -168,7 +168,7 @@ actor SharedMediaCache {
 
     private func saveManifest(_ manifest: [ManifestEntry]) {
         if let data = try? JSONEncoder().encode(manifest) {
-            UserDefaults.standard.set(data, forKey: Self.manifestKey)
+            HypnosDefaults.store.set(data, forKey: Self.manifestKey)
         }
     }
 }

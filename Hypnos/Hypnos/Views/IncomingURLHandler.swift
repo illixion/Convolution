@@ -41,8 +41,8 @@ struct IncomingURLHandler: ViewModifier {
                 #if DEBUG
                 // `-UITestDefault debugOpenURL=<url>`: handled as if the
                 // system had opened it (read once).
-                if let raw = UserDefaults.standard.string(forKey: "debugOpenURL"), let url = URL(string: raw) {
-                    UserDefaults.standard.removeObject(forKey: "debugOpenURL")
+                if let raw = HypnosDefaults.store.string(forKey: "debugOpenURL"), let url = URL(string: raw) {
+                    HypnosDefaults.store.removeObject(forKey: "debugOpenURL")
                     await handle(url)
                 }
                 #endif
@@ -105,7 +105,7 @@ struct IncomingURLHandler: ViewModifier {
                 AppLogger.streamURL.error("No Stash image found for id \(id, privacy: .private(mask: .hash))")
                 return
             }
-            openWindow(id: "photo-detail", value: PhotoWindowValue(image: image))
+            openWindow(id: HypnosSceneID.photoDetail, value: PhotoWindowValue(image: image))
             AppLogger.streamURL.info("Opened Stash image \(id, privacy: .private(mask: .hash)) via callback URL")
         } catch {
             AppLogger.streamURL.error("Failed to fetch Stash image \(id, privacy: .private(mask: .hash)): \(error.localizedDescription) (\(error.logCode, privacy: .public))")
@@ -125,7 +125,7 @@ struct IncomingURLHandler: ViewModifier {
                 AppLogger.streamURL.error("No Stash scene found for id \(id, privacy: .private(mask: .hash))")
                 return
             }
-            openWindow(id: "video-detail", value: VideoWindowValue(video: video, galleryVideos: [video]))
+            openWindow(id: HypnosSceneID.videoDetail, value: VideoWindowValue(video: video, galleryVideos: [video]))
             AppLogger.streamURL.info("Opened Stash scene \(id, privacy: .private(mask: .hash)) via callback URL")
         } catch {
             AppLogger.streamURL.error("Failed to fetch Stash scene \(id, privacy: .private(mask: .hash)): \(error.localizedDescription) (\(error.logCode, privacy: .public))")
@@ -175,7 +175,7 @@ struct IncomingURLHandler: ViewModifier {
             YouTubeHistory.shared.record(YouTubeVideoSummary(
                 id: id, title: video.title ?? "YouTube video", lengthSeconds: video.duration
             ))
-            openWindow(id: "video-detail", value: VideoWindowValue(video: video, galleryVideos: [video]))
+            openWindow(id: HypnosSceneID.videoDetail, value: VideoWindowValue(video: video, galleryVideos: [video]))
             AppLogger.streamURL.info("Opened YouTube video via \(resolution.source.rawValue, privacy: .public)")
         } catch {
             AppLogger.streamURL.error("YouTube link unplayable: \(error.localizedDescription)")
@@ -193,7 +193,7 @@ struct IncomingURLHandler: ViewModifier {
             streamURL: streamURL,
             title: StreamableURLResolver.displayTitle(for: identitySource)
         )
-        openWindow(id: "video-detail", value: VideoWindowValue(video: video, galleryVideos: [video]))
+        openWindow(id: HypnosSceneID.videoDetail, value: VideoWindowValue(video: video, galleryVideos: [video]))
         AppLogger.streamURL.info("Opened stream video window: \(video.identity, privacy: .private(mask: .hash))")
     }
 
@@ -228,7 +228,7 @@ struct IncomingURLHandler: ViewModifier {
                 originalFileName: url.lastPathComponent,
                 mediaType: mediaType
             )
-            openWindow(id: "shared-photo", value: item)
+            openWindow(id: HypnosSceneID.sharedPhoto, value: item)
         case .video:
             // Route shared video files through the rich pipeline so pseudo-3D
             // and adjustments are available (was: flat shared-video player).

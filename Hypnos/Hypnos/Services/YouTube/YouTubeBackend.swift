@@ -31,7 +31,7 @@ final class YouTubeBackend {
 
     /// e.g. `https://servo.example.ts.net/yt`. Empty: no backend.
     var endpoint: String {
-        didSet { UserDefaults.standard.set(endpoint, forKey: Self.endpointKey) }
+        didSet { HypnosDefaults.store.set(endpoint, forKey: Self.endpointKey) }
     }
 
     /// Held in the keychain and read from it once: a keychain read is an IPC
@@ -62,7 +62,7 @@ final class YouTubeBackend {
     }
 
     private init() {
-        endpoint = UserDefaults.standard.string(forKey: Self.endpointKey) ?? ""
+        endpoint = HypnosDefaults.store.string(forKey: Self.endpointKey) ?? ""
     }
 
     var baseURL: URL? {

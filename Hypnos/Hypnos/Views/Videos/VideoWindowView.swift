@@ -91,8 +91,8 @@ struct VideoWindowView: View {
     static let minimumStripWidth: CGFloat = 760
 
     #if os(visionOS)
-    @AppStorage(StereoSubtitleStyle.key) private var stereoSubtitleStyle = StereoSubtitleStyle.inPicture
-    @AppStorage(FlatSubtitleStyle.key) private var flatSubtitleStyle = StereoSubtitleStyle.inPicture
+    @AppStorage(StereoSubtitleStyle.key, store: HypnosDefaults.store) private var stereoSubtitleStyle = StereoSubtitleStyle.inPicture
+    @AppStorage(FlatSubtitleStyle.key, store: HypnosDefaults.store) private var flatSubtitleStyle = StereoSubtitleStyle.inPicture
 
     /// The subtitles to hang under a stereo picture, if it has them on and
     /// they are set to show there rather than in the picture.
@@ -814,7 +814,7 @@ struct VideoWindowView: View {
 
     // MARK: - Playback info
 
-    @AppStorage(PlaybackInfoVisibility.key) private var playbackInfoVisibility = PlaybackInfoVisibility.always
+    @AppStorage(PlaybackInfoVisibility.key, store: HypnosDefaults.store) private var playbackInfoVisibility = PlaybackInfoVisibility.always
 
     /// The panel shows under Settings → Videos → Playback Info.
     private var showsPlaybackInfo: Bool {
@@ -905,7 +905,7 @@ struct VideoWindowView: View {
                     pseudo3DSettings: windowModel.pseudo3DSettings.isModified
                         ? windowModel.pseudo3DSettings : nil
                 )
-                openWindow(id: "video-detail", value: newValue)
+                openWindow(id: HypnosSceneID.videoDetail, value: newValue)
                 dismissWindow()
             } : nil
         )

@@ -58,7 +58,7 @@ final class TVSettingsState {
         // tvSettingsInitialPage=deviceSetup` opens that page, since the
         // simulator takes no remote presses.
         #if DEBUG
-        if let raw = UserDefaults.standard.string(forKey: "tvSettingsInitialPage"), let page = TVSettingsPage(rawValue: raw) {
+        if let raw = HypnosDefaults.store.string(forKey: "tvSettingsInitialPage"), let page = TVSettingsPage(rawValue: raw) {
             path = [page]
         }
         #endif
@@ -75,7 +75,7 @@ struct TVSettingsView: View {
     @State private var cachePreset = CacheBudget.preset
     #if HYPNOS_YOUTUBE
     /// No YouTube page until the YouTube tab has been turned on once.
-    @AppStorage(YouTubeConsent.defaultsKey) private var youTubeOn = false
+    @AppStorage(YouTubeConsent.defaultsKey, store: HypnosDefaults.store) private var youTubeOn = false
     #endif
 
     var body: some View {

@@ -276,8 +276,8 @@ enum FlatSubtitleStyle {
 
 /// The flat picture's subtitle placement: over the picture or below it.
 struct FlatSubtitleSettings: View {
-    @AppStorage(FlatSubtitleStyle.key) private var style = StereoSubtitleStyle.inPicture
-    @AppStorage(SubtitleBandGap.key) private var bandGap = SubtitleBandGap.defaultPoints
+    @AppStorage(FlatSubtitleStyle.key, store: HypnosDefaults.store) private var style = StereoSubtitleStyle.inPicture
+    @AppStorage(SubtitleBandGap.key, store: HypnosDefaults.store) private var bandGap = SubtitleBandGap.defaultPoints
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -342,11 +342,11 @@ enum SubtitleBandGap {
 struct StereoSubtitleSettings: View {
     /// The player's subtitles: which kind is showing picks the depth setting.
     var subtitles: SubtitleController?
-    @AppStorage(StereoSubtitleStyle.key) private var style = StereoSubtitleStyle.inPicture
-    @AppStorage(SubtitleStereoDepth.key) private var textDepth = 0.0
-    @AppStorage(SubtitleStereoDepth.discKey) private var discDepth = 0.0
-    @AppStorage(SubtitleHDRBrightness.key) private var nits = SubtitleHDRBrightness.defaultNits
-    @AppStorage(SubtitleBandGap.key) private var bandGap = SubtitleBandGap.defaultPoints
+    @AppStorage(StereoSubtitleStyle.key, store: HypnosDefaults.store) private var style = StereoSubtitleStyle.inPicture
+    @AppStorage(SubtitleStereoDepth.key, store: HypnosDefaults.store) private var textDepth = 0.0
+    @AppStorage(SubtitleStereoDepth.discKey, store: HypnosDefaults.store) private var discDepth = 0.0
+    @AppStorage(SubtitleHDRBrightness.key, store: HypnosDefaults.store) private var nits = SubtitleHDRBrightness.defaultNits
+    @AppStorage(SubtitleBandGap.key, store: HypnosDefaults.store) private var bandGap = SubtitleBandGap.defaultPoints
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -420,10 +420,10 @@ struct StereoSubtitleFeeder: View {
     let filmTime: @MainActor () -> Double
     @Binding var frame: StereoSubtitleFrame?
 
-    @AppStorage(SubtitleHDRBrightness.key) private var hdrWhiteNits = SubtitleHDRBrightness.defaultNits
-    @AppStorage(SubtitleStereoDepth.key) private var textDepth = 0.0
-    @AppStorage(SubtitleStereoDepth.discKey) private var discDepth = 0.0
-    @AppStorage(SubtitleAppearance.key) private var styleJSON = ""
+    @AppStorage(SubtitleHDRBrightness.key, store: HypnosDefaults.store) private var hdrWhiteNits = SubtitleHDRBrightness.defaultNits
+    @AppStorage(SubtitleStereoDepth.key, store: HypnosDefaults.store) private var textDepth = 0.0
+    @AppStorage(SubtitleStereoDepth.discKey, store: HypnosDefaults.store) private var discDepth = 0.0
+    @AppStorage(SubtitleAppearance.key, store: HypnosDefaults.store) private var styleJSON = ""
     @State private var version = 0
 
     private var depth: Double { controller.selected?.isBitmap == true ? discDepth : textDepth }
@@ -525,7 +525,7 @@ struct PlayerOrnamentStack<Controls: View>: View {
     var filmTime: @MainActor () -> Double = { 0 }
     @ViewBuilder let controls: Controls
 
-    @AppStorage(SubtitleBandGap.key) private var bandGap = SubtitleBandGap.defaultPoints
+    @AppStorage(SubtitleBandGap.key, store: HypnosDefaults.store) private var bandGap = SubtitleBandGap.defaultPoints
     @State private var controlsHeight: CGFloat = 0
     /// The last prompt, kept in the tree while it fades out: a removal
     /// transition inside an ornament cut it in a single frame (measured on

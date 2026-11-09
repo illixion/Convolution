@@ -134,7 +134,7 @@ struct PhotoWindowView: View {
                                 let state = appModel.existingWindowState(for: image.fullSizeURL)
                                 switch state {
                                 case .backgroundedInOtherRoom(let existingValue):
-                                    openWindow(id: "photo-detail", value: existingValue)
+                                    openWindow(id: HypnosSceneID.photoDetail, value: existingValue)
                                     dismissWindow()
                                 case .activeInCurrentRoom:
                                     pendingPopOutImage = image
@@ -202,7 +202,7 @@ struct PhotoWindowView: View {
                 if let image = pendingPopOutImage {
                     let existingValues = appModel.popOutWindowValues(for: image.fullSizeURL)
                     if let existingValue = existingValues.first {
-                        openWindow(id: "photo-detail", value: existingValue)
+                        openWindow(id: HypnosSceneID.photoDetail, value: existingValue)
                     }
                     pendingPopOutImage = nil
                     dismissWindow()

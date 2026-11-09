@@ -21,7 +21,12 @@ import Foundation
 /// ```
 enum AppLogger {
     /// App bundle identifier used as the logging subsystem
+    #if NEXUS_MODULE
+    /// In Nexus the main bundle is the host's; this module logs under its own name.
+    static let subsystem = "com.illixion.hypnos"
+    #else
     static let subsystem = Bundle.main.bundleIdentifier ?? "com.illixion.hypnos"
+    #endif
 
     // MARK: - Logger Categories
 

@@ -41,6 +41,6 @@ struct ConsoleTabView: View {
     @OpenWindowProxy private var openWindow
 
     var body: some View {
-        RAVEConsoleScreen { openWindow(id: "console") }
+        RAVEConsoleScreen { openWindow(id: HypnosSceneID.console) }
     }
 }

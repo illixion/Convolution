@@ -41,7 +41,7 @@ import simd
 import SwiftUI
 
 struct FilmPlayerView: View {
-    static let windowID = "film-player"
+    static let windowID = HypnosSceneID.id("film-player")
 
     @Bindable private var session = FilmSession.shared
     private var player: FilmPlayer { session.player }
@@ -123,8 +123,8 @@ struct FilmPlayerView: View {
     @State private var stereoLoadGraceUntil = Date.distantPast
     /// The subtitles the stereo picture draws, from `StereoSubtitleFeeder`.
     @State private var stereoSubtitles: StereoSubtitleFrame?
-    @AppStorage(StereoSubtitleStyle.key) private var stereoSubtitleStyle = StereoSubtitleStyle.inPicture
-    @AppStorage(FlatSubtitleStyle.key) private var flatSubtitleStyle = StereoSubtitleStyle.inPicture
+    @AppStorage(StereoSubtitleStyle.key, store: HypnosDefaults.store) private var stereoSubtitleStyle = StereoSubtitleStyle.inPicture
+    @AppStorage(FlatSubtitleStyle.key, store: HypnosDefaults.store) private var flatSubtitleStyle = StereoSubtitleStyle.inPicture
     #endif
 
     var body: some View {
@@ -1245,7 +1245,7 @@ struct FilmTransport: View {
 /// A separate visionOS window: a sheet shares the stereo picture's depth
 /// region and can be occluded by it. Other platforms present this as a sheet.
 struct FilmAdjustmentsView: View {
-    static let windowID = "film-adjustments"
+    static let windowID = HypnosSceneID.id("film-adjustments")
     @Bindable private var session = FilmSession.shared
 
     var body: some View {

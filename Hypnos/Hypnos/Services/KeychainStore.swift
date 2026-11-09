@@ -303,7 +303,7 @@ enum KeychainStore {
     /// silently log the user out of their server with no way back.
     @discardableResult
     static func migrateFromUserDefaults(legacyKey: String, to key: Key,
-                                        defaults: UserDefaults = .standard) -> String? {
+                                        defaults: UserDefaults = HypnosDefaults.store) -> String? {
         guard let legacy = defaults.string(forKey: legacyKey), !legacy.isEmpty else {
             // Nothing to migrate. Tidy up an empty-string leftover so this stops
             // being asked on every launch.

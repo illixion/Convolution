@@ -86,7 +86,7 @@ private struct TVLibraryHomeContent: View {
                 // N: no remote-button injection on the tvOS simulator, so
                 // this is how screenshots below the hero get taken.
                 .task {
-                    let index = UserDefaults.standard.integer(forKey: "tvLibraryScrollToShelf")
+                    let index = HypnosDefaults.store.integer(forKey: "tvLibraryScrollToShelf")
                     guard index > 0, index <= home.shelves.count else { return }
                     try? await Task.sleep(for: .seconds(1))
                     proxy.scrollTo(home.shelves[index - 1].id, anchor: .top)

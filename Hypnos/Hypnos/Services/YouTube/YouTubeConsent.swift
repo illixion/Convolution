@@ -23,7 +23,7 @@ import Foundation
 enum YouTubeConsent {
     static let defaultsKey = "youtube.consentGranted"
 
-    static var isGranted: Bool { UserDefaults.standard.bool(forKey: defaultsKey) }
+    static var isGranted: Bool { HypnosDefaults.store.bool(forKey: defaultsKey) }
 
     /// Throws what the person sees when something asks for YouTube before
     /// it is turned on.

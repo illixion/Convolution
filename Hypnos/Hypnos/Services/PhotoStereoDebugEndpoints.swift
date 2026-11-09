@@ -27,7 +27,7 @@ enum PhotoStereoDebugEndpoints {
                     .integer("resolution", "per-window long-edge limit; 0 follows native within the stereo safety budget", range: 0 ... 8192)
                 ]) { args in
                     if let separated = args.bool("separated") {
-                        UserDefaults.standard.set(separated, forKey: "aiPhotoSeparateBoundaries")
+                        HypnosDefaults.store.set(separated, forKey: "aiPhotoSeparateBoundaries")
                     }
                     let models = orderedWindows
                     if let index = args.int("window"), models.indices.contains(index) {
@@ -73,10 +73,10 @@ enum PhotoStereoDebugEndpoints {
     }
 
     private static func setHDR(_ args: DebugArguments) -> Reply {
-        if let enabled = args.bool("enabled") { UserDefaults.standard.set(enabled, forKey: HDRStills.enabledKey) }
+        if let enabled = args.bool("enabled") { HypnosDefaults.store.set(enabled, forKey: HDRStills.enabledKey) }
         if let headroom = args.double("headroom") {
-            if headroom < 1 { UserDefaults.standard.removeObject(forKey: HDRStills.headroomKey) }
-            else { UserDefaults.standard.set(Float(headroom), forKey: HDRStills.headroomKey) }
+            if headroom < 1 { HypnosDefaults.store.removeObject(forKey: HDRStills.headroomKey) }
+            else { HypnosDefaults.store.set(Float(headroom), forKey: HDRStills.headroomKey) }
         }
 
         return reply()
@@ -234,7 +234,7 @@ enum PhotoStereoDebugEndpoints {
         let aiHDR: Bool
     }
     private static func reply() -> Reply {
-        Reply(separated: UserDefaults.standard.bool(forKey: "aiPhotoSeparateBoundaries"),
+        Reply(separated: HypnosDefaults.store.bool(forKey: "aiPhotoSeparateBoundaries"),
               hdrEnabled: HDRStills.isEnabled, hdrHeadroom: HDRStills.targetHeadroom,
               windows: orderedWindows.map {
             Window(enabled: $0.isAIDepthMode, ready: $0.aiDepthPresentationReady, processingDepth: $0.isProcessingAIDepth,

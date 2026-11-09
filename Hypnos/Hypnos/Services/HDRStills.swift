@@ -29,12 +29,12 @@ enum HDRStills {
 
     /// Off only when the debug server has turned it off.
     static var isEnabled: Bool {
-        UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true
+        HypnosDefaults.store.object(forKey: enabledKey) as? Bool ?? true
     }
 
     /// How far above SDR white the display goes, as a multiple of it.
     static var targetHeadroom: Float {
-        let stored = UserDefaults.standard.float(forKey: headroomKey)
+        let stored = HypnosDefaults.store.float(forKey: headroomKey)
         return stored >= 1 ? stored : 2.5
     }
 

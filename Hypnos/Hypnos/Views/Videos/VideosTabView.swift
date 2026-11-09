@@ -25,18 +25,18 @@ struct VideosTabView: View {
         // `-UITestDefault autoStartSlideshow=1`: the toolbar's slideshow of
         // what the tab shows, once it has loaded (read once).
         .task(id: appModel.galleryVideos.isEmpty) {
-            guard UserDefaults.standard.bool(forKey: "autoStartSlideshow"),
+            guard HypnosDefaults.store.bool(forKey: "autoStartSlideshow"),
                   let launch = MainTabCatalog.slideshowLaunch(appModel: appModel, selectedTab: .videos) else { return }
-            UserDefaults.standard.removeObject(forKey: "autoStartSlideshow")
+            HypnosDefaults.store.removeObject(forKey: "autoStartSlideshow")
             launch.start()
         }
         // `-UITestDefault autoOpenVideoIndex=<n>`: that video opens once
         // the grid has it (read once). tvOS has `tvAutoPlayVideoIndex`.
         .task(id: appModel.galleryVideos.count) {
-            guard let index = UserDefaults.standard.object(forKey: "autoOpenVideoIndex") as? Int,
+            guard let index = HypnosDefaults.store.object(forKey: "autoOpenVideoIndex") as? Int,
                   appModel.galleryVideos.indices.contains(index) else { return }
-            UserDefaults.standard.removeObject(forKey: "autoOpenVideoIndex")
-            openWindow(id: "video-detail", value: VideoWindowValue(video: appModel.galleryVideos[index],
+            HypnosDefaults.store.removeObject(forKey: "autoOpenVideoIndex")
+            openWindow(id: HypnosSceneID.videoDetail, value: VideoWindowValue(video: appModel.galleryVideos[index],
                                                                    galleryVideos: appModel.galleryVideos))
         }
         #endif

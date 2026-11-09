@@ -43,16 +43,16 @@ struct AnalysisCoordinator: Sendable {
         if let client = AnalysisPairing.client() {
             return AnalysisCoordinator(transport: .paired(client), player: playerID())
         }
-        guard let text = UserDefaults.standard.string(forKey: urlKey)?.trimmingCharacters(in: .whitespaces),
+        guard let text = HypnosDefaults.store.string(forKey: urlKey)?.trimmingCharacters(in: .whitespaces),
               !text.isEmpty, let url = URL(string: text), url.scheme == "http" || url.scheme == "https",
               let token = KeychainStore.string(for: .analysisCoordinatorToken), !token.isEmpty else { return nil }
         return AnalysisCoordinator(transport: .http(baseURL: url, token: token), player: playerID())
     }
 
     private static func playerID() -> String {
-        if let id = UserDefaults.standard.string(forKey: playerKey) { return id }
+        if let id = HypnosDefaults.store.string(forKey: playerKey) { return id }
         let id = UUID().uuidString
-        UserDefaults.standard.set(id, forKey: playerKey)
+        HypnosDefaults.store.set(id, forKey: playerKey)
         return id
     }
 

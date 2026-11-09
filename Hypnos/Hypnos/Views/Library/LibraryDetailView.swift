@@ -494,7 +494,7 @@ private struct LibraryEpisodeLockup: View {
 /// a capped level skips the direct-play attempt entirely. The same saved
 /// preference the player's Quality menu changes.
 private struct LibraryQualityButton: View {
-    @AppStorage(LibraryStreamQuality.defaultsKey) private var stored = LibraryStreamQuality.auto.rawValue
+    @AppStorage(LibraryStreamQuality.defaultsKey, store: HypnosDefaults.store) private var stored = LibraryStreamQuality.auto.rawValue
 
     private var selected: LibraryStreamQuality { LibraryStreamQuality(rawValue: stored) ?? .auto }
 

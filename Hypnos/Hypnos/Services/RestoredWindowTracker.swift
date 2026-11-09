@@ -35,11 +35,11 @@ enum RestoredWindowTracker {
         if seen.count > maxEntries {
             seen = Set(seen.shuffled().prefix(maxEntries))
         }
-        UserDefaults.standard.set(seen.map(\.uuidString), forKey: defaultsKey)
+        HypnosDefaults.store.set(seen.map(\.uuidString), forKey: defaultsKey)
     }
 
     private static func loadFromDefaults() -> Set<UUID> {
-        guard let raw = UserDefaults.standard.array(forKey: defaultsKey) as? [String] else {
+        guard let raw = HypnosDefaults.store.array(forKey: defaultsKey) as? [String] else {
             return []
         }
         return Set(raw.compactMap(UUID.init(uuidString:)))
@@ -54,7 +54,7 @@ enum RestoredWindowTracker {
     private static let sizesKey = "RestoredWindowTracker.windowSizes"
 
     private static var sizes: [String: [Double]] = (
-        UserDefaults.standard.dictionary(forKey: sizesKey) as? [String: [Double]]
+        HypnosDefaults.store.dictionary(forKey: sizesKey) as? [String: [Double]]
     ) ?? [:]
 
     static func windowSize(for id: UUID) -> CGSize? {
@@ -68,7 +68,7 @@ enum RestoredWindowTracker {
     /// being restored to a collapsed size again on the next launch.
     static func clearWindowSize(for id: UUID) {
         guard sizes.removeValue(forKey: id.uuidString) != nil else { return }
-        UserDefaults.standard.set(sizes, forKey: sizesKey)
+        HypnosDefaults.store.set(sizes, forKey: sizesKey)
     }
 
     static func setWindowSize(_ size: CGSize, for id: UUID) {
@@ -78,6 +78,6 @@ enum RestoredWindowTracker {
                 sizes.removeValue(forKey: key)
             }
         }
-        UserDefaults.standard.set(sizes, forKey: sizesKey)
+        HypnosDefaults.store.set(sizes, forKey: sizesKey)
     }
 }

@@ -501,7 +501,7 @@ enum MusicSortPreference {
     private static let key = "jellyfinMusic.sortOrder"
 
     static func load(for section: MusicSection) -> (MusicSort?, Bool?) {
-        guard let saved = UserDefaults.standard.dictionary(forKey: key)?[section.rawValue] as? String else { return (nil, nil) }
+        guard let saved = HypnosDefaults.store.dictionary(forKey: key)?[section.rawValue] as? String else { return (nil, nil) }
         let parts = saved.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
         let sort = MusicSort(rawValue: parts.first ?? "").flatMap { section.sorts.contains($0) ? $0 : nil }
         let descending = parts.count > 1 ? (parts[1] == "desc" ? true : parts[1] == "asc" ? false : nil) : nil
@@ -509,8 +509,8 @@ enum MusicSortPreference {
     }
 
     static func save(sort: MusicSort?, descending: Bool?, for section: MusicSection) {
-        var all = UserDefaults.standard.dictionary(forKey: key) ?? [:]
+        var all = HypnosDefaults.store.dictionary(forKey: key) ?? [:]
         all[section.rawValue] = "\(sort?.rawValue ?? "")|\(descending.map { $0 ? "desc" : "asc" } ?? "")"
-        UserDefaults.standard.set(all, forKey: key)
+        HypnosDefaults.store.set(all, forKey: key)
     }
 }

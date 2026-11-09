@@ -277,7 +277,7 @@ class PhotoWindowModel {
     /// AI HDR: an SDR photo gets a generated gain map (`GainMapHDR`), flat
     /// and in AI 3D. Per image (`restoreAIHDRPreference`), starting from the
     /// Settings default.
-    var aiHDREnabled = PlatformCapabilities.supportsAIHDR && UserDefaults.standard.bool(forKey: GainMapHDR.enabledKey)
+    var aiHDREnabled = PlatformCapabilities.supportsAIHDR && HypnosDefaults.store.bool(forKey: GainMapHDR.enabledKey)
     /// Set while an AI HDR toggle reloads the picture.
     var isProcessingAIHDR = false
     var aiDepthPresentationReady = false

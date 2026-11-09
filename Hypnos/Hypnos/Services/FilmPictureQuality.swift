@@ -26,8 +26,8 @@ enum FilmPictureQuality: String, CaseIterable, Sendable {
     static let defaultsKey = "filmPlayer.pictureQuality"
 
     static var preferred: FilmPictureQuality {
-        get { UserDefaults.standard.string(forKey: defaultsKey).flatMap(Self.init(rawValue:)) ?? .auto }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey) }
+        get { HypnosDefaults.store.string(forKey: defaultsKey).flatMap(Self.init(rawValue:)) ?? .auto }
+        set { HypnosDefaults.store.set(newValue.rawValue, forKey: defaultsKey) }
     }
 
     /// The tier asked of the plugin; nil is the film's own picture.

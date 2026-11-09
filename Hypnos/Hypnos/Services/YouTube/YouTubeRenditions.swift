@@ -85,12 +85,12 @@ enum YouTubeRenditions {
     /// variants on this OS, so an HDR variant is worth choosing over SDR.
     static var prefersHDR: Bool {
         AVPlayer.eligibleForHDRPlayback
-            && UserDefaults.standard.string(forKey: hdrRefusedKey) != osVersion
+            && HypnosDefaults.store.string(forKey: hdrRefusedKey) != osVersion
     }
 
     /// The player couldn't open an HDR cut: SDR from now until the OS changes.
     static func noteHDRRefused() {
-        UserDefaults.standard.set(osVersion, forKey: hdrRefusedKey)
+        HypnosDefaults.store.set(osVersion, forKey: hdrRefusedKey)
     }
 
     // Renamed when visionOS's refusals turned out to be the VP9 decoder not

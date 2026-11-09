@@ -466,7 +466,7 @@ struct VideoOrnamentsView: View {
             close()
             appModel.videoAdjustmentsTarget = windowModel
             windowModel.showAdjustments = true
-            openWindow(id: "video-adjustments")
+            openWindow(id: HypnosSceneID.videoAdjustments)
         } label: {
             Label("All Adjustments…", systemImage: "slider.horizontal.3")
         }

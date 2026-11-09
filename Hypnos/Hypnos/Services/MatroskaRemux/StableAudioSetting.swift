@@ -23,8 +23,8 @@ enum StableAudioSetting {
     static let key = "video.stableAudioOn"
 
     static var isOn: Bool {
-        get { UserDefaults.standard.bool(forKey: key) }
-        set { UserDefaults.standard.set(newValue, forKey: key) }
+        get { HypnosDefaults.store.bool(forKey: key) }
+        set { HypnosDefaults.store.set(newValue, forKey: key) }
     }
 }
 

@@ -183,7 +183,7 @@ struct PhotoSettingsPage: View {
 
 struct VideoSettingsPage: View {
     @Environment(AppModel.self) private var appModel
-    @AppStorage(PlaybackInfoVisibility.key) private var playbackInfoVisibility = PlaybackInfoVisibility.always
+    @AppStorage(PlaybackInfoVisibility.key, store: HypnosDefaults.store) private var playbackInfoVisibility = PlaybackInfoVisibility.always
 
     var body: some View {
         @Bindable var appModel = appModel

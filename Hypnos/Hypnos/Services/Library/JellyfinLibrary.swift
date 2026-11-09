@@ -944,7 +944,7 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// preserve an explicit server-remux preference. See `streamPlan`.
     static let remuxesOnDeviceKey = "library.remuxOnDevice"
     static var remuxesOnDevice: Bool {
-        UserDefaults.standard.object(forKey: remuxesOnDeviceKey) as? Bool ?? true
+        HypnosDefaults.store.object(forKey: remuxesOnDeviceKey) as? Bool ?? true
     }
 
     /// The URL is the title's file itself (`Videos/{id}/stream?static=true`),

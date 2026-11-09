@@ -30,8 +30,8 @@ enum ObjectAudioQuality: String, CaseIterable, Sendable {
     static let defaultsKey = "filmPlayer.objectAudioQuality"
 
     static var preferred: ObjectAudioQuality {
-        get { UserDefaults.standard.string(forKey: defaultsKey).flatMap(Self.init(rawValue:)) ?? .auto }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey) }
+        get { HypnosDefaults.store.string(forKey: defaultsKey).flatMap(Self.init(rawValue:)) ?? .auto }
+        set { HypnosDefaults.store.set(newValue.rawValue, forKey: defaultsKey) }
     }
 
     var title: String {

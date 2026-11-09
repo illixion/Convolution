@@ -104,7 +104,7 @@ struct JellyfinServerSection: View {
 /// How a title's MKV file plays: through Jellyfin's remux, or read and
 /// repackaged on the device (`JellyfinLibrary.remuxesOnDevice`).
 struct LibraryFilePlaybackSection: View {
-    @AppStorage(JellyfinLibrary.remuxesOnDeviceKey) private var remuxesOnDevice = true
+    @AppStorage(JellyfinLibrary.remuxesOnDeviceKey, store: HypnosDefaults.store) private var remuxesOnDevice = true
 
     var body: some View {
         if LibraryService.isAvailable {

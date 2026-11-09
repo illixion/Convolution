@@ -54,7 +54,7 @@ struct YouTubeTabView: View {
     @OpenWindowProxy private var openWindow
     @PushWindowProxy private var pushWindow
     @Environment(AppModel.self) private var appModel
-    @AppStorage(YouTubeConsent.defaultsKey) private var consentGranted = false
+    @AppStorage(YouTubeConsent.defaultsKey, store: HypnosDefaults.store) private var consentGranted = false
 
     private var pastedID: YouTubeVideoID? { YouTubeVideoID(parsing: query) }
 
@@ -477,9 +477,9 @@ struct YouTubeTabView: View {
     private func autoPlayIfRequested() {
         #if DEBUG
         let key = "youTubeAutoPlayID"
-        guard let raw = UserDefaults.standard.string(forKey: key) else { return }
+        guard let raw = HypnosDefaults.store.string(forKey: key) else { return }
         // `-UITestDefault` values persist; this one is for one launch.
-        UserDefaults.standard.removeObject(forKey: key)
+        HypnosDefaults.store.removeObject(forKey: key)
         guard let id = YouTubeVideoID(parsing: raw) else { return }
         play(YouTubeVideoSummary(id: id, title: "YouTube video", lengthSeconds: nil))
         #endif
@@ -517,10 +517,10 @@ struct YouTubeTabView: View {
         // Same rule as the galleries: in place (push, back returns here) unless
         // Settings → Open Media in New Windows is on.
         if appModel.openMediaInNewWindows {
-            openWindow(id: "video-detail", value: value)
+            openWindow(id: HypnosSceneID.videoDetail, value: value)
         } else {
             value.wasPushed = true
-            pushWindow(id: "video-detail", value: value)
+            pushWindow(id: HypnosSceneID.videoDetail, value: value)
         }
         #endif
     }

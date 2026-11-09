@@ -78,11 +78,11 @@ struct TVPicturesTabView: View {
     /// (auth, full-size decode) against the dev Stash instance.
     private func autoPresentIfRequested() {
         #if DEBUG
-        if UserDefaults.standard.bool(forKey: "tvAutoStartSlideshow") {
+        if HypnosDefaults.store.bool(forKey: "tvAutoStartSlideshow") {
             startSlideshow()
             return
         }
-        guard let raw = UserDefaults.standard.string(forKey: "tvAutoOpenPictureIndex"),
+        guard let raw = HypnosDefaults.store.string(forKey: "tvAutoOpenPictureIndex"),
               let index = Int(raw),
               appModel.galleryImages.indices.contains(index) else { return }
         presentedIndex = index

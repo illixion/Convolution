@@ -23,8 +23,8 @@ enum YouTubeQuality: String, CaseIterable, Identifiable, Sendable {
     static let defaultsKey = "youtube.quality"
 
     static var preferred: YouTubeQuality {
-        get { UserDefaults.standard.string(forKey: defaultsKey).flatMap(Self.init(rawValue:)) ?? .auto }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey) }
+        get { HypnosDefaults.store.string(forKey: defaultsKey).flatMap(Self.init(rawValue:)) ?? .auto }
+        set { HypnosDefaults.store.set(newValue.rawValue, forKey: defaultsKey) }
     }
 
     var id: String { rawValue }

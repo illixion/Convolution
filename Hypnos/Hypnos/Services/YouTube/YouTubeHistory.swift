@@ -23,7 +23,7 @@ final class YouTubeHistory {
     private(set) var videos: [YouTubeVideoSummary]
 
     private init() {
-        videos = UserDefaults.standard.data(forKey: Self.key)
+        videos = HypnosDefaults.store.data(forKey: Self.key)
             .flatMap { try? JSONDecoder().decode([YouTubeVideoSummary].self, from: $0) } ?? []
     }
 
@@ -45,7 +45,7 @@ final class YouTubeHistory {
     }
 
     private func save() {
-        UserDefaults.standard.set(try? JSONEncoder().encode(videos), forKey: Self.key)
+        HypnosDefaults.store.set(try? JSONEncoder().encode(videos), forKey: Self.key)
     }
 }
 

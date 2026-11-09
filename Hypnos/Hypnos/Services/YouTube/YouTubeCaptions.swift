@@ -60,7 +60,7 @@ enum YouTubeCaptionLanguage {
     private static let targetKey = "translation.target"
 
     static var preferred: Locale.Language {
-        let saved = UserDefaults.standard.string(forKey: targetKey) ?? ""
+        let saved = HypnosDefaults.store.string(forKey: targetKey) ?? ""
         return Locale.Language(identifier: saved.isEmpty ? (Locale.preferredLanguages.first ?? "en") : saved)
     }
 

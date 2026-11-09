@@ -91,7 +91,7 @@ struct HypnosApp: App {
         // One window. With `UIApplicationSupportsMultipleScenes` on, iPadOS can
         // still open several instances of it side by side; each is a complete
         // gallery with its own cover stack.
-        WindowGroup("Convolution", id: "main") {
+        WindowGroup("Convolution", id: HypnosSceneID.main) {
             IOSRootView(appModel: appModel)
         }
     }
@@ -104,7 +104,7 @@ struct HypnosApp: App {
         // One window, like iOS — but a completely different root (see
         // Views/TV/TVRootView.swift and Hypnos/CLAUDE.md "tvOS"), not
         // `IOSRootView`'s cover-stack-over-a-touch-gallery shape.
-        WindowGroup("Convolution", id: "main") {
+        WindowGroup("Convolution", id: HypnosSceneID.main) {
             TVRootView(appModel: appModel)
         }
     }
@@ -115,155 +115,7 @@ struct HypnosApp: App {
     #if os(visionOS)
     @SceneBuilder
     private var visionOSScenes: some Scene {
-        // Main gallery window — WindowGroup allows multiple instances.
-        // UUID identity ensures each openWindow call creates a new window.
-        WindowGroup("Convolution", id: "main", for: UUID.self) { $windowId in
-            // Main windows are managed too (inside `MainWindowView`): the app
-            // opens several, and one parked in another room is exactly what the
-            // Windows tab is for. Each tab lists every main window but its own.
-            MainWindowView(appModel: appModel, windowId: windowId)
-                .handleIncomingMediaURLs(appModel: appModel)
-                .debugApprovalPrompts()
-        } defaultValue: {
-            UUID()
-        }
-        .defaultSize(width: 1200, height: 800)
-        .raveWindowPushPlacement(id: "main")
-        .windowResizability(.contentMinSize)
-        .windowStyle(.plain)
-        .defaultLaunchBehavior(.presented)
-
-        // Individual photo window - supports multiple pop-out instances
-        WindowGroup(id: "photo-detail", for: PhotoWindowValue.self) { $windowValue in
-            if let windowValue = windowValue {
-                PhotoWindowView(windowValue: windowValue, appModel: appModel, onSizeSettled: { size in
-                    $windowValue.wrappedValue?.restoredSize = RAVECodableSize(size)
-                })
-                    .environment(appModel)
-                    .captureOpenWindowAction()
-                    .handleIncomingMediaURLs(appModel: appModel)
-                    .debugApprovalPrompts()
-                    .manageWindow(ManagedWindows.photo(windowValue))
-                    .raveWindowPushHost(sceneID: "photo-detail", value: windowValue)
-            }
-        }
-        .windowStyle(.plain)
-        .defaultSize(width: 1200, height: 900)
-        .raveWindowPushPlacement(id: "photo-detail")
-        .defaultLaunchBehavior(.suppressed)
-
-        // Individual video window - pop-out video player
-        WindowGroup(id: "video-detail", for: VideoWindowValue.self) { $windowValue in
-            if let windowValue, windowValue.video.opensInFilmPlayer {
-                LocalDiscHandoffView(video: windowValue.video)
-                    .environment(appModel)
-            } else if let windowValue = windowValue {
-                VideoWindowView(windowValue: windowValue, appModel: appModel)
-                    .environment(appModel)
-                    .captureOpenWindowAction()
-                    .handleIncomingMediaURLs(appModel: appModel)
-                    .debugApprovalPrompts()
-                    .manageWindow(ManagedWindows.video(windowValue))
-                    .raveWindowPushHost(sceneID: "video-detail", value: windowValue)
-            }
-        }
-        .windowStyle(.plain)
-        .defaultSize(width: 1200, height: 700)
-        .raveWindowPushPlacement(id: "video-detail")
-        .defaultLaunchBehavior(.suppressed)
-
-        // Shared photo viewer - opens when image is shared to the app
-        WindowGroup(id: "shared-photo", for: SharedMediaItem.self) { $item in
-            if let item = item {
-                SharedPhotoWindowView(item: item, appModel: appModel)
-                    .environment(appModel)
-                    .captureOpenWindowAction()
-                    .handleIncomingMediaURLs(appModel: appModel)
-                    .manageWindow(ManagedWindows.sharedPhoto(item))
-            }
-        }
-        .windowStyle(.plain)
-        .defaultSize(width: 1200, height: 900)
-        .defaultLaunchBehavior(.suppressed)
-
-        // Shared videos are routed to the "video-detail" scene above (rich
-        // pipeline: native-Metal playback, fake-3D, adjustments). The old flat
-        // "shared-video" group is gone — nothing opened it, and a second
-        // WindowGroup taking the same `SharedMediaItem` payload made scene
-        // restoration ambiguous between it and "shared-photo".
-
-        // Pop-out debug console window (singleton)
-        Window("Console", id: "console") {
-            ConsoleWindowView()
-                .environment(appModel)
-                .captureOpenWindowAction()
-                .handleIncomingMediaURLs(appModel: appModel)
-                .manageWindow(ManagedWindows.console())
-        }
-        .defaultSize(width: 900, height: 600)
-        .windowResizability(.contentMinSize)
-        .defaultLaunchBehavior(.suppressed)
-
-        // GPU memory monitor window (singleton)
-        Window("GPU Memory", id: "gpu-memory") {
-            GPUMemoryMonitorView()
-                .environment(appModel)
-                .captureOpenWindowAction()
-                .handleIncomingMediaURLs(appModel: appModel)
-                .manageWindow(ManagedWindows.gpuMemory())
-        }
-        .defaultSize(width: 500, height: 350)
-        .windowResizability(.contentMinSize)
-        .defaultLaunchBehavior(.suppressed)
-
-        // Video adjustments — standalone, repositionable window for the active
-        // video window's Adjustments (avoids overlapping the fake-3D video).
-        Window("Adjustments", id: "video-adjustments") {
-            VideoAdjustmentsWindowView()
-                .environment(appModel)
-                .captureOpenWindowAction()
-                .handleIncomingMediaURLs(appModel: appModel)
-                .manageWindow(ManagedWindows.videoAdjustments())
-        }
-        .defaultSize(width: 380, height: 640)
-        .windowResizability(.contentSize)
-        .defaultLaunchBehavior(.suppressed)
-
-        // Slideshow of the app's own pictures or videos. The scene id keeps its
-        // original spelling: visionOS restores open windows by it.
-        WindowGroup(id: "remote-viewer", for: RemoteViewerWindowValue.self) { $windowValue in
-            if let windowValue = windowValue {
-                RemoteViewerWindowView(windowValue: windowValue, onSizeSettled: { size in
-                    $windowValue.wrappedValue?.restoredSize = RAVECodableSize(size)
-                })
-                    .environment(appModel)
-                    .captureOpenWindowAction()
-                    .handleIncomingMediaURLs(appModel: appModel)
-                    .manageWindow(ManagedWindows.remoteViewer(windowValue, appModel: appModel))
-                    // Structural floor. This view's root is a GeometryReader,
-                    // which has no intrinsic size and greedily accepts whatever
-                    // it's proposed — during restoration of a window the
-                    // compositor hasn't placed yet, that proposal can be the
-                    // 10x10 default. Without a minimum the window collapses to
-                    // nothing, and the size write-back then persists the
-                    // collapsed geometry. The main window group has had this
-                    // floor all along; the viewer was the one scene without it.
-                    .frame(
-                        minWidth: RemoteViewerWindowView.minimumWindowSize.width,
-                        minHeight: RemoteViewerWindowView.minimumWindowSize.height
-                    )
-            }
-        }
-        .windowStyle(.plain)
-        .windowResizability(.contentMinSize)
-        .defaultSize(width: 1400, height: 900)
-        .defaultLaunchBehavior(.suppressed)
-
-        // The debug server's "Allow debug access?" / "Allow code changes?"
-        // prompt, in a window of its own: the system alert it would otherwise
-        // use attaches to the frontmost window, where a 3D video's content
-        // stands in front of it and hides it.
-        DebugApprovalWindow()
+        HypnosWindows(appModel: appModel)
 
         // Every immersive space leaves a system environment (Mount Hood and
         // the rest) as it is rather than closing it (visionOS 26): mixed
@@ -290,47 +142,6 @@ struct HypnosApp: App {
         }
         .immersionStyle(selection: .constant(.mixed), in: .mixed)
         .immersiveEnvironmentBehavior(.coexist)
-
-        // Film player: picture plus Atmos objects as spatial sources around
-        // this window (Settings → Developer → Film Player). Opened with a
-        // loaded film, so it never restores on its own.
-        Window("Film Player", id: FilmPlayerView.windowID) {
-            FilmPlayerView()
-                .environment(appModel)
-                .raveWindowPushHost(sceneID: FilmPlayerView.windowID)
-        }
-        .windowStyle(.plain)
-        .defaultSize(width: 1280, height: 720)
-        .raveWindowPushPlacement(id: FilmPlayerView.windowID)
-        .defaultLaunchBehavior(.suppressed)
-        .restorationBehavior(.disabled)
-
-        // Debug: the film's picture through Apple's renderers, beside the
-        // film player (the `filmCompare` debug command).
-        // The music mini player: a small glass panel to park beside other windows.
-        Window("Mini Player", id: MusicMiniPlayerWindowView.windowID) {
-            MusicMiniPlayerWindowView()
-        }
-        .windowStyle(.plain)
-        .windowResizability(.contentSize)
-        .defaultLaunchBehavior(.suppressed)
-        .restorationBehavior(.disabled)
-
-        Window("Picture Compare", id: PictureCompare.windowID) {
-            PictureCompareView()
-        }
-        .windowStyle(.plain)
-        .defaultSize(width: 1280, height: 580)
-        .defaultLaunchBehavior(.suppressed)
-        .restorationBehavior(.disabled)
-
-        Window("Sound and Picture", id: FilmAdjustmentsView.windowID) {
-            FilmAdjustmentsView()
-        }
-        .defaultSize(width: 900, height: 640)
-        .windowResizability(.contentMinSize)
-        .defaultLaunchBehavior(.suppressed)
-        .restorationBehavior(.disabled)
     }
     #endif
 
@@ -348,7 +159,7 @@ struct HypnosApp: App {
     /// window of whichever group it picked for each URL.
     @SceneBuilder
     private var macOSScenes: some Scene {
-        WindowGroup("Convolution", id: "main") {
+        WindowGroup("Convolution", id: HypnosSceneID.main) {
             ContentView()
                 .environment(appModel)
                 .frame(minWidth: 640, minHeight: 480)
@@ -362,7 +173,7 @@ struct HypnosApp: App {
             HypnosCommands(appModel: appModel)
         }
 
-        WindowGroup("Picture", id: "photo-detail", for: PhotoWindowValue.self) { $windowValue in
+        WindowGroup("Picture", id: HypnosSceneID.photoDetail, for: PhotoWindowValue.self) { $windowValue in
             if let windowValue {
                 PhotoWindowView(windowValue: windowValue, appModel: appModel, onSizeSettled: { size in
                     $windowValue.wrappedValue?.restoredSize = RAVECodableSize(size)
@@ -377,7 +188,7 @@ struct HypnosApp: App {
         .defaultSize(width: 1000, height: 760)
         .handlesExternalEvents(matching: [])
 
-        WindowGroup("Video", id: "video-detail", for: VideoWindowValue.self) { $windowValue in
+        WindowGroup("Video", id: HypnosSceneID.videoDetail, for: VideoWindowValue.self) { $windowValue in
             if let windowValue, windowValue.video.opensInFilmPlayer {
                 LocalDiscHandoffView(video: windowValue.video)
                     .environment(appModel)
@@ -393,7 +204,7 @@ struct HypnosApp: App {
         .defaultSize(width: 1120, height: 700)
         .handlesExternalEvents(matching: [])
 
-        WindowGroup("Shared Picture", id: "shared-photo", for: SharedMediaItem.self) { $item in
+        WindowGroup("Shared Picture", id: HypnosSceneID.sharedPhoto, for: SharedMediaItem.self) { $item in
             if let item {
                 SharedPhotoWindowView(item: item, appModel: appModel)
                     .environment(appModel)
@@ -407,7 +218,7 @@ struct HypnosApp: App {
         .handlesExternalEvents(matching: [])
 
         // Slideshows of the app's own pictures or videos.
-        WindowGroup("Slideshow", id: "remote-viewer", for: RemoteViewerWindowValue.self) { $windowValue in
+        WindowGroup("Slideshow", id: HypnosSceneID.remoteViewer, for: RemoteViewerWindowValue.self) { $windowValue in
             if let windowValue {
                 RemoteViewerWindowView(windowValue: windowValue, onSizeSettled: { size in
                     $windowValue.wrappedValue?.restoredSize = RAVECodableSize(size)
@@ -434,7 +245,7 @@ struct HypnosApp: App {
         .restorationBehavior(.disabled)
         .handlesExternalEvents(matching: [])
 
-        Window("Adjustments", id: "video-adjustments") {
+        Window("Adjustments", id: HypnosSceneID.videoAdjustments) {
             VideoAdjustmentsWindowView()
                 .environment(appModel)
         }
@@ -450,14 +261,14 @@ struct HypnosApp: App {
         .restorationBehavior(.disabled)
         .handlesExternalEvents(matching: [])
 
-        Window("Console", id: "console") {
+        Window("Console", id: HypnosSceneID.console) {
             ConsoleWindowView()
                 .environment(appModel)
         }
         .defaultSize(width: 900, height: 600)
         .handlesExternalEvents(matching: [])
 
-        Window("GPU Memory", id: "gpu-memory") {
+        Window("GPU Memory", id: HypnosSceneID.gpuMemory) {
             GPUMemoryMonitorView()
                 .environment(appModel)
         }
@@ -471,32 +282,3 @@ struct HypnosApp: App {
     #endif
 }
 
-#if os(visionOS)
-/// Wrapper view for the main window that handles shared media URLs
-private struct MainWindowView: View {
-    let appModel: AppModel
-    /// The scene's presented value. Unreachable as nil in practice — the group
-    /// declares a `defaultValue` — but the binding is optional, so the window
-    /// manager needs an identity that survives body re-evaluation either way:
-    /// a fresh `UUID()` per evaluation would leave Close addressing a value no
-    /// scene holds.
-    let windowId: UUID?
-    @State private var fallbackWindowId = UUID()
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        ContentView()
-            .environment(appModel)
-            .raveRetainedWindowContent(sceneID: "main", value: windowId ?? fallbackWindowId)
-            .frame(minWidth: 320, maxWidth: 3000, minHeight: 320, maxHeight: 3000)
-            .registerAsMainWindow()
-            .manageWindow(ManagedWindows.main(windowId ?? fallbackWindowId))
-            // Park the live gallery hierarchy while a viewer is open. Return
-            // reattaches it to a fresh shell at the user, preserving the grid.
-            .raveWindowPushHost(sceneID: "main", value: windowId ?? fallbackWindowId)
-            .onAppear {
-                RAVEWindowSessionRegistry.shared.openWindow = openWindow
-            }
-    }
-}
-#endif

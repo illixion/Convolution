@@ -6,8 +6,8 @@ import Translation
 #endif
 
 struct AICaptionSettingsPage: View {
-    @AppStorage("captions.locale") private var locale = Locale.preferredLanguages.first ?? "en-US"
-    @AppStorage("captions.speakers") private var speakers = true
+    @AppStorage("captions.locale", store: HypnosDefaults.store) private var locale = Locale.preferredLanguages.first ?? "en-US"
+    @AppStorage("captions.speakers", store: HypnosDefaults.store) private var speakers = true
     @State private var locales: [Locale] = []
     var body: some View {
         SettingsPage("AI Captions") {
@@ -51,7 +51,7 @@ struct AICaptionSettingsPage: View {
         }
         .task {
             locales = await SpeechTranscriber.supportedLocales.sorted { $0.identifier < $1.identifier }
-            let preferred = UserDefaults.standard.string(forKey: "captions.locale")
+            let preferred = HypnosDefaults.store.string(forKey: "captions.locale")
                 ?? Locale.preferredLanguages.first ?? Locale.current.identifier
             if let match = matchingLocale(preferred, in: locales)
                 ?? matchingLocale(Locale.current.identifier, in: locales)
@@ -111,7 +111,7 @@ struct SpeakerModelSection: View {
 #if os(iOS) || os(macOS)
 /// The language "Translate" in a subtitle menu starts with.
 struct TranslationTargetSection: View {
-    @AppStorage(SubtitleTranslationSupport.targetKey) private var target = ""
+    @AppStorage(SubtitleTranslationSupport.targetKey, store: HypnosDefaults.store) private var target = ""
     @State private var languages: [Locale.Language] = []
 
     var body: some View {

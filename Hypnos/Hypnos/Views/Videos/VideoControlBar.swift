@@ -30,7 +30,7 @@ struct VideoControlBar<Accessories: View>: View {
     #if os(tvOS)
     private var readoutInPanel: Bool { false }
     #else
-    @AppStorage(PlaybackInfoVisibility.key) private var playbackInfoVisibility = PlaybackInfoVisibility.always
+    @AppStorage(PlaybackInfoVisibility.key, store: HypnosDefaults.store) private var playbackInfoVisibility = PlaybackInfoVisibility.always
     private var readoutInPanel: Bool { windowModel.playbackInfo.isShown(playbackInfoVisibility) }
     #endif
 

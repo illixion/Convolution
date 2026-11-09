@@ -113,7 +113,7 @@ struct AnimatedJXLWebView {
     private static let animB64 = loadResourceBase64("jxl-anim")
 
     private static func loadResourceBase64(_ name: String) -> String {
-        guard let url = Bundle.main.url(forResource: name, withExtension: "js"),
+        guard let url = HypnosBundle.resources.url(forResource: name, withExtension: "js"),
               let data = try? Data(contentsOf: url) else {
             AppLogger.remoteViewer.error("AnimatedJXLWebView: missing bundled resource \(name, privacy: .public).js")
             return ""

@@ -44,7 +44,7 @@ struct DeveloperSettingsPage: View {
 
             Section {
                 Button {
-                    openWindow(id: "gpu-memory")
+                    openWindow(id: HypnosSceneID.gpuMemory)
                 } label: {
                     Label("Open GPU Memory Monitor", systemImage: "memorychip")
                 }

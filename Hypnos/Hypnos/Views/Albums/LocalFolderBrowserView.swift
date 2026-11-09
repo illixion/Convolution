@@ -265,7 +265,7 @@ struct LocalFolderBrowserView: View {
             if newWindow {
                 appModel.enqueuePhotoWindowOpen(image)
             } else {
-                pushWindow(id: "photo-detail", value: PhotoWindowValue(image: image, wasPushed: true))
+                pushWindow(id: HypnosSceneID.photoDetail, value: PhotoWindowValue(image: image, wasPushed: true))
             }
         } else {
             // Build the sibling list so prev/next navigates the folder's
@@ -289,9 +289,9 @@ struct LocalFolderBrowserView: View {
                     title: file.name
                 )
             if newWindow {
-                openWindow(id: "video-detail", value: VideoWindowValue(video: video, galleryVideos: siblings))
+                openWindow(id: HypnosSceneID.videoDetail, value: VideoWindowValue(video: video, galleryVideos: siblings))
             } else {
-                pushWindow(id: "video-detail", value: VideoWindowValue(video: video, galleryVideos: siblings, wasPushed: true))
+                pushWindow(id: HypnosSceneID.videoDetail, value: VideoWindowValue(video: video, galleryVideos: siblings, wasPushed: true))
             }
         }
     }

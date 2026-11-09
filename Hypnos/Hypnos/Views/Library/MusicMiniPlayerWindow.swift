@@ -13,7 +13,7 @@ import SwiftUI
 import RAVEUI
 
 struct MusicMiniPlayerWindowView: View {
-    static let windowID = "music-mini-player"
+    static let windowID = HypnosSceneID.id("music-mini-player")
     static let width: CGFloat = 340
 
     @State private var music = JellyfinMusicSession.shared

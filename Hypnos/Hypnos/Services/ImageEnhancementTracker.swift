@@ -60,9 +60,9 @@ actor ImageEnhancementTracker {
     private var aiHDRByURL: [String: Bool]
 
     private init() {
-        if let dict = UserDefaults.standard.dictionary(forKey: convertedIdentityKey) as? [String: String] {
+        if let dict = HypnosDefaults.store.dictionary(forKey: convertedIdentityKey) as? [String: String] {
             convertedIdentityByURL = dict
-        } else if let legacy = UserDefaults.standard.array(forKey: userDefaultsKey) as? [String] {
+        } else if let legacy = HypnosDefaults.store.array(forKey: userDefaultsKey) as? [String] {
             // Migrated from the URL-only set. The identity is unknown for these,
             // so the URL key stands in: correct for Photos and local files,
             // where identity *is* the persistent key, and simply absent from the
@@ -77,43 +77,43 @@ actor ImageEnhancementTracker {
             "Loaded \(loadedCount, privacy: .public) previously converted images"
         )
 
-        if let dict = UserDefaults.standard.dictionary(forKey: lastModeKey) as? [String: String] {
+        if let dict = HypnosDefaults.store.dictionary(forKey: lastModeKey) as? [String: String] {
             lastViewingModeByURL = dict
         } else {
             lastViewingModeByURL = [:]
         }
 
-        if let saved = UserDefaults.standard.array(forKey: flippedKey) as? [String] {
+        if let saved = HypnosDefaults.store.array(forKey: flippedKey) as? [String] {
             flippedByURL = Set(saved)
         } else {
             flippedByURL = []
         }
 
-        if let dict = UserDefaults.standard.dictionary(forKey: resolutionOverrideKey) as? [String: Int] {
+        if let dict = HypnosDefaults.store.dictionary(forKey: resolutionOverrideKey) as? [String: Int] {
             resolutionOverrideByURL = dict
         } else {
             resolutionOverrideByURL = [:]
         }
 
-        if let dict = UserDefaults.standard.dictionary(forKey: spatial3DResolutionOverrideKey) as? [String: Int] {
+        if let dict = HypnosDefaults.store.dictionary(forKey: spatial3DResolutionOverrideKey) as? [String: Int] {
             spatial3DResolutionOverrideByURL = dict
         } else {
             spatial3DResolutionOverrideByURL = [:]
         }
 
-        if let dict = UserDefaults.standard.dictionary(forKey: windowSizeKey) as? [String: [Double]] {
+        if let dict = HypnosDefaults.store.dictionary(forKey: windowSizeKey) as? [String: [Double]] {
             windowSizeByURL = dict
         } else {
             windowSizeByURL = [:]
         }
 
-        if let dict = UserDefaults.standard.dictionary(forKey: adjustmentsKey) as? [String: Data] {
+        if let dict = HypnosDefaults.store.dictionary(forKey: adjustmentsKey) as? [String: Data] {
             adjustmentsByURL = dict
         } else {
             adjustmentsByURL = [:]
         }
 
-        aiHDRByURL = UserDefaults.standard.dictionary(forKey: aiHDRKey) as? [String: Bool] ?? [:]
+        aiHDRByURL = HypnosDefaults.store.dictionary(forKey: aiHDRKey) as? [String: Bool] ?? [:]
     }
 
     /// Mark an image as having been converted to spatial 3D.
@@ -162,14 +162,14 @@ actor ImageEnhancementTracker {
     }
 
     private func save() {
-        UserDefaults.standard.set(convertedIdentityByURL, forKey: convertedIdentityKey)
-        UserDefaults.standard.set(lastViewingModeByURL, forKey: lastModeKey)
-        UserDefaults.standard.set(Array(flippedByURL), forKey: flippedKey)
-        UserDefaults.standard.set(resolutionOverrideByURL, forKey: resolutionOverrideKey)
-        UserDefaults.standard.set(spatial3DResolutionOverrideByURL, forKey: spatial3DResolutionOverrideKey)
-        UserDefaults.standard.set(windowSizeByURL, forKey: windowSizeKey)
-        UserDefaults.standard.set(adjustmentsByURL, forKey: adjustmentsKey)
-        UserDefaults.standard.set(aiHDRByURL, forKey: aiHDRKey)
+        HypnosDefaults.store.set(convertedIdentityByURL, forKey: convertedIdentityKey)
+        HypnosDefaults.store.set(lastViewingModeByURL, forKey: lastModeKey)
+        HypnosDefaults.store.set(Array(flippedByURL), forKey: flippedKey)
+        HypnosDefaults.store.set(resolutionOverrideByURL, forKey: resolutionOverrideKey)
+        HypnosDefaults.store.set(spatial3DResolutionOverrideByURL, forKey: spatial3DResolutionOverrideKey)
+        HypnosDefaults.store.set(windowSizeByURL, forKey: windowSizeKey)
+        HypnosDefaults.store.set(adjustmentsByURL, forKey: adjustmentsKey)
+        HypnosDefaults.store.set(aiHDRByURL, forKey: aiHDRKey)
     }
 
     // MARK: - Backup Export / Import

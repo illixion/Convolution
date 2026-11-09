@@ -44,7 +44,7 @@ struct SettingsTabView: View {
     @Bindable private var jellyfin = JellyfinAuth.shared
     #if HYPNOS_YOUTUBE
     /// No YouTube page until the YouTube tab has been turned on once.
-    @AppStorage(YouTubeConsent.defaultsKey) private var youTubeOn = false
+    @AppStorage(YouTubeConsent.defaultsKey, store: HypnosDefaults.store) private var youTubeOn = false
     #endif
     /// Not observable; picked up again when coming back from the Cache page.
     @State private var cachePreset = CacheBudget.preset

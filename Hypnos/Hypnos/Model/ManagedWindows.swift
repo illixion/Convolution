@@ -64,7 +64,7 @@ enum ManagedWindows {
     @MainActor
     static func main(_ windowId: UUID) -> RAVEManagedWindow {
         .value(
-            id: "main",
+            id: HypnosSceneID.main,
             windowId,
             label: RAVEWindowLabel(title: "Gallery", systemImage: "square.grid.2x2"),
             recreate: { _ in UUID() }
@@ -74,7 +74,7 @@ enum ManagedWindows {
     @MainActor
     static func photo(_ value: PhotoWindowValue) -> RAVEManagedWindow {
         .value(
-            id: "photo-detail",
+            id: HypnosSceneID.photoDetail,
             value,
             label: RAVEWindowLabel(
                 title: "Photo",
@@ -89,7 +89,7 @@ enum ManagedWindows {
     @MainActor
     static func video(_ value: VideoWindowValue) -> RAVEManagedWindow {
         .value(
-            id: "video-detail",
+            id: HypnosSceneID.videoDetail,
             value,
             label: RAVEWindowLabel(
                 title: "Video",
@@ -106,7 +106,7 @@ enum ManagedWindows {
     @MainActor
     static func sharedPhoto(_ item: SharedMediaItem) -> RAVEManagedWindow {
         .value(
-            id: "shared-photo",
+            id: HypnosSceneID.sharedPhoto,
             item,
             label: RAVEWindowLabel(
                 title: "Shared Photo",
@@ -119,7 +119,7 @@ enum ManagedWindows {
     @MainActor
     static func remoteViewer(_ value: RemoteViewerWindowValue, appModel: AppModel) -> RAVEManagedWindow {
         .value(
-            id: "remote-viewer",
+            id: HypnosSceneID.remoteViewer,
             value,
             label: RAVEWindowLabel(
                 title: "Slideshow",
@@ -132,18 +132,18 @@ enum ManagedWindows {
 
     @MainActor
     static func console() -> RAVEManagedWindow {
-        .singleton(id: "console", label: RAVEWindowLabel(title: "Console", systemImage: "terminal"))
+        .singleton(id: HypnosSceneID.console, label: RAVEWindowLabel(title: "Console", systemImage: "terminal"))
     }
 
     @MainActor
     static func gpuMemory() -> RAVEManagedWindow {
-        .singleton(id: "gpu-memory", label: RAVEWindowLabel(title: "GPU Memory", systemImage: "memorychip"))
+        .singleton(id: HypnosSceneID.gpuMemory, label: RAVEWindowLabel(title: "GPU Memory", systemImage: "memorychip"))
     }
 
     @MainActor
     static func videoAdjustments() -> RAVEManagedWindow {
         .singleton(
-            id: "video-adjustments",
+            id: HypnosSceneID.videoAdjustments,
             label: RAVEWindowLabel(title: "Adjustments", systemImage: "slider.horizontal.3")
         )
     }

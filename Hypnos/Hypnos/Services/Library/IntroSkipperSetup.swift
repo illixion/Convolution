@@ -117,7 +117,7 @@ final class IntroSkipperSetup {
     /// has no provider and the episode Play starts has no markers either
     /// (no named chapters). Stays quiet once the user said so.
     func suggestsInstall(for episode: LibraryItem?) async -> Bool {
-        guard let episode, !UserDefaults.standard.bool(forKey: Self.hintDismissedKey),
+        guard let episode, !HypnosDefaults.store.bool(forKey: Self.hintDismissedKey),
               let library = LibraryService.current() else { return false }
         await refresh()
         guard suggestsInstall else { return false }

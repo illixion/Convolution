@@ -8,7 +8,7 @@ import SwiftUI
 /// choice is remembered and applies at once, at the playhead.
 struct FilmPictureQualityPicker: View {
     let player: FilmVideoPlayer
-    @AppStorage(FilmPictureQuality.defaultsKey) private var stored = FilmPictureQuality.auto.rawValue
+    @AppStorage(FilmPictureQuality.defaultsKey, store: HypnosDefaults.store) private var stored = FilmPictureQuality.auto.rawValue
 
     private var choices: [FilmPictureQuality] { FilmPictureQuality.choices(offering: player.offeredPictureHeights) }
 
@@ -46,7 +46,7 @@ struct FilmPictureQualityPicker: View {
 struct FilmPictureQualityMenu: View {
     let player: FilmVideoPlayer
     var onOpenChanged: (Bool) -> Void = { _ in }
-    @AppStorage(FilmPictureQuality.defaultsKey) private var stored = FilmPictureQuality.auto.rawValue
+    @AppStorage(FilmPictureQuality.defaultsKey, store: HypnosDefaults.store) private var stored = FilmPictureQuality.auto.rawValue
 
     private var selected: FilmPictureQuality {
         FilmPictureQuality.selected(stored: stored, offering: player.offeredPictureHeights)

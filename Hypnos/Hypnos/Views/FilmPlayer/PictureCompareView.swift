@@ -36,7 +36,7 @@ import SwiftUI
 @MainActor @Observable
 final class PictureCompare {
     static let shared = PictureCompare()
-    static let windowID = "picture-compare"
+    static let windowID = HypnosSceneID.id("picture-compare")
 
     enum Renderer: String, CaseIterable {
         case playerLayer, playerViewController, videoPlayerComponent

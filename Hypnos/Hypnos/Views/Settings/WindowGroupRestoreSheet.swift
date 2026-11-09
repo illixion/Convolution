@@ -202,17 +202,17 @@ struct WindowGroupRestoreSheet: View {
         case .photo:
             guard let image = entry.image else { return }
             for value in appModel.popOutWindowValues(for: image.fullSizeURL) {
-                dismissWindow(id: "photo-detail", value: value)
+                dismissWindow(id: HypnosSceneID.photoDetail, value: value)
             }
         case .video:
             guard let video = entry.video else { return }
             for value in appModel.videoWindowValues(for: video) {
-                dismissWindow(id: "video-detail", value: value)
+                dismissWindow(id: HypnosSceneID.videoDetail, value: value)
             }
         case .remote:
             guard let configId = entry.remoteConfigId else { return }
             for value in appModel.remoteViewerWindowValues(for: configId) {
-                dismissWindow(id: "remote-viewer", value: value)
+                dismissWindow(id: HypnosSceneID.remoteViewer, value: value)
             }
         case .unknown:
             return

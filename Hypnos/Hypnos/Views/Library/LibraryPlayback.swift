@@ -225,9 +225,9 @@ private struct LibraryPlaybackPresenter: ViewModifier {
                                              wasPushed: pushes)
                 value.startSeconds = presentation.startSeconds
                 if pushes {
-                    pushWindow(id: "video-detail", value: value)
+                    pushWindow(id: HypnosSceneID.videoDetail, value: value)
                 } else {
-                    openWindow(id: "video-detail", value: value)
+                    openWindow(id: HypnosSceneID.videoDetail, value: value)
                 }
             }
         #endif

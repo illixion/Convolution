@@ -106,7 +106,7 @@ final class SubtitleTranslator {
         case .ai:
             // `RAVEGeneratedCaptions.start` reads the speech locale before it
             // does anything else: lend it the sheet's choice for that call.
-            let defaults = UserDefaults.standard
+            let defaults = HypnosDefaults.store
             let previous = defaults.string(forKey: Self.speechLocaleKey)
             if let speech = request.speechLocale { defaults.set(speech, forKey: Self.speechLocaleKey) }
             controller.generated.start()
@@ -268,7 +268,7 @@ enum SubtitleTranslationSupport {
 
     /// The saved destination, or the system's, among `languages`.
     static func target(in languages: [Locale.Language]) -> Locale.Language? {
-        let saved = UserDefaults.standard.string(forKey: targetKey) ?? ""
+        let saved = HypnosDefaults.store.string(forKey: targetKey) ?? ""
         let wanted = saved.isEmpty ? systemLanguage : Locale.Language(identifier: saved)
         return bestMatch(for: wanted, in: languages) ?? bestMatch(for: systemLanguage, in: languages)
     }

@@ -51,7 +51,7 @@ struct TVVideosTabView: View {
     /// auth / HLS-transcode-fallback path against the dev Stash instance.
     private func autoPresentIfRequested() {
         #if DEBUG
-        guard let raw = UserDefaults.standard.string(forKey: "tvAutoPlayVideoIndex"),
+        guard let raw = HypnosDefaults.store.string(forKey: "tvAutoPlayVideoIndex"),
               let index = Int(raw),
               appModel.galleryVideos.indices.contains(index) else { return }
         presentedVideo = appModel.galleryVideos[index]

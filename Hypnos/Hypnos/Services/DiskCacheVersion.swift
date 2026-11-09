@@ -45,7 +45,7 @@ enum DiskCacheVersion {
     /// directory enumeration only runs on an actual version change.
     static func enforce(_ version: Int, at directory: URL, fileManager: FileManager = .default) {
         let key = defaultsKeyPrefix + directory.lastPathComponent
-        let stored = UserDefaults.standard.object(forKey: key) as? Int
+        let stored = HypnosDefaults.store.object(forKey: key) as? Int
         guard stored != version else { return }
 
         if let contents = try? fileManager.contentsOfDirectory(
@@ -61,6 +61,6 @@ enum DiskCacheVersion {
             )
         }
 
-        UserDefaults.standard.set(version, forKey: key)
+        HypnosDefaults.store.set(version, forKey: key)
     }
 }

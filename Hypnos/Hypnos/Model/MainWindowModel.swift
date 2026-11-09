@@ -18,7 +18,7 @@ class MainWindowModel {
     // tab otherwise.
     var selectedTab: Tab = {
         #if DEBUG
-        if let raw = UserDefaults.standard.string(forKey: "mainInitialTab"), let tab = Tab(rawValue: raw) {
+        if let raw = HypnosDefaults.store.string(forKey: "mainInitialTab"), let tab = Tab(rawValue: raw) {
             return tab
         }
         #endif

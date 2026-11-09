@@ -44,7 +44,7 @@ struct TVRootView: View {
         // let screenshots of every tab get taken at all —
         // `-UITestDefault tvInitialTab=Videos` opens straight to Videos.
         #if DEBUG
-        if let raw = UserDefaults.standard.string(forKey: "tvInitialTab"),
+        if let raw = HypnosDefaults.store.string(forKey: "tvInitialTab"),
            let tab = TVTab(rawValue: raw) {
             _selectedTab = State(initialValue: tab)
         } else {

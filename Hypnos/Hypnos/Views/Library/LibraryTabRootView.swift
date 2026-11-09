@@ -126,13 +126,13 @@ struct LibraryTabRootView: View {
     private func openAutoOpenItemIfRequested() async {
         #if DEBUG
         guard path.isEmpty,
-              let itemId = UserDefaults.standard.string(forKey: "libraryAutoOpenItemId"), !itemId.isEmpty,
+              let itemId = HypnosDefaults.store.string(forKey: "libraryAutoOpenItemId"), !itemId.isEmpty,
               let library = LibraryService.current(),
               let item = try? await library.item(id: itemId)
         else { return }
         path.append(item)
-        if UserDefaults.standard.bool(forKey: "libraryAutoPlay") {
-            UserDefaults.standard.removeObject(forKey: "libraryAutoPlay")
+        if HypnosDefaults.store.bool(forKey: "libraryAutoPlay") {
+            HypnosDefaults.store.removeObject(forKey: "libraryAutoPlay")
             await playback.play(item)
         }
         #endif

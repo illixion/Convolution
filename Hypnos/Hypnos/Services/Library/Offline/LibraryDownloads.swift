@@ -752,11 +752,11 @@ final class LibraryDownloads {
 
     private func saveQueue() {
         let items = order.compactMap { jobs[$0] }.filter { $0.phase == .queued || $0.phase == .preparing }.map(\.item)
-        UserDefaults.standard.set(try? JSONEncoder().encode(items), forKey: Self.queueKey)
+        HypnosDefaults.store.set(try? JSONEncoder().encode(items), forKey: Self.queueKey)
     }
 
     private static func savedQueue() -> [LibraryItem] {
-        guard let data = UserDefaults.standard.data(forKey: queueKey) else { return [] }
+        guard let data = HypnosDefaults.store.data(forKey: queueKey) else { return [] }
         return (try? JSONDecoder().decode([LibraryItem].self, from: data)) ?? []
     }
 }

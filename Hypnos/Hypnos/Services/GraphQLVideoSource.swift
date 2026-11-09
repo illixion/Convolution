@@ -41,7 +41,7 @@ final class GraphQLVideoSource: VideoSource, @unchecked Sendable {
 
         // Read live (default on) so toggling the setting takes effect on next fetch.
         // Mirrors AppModel.enableStashTranscoding.
-        let allowTranscoding = UserDefaults.standard.object(forKey: "enableStashTranscoding") as? Bool ?? true
+        let allowTranscoding = HypnosDefaults.store.object(forKey: "enableStashTranscoding") as? Bool ?? true
 
         let videos = result.scenes.compactMap { Self.makeGalleryVideo(from: $0, allowTranscoding: allowTranscoding) }
 
@@ -58,7 +58,7 @@ final class GraphQLVideoSource: VideoSource, @unchecked Sendable {
     /// Read the transcoding preference live (default on) so toggling the setting
     /// takes effect on the next fetch. Mirrors `AppModel.enableStashTranscoding`.
     private static var allowTranscodingPreference: Bool {
-        UserDefaults.standard.object(forKey: "enableStashTranscoding") as? Bool ?? true
+        HypnosDefaults.store.object(forKey: "enableStashTranscoding") as? Bool ?? true
     }
 
     /// Fetch a single scene by Stash ID and map it to a `GalleryVideo`.

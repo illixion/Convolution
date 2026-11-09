@@ -41,7 +41,7 @@ struct HypnosCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Window") {
-                openWindow(id: "main")
+                openWindow(id: HypnosSceneID.main)
             }
             .keyboardShortcut("n", modifiers: .command)
         }

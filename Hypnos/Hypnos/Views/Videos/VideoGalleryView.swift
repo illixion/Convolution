@@ -297,7 +297,7 @@ struct VideoGalleryView: View {
             if PlatformCapabilities.supportsMultipleWindows {
                 Button("Open in New Window", systemImage: "macwindow.badge.plus") {
                     appModel.lastViewedVideoId = video.id
-                    openWindow(id: "video-detail", value: VideoWindowValue(video: video))
+                    openWindow(id: HypnosSceneID.videoDetail, value: VideoWindowValue(video: video))
                 }
             }
             if let quickLook {
@@ -389,9 +389,9 @@ struct VideoGalleryView: View {
     private func openVideoDetail(_ video: GalleryVideo) {
         appModel.lastViewedVideoId = video.id
         if appModel.openMediaInNewWindows {
-            openWindow(id: "video-detail", value: VideoWindowValue(video: video))
+            openWindow(id: HypnosSceneID.videoDetail, value: VideoWindowValue(video: video))
         } else {
-            pushWindow(id: "video-detail", value: VideoWindowValue(video: video, wasPushed: true))
+            pushWindow(id: HypnosSceneID.videoDetail, value: VideoWindowValue(video: video, wasPushed: true))
         }
     }
 }

@@ -48,7 +48,7 @@ struct TVLibraryTabView: View {
     private func openAutoOpenItemIfRequested() async {
         #if DEBUG
         guard path.isEmpty,
-              let itemId = UserDefaults.standard.string(forKey: "tvLibraryAutoOpenItemId"),
+              let itemId = HypnosDefaults.store.string(forKey: "tvLibraryAutoOpenItemId"),
               let library = LibraryService.current(),
               let item = try? await library.item(id: itemId)
         else { return }

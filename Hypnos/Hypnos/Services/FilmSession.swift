@@ -40,14 +40,14 @@ final class FilmSession {
 
     var server: String = FilmSession.storedServer {
         didSet {
-            UserDefaults.standard.set(server, forKey: "filmPlayer.jellyfinServer")
+            HypnosDefaults.store.set(server, forKey: "filmPlayer.jellyfinServer")
             Self.excludeFromOtherCredentials(server)
         }
     }
 
     private nonisolated static var storedServer: String {
-        UserDefaults.standard.string(forKey: "filmPlayer.jellyfinServer")
-            ?? UserDefaults.standard.string(forKey: "atmosSpike.jellyfinServer") ?? ""
+        HypnosDefaults.store.string(forKey: "filmPlayer.jellyfinServer")
+            ?? HypnosDefaults.store.string(forKey: "atmosSpike.jellyfinServer") ?? ""
     }
 
     /// Registers the exclusion below for the saved server without building
@@ -177,12 +177,12 @@ final class FilmSession {
             listenerDistanceAuto: listenerDistanceAuto, listenerDistance: listenerDistance
         )
         if let data = try? JSONEncoder().encode(settings) {
-            UserDefaults.standard.set(data, forKey: Self.soundKey)
+            HypnosDefaults.store.set(data, forKey: Self.soundKey)
         }
     }
 
     private func restoreSound() {
-        guard let data = UserDefaults.standard.data(forKey: Self.soundKey),
+        guard let data = HypnosDefaults.store.data(forKey: Self.soundKey),
               let settings = try? JSONDecoder().decode(SoundSettings.self, from: data) else {
             #if os(tvOS)
             // PHASE's send is linear: 0 dB would be fully wet. RealityKit's

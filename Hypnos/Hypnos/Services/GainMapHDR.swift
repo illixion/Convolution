@@ -62,7 +62,7 @@ final class GainMapHDR: @unchecked Sendable {
     private lazy var context = CIContext(options: [.workingColorSpace: linear, .cacheIntermediates: false])
 
     /// `modelURL` is a compiled model; the app's bundled one by default.
-    init(modelURL: URL? = Bundle.main.url(forResource: "GainMapGMNet", withExtension: "mlmodelc")) {
+    init(modelURL: URL? = HypnosBundle.resources.url(forResource: "GainMapGMNet", withExtension: "mlmodelc")) {
         self.modelURL = modelURL
     }
 

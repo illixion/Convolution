@@ -92,10 +92,10 @@ enum CacheBudget {
 
     static var preset: CacheSizePreset {
         get {
-            CacheSizePreset(rawValue: UserDefaults.standard.string(forKey: presetKey) ?? "") ?? .standard
+            CacheSizePreset(rawValue: HypnosDefaults.store.string(forKey: presetKey) ?? "") ?? .standard
         }
         set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: presetKey)
+            HypnosDefaults.store.set(newValue.rawValue, forKey: presetKey)
         }
     }
 

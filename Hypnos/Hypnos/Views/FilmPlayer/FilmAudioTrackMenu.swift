@@ -38,7 +38,7 @@ struct FilmAudioTrackMenu: View {
 struct ObjectAudioQualityMenu: View {
     let player: FilmPlayer
     var onOpenChanged: (Bool) -> Void = { _ in }
-    @AppStorage(ObjectAudioQuality.defaultsKey) private var stored = ObjectAudioQuality.auto.rawValue
+    @AppStorage(ObjectAudioQuality.defaultsKey, store: HypnosDefaults.store) private var stored = ObjectAudioQuality.auto.rawValue
 
     private var selected: ObjectAudioQuality { ObjectAudioQuality(rawValue: stored) ?? .auto }
 

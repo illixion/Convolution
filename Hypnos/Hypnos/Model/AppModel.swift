@@ -37,7 +37,7 @@ class AppModel {
     var stashServerURL: String {
         didSet {
             if stashServerURL != oldValue {
-                UserDefaults.standard.set(stashServerURL, forKey: "stashServerURL")
+                HypnosDefaults.store.set(stashServerURL, forKey: "stashServerURL")
                 // The new URL's host (if any) is (re-)registered by
                 // updateAPIClient() below; a *changed or cleared* old host
                 // needs its own unregister first, since updateStashMediaCredential
@@ -83,7 +83,7 @@ class AppModel {
     var nextcloudServerURL: String {
         didSet {
             guard nextcloudServerURL != oldValue else { return }
-            UserDefaults.standard.set(nextcloudServerURL, forKey: "nextcloudServerURL")
+            HypnosDefaults.store.set(nextcloudServerURL, forKey: "nextcloudServerURL")
             // Same reasoning as the Stash server's observer: only the *current*
             // host is re-registered below, so an abandoned one has to be
             // dropped here or its credential outlives the server.
@@ -97,7 +97,7 @@ class AppModel {
     var nextcloudUsername: String {
         didSet {
             guard nextcloudUsername != oldValue else { return }
-            UserDefaults.standard.set(nextcloudUsername, forKey: "nextcloudUsername")
+            HypnosDefaults.store.set(nextcloudUsername, forKey: "nextcloudUsername")
             updateNextcloudClient()
         }
     }
@@ -121,7 +121,7 @@ class AppModel {
     var nextcloudRoot: String {
         didSet {
             guard nextcloudRoot != oldValue else { return }
-            UserDefaults.standard.set(nextcloudRoot, forKey: "nextcloudRoot")
+            HypnosDefaults.store.set(nextcloudRoot, forKey: "nextcloudRoot")
             updateNextcloudClient()
         }
     }
@@ -732,7 +732,7 @@ class AppModel {
     var autoHideDelay: TimeInterval {
         didSet {
             if autoHideDelay != oldValue {
-                UserDefaults.standard.set(autoHideDelay, forKey: "autoHideDelay")
+                HypnosDefaults.store.set(autoHideDelay, forKey: "autoHideDelay")
             }
         }
     }
@@ -753,7 +753,7 @@ class AppModel {
     var maxImageResolution: Int {
         didSet {
             if maxImageResolution != oldValue {
-                UserDefaults.standard.set(maxImageResolution, forKey: "maxImageResolution")
+                HypnosDefaults.store.set(maxImageResolution, forKey: "maxImageResolution")
             }
         }
     }
@@ -779,7 +779,7 @@ class AppModel {
     var spatial3DMaxResolution: Int {
         didSet {
             if spatial3DMaxResolution != oldValue {
-                UserDefaults.standard.set(spatial3DMaxResolution, forKey: "spatial3DMaxResolution")
+                HypnosDefaults.store.set(spatial3DMaxResolution, forKey: "spatial3DMaxResolution")
             }
         }
     }
@@ -789,7 +789,7 @@ class AppModel {
     var dioramaDistance: Double {
         didSet {
             if dioramaDistance != oldValue {
-                UserDefaults.standard.set(dioramaDistance, forKey: "dioramaDistance")
+                HypnosDefaults.store.set(dioramaDistance, forKey: "dioramaDistance")
             }
         }
     }
@@ -809,7 +809,7 @@ class AppModel {
     var reduceMotion: Bool {
         didSet {
             if reduceMotion != oldValue {
-                UserDefaults.standard.set(reduceMotion, forKey: "reduceMotion")
+                HypnosDefaults.store.set(reduceMotion, forKey: "reduceMotion")
             }
         }
     }
@@ -841,7 +841,7 @@ class AppModel {
     var thumbnailStyle: ThumbnailStyle {
         didSet {
             if thumbnailStyle != oldValue {
-                UserDefaults.standard.set(thumbnailStyle.rawValue, forKey: "thumbnailStyle")
+                HypnosDefaults.store.set(thumbnailStyle.rawValue, forKey: "thumbnailStyle")
             }
         }
     }
@@ -851,7 +851,7 @@ class AppModel {
     var galleryGridStyle: GalleryGridStyle {
         didSet {
             if galleryGridStyle != oldValue {
-                UserDefaults.standard.set(galleryGridStyle.rawValue, forKey: "galleryGridStyle")
+                HypnosDefaults.store.set(galleryGridStyle.rawValue, forKey: "galleryGridStyle")
             }
         }
     }
@@ -875,7 +875,7 @@ class AppModel {
     var roundedCorners: Bool {
         didSet {
             if roundedCorners != oldValue {
-                UserDefaults.standard.set(roundedCorners, forKey: "roundedCorners")
+                HypnosDefaults.store.set(roundedCorners, forKey: "roundedCorners")
             }
         }
     }
@@ -900,7 +900,7 @@ class AppModel {
     var pinchToZoomVideos: Bool {
         didSet {
             if pinchToZoomVideos != oldValue {
-                UserDefaults.standard.set(pinchToZoomVideos, forKey: "pinchToZoomVideos")
+                HypnosDefaults.store.set(pinchToZoomVideos, forKey: "pinchToZoomVideos")
             }
         }
     }
@@ -910,7 +910,7 @@ class AppModel {
     var openMediaInNewWindows: Bool {
         didSet {
             if openMediaInNewWindows != oldValue {
-                UserDefaults.standard.set(openMediaInNewWindows, forKey: "openMediaInNewWindows")
+                HypnosDefaults.store.set(openMediaInNewWindows, forKey: "openMediaInNewWindows")
             }
         }
     }
@@ -922,7 +922,7 @@ class AppModel {
     var enableStashTranscoding: Bool {
         didSet {
             if enableStashTranscoding != oldValue {
-                UserDefaults.standard.set(enableStashTranscoding, forKey: "enableStashTranscoding")
+                HypnosDefaults.store.set(enableStashTranscoding, forKey: "enableStashTranscoding")
             }
         }
     }
@@ -936,7 +936,7 @@ class AppModel {
     var realtimeDepthModelName: String {
         didSet {
             if realtimeDepthModelName != oldValue {
-                UserDefaults.standard.set(realtimeDepthModelName, forKey: "realtimeDepthModelName")
+                HypnosDefaults.store.set(realtimeDepthModelName, forKey: "realtimeDepthModelName")
             }
         }
     }
@@ -949,7 +949,7 @@ class AppModel {
     var preprocessDepthModelName: String {
         didSet {
             if preprocessDepthModelName != oldValue {
-                UserDefaults.standard.set(preprocessDepthModelName, forKey: "preprocessDepthModelName")
+                HypnosDefaults.store.set(preprocessDepthModelName, forKey: "preprocessDepthModelName")
             }
         }
     }
@@ -963,7 +963,7 @@ class AppModel {
     var defaultRealtimePseudo3D: Bool {
         didSet {
             if defaultRealtimePseudo3D != oldValue {
-                UserDefaults.standard.set(defaultRealtimePseudo3D, forKey: "defaultRealtimePseudo3D")
+                HypnosDefaults.store.set(defaultRealtimePseudo3D, forKey: "defaultRealtimePseudo3D")
             }
         }
     }
@@ -977,7 +977,7 @@ class AppModel {
     var stableDepth: Bool {
         didSet {
             if stableDepth != oldValue {
-                UserDefaults.standard.set(stableDepth, forKey: DepthRefinement.enabledDefaultsKey)
+                HypnosDefaults.store.set(stableDepth, forKey: DepthRefinement.enabledDefaultsKey)
             }
         }
     }
@@ -992,7 +992,7 @@ class AppModel {
     var smoothMotion: Bool {
         didSet {
             if smoothMotion != oldValue {
-                UserDefaults.standard.set(smoothMotion, forKey: Self.smoothMotionKey)
+                HypnosDefaults.store.set(smoothMotion, forKey: Self.smoothMotionKey)
             }
         }
     }
@@ -1007,7 +1007,7 @@ class AppModel {
     var aiUpscaling: Bool {
         didSet {
             if aiUpscaling != oldValue {
-                UserDefaults.standard.set(aiUpscaling, forKey: Self.aiUpscalingKey)
+                HypnosDefaults.store.set(aiUpscaling, forKey: Self.aiUpscalingKey)
             }
         }
     }
@@ -1018,14 +1018,14 @@ class AppModel {
     /// Smooth Motion follows its Smart Activation rules (`SmartRules`) for
     /// each video, before the default. Off by default.
     var smartSmoothMotion: Bool {
-        didSet { if smartSmoothMotion != oldValue { UserDefaults.standard.set(smartSmoothMotion, forKey: Self.smartSmoothMotionKey) } }
+        didSet { if smartSmoothMotion != oldValue { HypnosDefaults.store.set(smartSmoothMotion, forKey: Self.smartSmoothMotionKey) } }
     }
     static let smartSmoothMotionKey = "smartSmoothMotion"
 
     /// AI Upscaling follows its Smart Activation rules for each video, before
     /// the default. Off by default.
     var smartUpscaling: Bool {
-        didSet { if smartUpscaling != oldValue { UserDefaults.standard.set(smartUpscaling, forKey: Self.smartUpscalingKey) } }
+        didSet { if smartUpscaling != oldValue { HypnosDefaults.store.set(smartUpscaling, forKey: Self.smartUpscalingKey) } }
     }
     static let smartUpscalingKey = "smartUpscaling"
 
@@ -1035,7 +1035,7 @@ class AppModel {
         didSet {
             guard smartRules != oldValue else { return }
             if let data = try? JSONEncoder().encode(smartRules) {
-                UserDefaults.standard.set(data, forKey: Self.smartRulesKey)
+                HypnosDefaults.store.set(data, forKey: Self.smartRulesKey)
             }
         }
     }
@@ -1048,7 +1048,7 @@ class AppModel {
     var aiHDRVideos: Bool {
         didSet {
             if aiHDRVideos != oldValue {
-                UserDefaults.standard.set(aiHDRVideos, forKey: Self.aiHDRVideosKey)
+                HypnosDefaults.store.set(aiHDRVideos, forKey: Self.aiHDRVideosKey)
             }
         }
     }
@@ -1060,7 +1060,7 @@ class AppModel {
     var videoAutoplayMuted: Bool {
         didSet {
             if videoAutoplayMuted != oldValue {
-                UserDefaults.standard.set(videoAutoplayMuted, forKey: "videoAutoplayMuted")
+                HypnosDefaults.store.set(videoAutoplayMuted, forKey: "videoAutoplayMuted")
             }
         }
     }
@@ -1070,7 +1070,7 @@ class AppModel {
     var rememberImageEnhancements: Bool {
         didSet {
             if rememberImageEnhancements != oldValue {
-                UserDefaults.standard.set(rememberImageEnhancements, forKey: "rememberImageEnhancements")
+                HypnosDefaults.store.set(rememberImageEnhancements, forKey: "rememberImageEnhancements")
             }
         }
     }
@@ -1080,7 +1080,7 @@ class AppModel {
     var defaultImageViewingMode: DefaultImageViewingMode {
         didSet {
             if defaultImageViewingMode != oldValue {
-                UserDefaults.standard.set(defaultImageViewingMode.rawValue, forKey: "defaultImageViewingMode")
+                HypnosDefaults.store.set(defaultImageViewingMode.rawValue, forKey: "defaultImageViewingMode")
             }
         }
     }
@@ -1090,7 +1090,7 @@ class AppModel {
     var aiHDRByDefault: Bool {
         didSet {
             if aiHDRByDefault != oldValue {
-                UserDefaults.standard.set(aiHDRByDefault, forKey: GainMapHDR.enabledKey)
+                HypnosDefaults.store.set(aiHDRByDefault, forKey: GainMapHDR.enabledKey)
                 if aiHDRByDefault { GainMapHDR.shared.prewarm() }
             }
         }
@@ -1101,7 +1101,7 @@ class AppModel {
     var autoRestoreSpatial3D: Bool {
         didSet {
             if autoRestoreSpatial3D != oldValue {
-                UserDefaults.standard.set(autoRestoreSpatial3D, forKey: "autoRestoreSpatial3D")
+                HypnosDefaults.store.set(autoRestoreSpatial3D, forKey: "autoRestoreSpatial3D")
             }
         }
     }
@@ -1113,7 +1113,7 @@ class AppModel {
     var fullyImmersive3DMode: Bool {
         didSet {
             if fullyImmersive3DMode != oldValue {
-                UserDefaults.standard.set(fullyImmersive3DMode, forKey: "fullyImmersive3DMode")
+                HypnosDefaults.store.set(fullyImmersive3DMode, forKey: "fullyImmersive3DMode")
             }
         }
     }
@@ -1130,7 +1130,7 @@ class AppModel {
         didSet {
             if globalVisualAdjustments != oldValue {
                 if let data = try? JSONEncoder().encode(globalVisualAdjustments) {
-                    UserDefaults.standard.set(data, forKey: "globalVisualAdjustments")
+                    HypnosDefaults.store.set(data, forKey: "globalVisualAdjustments")
                 }
             }
         }
@@ -1142,7 +1142,7 @@ class AppModel {
         didSet {
             if globalPseudo3DSettings != oldValue {
                 if let data = try? JSONEncoder().encode(globalPseudo3DSettings) {
-                    UserDefaults.standard.set(data, forKey: "globalPseudo3DSettings")
+                    HypnosDefaults.store.set(data, forKey: "globalPseudo3DSettings")
                 }
             }
         }
@@ -1209,10 +1209,10 @@ class AppModel {
 
     private func persistImplicitSlideshowConfig(_ config: RemoteViewerConfig?, key: String) {
         guard let config, let data = try? JSONEncoder().encode(config) else {
-            UserDefaults.standard.removeObject(forKey: key)
+            HypnosDefaults.store.removeObject(forKey: key)
             return
         }
-        UserDefaults.standard.set(data, forKey: key)
+        HypnosDefaults.store.set(data, forKey: key)
     }
 
     /// Which library the Pictures and Videos tabs browse.
@@ -1222,7 +1222,7 @@ class AppModel {
     var librarySource: LibrarySource {
         didSet {
             guard librarySource != oldValue else { return }
-            UserDefaults.standard.set(librarySource.rawValue, forKey: "librarySource")
+            HypnosDefaults.store.set(librarySource.rawValue, forKey: "librarySource")
             applyLibrarySource()
         }
     }
@@ -1237,7 +1237,7 @@ class AppModel {
     var hasCompletedWelcome: Bool {
         didSet {
             if hasCompletedWelcome != oldValue {
-                UserDefaults.standard.set(hasCompletedWelcome, forKey: "hasCompletedWelcome")
+                HypnosDefaults.store.set(hasCompletedWelcome, forKey: "hasCompletedWelcome")
             }
         }
     }
@@ -1290,7 +1290,7 @@ class AppModel {
     var showDebugConsole: Bool {
         didSet {
             if showDebugConsole != oldValue {
-                UserDefaults.standard.set(showDebugConsole, forKey: "showDebugConsole")
+                HypnosDefaults.store.set(showDebugConsole, forKey: "showDebugConsole")
             }
         }
     }
@@ -1301,7 +1301,7 @@ class AppModel {
     var respectMemoryAlerts: Bool {
         didSet {
             if respectMemoryAlerts != oldValue {
-                UserDefaults.standard.set(respectMemoryAlerts, forKey: "respectMemoryAlerts")
+                HypnosDefaults.store.set(respectMemoryAlerts, forKey: "respectMemoryAlerts")
             }
         }
     }
@@ -1312,7 +1312,7 @@ class AppModel {
     var useLossyTextureCompression: Bool {
         didSet {
             if useLossyTextureCompression != oldValue {
-                UserDefaults.standard.set(useLossyTextureCompression, forKey: "useLossyTextureCompression")
+                HypnosDefaults.store.set(useLossyTextureCompression, forKey: "useLossyTextureCompression")
             }
         }
     }
@@ -1323,7 +1323,7 @@ class AppModel {
     var slideshowDelay: TimeInterval {
         didSet {
             if slideshowDelay != oldValue {
-                UserDefaults.standard.set(slideshowDelay, forKey: "slideshowDelay")
+                HypnosDefaults.store.set(slideshowDelay, forKey: "slideshowDelay")
             }
         }
     }
@@ -1336,20 +1336,20 @@ class AppModel {
     /// Default slideshow display settings, used as initial values for every
     /// slideshow source (gallery, local folder, video). The slideshow
     /// profiles override these but inherit them when first created.
-    var slideshowShowClock: Bool { didSet { if slideshowShowClock != oldValue { UserDefaults.standard.set(slideshowShowClock, forKey: "slideshowShowClock") } } }
-    var slideshowUseAspectRatio: Bool { didSet { if slideshowUseAspectRatio != oldValue { UserDefaults.standard.set(slideshowUseAspectRatio, forKey: "slideshowUseAspectRatio") } } }
-    var slideshowEnableKenBurns: Bool { didSet { if slideshowEnableKenBurns != oldValue { UserDefaults.standard.set(slideshowEnableKenBurns, forKey: "slideshowEnableKenBurns") } } }
-    var slideshowEnableDynamicBrightness: Bool { didSet { if slideshowEnableDynamicBrightness != oldValue { UserDefaults.standard.set(slideshowEnableDynamicBrightness, forKey: "slideshowEnableDynamicBrightness") } } }
-    var slideshowEnableDiorama: Bool { didSet { if slideshowEnableDiorama != oldValue { UserDefaults.standard.set(slideshowEnableDiorama, forKey: "slideshowEnableDiorama") } } }
-    var slideshowTransparentBackground: Bool { didSet { if slideshowTransparentBackground != oldValue { UserDefaults.standard.set(slideshowTransparentBackground, forKey: "slideshowTransparentBackground") } } }
-    var slideshowTextSize: Double { didSet { if slideshowTextSize != oldValue { UserDefaults.standard.set(slideshowTextSize, forKey: "slideshowTextSize") } } }
+    var slideshowShowClock: Bool { didSet { if slideshowShowClock != oldValue { HypnosDefaults.store.set(slideshowShowClock, forKey: "slideshowShowClock") } } }
+    var slideshowUseAspectRatio: Bool { didSet { if slideshowUseAspectRatio != oldValue { HypnosDefaults.store.set(slideshowUseAspectRatio, forKey: "slideshowUseAspectRatio") } } }
+    var slideshowEnableKenBurns: Bool { didSet { if slideshowEnableKenBurns != oldValue { HypnosDefaults.store.set(slideshowEnableKenBurns, forKey: "slideshowEnableKenBurns") } } }
+    var slideshowEnableDynamicBrightness: Bool { didSet { if slideshowEnableDynamicBrightness != oldValue { HypnosDefaults.store.set(slideshowEnableDynamicBrightness, forKey: "slideshowEnableDynamicBrightness") } } }
+    var slideshowEnableDiorama: Bool { didSet { if slideshowEnableDiorama != oldValue { HypnosDefaults.store.set(slideshowEnableDiorama, forKey: "slideshowEnableDiorama") } } }
+    var slideshowTransparentBackground: Bool { didSet { if slideshowTransparentBackground != oldValue { HypnosDefaults.store.set(slideshowTransparentBackground, forKey: "slideshowTransparentBackground") } } }
+    var slideshowTextSize: Double { didSet { if slideshowTextSize != oldValue { HypnosDefaults.store.set(slideshowTextSize, forKey: "slideshowTextSize") } } }
 
     /// Default 2D upper resolution cap for slideshow images (mirrors the
     /// regular viewer's `maxImageResolution` setting). 0 = Off (native).
     var slideshowMaxImageResolution2D: Int {
         didSet {
             if slideshowMaxImageResolution2D != oldValue {
-                UserDefaults.standard.set(slideshowMaxImageResolution2D, forKey: "slideshowMaxImageResolution2D")
+                HypnosDefaults.store.set(slideshowMaxImageResolution2D, forKey: "slideshowMaxImageResolution2D")
             }
         }
     }
@@ -1360,7 +1360,7 @@ class AppModel {
     var slideshowMaxImageResolution3D: Int {
         didSet {
             if slideshowMaxImageResolution3D != oldValue {
-                UserDefaults.standard.set(slideshowMaxImageResolution3D, forKey: "slideshowMaxImageResolution3D")
+                HypnosDefaults.store.set(slideshowMaxImageResolution3D, forKey: "slideshowMaxImageResolution3D")
             }
         }
     }
@@ -1393,7 +1393,7 @@ class AppModel {
     /// preference. Nothing reads them any more; removed on launch until they
     /// are gone.
     private nonisolated static func removeImmersiveVideoLeftovers() {
-        UserDefaults.standard.removeObject(forKey: "immersiveVideoHeadLocked")
+        HypnosDefaults.store.removeObject(forKey: "immersiveVideoHeadLocked")
         let fileManager = FileManager.default
         guard let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
         for name in ["VideoCache", "VideoCacheMetadata"] {
@@ -1418,7 +1418,7 @@ class AppModel {
             DepthConversionManager.cleanupOrphanedDownloads()
         }
         // Photos open with AI HDR: load its model before the first one does.
-        if PlatformCapabilities.supportsAIHDR, UserDefaults.standard.bool(forKey: GainMapHDR.enabledKey) {
+        if PlatformCapabilities.supportsAIHDR, HypnosDefaults.store.bool(forKey: GainMapHDR.enabledKey) {
             GainMapHDR.shared.prewarm()
         }
 
@@ -1428,7 +1428,7 @@ class AppModel {
         let defaultAutoHideDelay: TimeInterval = 3.0
         let defaultSlideshowDelay: TimeInterval = 5.0
 
-        let loadedServerURL = UserDefaults.standard.string(forKey: "stashServerURL") ?? defaultServerURL
+        let loadedServerURL = HypnosDefaults.store.string(forKey: "stashServerURL") ?? defaultServerURL
         // The API key lives in the Keychain. Installs that predate that wrote it
         // to UserDefaults, so pull it across first — the migration is a no-op
         // once the legacy key is gone, and it deletes the plaintext copy only
@@ -1439,27 +1439,27 @@ class AppModel {
         let loadedAPIKey = (KeychainStore.string(for: .stashAPIKey) ?? defaultAPIKey)
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let loadedNextcloudServerURL = UserDefaults.standard.string(forKey: "nextcloudServerURL") ?? ""
-        let loadedNextcloudUsername = UserDefaults.standard.string(forKey: "nextcloudUsername") ?? ""
+        let loadedNextcloudServerURL = HypnosDefaults.store.string(forKey: "nextcloudServerURL") ?? ""
+        let loadedNextcloudUsername = HypnosDefaults.store.string(forKey: "nextcloudUsername") ?? ""
         // Never in UserDefaults, so there is nothing to migrate across: this
         // setting only ever existed after the Keychain store did.
         let loadedNextcloudAppPassword = KeychainStore.string(for: .nextcloudAppPassword) ?? ""
         // "Photos" rather than "" so a fresh setup doesn't start by searching
         // the whole account — see `nextcloudRoot` for why that matters.
-        let loadedNextcloudRoot = UserDefaults.standard.string(forKey: "nextcloudRoot") ?? "Photos"
+        let loadedNextcloudRoot = HypnosDefaults.store.string(forKey: "nextcloudRoot") ?? "Photos"
 
         // Load auto-hide delay (0 means disabled, use default if not set)
-        let savedAutoHideDelay = UserDefaults.standard.double(forKey: "autoHideDelay")
-        let loadedAutoHideDelay = UserDefaults.standard.object(forKey: "autoHideDelay") != nil ? savedAutoHideDelay : defaultAutoHideDelay
+        let savedAutoHideDelay = HypnosDefaults.store.double(forKey: "autoHideDelay")
+        let loadedAutoHideDelay = HypnosDefaults.store.object(forKey: "autoHideDelay") != nil ? savedAutoHideDelay : defaultAutoHideDelay
 
         // Load slideshow delay
-        let savedSlideshowDelay = UserDefaults.standard.double(forKey: "slideshowDelay")
-        let loadedSlideshowDelay = UserDefaults.standard.object(forKey: "slideshowDelay") != nil ? savedSlideshowDelay : defaultSlideshowDelay
+        let savedSlideshowDelay = HypnosDefaults.store.double(forKey: "slideshowDelay")
+        let loadedSlideshowDelay = HypnosDefaults.store.object(forKey: "slideshowDelay") != nil ? savedSlideshowDelay : defaultSlideshowDelay
 
         // Load slideshow display defaults (defaults match the previous
         // RemoteViewerConfig defaults so behavior is unchanged on first launch).
         func loadBool(_ key: String, default defaultValue: Bool) -> Bool {
-            UserDefaults.standard.object(forKey: key) != nil ? UserDefaults.standard.bool(forKey: key) : defaultValue
+            HypnosDefaults.store.object(forKey: key) != nil ? HypnosDefaults.store.bool(forKey: key) : defaultValue
         }
         let loadedSlideshowShowClock = loadBool("slideshowShowClock", default: true)
         let loadedSlideshowUseAspectRatio = loadBool("slideshowUseAspectRatio", default: true)
@@ -1467,51 +1467,51 @@ class AppModel {
         let loadedSlideshowEnableDynamicBrightness = loadBool("slideshowEnableDynamicBrightness", default: true)
         let loadedSlideshowEnableDiorama = loadBool("slideshowEnableDiorama", default: false)
         let loadedSlideshowTransparentBackground = loadBool("slideshowTransparentBackground", default: false)
-        let loadedSlideshowTextSize: Double = UserDefaults.standard.object(forKey: "slideshowTextSize") != nil
-            ? UserDefaults.standard.double(forKey: "slideshowTextSize")
+        let loadedSlideshowTextSize: Double = HypnosDefaults.store.object(forKey: "slideshowTextSize") != nil
+            ? HypnosDefaults.store.double(forKey: "slideshowTextSize")
             : 1.0
 
         // Slideshow per-mode resolution caps. Default to the same 4096 cap
         // used elsewhere so first-launch behavior matches the regular viewer.
-        let loadedSlideshowMaxImageResolution2D: Int = UserDefaults.standard.object(forKey: "slideshowMaxImageResolution2D") != nil
-            ? UserDefaults.standard.integer(forKey: "slideshowMaxImageResolution2D")
+        let loadedSlideshowMaxImageResolution2D: Int = HypnosDefaults.store.object(forKey: "slideshowMaxImageResolution2D") != nil
+            ? HypnosDefaults.store.integer(forKey: "slideshowMaxImageResolution2D")
             : 4096
-        let loadedSlideshowMaxImageResolution3D: Int = UserDefaults.standard.object(forKey: "slideshowMaxImageResolution3D") != nil
-            ? UserDefaults.standard.integer(forKey: "slideshowMaxImageResolution3D")
+        let loadedSlideshowMaxImageResolution3D: Int = HypnosDefaults.store.object(forKey: "slideshowMaxImageResolution3D") != nil
+            ? HypnosDefaults.store.integer(forKey: "slideshowMaxImageResolution3D")
             : 4096
 
         // Load max image resolution (default: 4096, migrate from old bool key if needed)
         let loadedMaxImageResolution: Int
-        if UserDefaults.standard.object(forKey: "maxImageResolution") != nil {
-            loadedMaxImageResolution = UserDefaults.standard.integer(forKey: "maxImageResolution")
-        } else if UserDefaults.standard.object(forKey: "dynamicImageResolution") != nil {
+        if HypnosDefaults.store.object(forKey: "maxImageResolution") != nil {
+            loadedMaxImageResolution = HypnosDefaults.store.integer(forKey: "maxImageResolution")
+        } else if HypnosDefaults.store.object(forKey: "dynamicImageResolution") != nil {
             // Migrate from old boolean setting: true → 4096, false → 0 (Off)
-            loadedMaxImageResolution = UserDefaults.standard.bool(forKey: "dynamicImageResolution") ? 4096 : 0
-            UserDefaults.standard.set(loadedMaxImageResolution, forKey: "maxImageResolution")
-            UserDefaults.standard.removeObject(forKey: "dynamicImageResolution")
+            loadedMaxImageResolution = HypnosDefaults.store.bool(forKey: "dynamicImageResolution") ? 4096 : 0
+            HypnosDefaults.store.set(loadedMaxImageResolution, forKey: "maxImageResolution")
+            HypnosDefaults.store.removeObject(forKey: "dynamicImageResolution")
         } else {
             loadedMaxImageResolution = 4096
         }
 
         // Load spatial 3D max resolution (default: 4096)
         let loadedSpatial3DMaxResolution: Int
-        if UserDefaults.standard.object(forKey: "spatial3DMaxResolution") != nil {
-            loadedSpatial3DMaxResolution = UserDefaults.standard.integer(forKey: "spatial3DMaxResolution")
+        if HypnosDefaults.store.object(forKey: "spatial3DMaxResolution") != nil {
+            loadedSpatial3DMaxResolution = HypnosDefaults.store.integer(forKey: "spatial3DMaxResolution")
         } else {
             loadedSpatial3DMaxResolution = 4096
         }
 
         // Load diorama distance (default: 25)
         let loadedDioramaDistance: Double
-        if UserDefaults.standard.object(forKey: "dioramaDistance") != nil {
-            loadedDioramaDistance = UserDefaults.standard.double(forKey: "dioramaDistance")
+        if HypnosDefaults.store.object(forKey: "dioramaDistance") != nil {
+            loadedDioramaDistance = HypnosDefaults.store.double(forKey: "dioramaDistance")
         } else {
             loadedDioramaDistance = AppModel.defaultDioramaDistance
         }
 
         // Load reduce-motion user preference (default: false; system
         // Accessibility setting overrides via effectiveReduceMotion)
-        let loadedReduceMotion = UserDefaults.standard.bool(forKey: "reduceMotion")
+        let loadedReduceMotion = HypnosDefaults.store.bool(forKey: "reduceMotion")
 
         // Load thumbnail style. Migrates from legacy `thumbnailDiorama`
         // bool: true → .diorama, false → .flat. Default for fresh installs
@@ -1519,41 +1519,41 @@ class AppModel {
         // platform supports it (`effectiveThumbnailStyle` also enforces
         // this for values already persisted from before this guard existed).
         let loadedThumbnailStyle: ThumbnailStyle = {
-            if let raw = UserDefaults.standard.string(forKey: "thumbnailStyle"),
+            if let raw = HypnosDefaults.store.string(forKey: "thumbnailStyle"),
                let style = ThumbnailStyle(rawValue: raw) {
                 return style
             }
-            if UserDefaults.standard.object(forKey: "thumbnailDiorama") != nil {
-                return UserDefaults.standard.bool(forKey: "thumbnailDiorama") ? .diorama : .flat
+            if HypnosDefaults.store.object(forKey: "thumbnailDiorama") != nil {
+                return HypnosDefaults.store.bool(forKey: "thumbnailDiorama") ? .diorama : .flat
             }
             return PlatformCapabilities.supportsDiorama ? .diorama : .flat
         }()
 
-        let loadedGalleryGridStyle = UserDefaults.standard.string(forKey: "galleryGridStyle")
+        let loadedGalleryGridStyle = HypnosDefaults.store.string(forKey: "galleryGridStyle")
             .flatMap(GalleryGridStyle.init(rawValue:)) ?? .square
 
         // Load rounded corners (default: true)
-        let loadedRoundedCorners = UserDefaults.standard.object(forKey: "roundedCorners") != nil
-            ? UserDefaults.standard.bool(forKey: "roundedCorners")
+        let loadedRoundedCorners = HypnosDefaults.store.object(forKey: "roundedCorners") != nil
+            ? HypnosDefaults.store.bool(forKey: "roundedCorners")
             : true
 
         // Load media opening mode (default: false = pushWindow navigation)
         // Migrate from old key "openImagesInSeparateWindows" if new key doesn't exist
         let loadedOpenMediaInNewWindows: Bool
-        if UserDefaults.standard.object(forKey: "openMediaInNewWindows") != nil {
-            loadedOpenMediaInNewWindows = UserDefaults.standard.bool(forKey: "openMediaInNewWindows")
-        } else if UserDefaults.standard.object(forKey: "openImagesInSeparateWindows") != nil {
-            loadedOpenMediaInNewWindows = UserDefaults.standard.bool(forKey: "openImagesInSeparateWindows")
+        if HypnosDefaults.store.object(forKey: "openMediaInNewWindows") != nil {
+            loadedOpenMediaInNewWindows = HypnosDefaults.store.bool(forKey: "openMediaInNewWindows")
+        } else if HypnosDefaults.store.object(forKey: "openImagesInSeparateWindows") != nil {
+            loadedOpenMediaInNewWindows = HypnosDefaults.store.bool(forKey: "openImagesInSeparateWindows")
             // Migrate to new key
-            UserDefaults.standard.set(loadedOpenMediaInNewWindows, forKey: "openMediaInNewWindows")
-            UserDefaults.standard.removeObject(forKey: "openImagesInSeparateWindows")
+            HypnosDefaults.store.set(loadedOpenMediaInNewWindows, forKey: "openMediaInNewWindows")
+            HypnosDefaults.store.removeObject(forKey: "openImagesInSeparateWindows")
         } else {
             loadedOpenMediaInNewWindows = false
         }
 
         // Load remember image enhancements (default: true)
-        let loadedRememberImageEnhancements = UserDefaults.standard.object(forKey: "rememberImageEnhancements") != nil
-            ? UserDefaults.standard.bool(forKey: "rememberImageEnhancements")
+        let loadedRememberImageEnhancements = HypnosDefaults.store.object(forKey: "rememberImageEnhancements") != nil
+            ? HypnosDefaults.store.bool(forKey: "rememberImageEnhancements")
             : true
 
         let loadedEnableStashTranscoding = loadBool("enableStashTranscoding", default: true)
@@ -1561,9 +1561,9 @@ class AppModel {
         // "preferredDepthModelName" into both roles on first launch after the
         // split (the legacy key is also still read as a fallback by
         // CoreMLDepthProvider for anything not yet migrated).
-        let legacyDepthModelName = UserDefaults.standard.string(forKey: "preferredDepthModelName") ?? ""
-        let loadedRealtimeDepthModelName = UserDefaults.standard.string(forKey: "realtimeDepthModelName") ?? legacyDepthModelName
-        let loadedPreprocessDepthModelName = UserDefaults.standard.string(forKey: "preprocessDepthModelName") ?? legacyDepthModelName
+        let legacyDepthModelName = HypnosDefaults.store.string(forKey: "preferredDepthModelName") ?? ""
+        let loadedRealtimeDepthModelName = HypnosDefaults.store.string(forKey: "realtimeDepthModelName") ?? legacyDepthModelName
+        let loadedPreprocessDepthModelName = HypnosDefaults.store.string(forKey: "preprocessDepthModelName") ?? legacyDepthModelName
         let loadedDefaultRealtimePseudo3D = loadBool("defaultRealtimePseudo3D", default: false)
         let loadedStableDepth = loadBool(DepthRefinement.enabledDefaultsKey, default: true)
         let loadedSmoothMotion = loadBool(Self.smoothMotionKey, default: false)
@@ -1571,17 +1571,17 @@ class AppModel {
         let loadedAIHDRVideos = loadBool(Self.aiHDRVideosKey, default: false)
         let loadedSmartSmoothMotion = loadBool(Self.smartSmoothMotionKey, default: false)
         let loadedSmartUpscaling = loadBool(Self.smartUpscalingKey, default: false)
-        let loadedSmartRules = UserDefaults.standard.data(forKey: Self.smartRulesKey)
+        let loadedSmartRules = HypnosDefaults.store.data(forKey: Self.smartRulesKey)
             .flatMap { try? JSONDecoder().decode(SmartRules.self, from: $0) } ?? .suggested
         // Smooth Motion's interpolator choices are gone (2026-11-08): it
         // picks by the picture's rate. Forget what they were set to.
-        UserDefaults.standard.removeObject(forKey: "smoothMotionEngine")
-        UserDefaults.standard.removeObject(forKey: "ai3DSmoothMotionEngine")
+        HypnosDefaults.store.removeObject(forKey: "smoothMotionEngine")
+        HypnosDefaults.store.removeObject(forKey: "ai3DSmoothMotionEngine")
         let loadedVideoAutoplayMuted = loadBool("videoAutoplayMuted", default: true)
 
         // Load default image viewing mode (default: 2D / mono)
         let loadedDefaultImageViewingMode: DefaultImageViewingMode
-        if let raw = UserDefaults.standard.string(forKey: "defaultImageViewingMode"),
+        if let raw = HypnosDefaults.store.string(forKey: "defaultImageViewingMode"),
            let mode = DefaultImageViewingMode(rawValue: raw) {
             loadedDefaultImageViewingMode = mode
         } else {
@@ -1591,14 +1591,14 @@ class AppModel {
         // Load 3D auto-restore (default: true)
         // Migrate from the prior "constrainImmersive3DToWindow" key (portal
         // attempt that never shipped enabled — drop its value on read).
-        if UserDefaults.standard.object(forKey: "constrainImmersive3DToWindow") != nil {
-            UserDefaults.standard.removeObject(forKey: "constrainImmersive3DToWindow")
+        if HypnosDefaults.store.object(forKey: "constrainImmersive3DToWindow") != nil {
+            HypnosDefaults.store.removeObject(forKey: "constrainImmersive3DToWindow")
         }
-        let loadedFullyImmersive3DMode = UserDefaults.standard.object(forKey: "fullyImmersive3DMode") != nil
-            ? UserDefaults.standard.bool(forKey: "fullyImmersive3DMode")
+        let loadedFullyImmersive3DMode = HypnosDefaults.store.object(forKey: "fullyImmersive3DMode") != nil
+            ? HypnosDefaults.store.bool(forKey: "fullyImmersive3DMode")
             : false
-        let loadedAutoRestoreSpatial3D = UserDefaults.standard.object(forKey: "autoRestoreSpatial3D") != nil
-            ? UserDefaults.standard.bool(forKey: "autoRestoreSpatial3D")
+        let loadedAutoRestoreSpatial3D = HypnosDefaults.store.object(forKey: "autoRestoreSpatial3D") != nil
+            ? HypnosDefaults.store.bool(forKey: "autoRestoreSpatial3D")
             : true
 
         // Load remote viewer (default: false)
@@ -1607,7 +1607,7 @@ class AppModel {
         // installed base to preserve (added 2026-09-24), so a fresh Apple TV
         // picks its default from what's actually configured instead — see
         // `AppModel.defaultTVLibrarySource`.
-        let loadedLibrarySource = UserDefaults.standard.string(forKey: "librarySource")
+        let loadedLibrarySource = HypnosDefaults.store.string(forKey: "librarySource")
             .flatMap(LibrarySource.init(rawValue:))
             ?? {
                 #if os(tvOS)
@@ -1624,25 +1624,25 @@ class AppModel {
 
         // Unset means "never decided", which for an install that already has a
         // server or a settled photo-library prompt means "already set up".
-        let loadedHasCompletedWelcome = UserDefaults.standard.object(forKey: "hasCompletedWelcome") as? Bool
+        let loadedHasCompletedWelcome = HypnosDefaults.store.object(forKey: "hasCompletedWelcome") as? Bool
             ?? (!loadedServerURL.isEmpty || PhotosAuthorization.status != .notDetermined)
 
         // Load debug console visibility (default: false)
-        let loadedShowDebugConsole = UserDefaults.standard.bool(forKey: "showDebugConsole")
+        let loadedShowDebugConsole = HypnosDefaults.store.bool(forKey: "showDebugConsole")
 
         // Load respect memory alerts (default: true)
-        let loadedRespectMemoryAlerts = UserDefaults.standard.object(forKey: "respectMemoryAlerts") != nil
-            ? UserDefaults.standard.bool(forKey: "respectMemoryAlerts")
+        let loadedRespectMemoryAlerts = HypnosDefaults.store.object(forKey: "respectMemoryAlerts") != nil
+            ? HypnosDefaults.store.bool(forKey: "respectMemoryAlerts")
             : true
 
         // Load lossy texture compression (default: false — opt-in since it's a quality tradeoff)
-        let loadedUseLossyTextureCompression = UserDefaults.standard.object(forKey: "useLossyTextureCompression") != nil
-            ? UserDefaults.standard.bool(forKey: "useLossyTextureCompression")
+        let loadedUseLossyTextureCompression = HypnosDefaults.store.object(forKey: "useLossyTextureCompression") != nil
+            ? HypnosDefaults.store.bool(forKey: "useLossyTextureCompression")
             : false
 
         // Load global visual adjustments
         let loadedGlobalVisualAdjustments: VisualAdjustments
-        if let data = UserDefaults.standard.data(forKey: "globalVisualAdjustments"),
+        if let data = HypnosDefaults.store.data(forKey: "globalVisualAdjustments"),
            let decoded = try? JSONDecoder().decode(VisualAdjustments.self, from: data) {
             loadedGlobalVisualAdjustments = decoded
         } else {
@@ -1650,7 +1650,7 @@ class AppModel {
         }
 
         let loadedGlobalPseudo3DSettings: Pseudo3DSettings
-        if let data = UserDefaults.standard.data(forKey: "globalPseudo3DSettings"),
+        if let data = HypnosDefaults.store.data(forKey: "globalPseudo3DSettings"),
            let decoded = try? JSONDecoder().decode(Pseudo3DSettings.self, from: data) {
             loadedGlobalPseudo3DSettings = decoded
         } else {
@@ -1689,7 +1689,7 @@ class AppModel {
         #else
         self.openMediaInNewWindows = loadedOpenMediaInNewWindows
         #endif
-        self.pinchToZoomVideos = UserDefaults.standard.bool(forKey: "pinchToZoomVideos")
+        self.pinchToZoomVideos = HypnosDefaults.store.bool(forKey: "pinchToZoomVideos")
         self.enableStashTranscoding = loadedEnableStashTranscoding
         self.realtimeDepthModelName = loadedRealtimeDepthModelName
         self.preprocessDepthModelName = loadedPreprocessDepthModelName
@@ -1706,7 +1706,7 @@ class AppModel {
         self.autoRestoreSpatial3D = loadedAutoRestoreSpatial3D
         self.fullyImmersive3DMode = loadedFullyImmersive3DMode
         self.defaultImageViewingMode = loadedDefaultImageViewingMode
-        self.aiHDRByDefault = PlatformCapabilities.supportsAIHDR && UserDefaults.standard.bool(forKey: GainMapHDR.enabledKey)
+        self.aiHDRByDefault = PlatformCapabilities.supportsAIHDR && HypnosDefaults.store.bool(forKey: GainMapHDR.enabledKey)
         self.librarySource = loadedLibrarySource
         self.hasCompletedWelcome = loadedHasCompletedWelcome
         self.showDebugConsole = loadedShowDebugConsole
@@ -2010,7 +2010,7 @@ class AppModel {
     private static let savedViewsKey = "savedViews"
 
     private func loadSavedViews() {
-        if let data = UserDefaults.standard.data(forKey: Self.savedViewsKey),
+        if let data = HypnosDefaults.store.data(forKey: Self.savedViewsKey),
            let views = try? JSONDecoder().decode([SavedView].self, from: data) {
             savedViews = views
             AppLogger.appModel.info("Loaded \(views.count, privacy: .public) saved views")
@@ -2019,7 +2019,7 @@ class AppModel {
 
     func saveSavedViews() {
         if let data = try? JSONEncoder().encode(savedViews) {
-            UserDefaults.standard.set(data, forKey: Self.savedViewsKey)
+            HypnosDefaults.store.set(data, forKey: Self.savedViewsKey)
             let count = savedViews.count
             AppLogger.appModel.info("Saved \(count, privacy: .public) views")
         }
@@ -2104,7 +2104,7 @@ class AppModel {
     private static let savedVideoViewsKey = "savedVideoViews"
 
     private func loadSavedVideoViews() {
-        if let data = UserDefaults.standard.data(forKey: Self.savedVideoViewsKey),
+        if let data = HypnosDefaults.store.data(forKey: Self.savedVideoViewsKey),
            let views = try? JSONDecoder().decode([SavedVideoView].self, from: data) {
             savedVideoViews = views
             AppLogger.appModel.info("Loaded \(views.count, privacy: .public) saved video views")
@@ -2113,7 +2113,7 @@ class AppModel {
 
     func saveSavedVideoViews() {
         if let data = try? JSONEncoder().encode(savedVideoViews) {
-            UserDefaults.standard.set(data, forKey: Self.savedVideoViewsKey)
+            HypnosDefaults.store.set(data, forKey: Self.savedVideoViewsKey)
             let count = savedVideoViews.count
             AppLogger.appModel.info("Saved \(count, privacy: .public) video views")
         }
@@ -2182,7 +2182,7 @@ class AppModel {
     private static let savedWindowGroupsKey = "savedWindowGroups"
 
     private func loadSavedWindowGroups() {
-        if let data = UserDefaults.standard.data(forKey: Self.savedWindowGroupsKey),
+        if let data = HypnosDefaults.store.data(forKey: Self.savedWindowGroupsKey),
            var groups = try? JSONDecoder().decode([SavedWindowGroup].self, from: data) {
             for groupIndex in groups.indices {
                 // Drop entries this build can't restore (a kind written by a
@@ -2208,7 +2208,7 @@ class AppModel {
     }
 
     private func loadSlideshowConfig(key: String, assign: (RemoteViewerConfig) -> Void) {
-        guard let data = UserDefaults.standard.data(forKey: key),
+        guard let data = HypnosDefaults.store.data(forKey: key),
               let config = try? JSONDecoder().decode(RemoteViewerConfig.self, from: data) else { return }
         assign(config)
     }
@@ -2220,13 +2220,13 @@ class AppModel {
             "savedRemoteConfigs", "enableRemoteViewer", "slideshowShowSensors",
             "modTagManager.modTagLists", "modTagManager.defaultIndex", "modTagManager.lastActiveIndex",
         ] {
-            UserDefaults.standard.removeObject(forKey: key)
+            HypnosDefaults.store.removeObject(forKey: key)
         }
     }
 
     func persistSavedWindowGroups() {
         if let data = try? JSONEncoder().encode(savedWindowGroups) {
-            UserDefaults.standard.set(data, forKey: Self.savedWindowGroupsKey)
+            HypnosDefaults.store.set(data, forKey: Self.savedWindowGroupsKey)
             let count = savedWindowGroups.count
             AppLogger.windowState.info("Persisted \(count, privacy: .public) saved window groups")
         }
@@ -2541,7 +2541,7 @@ class AppModel {
             videoAutoplayMuted: videoAutoplayMuted,
             useLossyTextureCompression: useLossyTextureCompression,
             globalPseudo3DSettings: try? JSONEncoder().encode(globalPseudo3DSettings),
-            cacheSizePreset: UserDefaults.standard.string(forKey: CacheBudget.presetKey),
+            cacheSizePreset: HypnosDefaults.store.string(forKey: CacheBudget.presetKey),
             aiHDRByDefault: aiHDRByDefault
         )
         return backup
@@ -2601,7 +2601,7 @@ class AppModel {
             globalPseudo3DSettings = loaded
         }
         if let raw = backup.cacheSizePreset, CacheSizePreset(rawValue: raw) != nil {
-            UserDefaults.standard.set(raw, forKey: CacheBudget.presetKey)
+            HypnosDefaults.store.set(raw, forKey: CacheBudget.presetKey)
         }
 
         // Complex settings
@@ -2651,7 +2651,7 @@ class AppModel {
     /// Opens a new main gallery window.
     /// Each call creates a fresh instance (UUID-keyed WindowGroup).
     func showMainWindow(openWindow: WindowOpenAction) {
-        openWindow(id: "main", value: UUID())
+        openWindow(id: HypnosSceneID.main, value: UUID())
     }
 
     /// Seeds the shared filter with a single tag and opens a new main gallery
@@ -2669,7 +2669,7 @@ class AppModel {
             currentFilter.selectedTags = [item]
         }
         pendingGalleryFilter = PendingGalleryFilter(isVideo: isVideo)
-        openWindow(id: "main", value: UUID())
+        openWindow(id: HypnosSceneID.main, value: UUID())
     }
 
     /// Confirms a server answers, returning how many images it reports.
