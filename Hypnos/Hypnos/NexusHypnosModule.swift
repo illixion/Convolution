@@ -32,6 +32,7 @@ public final class HypnosSpaceModule: RAVESpaceModule, CinemaSpaceHosting {
 
     let appModel: AppModel
     private let space = CinemaSpace()
+    private let media = NexusMediaPublisher()
     private weak var host: RAVESpaceHost?
 
     public init() {
@@ -47,6 +48,7 @@ public final class HypnosSpaceModule: RAVESpaceModule, CinemaSpaceHosting {
             VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9)
         }
         Cinema.shared.spaceHost = self
+        media.start()
     }
 
     /// Hand the module its host; until then it can't join.
