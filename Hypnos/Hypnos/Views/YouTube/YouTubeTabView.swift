@@ -95,6 +95,22 @@ struct YouTubeTabView: View {
             }
             .navigationTitle("YouTube")
             .moreTabBackButton()
+            #if os(iOS) || os(macOS)
+            // The header button: visionOS has it in the tab-bar ornament and
+            // tvOS inline (no navigation bar to put it in).
+            .toolbar {
+                if offersHideWatched {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { hideWatched.toggle() } label: {
+                            Label(hideWatched ? "Show Watched" : "Hide Watched",
+                                  systemImage: hideWatched ? "eye.slash.fill" : "eye.slash")
+                        }
+                        .help(hideWatched ? "Show watched videos" : "Hide watched videos")
+                        .accessibilityIdentifier("youtube.hideWatched")
+                    }
+                }
+            }
+            #endif
             #if !os(tvOS)
             .searchable(text: $query, prompt: "Search YouTube or paste a link")
             .onSubmit(of: .search) { submit() }
@@ -117,6 +133,10 @@ struct YouTubeTabView: View {
             }
         }
         .task { autoPlayIfRequested() }
+        .onChange(of: offersHideWatched, initial: true) { _, offered in
+            YouTubeFilterOffer.shared.offersHideWatched = offered
+        }
+        .onDisappear { YouTubeFilterOffer.shared.offersHideWatched = false }
         .task {
             watchHistory.refreshTiles()
             watchHistory.flush()
@@ -168,7 +188,9 @@ struct YouTubeTabView: View {
             if results.isEmpty {
                 ContentUnavailableView.search(text: submittedQuery)
             } else {
+                #if os(tvOS)
                 HStack { hideWatchedButton; Spacer() }
+                #endif
                 grid(results, removable: false, filtersWatched: true)
                 if continuation != nil {
                     ProgressView()
@@ -196,10 +218,12 @@ struct YouTubeTabView: View {
                 shelfButton(watchHistory.isAvailable ? "Watched" : "Recently Watched",
                             systemImage: "play.circle", for: .recent)
                 // Nothing to hide on the shelves that are what was watched.
+                #if os(tvOS)
                 if case .feed(let feed) = shelf, feed != .history {
                     Divider().frame(height: 24)
                     hideWatchedButton
                 }
+                #endif
             }
             .padding(.vertical, 8)
         }
@@ -216,6 +240,15 @@ struct YouTubeTabView: View {
         }
     }
 
+    /// Whether the list on screen is one Hide Watched applies to (see
+    /// `YouTubeFilterOffer`).
+    private var offersHideWatched: Bool {
+        if !submittedQuery.isEmpty { return !results.isEmpty }
+        if case .feed(let feed) = shelf, feed != .history { return true }
+        return false
+    }
+
+    #if os(tvOS)
     @ViewBuilder
     private var hideWatchedButton: some View {
         let button = Button { hideWatched.toggle() } label: {
@@ -228,6 +261,7 @@ struct YouTubeTabView: View {
             button.buttonStyle(.bordered)
         }
     }
+    #endif
 
     @ViewBuilder
     private func feedContent(_ feed: YouTubeFeed) -> some View {

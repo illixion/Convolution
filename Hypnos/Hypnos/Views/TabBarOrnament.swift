@@ -16,6 +16,10 @@ struct TabBarOrnament: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var music = JellyfinMusicSession.shared
     @State private var showsNowPlaying = false
+    #if HYPNOS_YOUTUBE
+    @State private var youTubeOffer = YouTubeFilterOffer.shared
+    @AppStorage("youtube.hideWatched", store: HypnosDefaults.store) private var hideWatched = false
+    #endif
 
     /// Drives the library switch's popover. A plain `@State` rather than
     /// something on `windowModel`: nothing outside this control cares, and
@@ -55,9 +59,19 @@ struct TabBarOrnament: View {
             ) {
                 // Actions, not navigation: both act on the current tab rather than
                 // moving between tabs, so they sit past a divider.
-                if showsLibraryToggle || slideshowLaunch != nil {
+                if showsLibraryToggle || slideshowLaunch != nil || showsHideWatched {
                     RAVETabBarDivider()
                 }
+                #if HYPNOS_YOUTUBE
+                if showsHideWatched {
+                    RAVETabBarActionButton(
+                        systemImage: hideWatched ? "eye.slash.fill" : "eye.slash",
+                        help: hideWatched ? "Show watched videos" : "Hide watched videos",
+                        identifier: "youtube.hideWatched"
+                    ) { hideWatched.toggle() }
+                    .transition(.opacity.combined(with: .scale))
+                }
+                #endif
                 if showsLibraryToggle {
                     libraryMenu
                 }
@@ -70,12 +84,23 @@ struct TabBarOrnament: View {
                 }
             }
             .animation(.smooth(duration: 0.22), value: slideshowLaunch?.help)
+            .animation(.smooth(duration: 0.22), value: showsHideWatched)
             .animation(.smooth(duration: 0.22), value: appModel.effectiveLibrarySource)
         }
         .animation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(response: 0.35, dampingFraction: 0.88), value: music.current != nil)
         .sheet(isPresented: $showsNowPlaying) {
             NavigationStack { MusicNowPlayingView(music: music).rebuildsOnPatch() }
         }
+    }
+
+    /// The YouTube tab's Hide Watched button: only while the list on screen
+    /// is one the filter applies to.
+    private var showsHideWatched: Bool {
+        #if HYPNOS_YOUTUBE
+        windowModel.selectedTab == .youtube && youTubeOffer.offersHideWatched
+        #else
+        false
+        #endif
     }
 
     /// Whether to offer the library switch: only with more than one source
