@@ -161,6 +161,13 @@ struct Spatial3DImmersiveView: View {
     private func applyImmersiveViewingMode(to entity: Entity) {
         guard var ipc = entity.components[ImagePresentationComponent.self] else { return }
         ipc.desiredViewingMode = .spatial3DImmersive
+        // A loaned window entity carries its own Raw Splat state, re-applied
+        // by its window; only the shared settings are asserted here.
+        #if HYPNOS_PRIVATE_API && os(visionOS)
+        PrivateSpatial3DTuningStore.shared.apply(
+            to: &ipc, rawSplat: appModel.immersiveLoanOwner?.isRawSplatMode ?? false
+        )
+        #endif
         entity.components.set(ipc)
     }
 
@@ -205,6 +212,7 @@ struct Spatial3DImmersiveView: View {
             }
             var ipc = ImagePresentationComponent(spatial3DImage: spatial3DImage)
             ipc.desiredViewingMode = .spatial3DImmersive
+            ipc.applyPrivateSpatial3DTuningIfAvailable()
             let entity = Entity()
             entity.components.set(ipc)
             try await spatial3DImage.generate()

@@ -16,8 +16,10 @@
 // Private-API code, for GitHub-only builds. Empty here so every ordinary
 // build — including anything destined for the App Store — compiles the private
 // code out entirely. Opt in with `~/bin/build-and-sign --private-api`, which
-// sets PRIVATE_API_CONDITION on the xcodebuild command line. Currently gates
-// the iOS ImagePresentationComponent probe (see PrivateSpatial3DiOS.swift).
+// sets PRIVATE_API_CONDITION on the xcodebuild command line. Gates Raw Splat 3D
+// and Settings → Developer → Spatial 3D Tuning on visionOS
+// (PrivateSpatial3DTuning.swift) and the iOS ImagePresentationComponent probe
+// (PrivateSpatial3DiOS.swift).
 PRIVATE_API_CONDITION =
 
 // YouTube playback, for sideload builds only. Empty here, so no build

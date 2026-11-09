@@ -52,7 +52,9 @@ struct DeveloperSettingsPage: View {
                 LabeledContent("Videos Loaded", value: "\(appModel.galleryVideos.count)")
             }
 
-            #if HYPNOS_PRIVATE_API && !os(visionOS)
+            #if HYPNOS_PRIVATE_API && os(visionOS)
+            PrivateSpatial3DTuningSection()
+            #elseif HYPNOS_PRIVATE_API && os(iOS)
             PrivateSpatial3DiOSProbeSection()
             #endif
 

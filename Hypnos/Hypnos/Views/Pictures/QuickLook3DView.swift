@@ -567,6 +567,7 @@ struct QuickLook3DView: View {
 
         var ipc = ImagePresentationComponent(spatial3DImage: spatial)
         ipc.desiredViewingMode = .spatial3D
+        ipc.applyPrivateSpatial3DTuningIfAvailable()
         entity.components.set(ipc)
         if let ar = ipc.aspectRatio(for: .spatial3D) {
             aspectRatio = CGFloat(ar)

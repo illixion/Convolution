@@ -205,6 +205,12 @@ class PhotoWindowModel {
     /// The desired viewing mode (set immediately, before RealityKit animation completes)
     var desiredViewingMode: ImagePresentationComponent.ViewingMode = .mono
 
+    /// RealityKit 3D drawn as the raw splat scene (MXI two-pass rendering
+    /// off) instead of the stock composited presentation. Only a build with
+    /// `HYPNOS_PRIVATE_API` ever sets it (`PrivateSpatial3DTuning.swift`);
+    /// everywhere else it stays false and nothing reads it.
+    var isRawSplatMode: Bool = false
+
     /// Scale factor for converting window points to texture pixels
     /// (visionOS rendering density + headroom)
     static let displayScaleFactor: CGFloat = 2.5
@@ -1403,6 +1409,9 @@ class PhotoWindowModel {
     func cleanup() {
         AI3DWarmup.shared.clearIntent(self)
         PhotoStereoDebugEndpoints.windows.remove(self)
+        #if HYPNOS_PRIVATE_API && os(visionOS)
+        releaseRawSplatNudgeSuppression()
+        #endif
         // Cancel all tasks
         scenePhaseIdleTask?.cancel()
         scenePhaseIdleTask = nil

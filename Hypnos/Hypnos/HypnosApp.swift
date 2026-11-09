@@ -50,6 +50,11 @@ struct HypnosApp: App {
         LibraryHarness.runIfRequested()
         MusicHarness.runIfRequested()
         #endif
+        // Sideload builds: CoreRE reads some renderer overrides only once, when
+        // its MXI manager starts, so they go in before anything RealityKit does.
+        #if HYPNOS_PRIVATE_API && os(visionOS)
+        PrivateSpatial3DTuningStore.installAtLaunch()
+        #endif
         _appModel = State(initialValue: AppModel())
         // Reconnects downloads that ran while the app was closed.
         LibraryDownloads.shared.start()

@@ -666,6 +666,11 @@ extension PhotoWindowModel {
         } else {
             contentEntity.components.remove(BillboardComponent.self)
         }
+        // Sideload builds: re-assert the private component knobs and Raw
+        // Splat 3D. Not limited to windowed .spatial3D like the billboard.
+        #if HYPNOS_PRIVATE_API && os(visionOS)
+        applyPrivateSpatial3DTuning()
+        #endif
     }
 
     /// Ask the view layer to nudge the window's geometry so IPC re-anchors
