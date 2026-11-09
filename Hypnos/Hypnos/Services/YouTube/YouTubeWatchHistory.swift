@@ -13,7 +13,11 @@
  reported here.
 
  Reports that can't be sent wait in an outbox (the newest per video, with
- the time it was seen) until the server answers again. Uses the backend's
+ the time it was seen) until the server answers again. The outbox is a file
+ written off the main actor, never UserDefaults: any write to the app's
+ defaults store makes every `@AppStorage` view on it (the video window
+ among them) update, a 40 ms main-thread stall that dropped frames of the
+ playing video at each 10 s report. Uses the backend's
  endpoint and token; with no backend configured all of this is off and the
  tab falls back to the on-device `YouTubeHistory`.
  */
@@ -115,7 +119,13 @@ final class YouTubeWatchHistory {
     /// Title and channel of videos opened from a tile, for their reports.
     @ObservationIgnored private var metadata: [YouTubeVideoID: YouTubeVideoSummary] = [:]
 
-    private static let outboxKey = "youtube.watchHistory.outbox"
+    /// Where the outbox lived until 2026-11-09; read once to carry it over.
+    private static let legacyOutboxKey = "youtube.watchHistory.outbox"
+    private nonisolated static let outboxURL: URL = FileManager.default
+        .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("YouTubeWatchOutbox.json")
+    /// Serial, so the newest snapshot is always the one left on disk.
+    private nonisolated static let outboxQueue = DispatchQueue(label: "com.illixion.hypnos.youtube-outbox", qos: .utility)
     private static let importedKey = "youtube.watchHistory.importedAt"
     private static let importInterval: TimeInterval = 24 * 3600
 
@@ -126,8 +136,18 @@ final class YouTubeWatchHistory {
     }()
 
     private init() {
-        outbox = HypnosDefaults.store.data(forKey: Self.outboxKey)
-            .flatMap { try? JSONDecoder().decode([String: Report].self, from: $0) } ?? [:]
+        let decode = { (data: Data) in try? JSONDecoder().decode([String: Report].self, from: data) }
+        if let data = try? Data(contentsOf: Self.outboxURL), let saved = decode(data) {
+            outbox = saved
+        } else if let data = HypnosDefaults.store.data(forKey: Self.legacyOutboxKey) {
+            outbox = decode(data) ?? [:]
+            Self.writeOutbox(outbox)
+        } else {
+            outbox = [:]
+        }
+        if HypnosDefaults.store.object(forKey: Self.legacyOutboxKey) != nil {
+            HypnosDefaults.store.removeObject(forKey: Self.legacyOutboxKey)
+        }
     }
 
     /// The backend is set up; without it nothing here does anything.
@@ -298,8 +318,29 @@ final class YouTubeWatchHistory {
         }
     }
 
+    /// Off the main actor and out of UserDefaults (see the header): this
+    /// runs at every report while a video plays.
     private func saveOutbox() {
-        HypnosDefaults.store.set(try? JSONEncoder().encode(outbox), forKey: Self.outboxKey)
+        let snapshot = outbox
+        Self.outboxQueue.async { Self.writeOutbox(snapshot) }
+    }
+
+    private nonisolated static func writeOutbox(_ snapshot: [String: Report]) {
+        var url = outboxURL
+        do {
+            if snapshot.isEmpty {
+                if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+                return
+            }
+            let data = try JSONEncoder().encode(snapshot)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try? url.setResourceValues(values)
+        } catch {
+            AppLogger.youtube.error("Saving the watch-history outbox failed: \(error.logCode, privacy: .public)")
+        }
     }
 
     // MARK: - YouTube's history page
