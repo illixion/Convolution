@@ -18,6 +18,8 @@ import SwiftUI
 struct TVLibraryShelfRow: View {
     let shelf: LibraryShelf
     let playback: LibraryPlayback
+    /// Focus binding for the shelf's first lockup, so a neighbour can send focus here.
+    var firstItemFocus: FocusState<Bool>.Binding? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -29,28 +31,46 @@ struct TVLibraryShelfRow: View {
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 44) {
                     ForEach(shelf.items) { item in
-                        switch shelf.style {
-                        case .landscape:
-                            Button {
-                                Task { await playback.play(item) }
-                            } label: {
-                                TVLandscapeLockup(item: item, isResolving: playback.resolvingItemId == item.id)
-                            }
-                            .buttonStyle(.borderless)
-                            .contextMenu { LibraryItemContextMenu(item: item, playback: playback) }
-                        case .poster:
-                            NavigationLink(value: item) {
-                                TVPosterLockup(item: item)
-                            }
-                            .buttonStyle(.borderless)
-                            .contextMenu { LibraryItemContextMenu(item: item, playback: playback, showsDetails: false) }
-                        }
+                        lockup(item)
+                            .modifier(FirstItemFocus(binding: item.id == shelf.items.first?.id ? firstItemFocus : nil))
                     }
                 }
                 .padding(.horizontal, 90)
             }
             .scrollClipDisabled()
             .scrollIndicators(.hidden)
+        }
+    }
+
+    @ViewBuilder
+    private func lockup(_ item: LibraryItem) -> some View {
+        switch shelf.style {
+        case .landscape:
+            Button {
+                Task { await playback.play(item) }
+            } label: {
+                TVLandscapeLockup(item: item, isResolving: playback.resolvingItemId == item.id)
+            }
+            .buttonStyle(.borderless)
+            .contextMenu { LibraryItemContextMenu(item: item, playback: playback) }
+        case .poster:
+            NavigationLink(value: item) {
+                TVPosterLockup(item: item)
+            }
+            .buttonStyle(.borderless)
+            .contextMenu { LibraryItemContextMenu(item: item, playback: playback, showsDetails: false) }
+        }
+    }
+}
+
+private struct FirstItemFocus: ViewModifier {
+    let binding: FocusState<Bool>.Binding?
+
+    func body(content: Content) -> some View {
+        if let binding {
+            content.focused(binding)
+        } else {
+            content
         }
     }
 }

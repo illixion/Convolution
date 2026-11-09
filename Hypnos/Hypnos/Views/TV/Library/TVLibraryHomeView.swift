@@ -56,6 +56,12 @@ private struct TVLibraryHomeContent: View {
     /// How much of the first shelf shows under the hero.
     private let shelfPeek: CGFloat = 250
 
+    /// Focus goes to the first shelf's first lockup explicitly when Down is
+    /// pressed on the hero; the hero's `onMoveCommand` takes the arrows of
+    /// everything inside it, and relying on the geometric search let focus
+    /// land on the second shelf instead.
+    @FocusState private var firstShelfFocused: Bool
+
     var body: some View {
         GeometryReader { geometry in
             let screen = geometry.size
@@ -64,7 +70,8 @@ private struct TVLibraryHomeContent: View {
                     VStack(alignment: .leading, spacing: 64) {
                         if !home.featured.isEmpty {
                             TVLibraryHero(featured: home.featured, playback: playback,
-                                          screenSize: screen, height: screen.height - shelfPeek) {
+                                          screenSize: screen, height: screen.height - shelfPeek,
+                                          onMoveDown: { firstShelfFocused = true }) {
                                 withAnimation(.easeInOut(duration: 0.35)) {
                                     proxy.scrollTo(TVLibraryHero.scrollID, anchor: .top)
                                 }
@@ -73,7 +80,8 @@ private struct TVLibraryHomeContent: View {
                             .focusSection()
                         }
                         ForEach(home.shelves) { shelf in
-                            TVLibraryShelfRow(shelf: shelf, playback: playback)
+                            TVLibraryShelfRow(shelf: shelf, playback: playback,
+                                              firstItemFocus: shelf.id == home.shelves.first?.id ? $firstShelfFocused : nil)
                                 .focusSection()
                                 .id(shelf.id)
                         }
@@ -109,6 +117,8 @@ private struct TVLibraryHero: View {
     let playback: LibraryPlayback
     let screenSize: CGSize
     let height: CGFloat
+    /// Called when Down is pressed on a hero button.
+    let onMoveDown: () -> Void
     /// Called when focus enters the hero, to bring it fully back on screen
     /// (focus alone only scrolls far enough to reveal the buttons).
     let onFocusEnter: () -> Void
@@ -195,6 +205,10 @@ private struct TVLibraryHero: View {
     /// that also moved focus between the two buttons arrives within a few
     /// milliseconds of the focus change and is ignored.
     private func handleMove(_ direction: MoveCommandDirection) {
+        if direction == .down, focus != nil {
+            onMoveDown()
+            return
+        }
         guard featured.count > 1, Date.now.timeIntervalSince(lastFocusChange) > 0.2 else { return }
         switch (direction, focus) {
         case (.left, .play):
