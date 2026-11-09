@@ -32,6 +32,11 @@ inside `#if NEXUS_MODULE`.
 - **`NexusHypnosModule.swift`** (`NEXUS_MODULE` only): `HypnosSpaceModule`, the `RAVESpaceModule`. It asks
   for a mixed space with the `.systemDark` surroundings behind Big Screen and keeps that current.
 
+- **`Services/NexusMediaPublisher.swift`** (`NEXUS_MODULE` only): what the film player tells the other modules
+  on RAVEModuleBus (`media.nowPlaying`, `media.subtitle`, and the actions `media.play`/`pause`/`skip`),
+  withdrawn when the player window closes. The character reads these to watch along. Video windows are not
+  published yet, and the film item carries only a title and year (no overview).
+
 ## Rules for changes here
 
 - New scene ids go through `HypnosSceneID.id(_:)`; new settings through `HypnosDefaults.store`; new bundled
@@ -47,4 +52,5 @@ inside `#if NEXUS_MODULE`.
 - The Spatial 3D photo space (`Spatial3DImmersiveSpace`) is still this app's own and doesn't work in Nexus:
   it needs the same split into a mount.
 - Debug endpoints are not namespaced (`hypnos.`); Now Playing and the audio session are not behind arbiters.
+- The publisher has only compiled: a film needs a Jellyfin server (`scripts/dev-jellyfin.sh`), which the simulator run did not use.
 - The headset. In the simulator `cinemaMode` (debug command) puts the film in a mode while a host owns the space.
