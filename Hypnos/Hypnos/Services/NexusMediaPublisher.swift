@@ -66,6 +66,18 @@ final class NexusMediaPublisher: RAVEMediaControlling {
                                    isPlaying: player.isPlaying),
                     from: Self.moduleID)
         publishCue(at: player.currentTime)
+        publishScreen()
+    }
+
+    /// Where Big Screen is, so a module that wants to watch it can sit facing it. The HUD follows the head and the
+    /// window is a window, so neither is a place to sit toward.
+    private func publishScreen() {
+        let cinema = Cinema.shared
+        guard cinema.mode == .bigScreen, cinema.screenAttached, let pose = cinema.screenPose else { return }
+        let width = cinema.pictureWidth
+        bus.publish(RAVEMediaFeeds.screen,
+                    RAVESpaceObject(kind: "screen", transform: pose, size: SIMD2(width, width / max(cinema.hudAspect, 0.1))),
+                    from: Self.moduleID)
     }
 
     /// The line showing at `time`, once.
