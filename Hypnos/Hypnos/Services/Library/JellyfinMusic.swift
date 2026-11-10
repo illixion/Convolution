@@ -138,7 +138,13 @@ final class JellyfinMusicSession {
     private var startTask: Task<MusicPlayState?, Never>?
     private var lastProgressReport = Date.distantPast
 
-    private init() {}
+    private init() {
+        SleepTimer.shared.register(self) { [weak self] in
+            guard let self, self.isPlaying else { return false }
+            self.pause()
+            return true
+        }
+    }
 
     // MARK: - Starting playback
 

@@ -353,6 +353,11 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         // no transport UI popping up at the loop point.
         let player = CaptionQueuePlayer()
         controller.player = player
+        SleepTimer.shared.register(coordinator) { [weak player] in
+            guard let player, player.rate > 0 else { return false }
+            player.pause()
+            return true
+        }
         // The transport's Picture in Picture: the video floats over the Home
         // screen and other apps while the app plays on in the background
         // (`UIBackgroundModes` audio). Said outright rather than left to the
@@ -536,6 +541,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
     }
 
     static func dismantleUIViewController(_ uiViewController: AVPlayerViewController, coordinator: Coordinator) {
+        MainActor.assumeIsolated { SleepTimer.shared.unregister(coordinator) }
         coordinator.statusObservation?.invalidate()
         coordinator.pictureObservation?.invalidate()
         coordinator.speedObservation?.invalidate()
@@ -820,7 +826,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
 
         @MainActor private func refreshTransportBar() {
             guard let controller else { return }
-            controller.transportBarCustomMenuItems = [qualityMenu(), subtitleMenu(), ratingMenu(), loopItem()]
+            controller.transportBarCustomMenuItems = [qualityMenu(), subtitleMenu(), ratingMenu(), loopItem(), SleepTimerTVMenu.make()]
                 .compactMap { $0 }
             if subtitles?.selected != nil { silenceSystemSubtitles() }
         }

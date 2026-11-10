@@ -42,6 +42,8 @@ enum KeychainStore {
         /// The token a Vergence coordinator minted for this device when they paired
         /// (`AnalysisPairing`). It keys the paired TLS-PSK channel and never crosses the network.
         case analysisCoordinatorPairingToken
+        /// The sleep timer's Home Assistant long-lived access token (`SleepHome`).
+        case homeAssistantToken
         #if HYPNOS_YOUTUBE
         /// The optional YouTube backend's (web-yt-dlp) token.
         case youtubeBackendToken

@@ -21,6 +21,7 @@
 		AA13000000000000000000A3 /* MatroskaRemux in Frameworks */ = {isa = PBXBuildFile; productRef = AA13000000000000000000A2 /* MatroskaRemux */; };
 		AA15000000000000000000A3 /* FFmpegDecoders in Frameworks */ = {isa = PBXBuildFile; productRef = AA15000000000000000000A2 /* FFmpegDecoders */; };
 		AA17000000000000000000A3 /* RAVESearch in Frameworks */ = {isa = PBXBuildFile; productRef = AA17000000000000000000A2 /* RAVESearch */; };
+		AA1A0000000000000000A3 /* RAVEHome in Frameworks */ = {isa = PBXBuildFile; productRef = AA1A0000000000000000A2 /* RAVEHome */; };
 		AA14000000000000000000A3 /* GeneratedCaptions in Frameworks */ = {isa = PBXBuildFile; productRef = AA14000000000000000000A2 /* GeneratedCaptions */; };
 		AA20000000000000000000A3 /* RAVESupport in Frameworks */ = {isa = PBXBuildFile; productRef = AA20000000000000000000A2 /* RAVESupport */; };
 		AA11000000000000000000A3 /* RAVEFilm in Frameworks */ = {isa = PBXBuildFile; productRef = AA11000000000000000000A2 /* RAVEFilm */; };
@@ -84,6 +85,7 @@
 				AA13000000000000000000A3 /* MatroskaRemux in Frameworks */,
 				AA15000000000000000000A3 /* FFmpegDecoders in Frameworks */,
 				AA17000000000000000000A3 /* RAVESearch in Frameworks */,
+				AA1A0000000000000000A3 /* RAVEHome in Frameworks */,
 				AA11000000000000000000A3 /* RAVEFilm in Frameworks */,
 				AA20000000000000000000A3 /* RAVESupport in Frameworks */,
 				AA14000000000000000000A3 /* GeneratedCaptions in Frameworks */,
@@ -190,6 +192,7 @@
 				AA13000000000000000000A2 /* MatroskaRemux */,
 				AA15000000000000000000A2 /* FFmpegDecoders */,
 				AA17000000000000000000A2 /* RAVESearch */,
+				AA1A0000000000000000A2 /* RAVEHome */,
 				AA11000000000000000000A2 /* RAVEFilm */,
 				AA20000000000000000000A2 /* RAVESupport */,
 				AA12000000000000000000A2 /* RAVEDeviceSetup */,
@@ -700,6 +703,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AA05000000000000000000B1 /* XCLocalSwiftPackageReference "../../RAVEEngine" */;
 			productName = RAVEDiagnostics;
+		};
+		AA1A0000000000000000A2 /* RAVEHome */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA01000000000000000000A1 /* XCLocalSwiftPackageReference "../../RAVESDK" */;
+			productName = RAVEHome;
 		};
 		AA17000000000000000000A2 /* RAVESearch */ = {
 			isa = XCSwiftPackageProductDependency;

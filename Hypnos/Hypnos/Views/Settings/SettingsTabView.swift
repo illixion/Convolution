@@ -49,10 +49,19 @@ struct SettingsTabView: View {
     #endif
     /// Not observable; picked up again when coming back from the Cache page.
     @State private var cachePreset = CacheBudget.preset
+    /// The pages pushed. Held here so a UI test can open one directly: XCUITest
+    /// can't scroll a visionOS list, so a row below the fold is out of reach
+    /// (DEBUG-only `-UITestDefault settingsInitialPage=sleepTimer`, like tvOS's).
+    @State private var path: [Page] = {
+        #if DEBUG
+        if HypnosDefaults.store.string(forKey: "settingsInitialPage") == "sleepTimer" { return [.sleepTimer] }
+        #endif
+        return []
+    }()
 
     enum Page: Hashable {
         case jellyfin, stash, nextcloud, photoLibrary, localFiles, deviceSetup
-        case general, gallery, photos, videos, subtitles, slideshows, windowGroups
+        case general, gallery, photos, videos, subtitles, slideshows, windowGroups, sleepTimer
         case aiFeatures, ai3D, aiCaptions, smartActivation, compute
         case cache, backup, developer
         #if HYPNOS_YOUTUBE
@@ -61,7 +70,7 @@ struct SettingsTabView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Form {
                 Section("Libraries & Servers") {
                     row(.jellyfin, "Jellyfin", systemImage: "film.stack", value: jellyfinStatus)
@@ -91,6 +100,8 @@ struct SettingsTabView: View {
                     row(.photos, "Photos", systemImage: "photo")
                     row(.videos, "Videos", systemImage: "play.rectangle.on.rectangle")
                     row(.slideshows, "Slideshows", systemImage: "play.square.stack")
+                    row(.sleepTimer, "Sleep Timer", systemImage: "moon.zzz", value: sleepTimerStatus)
+                        .accessibilityIdentifier(A11y.SleepTimerUI.settingsRow)
                     if PlatformCapabilities.supportsWindowManagement {
                         row(.windowGroups, "Window Groups", systemImage: "macwindow.on.rectangle",
                             value: appModel.savedWindowGroups.isEmpty ? "" : "\(appModel.savedWindowGroups.count)")
@@ -133,6 +144,11 @@ struct SettingsTabView: View {
             .navigationDestination(for: Page.self, destination: page)
             .onAppear { cachePreset = CacheBudget.preset }
         }
+    }
+
+    private var sleepTimerStatus: String {
+        guard let end = SleepTimer.shared.endDate else { return "" }
+        return "Ends \(end.formatted(date: .omitted, time: .shortened))"
     }
 
     private func row(_ page: Page, _ title: String, systemImage: String, value: String = "") -> some View {
@@ -187,6 +203,7 @@ struct SettingsTabView: View {
             }
             #endif
         case .slideshows: SlideshowSettingsPage()
+        case .sleepTimer: SleepTimerSettingsPage()
         case .windowGroups: WindowGroupsSettingsPage()
         case .cache: SettingsPage("Cache") { CacheSettingsSection() }
         case .backup:

@@ -51,6 +51,21 @@ enum A11y {
         static let loadStatus = "video.loadStatus"
     }
 
+    /// Settings → Sleep Timer.
+    enum SleepTimerUI {
+        static let settingsRow = "settings.sleepTimer"
+        static let start = "sleepTimer.start"
+        static let cancel = "sleepTimer.cancel"
+        static let timeLeft = "sleepTimer.timeLeft"
+        static let addAccessory = "sleepTimer.addAccessory"
+        static let haURL = "sleepTimer.homeAssistant.url"
+        static let haToken = "sleepTimer.homeAssistant.token"
+        static let haSave = "sleepTimer.homeAssistant.save"
+        static let haStatus = "sleepTimer.homeAssistant.status"
+        static let homeKitToggle = "sleepTimer.homeKit.toggle"
+        static let homeKitStatus = "sleepTimer.homeKit.status"
+    }
+
     /// First-run flow.
     enum Welcome {
         static let panel = "welcome.panel"

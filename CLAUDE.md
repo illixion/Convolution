@@ -206,6 +206,7 @@ work on an area without having touched one of those files yet.
 | `hypnos-library-jellyfin.md` | Library tab, stream quality, Jellyfin 12.x, subtitles, offline downloads |
 | `hypnos-youtube.md` | YouTube resolver chain, surround splice, quality caps, SponsorBlock |
 | `hypnos-slideshows.md` | Picture and video slideshows, their profiles and window, Slideshow 3D |
+| `hypnos-sleep-timer.md` | Sleep timer: what ends and in what order, player registration, Home Assistant / HomeKit accessory actions via `RAVEHome`, HomeKit signing |
 | `hypnos-ios-port.md`, `hypnos-tvos-port.md`, `hypnos-macos-port.md`, `hypnos-quest-port.md` | One file per platform port |
 | `hypnos-ui-tests.md` | XCUITest wiring |
 

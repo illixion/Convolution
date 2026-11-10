@@ -29,7 +29,7 @@ import RAVEUI
 import SwiftUI
 
 enum TVSettingsPage: String, Hashable {
-    case deviceSetup, librarySource, jellyfin, stash, nextcloud, cache, developer, aiCaptions, subtitles
+    case deviceSetup, librarySource, jellyfin, stash, nextcloud, cache, developer, aiCaptions, subtitles, sleepTimer
     #if HYPNOS_YOUTUBE
     case youtube
     #endif
@@ -107,6 +107,7 @@ struct TVSettingsView: View {
                 Section {
                     row(.subtitles, "Subtitles", systemImage: "textformat.size", value: "")
                     row(.aiCaptions, "AI Captions", systemImage: "captions.bubble", value: "")
+                    row(.sleepTimer, "Sleep Timer", systemImage: "moon.zzz", value: "")
                     row(.cache, "Cache", systemImage: "internaldrive", value: cachePreset.label)
                     row(.developer, "Developer", systemImage: "hammer", value: "")
                 }
@@ -165,6 +166,7 @@ struct TVSettingsView: View {
         case .nextcloud: "Nextcloud"
         case .aiCaptions: "AI Captions"
         case .subtitles: "Subtitles"
+        case .sleepTimer: "Sleep Timer"
         case .cache: "Cache"
         case .developer: "Developer"
         #if HYPNOS_YOUTUBE
@@ -182,6 +184,7 @@ struct TVSettingsView: View {
         case .stash: StashServerSection()
         case .nextcloud: NextcloudSettingsSection()
         case .aiCaptions, .subtitles: EmptyView()
+        case .sleepTimer: SleepTimerSettingsSections()
         case .cache: CacheSettingsSection()
         case .developer: TVDeveloperSection()
         #if HYPNOS_YOUTUBE

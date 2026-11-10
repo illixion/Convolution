@@ -137,6 +137,11 @@ final class FilmSession {
         }
         restoreSound()
         subtitles.playhead = { [weak self] in self?.player.currentTime ?? 0 }
+        SleepTimer.shared.register(self) { [weak self] in
+            guard let player = self?.player, player.isPlaying else { return false }
+            player.pause()
+            return true
+        }
         Self.excludeFromOtherCredentials(server)
         // Starts watching the network, so Auto object-audio quality knows
         // the path by the time a film loads.

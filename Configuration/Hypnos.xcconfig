@@ -60,3 +60,16 @@ DOVI_CONDITION =
 NC_MODELS_CONDITION =
 
 SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(PRIVATE_API_CONDITION) $(YOUTUBE_CONDITION) $(FFMPEG_CONDITION) $(DOVI_CONDITION) $(NC_MODELS_CONDITION)
+
+// HomeKit for the sleep timer's accessory actions, on iOS and visionOS. Empty
+// here: the shared sideload wildcard profile has no HomeKit capability, and an
+// entitlement the profile lacks stops the app installing. A build whose App ID
+// and profile carry the capability (an App Store build, or a sideload with its
+// own profile) opts in with `HOMEKIT_ENTITLEMENTS=Hypnos/HypnosHomeKit.entitlements`
+// (`~/bin/build-and-sign --set HOMEKIT_ENTITLEMENTS=...`, or the gitignored
+// scripts/build-signing.conf / LocalSigning.xcconfig). tvOS always has it
+// (HypnosTV.entitlements; the tvOS dev profile carries it) and the Mac has no
+// HomeKit at all. Home Assistant needs none of this.
+HOMEKIT_ENTITLEMENTS =
+CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*] = $(HOMEKIT_ENTITLEMENTS)
+CODE_SIGN_ENTITLEMENTS[sdk=xros*] = $(HOMEKIT_ENTITLEMENTS)

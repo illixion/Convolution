@@ -114,6 +114,7 @@ struct VideoOrnamentsView: View {
             subtitleMenu
             audioMenu
             speedMenu
+            sleepTimerMenu
             // Depth-conversion status for THIS video — visible at a glance
             // without keeping the ViewMode menu open. Isolated in its own view
             // so its continuous observation of DepthConversionManager doesn't
@@ -149,6 +150,7 @@ struct VideoOrnamentsView: View {
                 subtitleMenu
                 audioMenu
                 speedMenu
+                sleepTimerMenu
                 ConversionStatusRow(videoIdentity: video.identity)
             }
             LoopControls(windowModel: windowModel)
@@ -343,6 +345,10 @@ struct VideoOrnamentsView: View {
         PlaybackSpeedMenu(speed: windowModel.playbackSpeed, onOpenChanged: { chromeMenu("Speed", opened: $0) }) { speed in
             windowModel.setPlaybackSpeed(speed)
         }
+    }
+
+    private var sleepTimerMenu: some View {
+        SleepTimerMenu(onOpenChanged: { chromeMenu("Sleep Timer", opened: $0) })
     }
 
     private var flipButton: some View {

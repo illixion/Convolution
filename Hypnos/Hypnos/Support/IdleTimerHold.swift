@@ -23,5 +23,13 @@ enum IdleTimerHold {
             UIApplication.shared.isIdleTimerDisabled = disabled
         }
     }
+
+    /// Let go of every hold at once, so the device can lock itself: the sleep
+    /// timer ending (`SleepTimer`). A player that starts playing again holds
+    /// again, as it does after any pause.
+    static func releaseAll() {
+        holders.removeAll()
+        if UIApplication.shared.isIdleTimerDisabled { UIApplication.shared.isIdleTimerDisabled = false }
+    }
 }
 #endif

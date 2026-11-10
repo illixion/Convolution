@@ -677,6 +677,7 @@ final class VideoWindowModel {
     func start() {
         guard !didStart else { return }
         didStart = true
+        SleepTimer.shared.register(self) { [weak self] in self?.pauseForSleepTimer() ?? false }
         subtitles.playhead = { [weak self] in self?.currentTime ?? 0 }
         appModel.lastViewedVideoId = video.id
         appModel.registerWindowModel(self)
@@ -1031,8 +1032,19 @@ final class VideoWindowModel {
         }
     }
 
+    /// Pause for the sleep timer: only a window that is playing, and only
+    /// pausing (never a resume), whichever renderer draws it. Returns whether
+    /// it paused one.
+    func pauseForSleepTimer() -> Bool {
+        guard !isPaused else { return false }
+        pauseCommand?()
+        isPaused = true
+        return true
+    }
+
     /// Call from onDisappear.
     func cleanup() {
+        SleepTimer.shared.unregister(self)
         #if os(iOS) || os(tvOS)
         IdleTimerHold.set(false, for: self)
         #endif

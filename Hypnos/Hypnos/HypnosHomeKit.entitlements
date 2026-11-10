@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- iOS and visionOS only, and only when HOMEKIT_ENTITLEMENTS names this
+	     file (Configuration/Hypnos.xcconfig): the sleep timer's HomeKit
+	     actions. The capability has to be on the app's App ID and in the
+	     provisioning profile, which the shared sideload wildcard profile is
+	     not, so a build that doesn't ask for this file has no HomeKit and
+	     Home Assistant still works. -->
+	<key>com.apple.developer.homekit</key>
+	<true/>
+</dict>
+</plist>

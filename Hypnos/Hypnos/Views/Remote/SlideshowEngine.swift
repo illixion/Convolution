@@ -463,6 +463,7 @@ class SlideshowEngine {
 
     func start() {
         guard state == .idle, let sharedEngine else { return }
+        SleepTimer.shared.register(self) { [weak self] in self?.pauseForSleepTimer() ?? false }
         state = .loading
         isLoading = true
         sharedEngine.start()
@@ -477,7 +478,21 @@ class SlideshowEngine {
         AI3DWarmup.shared.setIntent(self, roles: state == .stopped ? [] : roles)
     }
 
+    /// Pause a running slideshow (and so the clip it is playing) for the
+    /// sleep timer. Returns whether it paused one.
+    func pauseForSleepTimer() -> Bool {
+        guard let sharedEngine else { return false }
+        switch sharedEngine.state {
+        case .displaying, .loading, .transitioning:
+            sharedEngine.togglePause()
+            return true
+        default:
+            return false
+        }
+    }
+
     func stop() {
+        SleepTimer.shared.unregister(self)
         state = .stopped
         AI3DWarmup.shared.clearIntent(self)
         if let sharedEngine {

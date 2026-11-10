@@ -1172,6 +1172,7 @@ struct FilmTransport: View {
             PlaybackSpeedMenu(speed: player.speed, onOpenChanged: { menuChanged("Speed", $0) }) { speed in
                 player.setSpeed(speed)
             }
+            SleepTimerMenu(onOpenChanged: { menuChanged("Sleep Timer", $0) })
         }
         if shows(2) {
             recenterButton

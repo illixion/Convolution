@@ -6,6 +6,8 @@
 	<string>$(COMMIT_HASH)</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Convolution shows your photos and videos, and on Apple Vision Pro converts them to 3D. Your library is read on this device only — nothing is uploaded.</string>
+	<key>NSHomeKitUsageDescription</key>
+	<string>Convolution uses HomeKit, only if you turn it on, to set accessories such as lights and a smart plug when the sleep timer ends.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Convolution connects to the media servers you configure so you can browse and stream your own libraries, and to your other devices running Convolution when you send settings between them with Device Setup.</string>
 	<key>NSBonjourServices</key>
