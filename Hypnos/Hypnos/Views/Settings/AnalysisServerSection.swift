@@ -10,6 +10,9 @@ struct AnalysisServerSection: View {
     @State private var paired = AnalysisPairing.record()
     @State private var pairAddress = ""
     @State private var pairing: RAVEPairingClient<AnalysisPairing.Grant>?
+    /// Finds Vergence computers announcing themselves on this network, and carries a pairing request to one.
+    @State private var locator = RAVECompanionLocator(
+        namespace: AnalysisPairing.namespace, deviceID: AnalysisPairing.deviceID, deviceName: { AnalysisPairing.deviceName })
     @State private var pairingDeviceID = ""
     @State private var message: String?
     @State private var checking = false
@@ -34,7 +37,13 @@ struct AnalysisServerSection: View {
         } header: {
             Text("Analysis Server")
         } footer: {
-            Text("A Vergence analysis server lets other computers prepare a Library title's Smooth Motion, AI 3D depth and AI HDR highlights while it plays, starting where you are watching. Pair with it by its address (run `vergenced pair`, or Pair a Headset in the Vergence app): both screens show the same six digits. Leave it unpaired and empty to use only what the Jellyfin plugin prepared overnight.")
+            Text("A Vergence analysis server lets other computers prepare a Library title's Smooth Motion, AI 3D depth and AI HDR highlights while it plays, starting where you are watching. Pair with a computer listed nearby, or by its address: both screens show the same six digits. A computer running the Vergence app appears here by itself. Leave it unpaired and empty to use only what the Jellyfin plugin prepared overnight.")
+        }
+        // Browsing only while there is nobody paired to find, and the screen is up.
+        .onAppear { if paired == nil { locator.startBrowsing() } }
+        .onDisappear { locator.stopBrowsing() }
+        .onChange(of: paired) { _, now in
+            if now == nil { locator.startBrowsing() } else { locator.stopBrowsing() }
         }
         if paired == nil {
             Section {
@@ -75,6 +84,7 @@ struct AnalysisServerSection: View {
             }
             Button("Cancel", role: .cancel) { stopPairing() }
         default:
+            nearbyRows
             TextField("Computer's address, or a vergence:// link", text: $pairAddress)
                 .textFieldTapTarget()
                 #if !os(macOS)
@@ -88,6 +98,26 @@ struct AnalysisServerSection: View {
         }
     }
 
+    /// The computers announcing themselves here: tapping one asks it to pair, and it shows a code.
+    @ViewBuilder private var nearbyRows: some View {
+        if locator.nearby.isEmpty {
+            HStack {
+                ProgressView()
+                Text("Looking for computers running Vergence…").foregroundStyle(.secondary)
+            }
+        } else {
+            ForEach(locator.nearby) { host in
+                Button { startPairing(host: host) } label: {
+                    HStack {
+                        Text(host.name)
+                        Spacer()
+                        Text("Pair").foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
     private func spaced(_ code: String) -> String {
         guard code.count == 6 else { return code }
         return "\(code.prefix(3)) \(code.suffix(3))"
@@ -95,14 +125,26 @@ struct AnalysisServerSection: View {
 
     private func startPairing() {
         guard let link = AnalysisPairing.link(from: pairAddress) else { return }
+        begin(RAVEPairingClient<AnalysisPairing.Grant>(locator: locator, link: link,
+                                                       deviceName: AnalysisPairing.deviceName, requested: [.play]))
+    }
+
+    /// A computer found nearby: one that lists a pairing port is dialled, and any other is asked
+    /// to open a listener for this device (its Mac-style knock).
+    private func startPairing(host: RAVECompanionLocator.NearbyHost) {
+        if let link = host.directPairLink(AnalysisPairing.namespace) {
+            begin(RAVEPairingClient<AnalysisPairing.Grant>(locator: locator, link: link,
+                                                           deviceName: AnalysisPairing.deviceName, requested: [.play]))
+        } else {
+            begin(RAVEPairingClient<AnalysisPairing.Grant>(locator: locator, host: host,
+                                                           deviceName: AnalysisPairing.deviceName, requested: [.play]))
+        }
+    }
+
+    private func begin(_ client: RAVEPairingClient<AnalysisPairing.Grant>) {
         message = nil
-        let deviceID = AnalysisPairing.deviceID
-        let locator = RAVECompanionLocator(namespace: AnalysisPairing.namespace, deviceID: deviceID,
-                                           deviceName: { AnalysisPairing.deviceName })
-        let client = RAVEPairingClient<AnalysisPairing.Grant>(locator: locator, link: link,
-                                                              deviceName: AnalysisPairing.deviceName, requested: [.play])
         pairing = client
-        pairingDeviceID = deviceID
+        pairingDeviceID = locator.deviceID
         client.start()
         watch(client)
     }

@@ -11,6 +11,11 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_hypnos-setup._tcp</string>
+		<!-- Vergence analysis servers (AnalysisPairing's RAVECompanion namespace): the host's
+		     record, this device's knock, and the host's one-off pairing listener. -->
+		<string>_vergence-mac._tcp</string>
+		<string>_vergence-knock._tcp</string>
+		<string>_vergence-pair._tcp</string>
 	</array>
 	<key>NSMotionUsageDescription</key>
 	<string>Convolution follows your headphones’ head movement so spatial audio stays in place when you turn your head.</string>

@@ -149,7 +149,12 @@ for the passes.
 ### Pairing and auth
 
 - **Pair with the RAVECompanion protocol:** Bonjour discovery, six-digit numeric comparison, a token
-  per device with grants. Players and workers pair with the coordinator once, and it never sees
+  per device with grants. The Apple client uses all of it: it browses `_vergence-mac._tcp` (the
+  host's record, announced all the time by the desktop app), lists the computers in Settings →
+  Analysis Server, and asks one to pair with a `pair=1` knock (`_vergence-knock._tcp`); the host
+  opens a one-off `_vergence-pair._tcp` listener bound to this device id. `Info.plist` declares the
+  three service types (`NSBonjourServices`), or iOS and visionOS refuse every lookup. The address
+  or link stays as the fallback (`vergence://pair`, a typed address). Players and workers pair with the coordinator once, and it never sees
   their media credentials.
   - A Vision Pro uses the Swift implementation, a Quest the C one from QuestControllerBridge, and the
     coordinator a Rust port.
