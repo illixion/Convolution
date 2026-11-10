@@ -134,6 +134,7 @@ internal class CoordinatorPairingClient {
         val secret = ByteArray(32).also(random::nextBytes)
         val nonce = ByteArray(32).also(random::nextBytes)
         var agreed: ByteArray? = null
+        var awaitingApproval = false
         try {
             Socket().use { s ->
                 socket = s
@@ -164,6 +165,7 @@ internal class CoordinatorPairingClient {
                     ?: throw IOException("the computer's v2 pairing metadata did not verify")
                 val code = String(agreed!!, 0, 6, Charsets.US_ASCII)
                 val key = agreed!!.copyOfRange(6, 38)
+                awaitingApproval = true
                 main.post { listener.onCode(code, hostName) }
 
                 // The person at the computer has this long to compare and answer.
@@ -195,7 +197,11 @@ internal class CoordinatorPairingClient {
             if (cancelled) fail(listener, "Pairing cancelled.")
             else {
                 Log.w(TAG, "pairing_failed error=${e.javaClass.simpleName}")
-                fail(listener, "Pairing didn't finish: ${e.message ?: e.javaClass.simpleName}")
+                fail(listener, if (awaitingApproval) {
+                    "Pairing could not be completed. Make sure both apps are up to date and try again."
+                } else {
+                    "Pairing didn't finish: ${e.message ?: e.javaClass.simpleName}"
+                })
             }
         } finally {
             socket = null
