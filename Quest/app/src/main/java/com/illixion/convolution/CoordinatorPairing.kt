@@ -19,6 +19,7 @@ import java.net.Socket
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.SecureRandom
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.Executors
 
 private const val TAG = "ConvolutionPairing"
@@ -110,10 +111,15 @@ internal class CoordinatorPairingClient {
 
     private val main = Handler(Looper.getMainLooper())
     private val random = SecureRandom()
+    private val pairing = AtomicBoolean(false)
     @Volatile private var socket: Socket? = null
     @Volatile private var cancelled = false
 
     fun pair(address: String, port: Int, deviceId: String, deviceName: String, listener: Listener) {
+        if (!pairing.compareAndSet(false, true)) {
+            fail(listener, "A pairing is already in progress.")
+            return
+        }
         cancelled = false
         Thread({ run(address, port, deviceId, deviceName, listener) }, "pairing").apply { isDaemon = true }.start()
     }
@@ -195,6 +201,7 @@ internal class CoordinatorPairingClient {
             socket = null
             secret.fill(0)
             agreed?.fill(0)
+            pairing.set(false)
         }
     }
 
