@@ -20,6 +20,7 @@ struct TVLibraryTabView: View {
     @State private var model = LibraryHomeViewModel()
     @State private var playback = LibraryPlayback()
     @State private var path = NavigationPath()
+    @State private var topShelfItemInFlight: String?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -33,6 +34,12 @@ struct TVLibraryTabView: View {
         .task(id: LibraryService.configurationKey) {
             await model.start()
             await openAutoOpenItemIfRequested()
+            await openTopShelfItemIfRequested()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .tvTopShelfLibraryPlay)) { notification in
+            guard let itemID = notification.object as? String else { return }
+            HypnosDefaults.store.set(itemID, forKey: "tvTopShelfPendingItemID")
+            Task { await openTopShelfItemIfRequested() }
         }
         .onChange(of: LibraryWatchState.shared.revision) {
             Task { await model.refresh() }
@@ -54,6 +61,18 @@ struct TVLibraryTabView: View {
         else { return }
         path.append(item)
         #endif
+    }
+
+    private func openTopShelfItemIfRequested() async {
+        guard let itemID = HypnosDefaults.store.string(forKey: "tvTopShelfPendingItemID"),
+              itemID != topShelfItemInFlight,
+              let library = LibraryService.current()
+        else { return }
+        topShelfItemInFlight = itemID
+        HypnosDefaults.store.removeObject(forKey: "tvTopShelfPendingItemID")
+        defer { topShelfItemInFlight = nil }
+        guard let item = try? await library.item(id: itemID) else { return }
+        await playback.play(item)
     }
 }
 

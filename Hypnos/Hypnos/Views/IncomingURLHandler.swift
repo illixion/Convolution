@@ -68,6 +68,9 @@ struct IncomingURLHandler: ViewModifier {
                 await openStashImage(from: url)
             case "scene", "video":
                 await openStashScene(from: url)
+            case "library-play":
+                guard let id = Self.idParameter(from: url) else { return }
+                NotificationCenter.default.post(name: .tvTopShelfLibraryPlay, object: id)
             case "setup":
                 // An Apple TV's setup code, read by the system Camera.
                 guard let code = RAVESetupCode(url: url, service: DeviceSetup.service) else {
@@ -254,4 +257,8 @@ extension View {
     func handleIncomingMediaURLs(appModel: AppModel) -> some View {
         modifier(IncomingURLHandler(appModel: appModel))
     }
+}
+
+extension Notification.Name {
+    static let tvTopShelfLibraryPlay = Notification.Name("Hypnos.TVTopShelfLibraryPlay")
 }

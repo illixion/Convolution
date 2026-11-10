@@ -78,10 +78,14 @@ struct TVRootView: View {
             }
         }
         .environment(appModel)
+        .handleIncomingMediaURLs(appModel: appModel)
         .task {
             if appModel.galleryImages.isEmpty {
                 await appModel.loadInitialGallery()
             }
+        }
+        .task(id: LibraryService.configurationKey) {
+            await TVTopShelfCache.refreshFromLibrary()
         }
         .onChange(of: appModel.activeRemoteViewerOpenRequest?.id, initial: true) { _, _ in
             presentRequestedSlideshow()
@@ -89,6 +93,11 @@ struct TVRootView: View {
         .fullScreenCover(item: $slideshow) { value in
             TVSlideshowView(windowValue: value)
                 .environment(appModel)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .tvTopShelfLibraryPlay)) { notification in
+            guard let itemID = notification.object as? String else { return }
+            HypnosDefaults.store.set(itemID, forKey: "tvTopShelfPendingItemID")
+            selectedTab = .library
         }
         .onChange(of: selectedTab, initial: true) { old, new in
             if new == .pictures || new == .videos { lastContentTab = new }

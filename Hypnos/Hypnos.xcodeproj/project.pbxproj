@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AA1900000000000000000001 /* TopShelfContentProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1900000000000000000002 /* TopShelfContentProvider.swift */; };
+		AA1900000000000000000003 /* HypnosTopShelf.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = AA1900000000000000000004 /* HypnosTopShelf.appex */; platformFilters = (tvos, ); settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		AA05000000000000000000B3 /* RAVEDiagnostics in Frameworks */ = {isa = PBXBuildFile; productRef = AA05000000000000000000B2 /* RAVEDiagnostics */; };
 		AA06000000000000000000C3 /* RAVEUI in Frameworks */ = {isa = PBXBuildFile; productRef = AA06000000000000000000C2 /* RAVEUI */; };
 		AA06000000000000000000C5 /* RAVEConsole in Frameworks */ = {isa = PBXBuildFile; productRef = AA06000000000000000000C4 /* RAVEConsole */; };
@@ -30,6 +32,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		AA1900000000000000000005 /* PBXContainerItemProxy */ = {isa = PBXContainerItemProxy; containerPortal = 077865122D811C5500BCF113 /* Project object */; proxyType = 1; remoteGlobalIDString = AA1900000000000000000006; remoteInfo = HypnosTopShelf; };
 		AA08000000000000000000EB /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 077865122D811C5500BCF113 /* Project object */;
@@ -40,6 +43,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		AA1900000000000000000002 /* TopShelfContentProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopShelfContentProvider.swift; sourceTree = "<group>"; };
+		AA1900000000000000000004 /* HypnosTopShelf.appex */ = {isa = PBXFileReference; explicitFileType = wrapper.app-extension; includeInIndex = 0; path = HypnosTopShelf.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		0778651A2D811C5500BCF113 /* Hypnos.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hypnos.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1DE40D9B2F67E27D00990AE2 /* BuildInfo.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = BuildInfo.xcconfig; sourceTree = "<group>"; };
 		8E9DA7BDAEB07F2CBEB7EEF5 /* Hypnos.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Hypnos.xcconfig; path = ../Configuration/Hypnos.xcconfig; sourceTree = "<group>"; };
@@ -105,6 +110,7 @@
 			children = (
 				FB302A1BC44797EC0074C931 /* README.md */,
 				0778651C2D811C5500BCF113 /* Hypnos */,
+				AA1900000000000000000007 /* TopShelf */,
 				AA08000000000000000000E3 /* HypnosUITests */,
 				AA08000000000000000000EE /* Shared */,
 				0778651B2D811C5500BCF113 /* Products */,
@@ -117,11 +123,13 @@
 			isa = PBXGroup;
 			children = (
 				0778651A2D811C5500BCF113 /* Hypnos.app */,
+				AA1900000000000000000004 /* HypnosTopShelf.appex */,
 				AA08000000000000000000E2 /* HypnosUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
+		AA1900000000000000000007 /* TopShelf */ = {isa = PBXGroup; children = (AA1900000000000000000002 /* TopShelfContentProvider.swift */, ); path = TopShelf; sourceTree = "<group>"; };
 		AA08000000000000000000EE /* Shared */ = {
 			isa = PBXGroup;
 			children = (
@@ -159,10 +167,12 @@
 				077865172D811C5500BCF113 /* Frameworks */,
 				077865182D811C5500BCF113 /* Resources */,
 				AA16000000000000000000A1 /* Embed FFmpeg decoders (sideload only) */,
+				AA1900000000000000000008 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				AA1900000000000000000009 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				0778651C2D811C5500BCF113 /* Hypnos */,
@@ -190,6 +200,17 @@
 			productName = Hypnos;
 			productReference = 0778651A2D811C5500BCF113 /* Hypnos.app */;
 			productType = "com.apple.product-type.application";
+		};
+		AA1900000000000000000006 /* HypnosTopShelf */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA1900000000000000000010 /* Build configuration list for HypnosTopShelf */;
+			buildPhases = (AA1900000000000000000011 /* Sources */, AA1900000000000000000012 /* Frameworks */, AA1900000000000000000013 /* Resources */, );
+			buildRules = ();
+			dependencies = ();
+			name = HypnosTopShelf;
+			productName = HypnosTopShelf;
+			productReference = AA1900000000000000000004 /* HypnosTopShelf.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 		AA08000000000000000000E1 /* HypnosUITests */ = {
 			isa = PBXNativeTarget;
@@ -229,6 +250,7 @@
 					077865192D811C5500BCF113 = {
 						CreatedOnToolsVersion = 16.3;
 					};
+					AA1900000000000000000006 = {CreatedOnToolsVersion = 16.3; };
 					AA08000000000000000000E1 = {
 						TestTargetID = 077865192D811C5500BCF113;
 					};
@@ -259,11 +281,17 @@
 			targets = (
 				077865192D811C5500BCF113 /* Hypnos */,
 				AA08000000000000000000E1 /* HypnosUITests */,
+				AA1900000000000000000006 /* HypnosTopShelf */,
 			);
 		};
 /* End PBXProject section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		AA1900000000000000000008 /* Embed App Extensions */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (AA1900000000000000000003 /* HypnosTopShelf.appex in Embed App Extensions */, ); name = "Embed App Extensions"; runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXResourcesBuildPhase section */
+		AA1900000000000000000013 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		077865182D811C5500BCF113 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -304,6 +332,7 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		AA1900000000000000000011 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (AA1900000000000000000001 /* TopShelfContentProvider.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
 		077865162D811C5500BCF113 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -322,7 +351,12 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXFrameworksBuildPhase section */
+		AA1900000000000000000012 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
 /* Begin PBXTargetDependency section */
+		AA1900000000000000000009 /* PBXTargetDependency */ = {isa = PBXTargetDependency; platformFilters = (tvos, ); target = AA1900000000000000000006 /* HypnosTopShelf */; targetProxy = AA1900000000000000000005 /* PBXContainerItemProxy */; };
 		AA08000000000000000000EA /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 077865192D811C5500BCF113 /* Hypnos */;
@@ -338,6 +372,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Hypnos/Hypnos.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=appletvos*]" = Hypnos/HypnosTV.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_PREVIEWS = YES;
@@ -378,6 +413,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Hypnos/Hypnos.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=appletvos*]" = Hypnos/HypnosTV.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_PREVIEWS = YES;
@@ -586,6 +622,8 @@
 			};
 			name = Release;
 		};
+		AA1900000000000000000014 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = { APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = TopShelf/TopShelf.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = TopShelf/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 26.0; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", ); MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.illixion.hypnos.debug.topshelf; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = appletvos; SKIP_INSTALL = YES; SUPPORTED_PLATFORMS = "appletvos appletvsimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 3; TVOS_DEPLOYMENT_TARGET = 26.2; }; name = Debug; };
+		AA1900000000000000000015 /* Release */ = {isa = XCBuildConfiguration; buildSettings = { APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = TopShelf/TopShelf.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = TopShelf/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 26.0; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", ); MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.illixion.hypnos.topshelf; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = appletvos; SKIP_INSTALL = YES; SUPPORTED_PLATFORMS = "appletvos appletvsimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 3; TVOS_DEPLOYMENT_TARGET = 26.2; }; name = Release; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -616,6 +654,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		AA1900000000000000000010 /* Build configuration list for HypnosTopShelf */ = {isa = XCConfigurationList; buildConfigurations = (AA1900000000000000000014 /* Debug */, AA1900000000000000000015 /* Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */

@@ -49,6 +49,10 @@ final class LibraryHomeViewModel {
             // menu open on a lockup, a second after it opened.
             let fresh = try await library.home()
             if fresh != home { home = fresh }
+            #if os(tvOS)
+            let continueWatching = fresh.shelves.first(where: { $0.id == "up-next" })?.items ?? []
+            Task { await TVTopShelfCache.refresh(items: continueWatching, library: library) }
+            #endif
         } catch is CancellationError {
             // Superseded by a newer load (configuration changed); not an error.
         } catch let urlError as URLError where urlError.code == .cancelled {
