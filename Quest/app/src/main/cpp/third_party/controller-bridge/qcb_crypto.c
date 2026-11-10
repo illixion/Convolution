@@ -199,6 +199,115 @@ void qcb_pair_commitment(const uint8_t public_key[32], const uint8_t nonce[QCB_P
     sha256_final(&c, out);
 }
 
+static void sha256_u32(sha256_ctx* c, uint32_t value) {
+    uint8_t be[4] = {(uint8_t)(value >> 24), (uint8_t)(value >> 16), (uint8_t)(value >> 8), (uint8_t)value};
+    sha256_update(c, be, sizeof(be));
+}
+
+static int sha256_field(sha256_ctx* c, const void* data, size_t size) {
+    if (size > UINT32_MAX || (size && data == NULL)) return -1;
+    sha256_u32(c, (uint32_t)size);
+    if (size) sha256_update(c, data, size);
+    return 0;
+}
+
+static int sorted_grants(const char* const* requested, size_t count, const char** sorted, size_t* unique) {
+    if (count > 32 || (count && requested == NULL)) return -1;
+    for (size_t i = 0; i < count; i++) {
+        if (requested[i] == NULL) return -1;
+        sorted[i] = requested[i];
+        for (size_t j = i; j > 0 && strcmp(sorted[j - 1], sorted[j]) > 0; j--) {
+            const char* swap = sorted[j - 1]; sorted[j - 1] = sorted[j]; sorted[j] = swap;
+        }
+    }
+    size_t n = 0;
+    for (size_t i = 0; i < count; i++) if (i == 0 || strcmp(sorted[i], sorted[i - 1]) != 0) sorted[n++] = sorted[i];
+    *unique = n;
+    return 0;
+}
+
+int qcb_pair_commitment_v2(const char* label_prefix,
+                           const uint8_t public_key[32], const uint8_t nonce[QCB_PAIR_NONCE_SIZE],
+                           const char* device_id, const char* device_name,
+                           const char* const* requested, size_t requested_count,
+                           const char* ssh_public_key, uint8_t out[32]) {
+    if (!label_prefix || !device_id || !device_name || !public_key || !nonce || !out) return -1;
+    char info[96];
+    size_t prefix = strlen(label_prefix);
+    static const char suffix[] = "-Pair-v2";
+    if (prefix > sizeof(info) - sizeof(suffix)) return -1;
+    memcpy(info, label_prefix, prefix); memcpy(info + prefix, suffix, sizeof(suffix) - 1);
+    const char* sorted[32]; size_t unique = 0;
+    if (sorted_grants(requested, requested_count, sorted, &unique) != 0) return -1;
+    sha256_ctx c; sha256_init(&c);
+    static const char tag[] = "RAVECompanionPairCommit-v2";
+    sha256_update(&c, (const uint8_t*)tag, sizeof(tag) - 1);
+    if (sha256_field(&c, info, prefix + sizeof(suffix) - 1) ||
+        sha256_field(&c, public_key, 32) || sha256_field(&c, nonce, QCB_PAIR_NONCE_SIZE) ||
+        sha256_field(&c, device_id, strlen(device_id)) || sha256_field(&c, device_name, strlen(device_name))) return -1;
+    sha256_u32(&c, (uint32_t)unique);
+    for (size_t i = 0; i < unique; i++) if (sha256_field(&c, sorted[i], strlen(sorted[i]))) return -1;
+    uint8_t has_ssh = ssh_public_key ? 1 : 0;
+    sha256_update(&c, &has_ssh, 1);
+    if (ssh_public_key && sha256_field(&c, ssh_public_key, strlen(ssh_public_key))) return -1;
+    sha256_final(&c, out);
+    return 0;
+}
+
+int qcb_pair_agree_v2(const uint8_t secret[32], const uint8_t nonce[QCB_PAIR_NONCE_SIZE],
+                      const uint8_t host_public_key[32], const uint8_t host_nonce[QCB_PAIR_NONCE_SIZE],
+                      const uint8_t commitment[32], const char* label_prefix,
+                      const char* host_id, const char* host_name,
+                      const char* device_id, const char* device_name,
+                      const char* const* requested, size_t requested_count,
+                      const char* ssh_public_key, char code[7], uint8_t key[32]) {
+    if (code) code[0] = '\0';
+    if (key) memset(key, 0, 32);
+    if (!secret || !nonce || !host_public_key || !host_nonce || !commitment || !label_prefix ||
+        !host_id || !host_name || !device_id || !device_name || !code || !key) return -1;
+    uint8_t mine[32], expected[32], shared[32], transcript[32];
+    qcb_pair_public_key(secret, mine);
+    if (qcb_pair_commitment_v2(label_prefix, mine, nonce, device_id, device_name, requested,
+                               requested_count, ssh_public_key, expected) != 0) {
+        crypto_wipe(expected, sizeof(expected));
+        return -1;
+    }
+    uint8_t mismatch = 0;
+    for (size_t i = 0; i < 32; i++) mismatch |= expected[i] ^ commitment[i];
+    if (mismatch) { crypto_wipe(expected, sizeof(expected)); return -1; }
+    crypto_x25519(shared, secret, host_public_key);
+    uint8_t any = 0;
+    for (size_t i = 0; i < 32; i++) any |= shared[i];
+    if (!any) { crypto_wipe(shared, sizeof(shared)); crypto_wipe(expected, sizeof(expected)); return -1; }
+
+    sha256_ctx c; sha256_init(&c);
+    static const char tag[] = "RAVECompanionPairTranscript-v2";
+    sha256_update(&c, (const uint8_t*)tag, sizeof(tag) - 1);
+    if (sha256_field(&c, commitment, 32) || sha256_field(&c, host_public_key, 32) ||
+        sha256_field(&c, host_nonce, QCB_PAIR_NONCE_SIZE) || sha256_field(&c, mine, 32) ||
+        sha256_field(&c, nonce, QCB_PAIR_NONCE_SIZE) || sha256_field(&c, host_id, strlen(host_id)) ||
+        sha256_field(&c, host_name, strlen(host_name))) {
+        crypto_wipe(shared, sizeof(shared)); crypto_wipe(expected, sizeof(expected));
+        crypto_wipe(transcript, sizeof(transcript)); return -1;
+    }
+    sha256_final(&c, transcript);
+    char info[96]; size_t prefix = strlen(label_prefix); static const char suffix[] = "-Pair-v2";
+    if (prefix > sizeof(info) - sizeof(suffix)) {
+        crypto_wipe(shared, sizeof(shared)); crypto_wipe(expected, sizeof(expected));
+        crypto_wipe(transcript, sizeof(transcript)); return -1;
+    }
+    memcpy(info, label_prefix, prefix); memcpy(info + prefix, suffix, sizeof(suffix) - 1);
+    qcb_hkdf_sha256(shared, 32, transcript, 32, (const uint8_t*)info, prefix + sizeof(suffix) - 1, key, 32);
+    uint32_t number = (uint32_t)transcript[0] << 24 | (uint32_t)transcript[1] << 16 |
+                      (uint32_t)transcript[2] << 8 | transcript[3];
+    number %= 1000000u;
+    for (int i = 5; i >= 0; i--) { code[i] = (char)('0' + number % 10); number /= 10; }
+    code[6] = '\0';
+    crypto_wipe(shared, sizeof(shared)); crypto_wipe(expected, sizeof(expected));
+    crypto_wipe(transcript, sizeof(transcript));
+    return 0;
+}
+
 int qcb_pair_agree_labelled(const uint8_t secret[32],
                             const uint8_t nonce[QCB_PAIR_NONCE_SIZE],
                             const uint8_t host_public_key[32],

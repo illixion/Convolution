@@ -131,24 +131,31 @@ internal class CoordinatorPairingClient {
         try {
             Socket().use { s ->
                 socket = s
+                if (cancelled) throw IOException("Pairing cancelled.")
                 s.connect(InetSocketAddress(address, port), 5000)
+                if (cancelled) throw IOException("Pairing cancelled.")
                 s.soTimeout = 30000
                 val input = s.getInputStream(); val output = s.getOutputStream()
                 val publicKey = AnalysisNative.pairPublicKey(secret) ?: throw IOException("no public key")
+                val requested = arrayOf("play")
+                val commitment = AnalysisNative.pairCommitment(publicKey, nonce, "Vergence", deviceId, deviceName, requested, null)
+                    ?: throw IOException("no commitment")
                 write(output, JSONObject().put("commit", JSONObject()
                     .put("headsetID", deviceId).put("headsetName", deviceName)
-                    .put("commitment", b64(AnalysisNative.pairCommitment(publicKey, nonce)))
+                    .put("commitment", b64(commitment))
                     .put("requested", JSONArray().put("play"))))
 
                 val hello = read(input).getJSONObject("macHello")
                 val hostId = hello.getString("macID")
-                val hostName = hello.optString("macName", address)
+                val hostName = hello.getString("macName")
                 val hostPublic = unb64(hello.getString("publicKey"))
                 val hostNonce = unb64(hello.getString("nonce"))
                 if (hostPublic.size != 32 || hostNonce.size != 32) throw IOException("unexpected key sizes")
 
                 write(output, JSONObject().put("reveal", JSONObject().put("publicKey", b64(publicKey)).put("nonce", b64(nonce))))
-                agreed = AnalysisNative.pairAgree(secret, nonce, hostPublic, hostNonce) ?: throw IOException("the computer's key is unusable")
+                agreed = AnalysisNative.pairAgree(secret, nonce, hostPublic, hostNonce, commitment, "Vergence",
+                    hostId, hostName, deviceId, deviceName, requested, null)
+                    ?: throw IOException("the computer's v2 pairing metadata did not verify")
                 val code = String(agreed!!, 0, 6, Charsets.US_ASCII)
                 val key = agreed!!.copyOfRange(6, 38)
                 main.post { listener.onCode(code, hostName) }
@@ -163,6 +170,9 @@ internal class CoordinatorPairingClient {
                 if (opened == null) throw IOException("the grant did not open")
                 val grant = JSONObject(String(opened, Charsets.UTF_8))
                 opened.fill(0)
+                if (grant.optString("macID", "") != hostId || grant.optString("macName", "") != hostName) {
+                    throw IOException("the encrypted grant names a different computer")
+                }
                 val grants = grant.optJSONArray("grants")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
                 if ("play" !in grants) { fail(listener, "$hostName paired without permission to play. Allow it in Vergence's Devices list."); return }
                 val addresses = ArrayList<String>().apply { add(address) }  // it answered here, so try it first
@@ -192,6 +202,7 @@ internal class CoordinatorPairingClient {
 
     private fun write(out: OutputStream, message: JSONObject) {
         val body = message.toString().toByteArray(Charsets.UTF_8)
+        if (body.isEmpty() || body.size > 16 * 1024) throw IOException("pairing message outside its frame limit")
         out.write(ByteBuffer.allocate(4 + body.size).order(ByteOrder.LITTLE_ENDIAN).putInt(body.size).put(body).array())
         out.flush()
     }
@@ -200,7 +211,7 @@ internal class CoordinatorPairingClient {
         val data = DataInputStream(input)
         val header = ByteArray(4).also(data::readFully)
         val length = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN).int
-        if (length < 0 || length > 16 * 1024) throw IOException("pairing message too large")
+        if (length <= 0 || length > 16 * 1024) throw IOException("pairing message outside its frame limit")
         return JSONObject(String(ByteArray(length).also(data::readFully), Charsets.UTF_8))
     }
 

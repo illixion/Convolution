@@ -86,6 +86,24 @@ void test_pairing() {
     unbase64("2nT0ycFyWNPCpIulxi3TmpRtkK5Pn5GTzJsduo+Ov0Y=", expected_key);
     check(std::memcmp(key, expected_key, 32) == 0, "Vergence pairing key matches vergence-companion");
 
+    // The headset and Vergence coordinator share RAVECompanion v2. Bind the
+    // actual requested permission and both endpoint identities to the code/key.
+    const char* requested[] = {"play"};
+    uint8_t quest_public[32], commitment[32], v2_key[32];
+    qcb_pair_public_key(quest_secret, quest_public);
+    char v2_code[7];
+    check(qcb_pair_commitment_v2("Vergence", quest_public, quest_nonce, "device-1", "Vision Pro",
+                                 requested, 1, nullptr, commitment) == 0,
+          "Vergence v2 enrollment commitment");
+    check(qcb_pair_agree_v2(quest_secret, quest_nonce, host_public, host_nonce, commitment, "Vergence",
+                            "MAC-1", "Studio", "device-1", "Vision Pro", requested, 1, nullptr,
+                            v2_code, v2_key) == 0,
+          "Vergence v2 agreement");
+    check(qcb_pair_agree_v2(quest_secret, quest_nonce, host_public, host_nonce, commitment, "Vergence",
+                            "MAC-1", "Studio", "changed-device", "Vision Pro", requested, 1, nullptr,
+                            v2_code, v2_key) != 0,
+          "Vergence v2 refuses a changed device identity");
+
     // vergence-companion sealed this grant under that key with nonce 0x55 * 12.
     uint8_t sealed[256], plain[256];
     size_t sealed_size = unbase64(

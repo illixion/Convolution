@@ -42,10 +42,13 @@ final class AnalysisNative {
 
     /** X25519 public key of a 32-byte secret. */
     static native byte[] pairPublicKey(byte[] secret);
-    /** SHA256(publicKey || nonce). */
-    static native byte[] pairCommitment(byte[] publicKey, byte[] nonce);
-    /** Six ASCII digits then the 32-byte key ("Vergence-Pair-v1"), or null for an unusable host key. */
-    static native byte[] pairAgree(byte[] secret, byte[] nonce, byte[] hostPublicKey, byte[] hostNonce);
+    /** RAVECompanion v2 commitment binding the client identity and requested capabilities. */
+    static native byte[] pairCommitment(byte[] publicKey, byte[] nonce, String labelPrefix,
+                                        String deviceId, String deviceName, String[] requested, String sshPublicKey);
+    /** Six ASCII digits then the 32-byte v2 key, or null for a mismatch or unusable host key. */
+    static native byte[] pairAgree(byte[] secret, byte[] nonce, byte[] hostPublicKey, byte[] hostNonce,
+                                   byte[] commitment, String labelPrefix, String hostId, String hostName,
+                                   String deviceId, String deviceName, String[] requested, String sshPublicKey);
     /** Opens a CryptoKit ChaChaPoly combined box; null when it does not authenticate. */
     static native byte[] boxOpen(byte[] key, byte[] combined);
     /** The coordinator's bearer token for a paired device, hex (desktop/src/pairing.rs). */

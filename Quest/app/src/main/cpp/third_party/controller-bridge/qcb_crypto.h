@@ -8,17 +8,17 @@
  *
  * Pairing
  * -------
- * The Quest plays the "headset" role of Longwave's numeric-comparison pairing
- * (Shared/CompanionPairing.swift, CompanionWindows/backend/Devices/Pairing.cs):
- * it commits to SHA256(public key || nonce), the host answers with its own key
- * and nonce, the Quest reveals, and both sides derive
- *     transcript = SHA256(commitment || hostPub || hostNonce || questPub || questNonce)
- *     key        = HKDF-SHA256(X25519 shared, salt: transcript, info: "Longwave-Pair-v1")
- *     code       = big-endian u32 of transcript[0..4] mod 1 000 000, six digits.
- * The Quest shows the code; the host's user compares it and approves. The host
- * then seals a grant (JSON with the device token) to `key`, in CryptoKit's
- * ChaChaPoly combined layout: nonce(12) || ciphertext || tag(16).
- * test_qcb_crypto.c pins all of it to values CryptoKit produced.
+ * The Quest plays the "headset" role of RAVECompanion v2 pairing. The opening
+ * commitment binds the X25519 key and nonce, device ID/name, requested grants,
+ * optional SSH key, and app namespace. The transcript then also binds host ID
+ * and name before deriving the comparison code and ChaChaPoly key. The user
+ * compares the six digits and approves; the host seals its grant to that key
+ * in CryptoKit's combined layout: nonce(12) || ciphertext || tag(16).
+ * test_qcb_crypto.c pins the v2 values to shared Swift/C# vectors.
+ *
+ * qcb_pair_commitment and the v1 agree functions below remain only for callers
+ * that still explicitly implement the legacy protocol. Current pairing clients
+ * must use qcb_pair_commitment_v2 / qcb_pair_agree_v2.
  *
  * Sealed datagrams
  * ----------------
@@ -73,15 +73,13 @@ void qcb_hkdf_sha256(const uint8_t* ikm, size_t ikm_size,
 void qcb_pair_public_key(const uint8_t secret[32], uint8_t public_key[32]);
 void qcb_pair_commitment(const uint8_t public_key[32], const uint8_t nonce[QCB_PAIR_NONCE_SIZE],
                          uint8_t out[32]);
-/* The Quest's side, once the host's key and nonce arrived. Writes the six digits
-   (NUL-terminated) and the agreed key. Returns 0, or -1 for an unusable host key
-   (an all-zero shared secret, which CryptoKit refuses too). */
+/* Legacy v1 exchange. Retained for the sealed-datagram test vectors only. */
 int qcb_pair_agree(const uint8_t secret[32],
                    const uint8_t nonce[QCB_PAIR_NONCE_SIZE],
                    const uint8_t host_public_key[32],
                    const uint8_t host_nonce[QCB_PAIR_NONCE_SIZE],
                    char code[7], uint8_t key[32]);
-/* The same in another app's namespace: the key's HKDF info is
+/* Legacy v1 exchange. The key's HKDF info is
    "<label_prefix>-Pair-v1" (RAVECompanionNamespace's labelPrefix; Longwave's is
    "Longwave", which qcb_pair_agree uses, Vergence's coordinator "Vergence").
    The transcript and the code don't depend on it. Returns -1 for an unusable
@@ -92,6 +90,21 @@ int qcb_pair_agree_labelled(const uint8_t secret[32],
                             const uint8_t host_nonce[QCB_PAIR_NONCE_SIZE],
                             const char* label_prefix,
                             char code[7], uint8_t key[32]);
+/* RAVECompanion pairing v2. The grant list is canonicalized as a sorted unique
+   set. `ssh_public_key == NULL` means absent; empty string is a present value.
+   All metadata is UTF-8 and must match the commit and macHello byte-for-byte. */
+int qcb_pair_commitment_v2(const char* label_prefix,
+                           const uint8_t public_key[32], const uint8_t nonce[QCB_PAIR_NONCE_SIZE],
+                           const char* device_id, const char* device_name,
+                           const char* const* requested, size_t requested_count,
+                           const char* ssh_public_key, uint8_t out[32]);
+int qcb_pair_agree_v2(const uint8_t secret[32], const uint8_t nonce[QCB_PAIR_NONCE_SIZE],
+                      const uint8_t host_public_key[32], const uint8_t host_nonce[QCB_PAIR_NONCE_SIZE],
+                      const uint8_t commitment[32], const char* label_prefix,
+                      const char* host_id, const char* host_name,
+                      const char* device_id, const char* device_name,
+                      const char* const* requested, size_t requested_count,
+                      const char* ssh_public_key, char code[7], uint8_t key[32]);
 
 /* CryptoKit ChaChaPoly combined form. `out` holds size + 28 bytes. */
 void qcb_chachapoly_seal(const uint8_t key[32], const uint8_t nonce[12],

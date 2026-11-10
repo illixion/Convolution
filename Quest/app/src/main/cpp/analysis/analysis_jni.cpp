@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "analysis_track.h"
@@ -14,9 +15,6 @@
 
 namespace {
 
-/* RAVECompanionNamespace's label prefix for Vergence's coordinator
-   (vergence desktop/src/pairing.rs: Namespace::new("vergence", "Vergence", ...)). */
-constexpr const char* kVergenceLabel = "Vergence";
 constexpr const char* kHttpTokenSalt = "Vergence-HTTP-Token-v1";
 
 bool copy_exact(JNIEnv* env, jbyteArray array, uint8_t* out, jsize size) {
@@ -37,6 +35,43 @@ jbyteArray to_java(JNIEnv* env, const uint8_t* data, size_t size) {
     jbyteArray array = env->NewByteArray(static_cast<jsize>(size));
     if (array != nullptr) env->SetByteArrayRegion(array, 0, jsize(size), reinterpret_cast<const jbyte*>(data));
     return array;
+}
+
+bool utf8(JNIEnv* env, jstring value, std::string& out, bool nullable = false) {
+    if (value == nullptr) return nullable;
+    const jsize count = env->GetStringLength(value);
+    const jchar* chars = env->GetStringChars(value, nullptr);
+    if (chars == nullptr) return false;
+    out.clear();
+    for (jsize i = 0; i < count; i++) {
+        uint32_t cp = chars[i];
+        if (cp >= 0xD800 && cp <= 0xDBFF) {
+            if (++i >= count || chars[i] < 0xDC00 || chars[i] > 0xDFFF) { env->ReleaseStringChars(value, chars); return false; }
+            cp = 0x10000 + ((cp - 0xD800) << 10) + (chars[i] - 0xDC00);
+        } else if (cp >= 0xDC00 && cp <= 0xDFFF) { env->ReleaseStringChars(value, chars); return false; }
+        if (cp <= 0x7F) out.push_back(char(cp));
+        else if (cp <= 0x7FF) { out.push_back(char(0xC0 | (cp >> 6))); out.push_back(char(0x80 | (cp & 0x3F))); }
+        else if (cp <= 0xFFFF) { out.push_back(char(0xE0 | (cp >> 12))); out.push_back(char(0x80 | ((cp >> 6) & 0x3F))); out.push_back(char(0x80 | (cp & 0x3F))); }
+        else { out.push_back(char(0xF0 | (cp >> 18))); out.push_back(char(0x80 | ((cp >> 12) & 0x3F))); out.push_back(char(0x80 | ((cp >> 6) & 0x3F))); out.push_back(char(0x80 | (cp & 0x3F))); }
+    }
+    env->ReleaseStringChars(value, chars);
+    return true;
+}
+
+bool string_array(JNIEnv* env, jobjectArray values, std::vector<std::string>& strings,
+                  std::vector<const char*>& pointers) {
+    if (values == nullptr) return true;
+    jsize count = env->GetArrayLength(values);
+    if (count > 32) return false;
+    strings.reserve(count); pointers.reserve(count);
+    for (jsize i = 0; i < count; i++) {
+        auto item = static_cast<jstring>(env->GetObjectArrayElement(values, i));
+        strings.emplace_back();
+        if (!utf8(env, item, strings.back())) { if (item) env->DeleteLocalRef(item); return false; }
+        if (item) env->DeleteLocalRef(item);
+    }
+    for (const auto& value : strings) pointers.push_back(value.c_str());
+    return true;
 }
 
 vgat::ChunkStore* store(jlong handle) { return reinterpret_cast<vgat::ChunkStore*>(handle); }
@@ -153,26 +188,39 @@ Java_com_illixion_convolution_AnalysisNative_pairPublicKey(JNIEnv* env, jclass, 
 }
 
 JNIEXPORT jbyteArray JNICALL
-Java_com_illixion_convolution_AnalysisNative_pairCommitment(JNIEnv* env, jclass, jbyteArray publicKey, jbyteArray nonce) {
+Java_com_illixion_convolution_AnalysisNative_pairCommitment(JNIEnv* env, jclass, jbyteArray publicKey, jbyteArray nonce,
+    jstring labelPrefix, jstring deviceId, jstring deviceName, jobjectArray requested, jstring sshPublicKey) {
     uint8_t pub[32], n[QCB_PAIR_NONCE_SIZE], out[32];
-    if (!copy_exact(env, publicKey, pub, 32) || !copy_exact(env, nonce, n, QCB_PAIR_NONCE_SIZE)) return nullptr;
-    qcb_pair_commitment(pub, n, out);
+    std::string label, id, name, ssh; std::vector<std::string> grants; std::vector<const char*> grantPointers;
+    if (!copy_exact(env, publicKey, pub, 32) || !copy_exact(env, nonce, n, QCB_PAIR_NONCE_SIZE) ||
+        !utf8(env, labelPrefix, label) || !utf8(env, deviceId, id) || !utf8(env, deviceName, name) ||
+        !utf8(env, sshPublicKey, ssh, true) || !string_array(env, requested, grants, grantPointers)) return nullptr;
+    if (qcb_pair_commitment_v2(label.c_str(), pub, n, id.c_str(), name.c_str(), grantPointers.data(),
+                               grantPointers.size(), sshPublicKey ? ssh.c_str() : nullptr, out) != 0) return nullptr;
     return to_java(env, out, 32);
 }
 
 /* Six ASCII digits, then the 32-byte key; null for an unusable host key. */
 JNIEXPORT jbyteArray JNICALL
 Java_com_illixion_convolution_AnalysisNative_pairAgree(JNIEnv* env, jclass, jbyteArray secret, jbyteArray nonce,
-                                                      jbyteArray hostPublicKey, jbyteArray hostNonce) {
-    uint8_t s[32], n[QCB_PAIR_NONCE_SIZE], hp[32], hn[QCB_PAIR_NONCE_SIZE];
+    jbyteArray hostPublicKey, jbyteArray hostNonce, jbyteArray commitment, jstring labelPrefix,
+    jstring hostId, jstring hostName, jstring deviceId, jstring deviceName, jobjectArray requested, jstring sshPublicKey) {
+    uint8_t s[32], n[QCB_PAIR_NONCE_SIZE], hp[32], hn[QCB_PAIR_NONCE_SIZE], committed[32];
+    std::string label, hid, hname, did, dname, ssh; std::vector<std::string> grants; std::vector<const char*> grantPointers;
     if (!copy_exact(env, secret, s, 32) || !copy_exact(env, nonce, n, QCB_PAIR_NONCE_SIZE) ||
         !copy_exact(env, hostPublicKey, hp, 32) || !copy_exact(env, hostNonce, hn, QCB_PAIR_NONCE_SIZE)) {
         qcb_wipe(s, sizeof(s));
         return nullptr;
     }
+    if (!copy_exact(env, commitment, committed, 32) || !utf8(env, labelPrefix, label) ||
+        !utf8(env, hostId, hid) || !utf8(env, hostName, hname) || !utf8(env, deviceId, did) ||
+        !utf8(env, deviceName, dname) || !utf8(env, sshPublicKey, ssh, true) ||
+        !string_array(env, requested, grants, grantPointers)) { qcb_wipe(s, sizeof(s)); return nullptr; }
     char code[7];
     uint8_t out[6 + 32];
-    int result = qcb_pair_agree_labelled(s, n, hp, hn, kVergenceLabel, code, out + 6);
+    int result = qcb_pair_agree_v2(s, n, hp, hn, committed, label.c_str(), hid.c_str(), hname.c_str(),
+        did.c_str(), dname.c_str(), grantPointers.data(), grantPointers.size(), sshPublicKey ? ssh.c_str() : nullptr,
+        code, out + 6);
     qcb_wipe(s, sizeof(s));
     if (result != 0) return nullptr;
     std::memcpy(out, code, 6);
