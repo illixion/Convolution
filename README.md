@@ -319,6 +319,14 @@ better than the stock model on real films, publish the validated package once
 and add it to the in-app download catalog; viewers should not need Python or a
 Mac/PC to generate it.
 
+## Support
+
+I'm Ixion. I make Convolution, and everything else I publish, as free and open-source software, and I don't expect anything in return. If it's useful to you and you'd like to help me keep building, you can [sponsor me on GitHub](https://github.com/sponsors/illixion). If not, I hope you enjoy it all the same. 💖
+
+<!-- Pose art slot: once https://illixion.com/images/support/synth-wave.png exists, uncomment:
+<p align="center"><img src="https://illixion.com/images/support/synth-wave.png" width="220" alt="Ixion's Synth character waving"></p>
+-->
+
 ## License
 
 See [LICENSE.txt](LICENSE.txt) for licensing information, and
