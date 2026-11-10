@@ -22,6 +22,7 @@
 		AA15000000000000000000A3 /* FFmpegDecoders in Frameworks */ = {isa = PBXBuildFile; productRef = AA15000000000000000000A2 /* FFmpegDecoders */; };
 		AA17000000000000000000A3 /* RAVESearch in Frameworks */ = {isa = PBXBuildFile; productRef = AA17000000000000000000A2 /* RAVESearch */; };
 		AA14000000000000000000A3 /* GeneratedCaptions in Frameworks */ = {isa = PBXBuildFile; productRef = AA14000000000000000000A2 /* GeneratedCaptions */; };
+		AA20000000000000000000A3 /* RAVESupport in Frameworks */ = {isa = PBXBuildFile; productRef = AA20000000000000000000A2 /* RAVESupport */; };
 		AA11000000000000000000A3 /* RAVEFilm in Frameworks */ = {isa = PBXBuildFile; productRef = AA11000000000000000000A2 /* RAVEFilm */; };
 		AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */ = {isa = PBXBuildFile; productRef = AA12000000000000000000A2 /* RAVEDeviceSetup */; };
 		AA18000000000000000000A3 /* RAVECompanion in Frameworks */ = {isa = PBXBuildFile; productRef = AA18000000000000000000A2 /* RAVECompanion */; };
@@ -84,6 +85,7 @@
 				AA15000000000000000000A3 /* FFmpegDecoders in Frameworks */,
 				AA17000000000000000000A3 /* RAVESearch in Frameworks */,
 				AA11000000000000000000A3 /* RAVEFilm in Frameworks */,
+				AA20000000000000000000A3 /* RAVESupport in Frameworks */,
 				AA14000000000000000000A3 /* GeneratedCaptions in Frameworks */,
 				AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */,
 				AA18000000000000000000A3 /* RAVECompanion in Frameworks */,
@@ -189,6 +191,7 @@
 				AA15000000000000000000A2 /* FFmpegDecoders */,
 				AA17000000000000000000A2 /* RAVESearch */,
 				AA11000000000000000000A2 /* RAVEFilm */,
+				AA20000000000000000000A2 /* RAVESupport */,
 				AA12000000000000000000A2 /* RAVEDeviceSetup */,
 				AA18000000000000000000A2 /* RAVECompanion */,
 				AA14000000000000000000A2 /* GeneratedCaptions */,
@@ -747,6 +750,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AA14000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/GeneratedCaptions" */;
 			productName = GeneratedCaptions;
+		};
+		AA20000000000000000000A2 /* RAVESupport */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA01000000000000000000A1 /* XCLocalSwiftPackageReference "../../RAVESDK" */;
+			productName = RAVESupport;
 		};
 		AA11000000000000000000A2 /* RAVEFilm */ = {
 			isa = XCSwiftPackageProductDependency;

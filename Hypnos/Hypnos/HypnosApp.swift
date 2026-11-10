@@ -13,6 +13,7 @@
 import DebugTrace
 import DebugTraceServer
 import DebugTraceUI
+import RAVESupport
 import RAVEUI
 import SwiftUI
 
@@ -98,6 +99,7 @@ struct HypnosApp: App {
         // gallery with its own cover stack.
         WindowGroup("Convolution", id: HypnosSceneID.main) {
             IOSRootView(appModel: appModel)
+                .raveSupportWelcome(RAVESupportConfig(appName: "Convolution", appID: "com.illixion.hypnos"))
         }
     }
     #endif
@@ -111,6 +113,7 @@ struct HypnosApp: App {
         // `IOSRootView`'s cover-stack-over-a-touch-gallery shape.
         WindowGroup("Convolution", id: HypnosSceneID.main) {
             TVRootView(appModel: appModel)
+                .raveSupportWelcome(RAVESupportConfig(appName: "Convolution", appID: "com.illixion.hypnos"))
         }
     }
     #endif
@@ -171,6 +174,7 @@ struct HypnosApp: App {
                 .handleIncomingMediaURLs(appModel: appModel)
                 .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
                 .debugApprovalPrompts()
+                .raveSupportWelcome(RAVESupportConfig(appName: "Convolution", appID: "com.illixion.hypnos"))
         }
         .defaultSize(width: 1280, height: 820)
         .handlesExternalEvents(matching: ["*"])

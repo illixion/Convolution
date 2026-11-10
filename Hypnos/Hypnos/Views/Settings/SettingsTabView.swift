@@ -14,6 +14,7 @@
  */
 
 import RAVEMedia
+import RAVESupport
 import SwiftUI
 
 /// Outcome of a "Apply & Test Connection" check, carrying whether it should
@@ -113,6 +114,10 @@ struct SettingsTabView: View {
 
                 Section {
                     row(.developer, "Developer", systemImage: "hammer")
+                }
+
+                Section {
+                    RAVESupportCard(RAVESupportConfig(appName: "Convolution", appID: "com.illixion.hypnos"))
                 }
 
                 Section {

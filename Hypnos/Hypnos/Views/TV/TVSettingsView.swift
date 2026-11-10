@@ -24,6 +24,7 @@
 #if os(tvOS)
 
 import RAVEDeviceSetup
+import RAVESupport
 import RAVEUI
 import SwiftUI
 
@@ -108,6 +109,9 @@ struct TVSettingsView: View {
                     row(.aiCaptions, "AI Captions", systemImage: "captions.bubble", value: "")
                     row(.cache, "Cache", systemImage: "internaldrive", value: cachePreset.label)
                     row(.developer, "Developer", systemImage: "hammer", value: "")
+                }
+                Section {
+                    RAVESupportCard(RAVESupportConfig(appName: "Convolution", appID: "com.illixion.hypnos"))
                 }
             }
             .raveScreenTitle("Settings")

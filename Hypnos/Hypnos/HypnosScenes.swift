@@ -14,6 +14,7 @@
 import DebugTrace
 import DebugTraceServer
 import DebugTraceUI
+import RAVESupport
 import RAVEUI
 import SwiftUI
 
@@ -30,6 +31,7 @@ struct HypnosWindows: Scene {
             // Windows tab is for. Each tab lists every main window but its own.
             MainWindowView(appModel: appModel, windowId: windowId)
                 .handleIncomingMediaURLs(appModel: appModel)
+                .raveSupportWelcome(RAVESupportConfig(appName: "Convolution", appID: "com.illixion.hypnos"))
                 .debugApprovalPrompts()
         } defaultValue: {
             UUID()

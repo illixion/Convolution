@@ -58,6 +58,8 @@ enum AppLauncher {
 
         var overrides = baseline
         overrides["hasCompletedWelcome"] = welcome == .shown ? "0" : "1"
+        // RAVESupport's one-time sponsor sheet would sit over every screen under test.
+        overrides["rave.support.welcomeShown.com.illixion.hypnos"] = "1"
         overrides.merge(defaults) { _, caller in caller }
         // Sorted so a failing run is reproducible from the logged arguments.
         for (key, value) in overrides.sorted(by: { $0.key < $1.key }) {
