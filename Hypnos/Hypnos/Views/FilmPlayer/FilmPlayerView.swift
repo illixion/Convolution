@@ -758,7 +758,7 @@ struct FilmPlayerView: View {
     /// and the title's details): they keep the gaze with the picture still
     /// tappable.
     private static let popoverHolds: Set<String> = [
-        "More", "Cinema", detailsHold, "View Mode", "Picture Quality", "Audio", "Audio Quality", "Subtitles", "Speed",
+        "More", "Cinema", detailsHold, "View Mode", "Picture Quality", "Audio", "Audio Quality", "Subtitles", "Speed", "Equalizer",
     ]
 
     /// A menu, popover or sheet is open over the picture, which dims for it.
@@ -1172,6 +1172,8 @@ struct FilmTransport: View {
             PlaybackSpeedMenu(speed: player.speed, onOpenChanged: { menuChanged("Speed", $0) }) { speed in
                 player.setSpeed(speed)
             }
+            // The film's objects and room are always reached, so no coverage to report.
+            AudioEQMenu(onOpenChanged: { menuChanged("Equalizer", $0) })
             SleepTimerMenu(onOpenChanged: { menuChanged("Sleep Timer", $0) })
         }
         if shows(2) {

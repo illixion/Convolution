@@ -380,6 +380,15 @@ final class VideoWindowModel {
         refreshAudioTracks()
     }
 
+    /// What the equalizer found on the playing item's audio (`AudioEQMenu` says so when it can't
+    /// reach it: HLS). Nil until known, and while a new item loads.
+    private(set) var audioEQResult: EQAttachResult?
+
+    func noteAudioEQ(_ result: EQAttachResult?) {
+        guard audioEQResult != result else { return }
+        audioEQResult = result
+    }
+
     func noteStereoAudioPlayer(_ player: AVPlayer?) {
         guard stereoAudioPlayer !== player else { return }
         stereoAudioPlayer = player
@@ -569,8 +578,8 @@ final class VideoWindowModel {
 
     /// The ornament "menus" that are popovers: the control strip's More,
     /// Cinema, the title's Details and the bar's choices (view mode,
-    /// quality, subtitles, speed).
-    static let popoverMenuNames: Set<String> = ["More", "Cinema", "Details", "Playback Info", "View Mode", "Quality", "Subtitles", "Audio", "Speed"]
+    /// quality, subtitles, speed, equalizer).
+    static let popoverMenuNames: Set<String> = ["More", "Cinema", "Details", "Playback Info", "View Mode", "Quality", "Subtitles", "Audio", "Speed", "Equalizer"]
 
     /// Only popovers are open: they keep the gaze even with the stereo
     /// picture tappable, so a tap on the picture can close them. A real menu

@@ -371,6 +371,7 @@ extension Pseudo3DStereoEngine {
                 })
                 playbackModel?.noteStereoAudioPlayer(player)
             }
+            onAudioEQResult = { [weak playbackModel] result in playbackModel?.noteAudioEQ(result) }
             playbackModel.playCommand = { [weak self] in self?.play() }
             playbackModel.pauseCommand = { [weak self] in self?.pause() }
             playbackModel.seekCommand = { [weak self] t in self?.seek(to: t) }

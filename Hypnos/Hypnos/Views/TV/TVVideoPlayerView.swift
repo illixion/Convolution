@@ -47,6 +47,7 @@
 #if os(tvOS)
 
 import AVKit
+import RAVEMedia
 import DebugTrace
 import GeneratedCaptions
 import SwiftUI
@@ -639,6 +640,8 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         var pictureObservation: NSKeyValueObservation?
         /// The item playing (or the one a looper plays copies of).
         var item: AVPlayerItem?
+        /// What the equalizer found on the audio (it can't reach HLS).
+        private(set) var audioEQResult: EQAttachResult?
         private var shownInfo: PlayerDetails?
         private var shownArtwork: UIImage?
         private var shownMetadata: [AVMetadataItem]?
@@ -647,6 +650,12 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         @MainActor func makeItem(_ url: URL) -> AVPlayerItem {
             let item = AVPlayerItem(asset: MediaAuthorization.shared.asset(for: url))
             item.applySpatialAudioPolicy()
+            audioEQResult = nil
+            item.attachAudioEQ { [weak self] result in
+                guard let self else { return }
+                self.audioEQResult = result
+                self.refreshTransportBar() // the bar's menu says when the stream can't be equalised
+            }
             item.preferredMaximumResolution = maximumResolution
             if let shownMetadata { item.externalMetadata = shownMetadata }
             return item
@@ -826,7 +835,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
 
         @MainActor private func refreshTransportBar() {
             guard let controller else { return }
-            controller.transportBarCustomMenuItems = [qualityMenu(), subtitleMenu(), ratingMenu(), loopItem(), SleepTimerTVMenu.make()]
+            controller.transportBarCustomMenuItems = [qualityMenu(), subtitleMenu(), ratingMenu(), loopItem(), AudioEQTVMenu.make(coverage: audioEQResult), SleepTimerTVMenu.make()]
                 .compactMap { $0 }
             if subtitles?.selected != nil { silenceSystemSubtitles() }
         }

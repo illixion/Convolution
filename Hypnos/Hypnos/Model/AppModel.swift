@@ -1413,6 +1413,8 @@ class AppModel {
         }
         // Conversions log too, with no player open: send them to DebugTrace.
         RAVEMediaLog.routeVergenceLogs()
+        // The listener's equalizer, handed to RAVEMedia's players (the stereo engine) before any exists.
+        AudioEQ.install()
 
         Task.detached(priority: .utility) {
             DepthConversionManager.cleanupOrphanedDownloads()

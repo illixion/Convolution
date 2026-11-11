@@ -61,7 +61,7 @@ struct SettingsTabView: View {
 
     enum Page: Hashable {
         case jellyfin, stash, nextcloud, photoLibrary, localFiles, deviceSetup
-        case general, gallery, photos, videos, subtitles, slideshows, windowGroups, sleepTimer
+        case general, gallery, photos, videos, subtitles, slideshows, windowGroups, sleepTimer, equalizer
         case aiFeatures, ai3D, aiCaptions, smartActivation, compute
         case cache, backup, developer
         #if HYPNOS_YOUTUBE
@@ -102,6 +102,7 @@ struct SettingsTabView: View {
                     row(.slideshows, "Slideshows", systemImage: "play.square.stack")
                     row(.sleepTimer, "Sleep Timer", systemImage: "moon.zzz", value: sleepTimerStatus)
                         .accessibilityIdentifier(A11y.SleepTimerUI.settingsRow)
+                    row(.equalizer, "Equalizer", systemImage: "slider.vertical.3", value: AudioEQ.statusLabel)
                     if PlatformCapabilities.supportsWindowManagement {
                         row(.windowGroups, "Window Groups", systemImage: "macwindow.on.rectangle",
                             value: appModel.savedWindowGroups.isEmpty ? "" : "\(appModel.savedWindowGroups.count)")
@@ -204,6 +205,7 @@ struct SettingsTabView: View {
             #endif
         case .slideshows: SlideshowSettingsPage()
         case .sleepTimer: SleepTimerSettingsPage()
+        case .equalizer: AudioEQSettingsPage()
         case .windowGroups: WindowGroupsSettingsPage()
         case .cache: SettingsPage("Cache") { CacheSettingsSection() }
         case .backup:

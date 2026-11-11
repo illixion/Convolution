@@ -320,6 +320,9 @@ struct NativeMetalVideoPlayerView {
                 })
                 playbackModel?.noteNativePlayer(player)
             }
+            coordinator.onAudioEQResult = { [weak playbackModel] result in
+                playbackModel?.noteAudioEQ(result)
+            }
             coordinator.onFrameRateKnown = { [weak playbackModel] rate in
                 playbackModel?.notePictureFrameRate(rate)
             }
@@ -488,6 +491,8 @@ struct NativeMetalVideoPlayerView {
         var onPlaybackUpdate: ((PlaybackState) -> Void)?
         /// The AVPlayer, as each load makes one and teardown drops it.
         var onPlayerChanged: ((AVPlayer?) -> Void)?
+        /// What the equalizer found on the item just opened (nil while it loads).
+        var onAudioEQResult: (@MainActor (EQAttachResult?) -> Void)?
         #if os(iOS) || os(macOS)
         let pictureInPicture = VideoPictureInPicture()
         #endif
@@ -616,6 +621,12 @@ struct NativeMetalVideoPlayerView {
             let asset = MediaAuthorization.shared.asset(for: url)
             let item = AVPlayerItem(asset: asset)
             item.applySpatialAudioPolicy(sceneIdentifier: spatialAudioSceneIdentifier)
+            onAudioEQResult?(nil)
+            item.attachAudioEQ { [weak self, weak item] result in
+                // A result for an item this player has since dropped says nothing about the current one.
+                guard let self, let item, self.playerItem === item else { return }
+                self.onAudioEQResult?(result)
+            }
             let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
                 kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
                 kCVPixelBufferMetalCompatibilityKey as String: true

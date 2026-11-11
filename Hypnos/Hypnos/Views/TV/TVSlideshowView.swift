@@ -28,6 +28,7 @@
 import AVFoundation
 import Combine
 import DebugTrace
+import RAVEMedia
 import RAVESlideshow
 import SwiftUI
 import UIKit
@@ -412,6 +413,7 @@ private struct TVSlideshowVideoLayer: UIViewRepresentable {
                 }
                 let asset = MediaAuthorization.shared.asset(for: playable)
                 let item = AVPlayerItem(asset: asset)
+                item.attachAudioEQ()
                 self.statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
                     guard item.status == .failed else { return }
                     DispatchQueue.main.async {

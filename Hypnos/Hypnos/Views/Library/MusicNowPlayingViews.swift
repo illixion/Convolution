@@ -5,6 +5,7 @@
  lyrics pane read it every second.
  */
 
+import RAVEMedia
 import SwiftUI
 import RAVEUI
 
@@ -279,6 +280,8 @@ private struct MusicLyricsLines: View {
 
 struct MusicAudioOptionsMenu: View {
     let music: JellyfinMusicSession
+    @Bindable private var eq = AudioEQ.shared
+    @State private var showsEQEditor = false
 
     var body: some View {
         Menu {
@@ -291,6 +294,18 @@ struct MusicAudioOptionsMenu: View {
             }
             Divider()
             Toggle("Sound Check", systemImage: "speaker.wave.2", isOn: Binding(get: { music.soundCheck }, set: { music.setSoundCheck($0) }))
+            Divider()
+            Toggle("Equalizer", systemImage: "slider.vertical.3", isOn: Binding(get: { eq.settings.enabled }, set: { eq.setEnabled($0) }))
+            Menu("Equalizer Preset") {
+                ForEach(EQPreset.builtIns + eq.customPresets) { preset in
+                    Toggle(preset.name, isOn: Binding(get: { eq.matches(preset) }, set: { _ in eq.apply(preset) }))
+                }
+            }
+            #if !os(tvOS)
+            Button { showsEQEditor = true } label: { Label("Edit Equalizer…", systemImage: "slider.horizontal.3") }
+            #endif
+            // A song Jellyfin transcodes to HLS can't be equalised on the device.
+            if let note = AudioEQ.explanation(for: music.eqResult) { Text(note) }
             #if os(visionOS)
             Divider()
             Button {
@@ -304,6 +319,10 @@ struct MusicAudioOptionsMenu: View {
         }
         .accessibilityLabel("Audio options: \(music.audioMode.title)")
         .help("Speaker Mode mixes with other audio. Music Mode takes audio focus and enables system playback controls.")
+        .onAppear { eq.reloadPresets() }
+        #if !os(tvOS)
+        .sheet(isPresented: $showsEQEditor, onDismiss: { eq.reloadPresets() }) { AudioEQEditorSheet() }
+        #endif
     }
 }
 

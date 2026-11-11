@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import MediaPlayer
+import RAVEMedia
 
 struct JellyfinMusicNameID: Decodable, Hashable, Sendable {
     let Name: String
@@ -115,6 +116,9 @@ final class JellyfinMusicSession {
     /// Even out song loudness with the server's `NormalizationGain` (Jellyfin's LUFS scan).
     private(set) var soundCheck = HypnosDefaults.store.bool(forKey: "jellyfinMusic.soundCheck")
     var isShuffled = false
+    /// What the equalizer found on the playing song's audio: it can't reach a song Jellyfin
+    /// transcodes to HLS (anything but mp3/aac/m4a/flac/wav/alac). Nil until known.
+    private(set) var eqResult: EQAttachResult?
     private(set) var repeatMode = MusicRepeatMode(rawValue: HypnosDefaults.store.string(forKey: "jellyfinMusic.repeatMode") ?? "") ?? .off
     /// Whether the queue wraps around: Repeat All, and Repeat One once the listener moves on by hand.
     var repeats: Bool { repeatMode != .off }
@@ -125,6 +129,8 @@ final class JellyfinMusicSession {
     @ObservationIgnored private var randomConfiguration: String?
     @ObservationIgnored private var refillTask: Task<Void, Never>?
     @ObservationIgnored private var queueGeneration = UUID()
+    /// Each queued item's equalizer result, weakly keyed: a preloaded song reports before it plays.
+    @ObservationIgnored private let eqResults = NSMapTable<AVPlayerItem, EQResultBox>(keyOptions: .weakMemory, valueOptions: .strongMemory)
     private var player: AVPlayer?
     private var observation: NSKeyValueObservation?
     private var itemObservation: NSKeyValueObservation?
@@ -416,7 +422,18 @@ final class JellyfinMusicSession {
         #if os(visionOS)
         playerItem.allowedAudioSpatializationFormats = .monoStereoAndMultichannel
         #endif
+        playerItem.attachAudioEQ { [weak self, weak playerItem] result in
+            guard let self, let playerItem else { return }
+            self.eqResults.setObject(EQResultBox(result), forKey: playerItem)
+            self.syncEQResult()
+        }
         return playerItem
+    }
+
+    /// `eqResult` follows whichever item the player is on now.
+    private func syncEQResult() {
+        let result = player?.currentItem.flatMap { eqResults.object(forKey: $0)?.result }
+        if eqResult != result { eqResult = result }
     }
 
     /// Where playback goes after the current song, when that is already known (not a random refill).
@@ -451,6 +468,7 @@ final class JellyfinMusicSession {
         duration = Double(preloaded.music.RunTimeTicks ?? 0) / 10_000_000
         isPlaying = true
         applyVolume()
+        syncEQResult()
         reportStarted()
         publishNowPlaying()
         refreshPreload()
@@ -471,6 +489,7 @@ final class JellyfinMusicSession {
         let nextPlayer = AVQueuePlayer(items: [firstItem])
         nextPlayer.actionAtItemEnd = .advance
         player = nextPlayer
+        syncEQResult()
         nextPlayer.isMuted = isMuted
         applyVolume()
         applySpatialAudioPreference()
@@ -551,6 +570,7 @@ final class JellyfinMusicSession {
         (player as? AVQueuePlayer)?.removeAllItems()
         player?.replaceCurrentItem(with: nil)
         player = nil
+        syncEQResult()
     }
 
     // MARK: - Reporting to Jellyfin
@@ -711,4 +731,10 @@ final class JellyfinMusicSession {
         guard let base = URL(string: s.server), !s.apiKey.isEmpty || JellyfinAuth.shared.session != nil else { return nil }
         return (base, JellyfinAuth.shared.session?.accessToken ?? s.apiKey)
     }
+}
+
+/// An `EQAttachResult` in a class, for a weak-keyed `NSMapTable`.
+private final class EQResultBox {
+    let result: EQAttachResult
+    init(_ result: EQAttachResult) { self.result = result }
 }

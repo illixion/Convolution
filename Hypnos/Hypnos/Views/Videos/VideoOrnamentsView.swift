@@ -114,6 +114,7 @@ struct VideoOrnamentsView: View {
             subtitleMenu
             audioMenu
             speedMenu
+            audioEQMenu
             sleepTimerMenu
             // Depth-conversion status for THIS video — visible at a glance
             // without keeping the ViewMode menu open. Isolated in its own view
@@ -150,6 +151,7 @@ struct VideoOrnamentsView: View {
                 subtitleMenu
                 audioMenu
                 speedMenu
+                audioEQMenu
                 sleepTimerMenu
                 ConversionStatusRow(videoIdentity: video.identity)
             }
@@ -345,6 +347,11 @@ struct VideoOrnamentsView: View {
         PlaybackSpeedMenu(speed: windowModel.playbackSpeed, onOpenChanged: { chromeMenu("Speed", opened: $0) }) { speed in
             windowModel.setPlaybackSpeed(speed)
         }
+    }
+
+    /// The listener's equalizer, with what it found on this video's sound (it can't reach HLS).
+    private var audioEQMenu: some View {
+        AudioEQMenu(coverage: windowModel.audioEQResult, onOpenChanged: { chromeMenu("Equalizer", opened: $0) })
     }
 
     private var sleepTimerMenu: some View {

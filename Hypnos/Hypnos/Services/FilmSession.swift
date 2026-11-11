@@ -23,6 +23,8 @@ final class FilmSession {
     let player: FilmPlayer = {
         let player = FilmPlayer()
         player.volume = Float(PlayerVolume.saved)
+        // Every film's objects and room follow the listener's equalizer.
+        player.audioEQ = AudioEQ.shared
         return player
     }()
     /// The loaded item's subtitle tracks, drawn over the picture by the player view.
