@@ -758,7 +758,7 @@ struct YouTubeVideoCard: View {
     /// until the lookup answers, or if it can't. Something from the last
     /// day keeps "5 hours ago" in front, which says more than the day alone.
     private var publishedLine: String? {
-        guard let date = uploadDates.dates[video.id] else { return video.publishedText }
+        guard let date = uploadDates.date(for: video.id) else { return video.publishedText }
         let day = date.formatted(Self.dayStyle)
         if let relative = video.publishedText, Date.now.timeIntervalSince(date) < 86_400 {
             return "\(relative) · \(day)"

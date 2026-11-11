@@ -33,7 +33,27 @@ final class YouTubeUploadDates {
         var date: Date
     }
 
-    private(set) var dates: [YouTubeVideoID: Date] = [:]
+    /// Not observed: a view reads `date(for:)`, so an answer re-renders only
+    /// the tile it belongs to (an observed dictionary re-ran every tile, and
+    /// dismissed any open tile menu, on each of the ~2 answers a second).
+    @ObservationIgnored private(set) var dates: [YouTubeVideoID: Date] = [:]
+
+    @MainActor
+    @Observable
+    final class DateSlot {
+        fileprivate(set) var date: Date?
+        init(_ date: Date?) { self.date = date }
+    }
+
+    @ObservationIgnored private var slots: [YouTubeVideoID: DateSlot] = [:]
+
+    /// The publish date of `id`, observed for that video alone.
+    func date(for id: YouTubeVideoID) -> Date? {
+        if let slot = slots[id] { return slot.date }
+        let slot = DateSlot(dates[id])
+        slots[id] = slot
+        return slot.date
+    }
 
     /// Oldest answer first, for trimming to `limit`.
     @ObservationIgnored private var order: [YouTubeVideoID] = []
@@ -98,9 +118,13 @@ final class YouTubeUploadDates {
 
     private func store(_ date: Date, for id: YouTubeVideoID) {
         if dates.updateValue(date, forKey: id) == nil { order.append(id) }
+        if let slot = slots[id], slot.date != date { slot.date = date }
         if order.count > Self.limit {
             let stale = order.prefix(order.count - Self.limit)
-            for old in stale { dates[old] = nil }
+            for old in stale {
+                dates[old] = nil
+                if let slot = slots[old] { slot.date = nil }
+            }
             order.removeFirst(stale.count)
         }
         scheduleSave()
