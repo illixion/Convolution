@@ -5,9 +5,11 @@ import Foundation
 /// visionOS 27.2, so the playlists are read here and the audio segments
 /// decoded one at a time: fragmented MP4 (an `EXT-X-MAP` and moof/mdat
 /// segments, Jellyfin's) through `RAVECaptionAudioSource.fragmentedMP4`, and
-/// packed audio (ADTS AAC behind an ID3 tag, YouTube's) through
-/// `RAVECaptionAudioSource.packedAudio`. Only segments from the playhead on
-/// are fetched, never the whole stream.
+/// packed audio (ADTS AAC behind an ID3 tag, YouTube's) and MPEG-TS (Stash's,
+/// Jellyfin's music) through `RAVECaptionAudioSource.packedAudio`. Only
+/// segments from the playhead on are fetched, never the whole stream. The
+/// audio equalizer plays what this reads, so it is continuous across
+/// segments and timed as the player times it.
 public enum HLSCaptionAudio {
     /// The audio the player has selected, as its media selection says.
     public struct Selection: Sendable {

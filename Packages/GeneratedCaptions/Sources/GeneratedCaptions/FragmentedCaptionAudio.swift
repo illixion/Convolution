@@ -20,7 +20,7 @@ private actor FragmentedCaptionAudio {
     private var output: AVAssetReaderTrackOutput?
     private var file: URL?
     private var timeOffset = 0.0
-    private var converter: AVAudioConverter?
+    private let decoder = CompressedAudioDecoder()
     /// The reader hands out linear PCM itself (see `readsPCM`).
     private var decodesInReader = false
 
@@ -35,7 +35,7 @@ private actor FragmentedCaptionAudio {
         while true {
             try Task.checkCancellation()
             if let output, let sample = output.copyNextSampleBuffer() {
-                if let buffer = try decodesInReader ? pcm(sample) : decode(sample) {
+                if let buffer = try decodesInReader ? CompressedAudioDecoder.pcm(sample) : decoder.decode(sample) {
                     return RAVECaptionAudioChunk(buffer: buffer, time: timeOffset + CMSampleBufferGetPresentationTimeStamp(sample).seconds)
                 }
                 continue
@@ -57,10 +57,16 @@ private actor FragmentedCaptionAudio {
                       let presentation = FragmentTimes.firstPresentation(data)[UInt32(bitPattern: track.trackID)] else {
                     throw URLError(.cannotDecodeContentData)
                 }
-                timeOffset = Double(presentation) / Double(scale) - (try await track.load(.timeRange)).start.seconds
+                // Placed against the picture by the edit lists, as the player places it.
+                let edits = FragmentEditList.offset(track: UInt32(bitPattern: track.trackID), timescale: scale, initSegment: data)
+                timeOffset = Double(presentation) / Double(scale) + edits - (try await track.load(.timeRange)).start.seconds
                 try Task.checkCancellation()
                 let reader = try AVAssetReader(asset: asset)
-                // Keep one codec decoder across fragments. Asking each reader
+                // ALAC (what the remux makes of DTS and TrueHD) is read as PCM
+                // by the reader: our converter fails every ALAC packet as bad
+                // data ('!dat', 560226676), with the cookie wrapped or not, and
+                // ALAC has no priming to trim. Keep one codec decoder across
+                // fragments for the rest. Asking each reader
                 // for PCM applies AAC priming trims at every segment boundary,
                 // dropping speech there (96 ms per segment at 22.05 kHz).
                 let readsPCM = try await track.load(.formatDescriptions).contains {
@@ -81,73 +87,6 @@ private actor FragmentedCaptionAudio {
                 throw error
             }
         }
-    }
-
-    /// ALAC (what the remux makes of DTS and TrueHD) is read as PCM by the
-    /// reader. Our own converter can't take it: it fails every packet as bad
-    /// data ('!dat', 560226676), with the cookie wrapped or not and the packet
-    /// descriptions as they are. ALAC has no priming to trim, which is the
-    /// reason the other codecs keep one converter across fragments.
-    private func pcm(_ sample: CMSampleBuffer) throws -> AVAudioPCMBuffer? {
-        let frames = CMSampleBufferGetNumSamples(sample)
-        // From the CoreMedia description, which carries a 5.1 layout that a
-        // bare stream description can't (that init fails for 6 channels).
-        guard frames > 0, let description = CMSampleBufferGetFormatDescription(sample),
-              let buffer = AVAudioPCMBuffer(pcmFormat: AVAudioFormat(cmAudioFormatDescription: description),
-                                            frameCapacity: AVAudioFrameCount(frames)) else { return nil }
-        buffer.frameLength = AVAudioFrameCount(frames)
-        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(sample, at: 0, frameCount: Int32(frames), into: buffer.mutableAudioBufferList)
-        guard status == noErr else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
-        return buffer
-    }
-
-    private func decode(_ sample: CMSampleBuffer) throws -> AVAudioPCMBuffer? {
-        let packets = CMSampleBufferGetNumSamples(sample)
-        guard packets > 0, let description = CMSampleBufferGetFormatDescription(sample),
-              let block = CMSampleBufferGetDataBuffer(sample) else { return nil }
-        let format = AVAudioFormat(cmAudioFormatDescription: description)
-        if converter?.inputFormat != format {
-            let pcm = format.channelLayout.map {
-                AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: format.sampleRate, interleaved: false, channelLayout: $0)
-            } ?? AVAudioFormat(standardFormatWithSampleRate: format.sampleRate, channels: format.channelCount)
-            guard let pcm,
-                  let decoder = AVAudioConverter(from: format, to: pcm) else { throw URLError(.cannotDecodeContentData) }
-            decoder.primeMethod = .none
-            var size = 0
-            if let cookie = CMAudioFormatDescriptionGetMagicCookie(description, sizeOut: &size), size > 0 {
-                decoder.magicCookie = Data(bytes: cookie, count: size)
-            }
-            converter = decoder
-        }
-        guard let converter else { throw URLError(.cannotDecodeContentData) }
-        let sizes = (0..<packets).map { CMSampleBufferGetSampleSize(sample, at: $0) }
-        let input = AVAudioCompressedBuffer(format: format, packetCapacity: AVAudioPacketCount(packets), maximumPacketSize: sizes.max() ?? 1)
-        input.packetCount = AVAudioPacketCount(packets)
-        input.byteLength = UInt32(CMBlockBufferGetDataLength(block))
-        let status = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: Int(input.byteLength), destination: input.data)
-        guard status == noErr else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
-        var offset = 0
-        for (index, size) in sizes.enumerated() {
-            var timing = CMSampleTimingInfo()
-            let status = CMSampleBufferGetSampleTimingInfo(sample, at: index, timingInfoOut: &timing)
-            let frames = status == noErr && timing.duration.isNumeric ? timing.duration.seconds * format.sampleRate : 0
-            input.packetDescriptions?[index] = AudioStreamPacketDescription(mStartOffset: Int64(offset),
-                mVariableFramesInPacket: UInt32(max(0, frames.rounded())), mDataByteSize: UInt32(size))
-            offset += size
-        }
-        let frames = CMSampleBufferGetDuration(sample).seconds * format.sampleRate
-        guard frames.isFinite, frames >= 0, frames < 10_000_000,
-              let output = AVAudioPCMBuffer(pcmFormat: converter.outputFormat, frameCapacity: AVAudioFrameCount(ceil(frames)) + 8192) else {
-            throw URLError(.cannotDecodeContentData)
-        }
-        var supplied = false
-        var error: NSError?
-        let result = converter.convert(to: output, error: &error) { _, status in
-            guard !supplied else { status.pointee = .noDataNow; return nil }
-            supplied = true; status.pointee = .haveData; return input
-        }
-        if result == .error { throw error ?? URLError(.cannotDecodeContentData) }
-        return output.frameLength > 0 ? output : nil
     }
 
     private func close() {

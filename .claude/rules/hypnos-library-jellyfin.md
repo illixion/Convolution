@@ -67,7 +67,13 @@ Jellyfin's `SegmentContainer=mp4`, muxed with the picture, so its video bytes
 are fetched and ignored) through `fragmentedMP4`, and **packed audio** (ADTS AAC
 behind an ID3 tag, no init segment; YouTube's audio renditions) through
 `packedAudio`, placed by the playlist's own timeline rather than the ID3
-timestamp. MPEG-TS segments and encrypted streams fail with their own message.
+timestamp. **MPEG-TS** (Stash's transcodes, Jellyfin's music) works since 2026-11-11: the audio
+PID's PES payloads become a raw ADTS/AC-3/E-AC-3/MP3 file, placed by its PTS against the segment's
+first video frame (`MPEGTSAudio`). Encrypted streams fail with their own message. Since the audio
+equalizer plays what this reads (`hypnos-audio-eq.md`), every container decodes through one codec
+decoder across segments (`CompressedAudioDecoder`; a reader per segment clicked at every seam) and
+fMP4 is placed by its edit lists (`FragmentEditList`); `HLSAudioTimingTests` holds all five forms
+to the millisecond.
 A progressive file still uses the file reader. The log now says "independent
 audio decoder" for all of these. Checked: package tests for the playlist parser
 and rendition choice, and `CAPTION_PACKED_FIXTURE=a.aac,b.aac
