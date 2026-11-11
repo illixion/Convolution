@@ -380,8 +380,8 @@ final class VideoWindowModel {
         refreshAudioTracks()
     }
 
-    /// What the equalizer found on the playing item's audio (`AudioEQMenu` says so when it can't
-    /// reach it: HLS). Nil until known, and while a new item loads.
+    /// What the equalizer found on the playing item's audio: a tap, the stream path (HLS), or why
+    /// neither (`AudioEQMenu` says so). Nil until known, and while a new item loads.
     private(set) var audioEQResult: EQAttachResult?
 
     func noteAudioEQ(_ result: EQAttachResult?) {

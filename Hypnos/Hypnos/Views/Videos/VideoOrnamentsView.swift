@@ -349,7 +349,7 @@ struct VideoOrnamentsView: View {
         }
     }
 
-    /// The listener's equalizer, with what it found on this video's sound (it can't reach HLS).
+    /// The listener's equalizer, with what it found on this video's sound (the menu says when it isn't shaping it).
     private var audioEQMenu: some View {
         AudioEQMenu(coverage: windowModel.audioEQResult, onOpenChanged: { chromeMenu("Equalizer", opened: $0) })
     }

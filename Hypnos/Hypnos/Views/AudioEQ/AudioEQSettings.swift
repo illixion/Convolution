@@ -34,7 +34,7 @@ struct AudioEQSettingsSections: View {
         } header: {
             Text("Equalizer")
         } footer: {
-            Text("One curve for everything you play: videos, films and music. It is also on each player's bar. Streams played as HLS (YouTube, server transcodes, MKV files) can't be equalised on this device, and the player's equalizer menu says so.")
+            Text("One curve for everything you play: videos, films, music and streams. It is also on each player's bar.")
         }
         .onAppear { eq.reloadPresets() }
         #if !os(tvOS)

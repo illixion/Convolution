@@ -622,11 +622,6 @@ struct NativeMetalVideoPlayerView {
             let item = AVPlayerItem(asset: asset)
             item.applySpatialAudioPolicy(sceneIdentifier: spatialAudioSceneIdentifier)
             onAudioEQResult?(nil)
-            item.attachAudioEQ { [weak self, weak item] result in
-                // A result for an item this player has since dropped says nothing about the current one.
-                guard let self, let item, self.playerItem === item else { return }
-                self.onAudioEQResult?(result)
-            }
             let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
                 kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
                 kCVPixelBufferMetalCompatibilityKey as String: true
@@ -638,6 +633,12 @@ struct NativeMetalVideoPlayerView {
             player.isMuted = startMuted
             player.volume = startVolume
             player.defaultRate = speed
+            // The equalizer, now the item has its player: an HLS item's sound is played in its place.
+            item.attachAudioEQ(player: player) { [weak self, weak item] result in
+                // A result for an item this player has since dropped says nothing about the current one.
+                guard let self, let item, self.playerItem === item else { return }
+                self.onAudioEQResult?(result)
+            }
             updateDrawRate()
 
             self.player = player
@@ -1051,7 +1052,7 @@ struct NativeMetalVideoPlayerView {
                     currentTime: currentTime ?? player.currentTime().seconds,
                     duration: duration.isFinite ? duration : 0,
                     paused: analysisBuffering ? !intendsToPlay : player.timeControlStatus == .paused,
-                    muted: player.isMuted,
+                    muted: player.listenerIsMuted,
                     buffered: buffered,
                     waiting: !analysisBuffering && player.timeControlStatus == .waitingToPlayAtSpecifiedRate
                 )

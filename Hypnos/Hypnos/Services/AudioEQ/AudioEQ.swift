@@ -13,11 +13,14 @@
  - **The stereo (AI 3D) player's item**, which RAVEMedia's engine makes: it reads
    `RAVEMediaPolicy.audioEQ`, set by `install()`.
 
- **What it cannot reach: HLS.** A tap needs real asset tracks and an HLS asset has none (measured,
- macOS 27.2; see `EQAudioTap`). So YouTube's HLS master, the on-device MKV remux, and Jellyfin's and
- Stash's HLS transcodes play unequalised, and each player says so (`AudioEQMenu`'s note) instead of
- showing an EQ that does nothing. The WebKit player isn't reached either (no tap on a web view's
- audio; Raven's Web Audio route reads silence on MSE).
+ - **HLS** (YouTube's master, the on-device MKV remux, Jellyfin's and Stash's transcodes, songs
+   Jellyfin transcodes), which no tap reaches (measured, macOS 27.2; see `EQAudioTap`): the stream's
+   audio is read and decoded here (`StreamEQAudio`, the AI captions reader) and RAVEMedia's
+   `EQStreamPlayback` plays it through the curve on the player item's clock, the player muted
+   under it. So the players attach the EQ once the item has its player.
+
+ The WebKit player isn't reached (no tap on a web view's audio; Raven's Web Audio route reads
+ silence on MSE); a stream whose audio can't be read (encrypted) says so in its menu.
  */
 
 import AVFoundation
@@ -28,6 +31,7 @@ enum AudioEQ {
     /// The app's EQ. Touching it (`install()` at launch) also hands it to RAVEMedia's players.
     static let shared: RAVEAudioEQ = {
         let eq = RAVEAudioEQ(defaults: HypnosDefaults.store)
+        eq.streamSource = { item, start in try await StreamEQAudio.reader(item: item, start: start) }
         RAVEMediaPolicy.audioEQ = eq
         return eq
     }()
@@ -46,12 +50,12 @@ enum AudioEQ {
     /// has been learned yet).
     static func explanation(for result: EQAttachResult?) -> String? {
         switch result {
-        case .none, .some(.attached):
+        case .none, .some(.attached), .some(.streamed):
             nil
         case .some(.noAudioTrack):
-            "The equalizer can't reach this sound. Streams played as HLS (YouTube, server transcodes, some MKV files) can't be equalised."
-        case .some(.failed):
-            "The equalizer couldn't attach to this sound."
+            "The equalizer can't reach this sound."
+        case .some(.failed(let reason)):
+            "The equalizer couldn't shape this sound: \(reason)"
         }
     }
 }

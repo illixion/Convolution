@@ -207,7 +207,7 @@ work on an area without having touched one of those files yet.
 | `hypnos-youtube.md` | YouTube resolver chain, surround splice, quality caps, SponsorBlock |
 | `hypnos-slideshows.md` | Picture and video slideshows, their profiles and window, Slideshow 3D |
 | `hypnos-sleep-timer.md` | Sleep timer: what ends and in what order, player registration, Home Assistant / HomeKit accessory actions via `RAVEHome`, HomeKit signing |
-| `hypnos-audio-eq.md` | Audio equalizer: one curve for every player, what it reaches (files, films, music) and what it cannot (HLS), RAVEMedia's tap and processor |
+| `hypnos-audio-eq.md` | Audio equalizer: one curve for every player (files, films, music, HLS streams), RAVEMedia's tap, processor and stream path, HLS audio timing |
 | `hypnos-ios-port.md`, `hypnos-tvos-port.md`, `hypnos-macos-port.md`, `hypnos-quest-port.md` | One file per platform port |
 | `hypnos-ui-tests.md` | XCUITest wiring |
 

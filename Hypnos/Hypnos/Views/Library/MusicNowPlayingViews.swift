@@ -304,7 +304,7 @@ struct MusicAudioOptionsMenu: View {
             #if !os(tvOS)
             Button { showsEQEditor = true } label: { Label("Edit Equalizer…", systemImage: "slider.horizontal.3") }
             #endif
-            // A song Jellyfin transcodes to HLS can't be equalised on the device.
+            // Why the equalizer isn't shaping this song, when it isn't (a stream it couldn't read).
             if let note = AudioEQ.explanation(for: music.eqResult) { Text(note) }
             #if os(visionOS)
             Divider()

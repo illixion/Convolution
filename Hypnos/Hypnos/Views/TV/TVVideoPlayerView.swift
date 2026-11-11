@@ -640,7 +640,7 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         var pictureObservation: NSKeyValueObservation?
         /// The item playing (or the one a looper plays copies of).
         var item: AVPlayerItem?
-        /// What the equalizer found on the audio (it can't reach HLS).
+        /// What the equalizer found on the audio (a tap, the stream path, or why neither).
         private(set) var audioEQResult: EQAttachResult?
         private var shownInfo: PlayerDetails?
         private var shownArtwork: UIImage?
@@ -651,11 +651,6 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
             let item = AVPlayerItem(asset: MediaAuthorization.shared.asset(for: url))
             item.applySpatialAudioPolicy()
             audioEQResult = nil
-            item.attachAudioEQ { [weak self] result in
-                guard let self else { return }
-                self.audioEQResult = result
-                self.refreshTransportBar() // the bar's menu says when the stream can't be equalised
-            }
             item.preferredMaximumResolution = maximumResolution
             if let shownMetadata { item.externalMetadata = shownMetadata }
             return item
@@ -720,6 +715,12 @@ private struct TVAVPlayerViewControllerRepresentable: UIViewControllerRepresenta
         /// Failure, readiness and the end of `item`, replacing the
         /// observers of the item before it.
         @MainActor func observe(_ item: AVPlayerItem, in player: AVQueuePlayer) {
+            // The equalizer, once the item has its player (an HLS item's sound is played in its place).
+            item.attachAudioEQ(player: player) { [weak self, weak item] result in
+                guard let self, let item, self.item === item else { return }
+                self.audioEQResult = result
+                self.refreshTransportBar() // the bar's menu says when the sound can't be equalised
+            }
             statusObservation?.invalidate()
             for observer in [failureObserver, endObserver].compactMap({ $0 }) {
                 NotificationCenter.default.removeObserver(observer)

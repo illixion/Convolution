@@ -9,6 +9,11 @@ import GeneratedCaptions
 enum StreamCaptionAudio {
     @MainActor static func source(item: AVPlayerItem, start: Double) async throws -> RAVECaptionAudioSource? {
         guard let url = (item.asset as? AVURLAsset)?.url, url.pathExtension.lowercased() == "m3u8" else { return nil }
+        return try await source(item: item, playlist: url, start: start)
+    }
+
+    /// The same, from `url`, the item's playlist (which its own URL may only redirect to).
+    @MainActor static func source(item: AVPlayerItem, playlist url: URL, start: Double) async throws -> RAVECaptionAudioSource? {
         // The audio the player is playing: its option's title is the
         // rendition's NAME (unique within a group) and its locale the LANGUAGE.
         var selection = HLSCaptionAudio.Selection()

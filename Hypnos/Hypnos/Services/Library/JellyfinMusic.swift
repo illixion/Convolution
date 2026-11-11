@@ -422,12 +422,17 @@ final class JellyfinMusicSession {
         #if os(visionOS)
         playerItem.allowedAudioSpatializationFormats = .monoStereoAndMultichannel
         #endif
-        playerItem.attachAudioEQ { [weak self, weak playerItem] result in
-            guard let self, let playerItem else { return }
-            self.eqResults.setObject(EQResultBox(result), forKey: playerItem)
+        return playerItem
+    }
+
+    /// The equalizer on `item`, once it is in `player`'s queue (a song Jellyfin transcodes is
+    /// HLS, whose sound the equalizer plays in the player's place).
+    private func attachEQ(_ item: AVPlayerItem, in player: AVPlayer) {
+        item.attachAudioEQ(player: player) { [weak self, weak item] result in
+            guard let self, let item else { return }
+            self.eqResults.setObject(EQResultBox(result), forKey: item)
             self.syncEQResult()
         }
-        return playerItem
     }
 
     /// `eqResult` follows whichever item the player is on now.
@@ -453,6 +458,7 @@ final class JellyfinMusicSession {
         guard let wanted, let (base, token) = connection(),
               let item = makePlayerItem(for: queue[wanted], base: base, token: token) else { return }
         queuePlayer.insert(item, after: queuePlayer.currentItem)
+        attachEQ(item, in: queuePlayer)
         preloaded = (item, queue[wanted], wanted)
     }
 
@@ -487,6 +493,7 @@ final class JellyfinMusicSession {
         if audioMode == .music { AudioSessionConfig.configureExclusiveMusicPlayback() }
         else { AudioSessionConfig.configureMixedPlayback() }
         let nextPlayer = AVQueuePlayer(items: [firstItem])
+        attachEQ(firstItem, in: nextPlayer)
         nextPlayer.actionAtItemEnd = .advance
         player = nextPlayer
         syncEQResult()
