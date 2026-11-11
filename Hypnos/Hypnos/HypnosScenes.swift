@@ -206,6 +206,23 @@ struct HypnosWindows: Scene {
     .defaultLaunchBehavior(.suppressed)
     .restorationBehavior(.disabled)
 
+    // The music visualizer: the queue's album art as Cover Flow, flat on a window of glass or standing in a volume.
+    Window("Visualizer", id: MusicVisualizerView.windowID) {
+        MusicVisualizerView(presentation: .window)
+    }
+    .windowStyle(.plain)
+    .defaultSize(width: 1100, height: 720)
+    .defaultLaunchBehavior(.suppressed)
+    .restorationBehavior(.disabled)
+
+    Window("Visualizer 3D", id: MusicVisualizerView.volumeID) {
+        MusicVisualizerView(presentation: .volume)
+    }
+    .windowStyle(.volumetric)
+    .defaultSize(width: 1.3, height: 0.75, depth: 0.6, in: .meters)
+    .defaultLaunchBehavior(.suppressed)
+    .restorationBehavior(.disabled)
+
     Window("Picture Compare", id: PictureCompare.windowID) {
         PictureCompareView()
     }

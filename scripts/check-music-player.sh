@@ -4,7 +4,9 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 checks_dir="$(mktemp -d "${TMPDIR:-/tmp}/hypnos-music-checks.XXXXXX")"
 swiftc -swift-version 6 -parse-as-library \
+    "$repo_root/Hypnos/Hypnos/Support/HypnosDefaults.swift" \
     "$repo_root/Hypnos/Hypnos/Services/Library/JellyfinMusic.swift" \
+    "$repo_root/Hypnos/Hypnos/Services/Library/MusicFlick.swift" \
     "$repo_root/Hypnos/Hypnos/Services/Library/MusicCatalog.swift" \
     "$repo_root/Hypnos/Hypnos/Services/Library/MusicSearchIndex.swift" \
     "$repo_root"/../RAVESDK/Sources/RAVESearch/*.swift \

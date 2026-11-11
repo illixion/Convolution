@@ -14,6 +14,11 @@ import Observation
     static let shared = JellyfinAuth()
     var session: Session?
 }
+/// The sleep timer's registry; the session only registers itself with it.
+@MainActor final class SleepTimer {
+    static let shared = SleepTimer()
+    func register(_ owner: AnyObject, pause: @escaping @MainActor () -> Bool) {}
+}
 enum AudioSessionConfig {
     static func configureMixedPlayback() {}
     static func configureExclusiveMusicPlayback() {}
@@ -62,6 +67,24 @@ actor JellyfinLibrary {
         lastRequest = request
         try await Task.sleep(for: .milliseconds(30))
         let itemType = request.section == .songs || request.playbackSongs ? "Audio" : "MusicAlbum"
+        if request.playlistID != nil {
+            // A playlist in the server's own order, with the fields a local sort reads.
+            let rows: [(name: String, minutes: Int, plays: Int)] = [("Delta", 4, 2), ("alpha", 2, 9), ("Charlie", 7, 0), ("Bravo", 3, 9), ("echo", 5, 1)]
+            let items = try rows.enumerated().map { index, row in
+                try JSONDecoder().decode(JellyfinMusicItem.self, from: Data(
+                    "{\"Id\":\"p-\(index)\",\"Name\":\"\(row.name)\",\"Type\":\"Audio\",\"PlaylistItemId\":\"e\(index)\",\"RunTimeTicks\":\(row.minutes * 600_000_000),\"UserData\":{\"PlayCount\":\(row.plays)}}".utf8))
+            }
+            return JellyfinMusicPage(Items: Array(items.dropFirst(start).prefix(limit)), TotalRecordCount: items.count)
+        }
+        if request.effectiveSort == .random, request.search.isEmpty {
+            // Random is dealt afresh on every call, as Jellyfin does: pages repeat each other.
+            let ids = Array((0..<125).shuffled().prefix(limit))
+            let items = try ids.map { index in
+                try JSONDecoder().decode(JellyfinMusicItem.self, from: Data(
+                    "{\"Id\":\"\(prefix)-\(index)\",\"Name\":\"Album \(index)\",\"Type\":\"\(itemType)\"}".utf8))
+            }
+            return JellyfinMusicPage(Items: items, TotalRecordCount: 125)
+        }
         let items = try (start..<min(start + limit, 125)).map { index in
             try JSONDecoder().decode(JellyfinMusicItem.self, from: Data(
                 "{\"Id\":\"\(prefix)-\(index)\",\"Name\":\"Album \(index)\",\"Type\":\"\(itemType)\",\"ChildCount\":12}".utf8))
@@ -274,6 +297,130 @@ actor JellyfinLibrary {
         precondition(runs.map { $0.range.count } == [2, 1, 2, 1])
         precondition(MusicGrouping.letter.runs([JellyfinMusicItem](), item: { $0 }).count == 1)
         print("Sort direction and section headers follow the order in force: PASS")
+
+        // Every list can be sorted, Random included, and a screen falls back to an order it offers.
+        precondition(MusicSection.allCases.allSatisfy { $0.sorts.contains(.random) && $0.sorts.contains($0.defaultSort) },
+                     "Every section sorts, shuffles, and offers the order it starts in")
+        precondition(MusicRequest(section: .recent).effectiveSort == .dateAdded && MusicRequest(section: .mostPlayed).effectiveSort == .plays)
+        precondition(MusicRequest(section: .recentlyPlayed).effectiveSort == .lastPlayed && MusicRequest(section: .recentlyPlayed).isDescending)
+        precondition(MusicRequest(section: .songs, albumID: "x").effectiveSort == .listOrder)
+        precondition(MusicRequest(section: .songs, albumID: "x", sort: .album).effectiveSort == .listOrder, "An order the album doesn't offer is ignored")
+        precondition(MusicRequest(section: .songs, albumID: "x", sort: .time).effectiveSort == .time)
+        precondition(MusicRequest(section: .albums, artistID: "x").effectiveSort == .year && MusicRequest(section: .albums, artistID: "x").isDescending)
+        precondition(MusicRequest(section: .albums, genreID: "x").effectiveSort == .title)
+        precondition(MusicRequest(section: .songs, artistID: "x").effectiveSort == nil, "The songs behind Play Next keep their order")
+        precondition(MusicRequest(section: .songs, playbackSongs: true).sorts.isEmpty)
+        precondition(MusicRequest(section: .albums, sort: .random).isDescending == false && !MusicSort.random.hasDirection)
+        precondition(MusicRequest(section: .albums, sort: .random, descending: true).isDescending == false, "Random has no direction")
+        precondition(MusicRequest(section: .albums, sort: .random, shuffleSeed: 1) != MusicRequest(section: .albums, sort: .random),
+                     "Dealing again is a new listing")
+        precondition(Set(MusicRequest(section: .songs, albumID: "a").sortKey).count > 0
+                     && MusicRequest(section: .songs, albumID: "a").sortKey == "album"
+                     && MusicRequest(section: .albums, artistID: "a").sortKey == "artist"
+                     && MusicRequest(section: .songs, playlistID: "a").sortKey == "playlist"
+                     && MusicRequest(section: .recent).sortKey == "recent")
+        precondition(MusicSort.listOrder.label(in: MusicRequest(section: .songs, albumID: "a")) == "Track Number"
+                     && MusicSort.listOrder.label(in: MusicRequest(section: .songs, playlistID: "a")) == "Playlist Order")
+        precondition(MusicSort.allCases.allSatisfy { !$0.server(songs: true).keys.isEmpty && !$0.server(songs: false).keys.isEmpty })
+        print("Every screen offers sorts, Random included, and falls back to one it has: PASS")
+
+        // A playlist is sorted here, stably, and only once every page is in.
+        do {
+            let playlist = MusicRequest(section: .songs, playlistID: "p")
+            precondition(!playlist.sortsLocally && !MusicRequest(section: .songs, playlistID: "p", sort: .listOrder).sortsLocally)
+            let original = MusicListing(request: playlist)
+            await original.loadIfNeeded()
+            precondition(original.songs.map(\.Name) == ["Delta", "alpha", "Charlie", "Bravo", "echo"], "Playlist order is the server's")
+            func sortedNames(_ request: MusicRequest) async -> [String] {
+                let listing = MusicListing(request: request)
+                await listing.loadIfNeeded()
+                precondition(!listing.hasMore, "A locally sorted playlist is loaded whole")
+                return listing.songs.map(\.Name)
+            }
+            let byTitle = await sortedNames(MusicRequest(section: .songs, playlistID: "p", sort: .title))
+            precondition(byTitle == ["alpha", "Bravo", "Charlie", "Delta", "echo"], "Title ignores case: \(byTitle)")
+            let byTitleDown = await sortedNames(MusicRequest(section: .songs, playlistID: "p", sort: .title, descending: true))
+            precondition(byTitleDown == byTitle.reversed())
+            let byTime = await sortedNames(MusicRequest(section: .songs, playlistID: "p", sort: .time))
+            precondition(byTime == ["alpha", "Bravo", "Delta", "echo", "Charlie"], "Shortest first: \(byTime)")
+            // Most plays first; alpha and Bravo tie, so they keep the playlist's order.
+            let byPlays = await sortedNames(MusicRequest(section: .songs, playlistID: "p", sort: .plays))
+            precondition(byPlays == ["alpha", "Bravo", "Delta", "echo", "Charlie"], "Ties keep their place: \(byPlays)")
+            let reversed = await sortedNames(MusicRequest(section: .songs, playlistID: "p", descending: true))
+            precondition(reversed == ["echo", "Bravo", "Charlie", "alpha", "Delta"], "The playlist, backwards")
+            let shuffled = await sortedNames(MusicRequest(section: .songs, playlistID: "p", sort: .random))
+            precondition(Set(shuffled) == Set(byTitle) && shuffled.count == 5)
+        }
+        print("A playlist sorts by every order after loading whole, keeping ties in its own order: PASS")
+
+        // Random is dealt a page at a time and never shows a song twice.
+        do {
+            let deal = MusicListing(request: MusicRequest(section: .albums, sort: .random))
+            await deal.loadIfNeeded()
+            precondition(deal.items.count == 60 && deal.hasMore)
+            var rounds = 0
+            while deal.hasMore, rounds < 40 {
+                await deal.loadMore()
+                rounds += 1
+                precondition(Set(deal.items.map(\.id)).count == deal.items.count, "Random repeated an item")
+            }
+            precondition(!deal.hasMore && deal.items.count == 125, "Random reaches the server's total: \(deal.items.count)")
+            precondition(deal.groups.count == 1 && deal.groups[0].title == "Albums", "Random has no section headers")
+        }
+        print("Random pages never repeat an item and reach the server's total: PASS")
+
+        // The flick that skips a song is hard to make by accident.
+        do {
+            precondition(MusicFlick.commitDistance(width: 200) == 120, "Never under 120 points")
+            precondition(MusicFlick.commitDistance(width: 400) == 180 && MusicFlick.commitDistance(width: 1000) == 450)
+            precondition(MusicFlick.startsSideways(dx: -40, dy: 10) && !MusicFlick.startsSideways(dx: 40, dy: 30), "A diagonal drag is not a flick")
+            precondition(!MusicFlick.startsSideways(dx: 5, dy: 40), "A scroll is not a flick")
+            let width: CGFloat = 300  // commit at 135
+            func out(_ dx: CGFloat, _ dy: CGFloat = 0, next: Bool = true, previous: Bool = true) -> MusicFlick.Outcome {
+                MusicFlick.outcome(dx: dx, dy: dy, width: width, hasNext: next, hasPrevious: previous)
+            }
+            precondition(out(-200) == .skip(forward: true) && out(200) == .skip(forward: false))
+            precondition(out(-100) == .cancel && out(100) == .cancel, "Short of the threshold goes back")
+            precondition(out(-134) == .cancel && out(-135) == .skip(forward: true), "The threshold is exact")
+            precondition(out(-300, 120) == .cancel, "Too slanted at the end")
+            precondition(out(-300, 90) == .skip(forward: true), "Three to one is allowed")
+            precondition(out(-300, next: false) == .cancel && out(300, previous: false) == .cancel, "No song that way, no skip")
+            precondition(out(300, next: false, previous: true) == .skip(forward: false))
+            precondition(MusicFlick.isArmed(dx: -150, dy: 0, width: width, canGo: true) && !MusicFlick.isArmed(dx: -150, dy: 0, width: width, canGo: false))
+            precondition(MusicFlick.travel(dx: -60, width: width, canGo: true) == -60, "One to one under the threshold")
+            precondition(MusicFlick.travel(dx: -235, width: width, canGo: true) == -160, "Then it drags: 135 + 100 * 0.25")
+            precondition(abs(MusicFlick.travel(dx: 100, width: width, canGo: false) - 18) < 0.001, "With no song that way it only stretches")
+        }
+        print("A flick skips only when pulled far, mostly sideways, towards a song: PASS")
+
+        // The song before and after the playing one, for the title that slides.
+        do {
+            func item(_ id: String) throws -> JellyfinMusicItem {
+                try JSONDecoder().decode(JellyfinMusicItem.self, from: Data("{\"Id\":\"\(id)\",\"Name\":\"\(id)\",\"Type\":\"Audio\"}".utf8))
+            }
+            let session = JellyfinMusicSession.shared
+            let songs = try ["s1", "s2", "s3"].map(item)
+            session.play(songs[0], from: songs)
+            precondition(session.previousItem == nil && session.nextItem?.id == "s2", "The start of a queue has nothing before it")
+            session.skipBack()
+            precondition(session.current?.id == "s1", "Skipping back at the start does nothing")
+            session.next()
+            precondition(session.previousItem?.id == "s1" && session.nextItem?.id == "s3")
+            session.next()
+            precondition(session.nextItem == nil, "The end of a queue that stops has nothing after it")
+            session.toggleRepeat()
+            precondition(session.nextItem?.id == "s1" && session.previousItem?.id == "s2", "Repeat wraps the queue")
+            session.jump(to: 0)
+            precondition(session.previousItem?.id == "s3", "Repeat wraps backwards too")
+            session.toggleRepeat(); session.toggleRepeat()
+            session.jump(to: 2)
+            session.skipBack()
+            precondition(session.current?.id == "s2" && session.currentIndex == 1, "Skip back goes to the song before, whatever the clock says")
+            session.stop()
+            precondition(session.nextItem == nil && session.previousItem == nil)
+            UserDefaults.standard.removeObject(forKey: "jellyfinMusic.repeatMode")
+        }
+        print("The neighbours of the playing song follow the queue and Repeat: PASS")
 
         // Repeat cycles off, all, one; Clear Up Next keeps the queue through the playing song only.
         do {

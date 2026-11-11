@@ -17,6 +17,13 @@ struct MusicNowPlayingView: View {
     #if os(macOS) || os(visionOS)
     @OpenWindowProxy private var openWindow
     #endif
+    #if os(iOS)
+    #if DEBUG
+    @State private var showsVisualizer = MusicDebugLaunch.opensVisualizer
+    #else
+    @State private var showsVisualizer = false
+    #endif
+    #endif
 
     private enum Pane: String, CaseIterable, Identifiable {
         case upNext = "Up Next", lyrics = "Lyrics"
@@ -26,18 +33,17 @@ struct MusicNowPlayingView: View {
     var body: some View {
         VStack(spacing: 20) {
             if let item = music.current {
-                MusicArtwork(item: item, music: music)
-                    .aspectRatio(1, contentMode: .fit)
-                    .frame(maxHeight: 300)
-                    .clipShape(RoundedRectangle(cornerRadius: 18)).shadow(radius: 22)
-                VStack(spacing: 4) {
-                    Text(item.Name).font(.title2.bold()).lineLimit(2).multilineTextAlignment(.center)
-                    Text([item.artist, item.Album].compactMap { $0 }.joined(separator: " · "))
-                        .foregroundStyle(.secondary).lineLimit(1)
-                    if let detail = qualityLine(item) {
-                        Text(detail).font(.caption).foregroundStyle(.tertiary)
-                    }
+                // The cover dissolves into the next one rather than swapping under the title.
+                ZStack {
+                    MusicArtwork(item: item, music: music)
+                        .id(item.id)
+                        .transition(.opacity)
                 }
+                .aspectRatio(1, contentMode: .fit)
+                .frame(maxHeight: 300)
+                .clipShape(RoundedRectangle(cornerRadius: 18)).shadow(radius: 22)
+                .animation(.smooth(duration: 0.4), value: item.id)
+                MusicTrackLabels(music: music, style: .nowPlaying)
                 HStack(spacing: 28) {
                     let favorite = MusicUserState.shared.isFavorite(item)
                     Button { Task { await MusicUserState.shared.toggleFavorite(item) } } label: {
@@ -90,7 +96,16 @@ struct MusicNowPlayingView: View {
         }
         .padding(24)
         .navigationTitle("Now Playing")
+        // The library is dark whatever the system is; a sheet doesn't inherit that, so its own background would
+        // be white behind white text.
+        .preferredColorScheme(.dark)
         .musicActionHost(actions, bottomInset: 24)
+        .musicNamesOpenLibrary(dismiss: { dismiss() })
+        #if os(iOS)
+        .fullScreenCover(isPresented: $showsVisualizer) {
+            MusicVisualizerView(presentation: .cover, close: { showsVisualizer = false })
+        }
+        #endif
         .toolbar {
             #if os(macOS) || os(visionOS)
             ToolbarItem(placement: .primaryAction) {
@@ -98,16 +113,21 @@ struct MusicNowPlayingView: View {
                     .accessibilityLabel("Open Mini Player")
             }
             #endif
+            #if !os(tvOS)
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    #if os(iOS)
+                    showsVisualizer = true
+                    #else
+                    MusicVisualizerView.open(using: openWindow)
+                    #endif
+                } label: { Image(systemName: "sparkles") }
+                    .accessibilityLabel("Visualizer")
+            }
+            #endif
             ToolbarItem(placement: .primaryAction) { MusicAudioOptionsMenu(music: music) }
             ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
         }
-    }
-
-    private func qualityLine(_ item: JellyfinMusicItem) -> String? {
-        var parts: [String] = []
-        if let quality = item.quality { parts.append(quality.isLossless ? "\(quality.badge) · \(quality.detail)" : quality.detail) }
-        if music.soundCheck, let gain = music.currentGainDB { parts.append("Sound Check \(String(format: "%+.1f", gain)) dB") }
-        return parts.isEmpty ? nil : parts.joined(separator: "   ")
     }
 }
 
@@ -143,24 +163,31 @@ struct MusicUpNextList: View {
             List {
                 ForEach(Array(music.queue.enumerated()), id: \.offset) { index, track in
                     let isCurrent = index == music.currentIndex
-                    Button { music.jump(to: index) } label: {
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(track.Name).foregroundStyle(isCurrent ? Color.accentColor : .primary).lineLimit(1)
-                                Text(track.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                            Spacer()
-                            if isCurrent { Image(systemName: music.isPlaying ? "waveform" : "pause.fill").foregroundStyle(Color.accentColor) }
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(track.Name).foregroundStyle(isCurrent ? Color.accentColor : .primary).lineLimit(1)
+                            MusicArtistLine(item: track).font(.caption).foregroundStyle(.secondary)
                         }
-                        .contentShape(Rectangle())
+                        Spacer()
+                        if isCurrent {
+                            Image(systemName: music.isPlaying ? "waveform" : "pause.fill").foregroundStyle(Color.accentColor)
+                                .contentTransition(.symbolEffect(.replace))
+                        }
                     }
-                    .buttonStyle(.plain)
+                    // A tap plays the row; its artist is a link of its own, which a Button around it would swallow.
+                    .contentShape(Rectangle())
+                    .onTapGesture { music.jump(to: index) }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(track.Name)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction(named: "Play") { music.jump(to: index) }
                     .id(index)
                     .contextMenu {
                         Button("Play", systemImage: "play.fill") { music.jump(to: index) }
                         if index > 0 { Button("Move Up", systemImage: "arrow.up") { music.moveInQueue(from: index, to: index - 1) } }
                         if index + 1 < music.queue.count { Button("Move Down", systemImage: "arrow.down") { music.moveInQueue(from: index, to: index + 1) } }
                         if !isCurrent { Button("Remove", systemImage: "minus.circle", role: .destructive) { music.removeFromQueue(at: index) } }
+                        MusicGoToItems(item: track)
                     }
                 }
                 #if !os(tvOS)
@@ -184,18 +211,26 @@ struct MusicLyricsView: View {
     private enum Phase { case loading, none, loaded(MusicLyrics), failed(String) }
     @State private var phase = Phase.loading
 
+    /// Which screen of the pane is showing, for the animation between them.
+    private var phaseKey: Int {
+        switch phase { case .loading: 0; case .none: 1; case .failed: 2; case .loaded: 3 }
+    }
+
     var body: some View {
         Group {
             switch phase {
-            case .loading: ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .loading: ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).transition(.opacity)
             case .none:
                 ContentUnavailableView("No Lyrics", systemImage: "quote.bubble",
                     description: Text("Jellyfin has no lyrics for this song. Put a .lrc file beside it, or add a lyrics plugin."))
+                    .transition(.opacity)
             case .failed(let message):
                 ContentUnavailableView("Lyrics Unavailable", systemImage: "exclamationmark.triangle", description: Text(message))
-            case .loaded(let lyrics): MusicLyricsLines(lyrics: lyrics, music: music)
+                    .transition(.opacity)
+            case .loaded(let lyrics): MusicLyricsLines(lyrics: lyrics, music: music).transition(.opacity)
             }
         }
+        .animation(.smooth(duration: 0.3), value: phaseKey)
         .task(id: music.current?.id) {
             guard let id = music.current?.id else { return }
             phase = .loading
@@ -334,8 +369,10 @@ struct MusicMiniPlayerView: View {
     var width: CGFloat?
 
     var body: some View {
-        RAVEMiniPlayerBar(title: current.Name, subtitle: current.artist, open: onShowNowPlaying) {
+        RAVEMiniPlayerBar(accessibilityTitle: "Now Playing, \(current.Name), \(current.artist)", open: onShowNowPlaying) {
             MusicArtwork(item: current, music: music)
+        } labels: {
+            MusicTrackLabels(music: music, style: .bar)
         } controls: {
             MusicTransportStrip(music: music, width: width)
         }
@@ -379,11 +416,26 @@ private struct MusicMiniPlayerOptions: View {
     #if os(macOS) || os(visionOS)
     @OpenWindowProxy private var openWindow
     #endif
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
+
     var body: some View {
+        #if os(iOS)
+        // An iPhone's bar is too narrow for the whole row beside the transport: one menu holds it.
+        if sizeClass == .compact { compact } else { row }
+        #else
+        row
+        #endif
+    }
+
+    private var row: some View {
         HStack(spacing: 16) {
             #if os(macOS) || os(visionOS)
             Button { openWindow(id: MusicMiniPlayerWindowView.windowID) } label: { Image(systemName: "pip.enter") }
                 .accessibilityLabel("Open Mini Player")
+            Button { MusicVisualizerView.open(using: openWindow) } label: { Image(systemName: "sparkles") }
+                .accessibilityLabel("Visualizer")
             #endif
             Button { music.toggleShuffle() } label: {
                 Image(systemName: "shuffle")
@@ -395,10 +447,24 @@ private struct MusicMiniPlayerOptions: View {
                 .accessibilityLabel("Stop Playback")
         }
     }
+
+    #if os(iOS)
+    private var compact: some View {
+        Menu {
+            Button(music.isShuffled ? "Turn Shuffle Off" : "Turn Shuffle On", systemImage: "shuffle") { music.toggleShuffle() }
+            Picker("Audio", selection: Binding(get: { music.audioMode }, set: { music.setAudioMode($0) })) {
+                ForEach(JellyfinMusicAudioMode.allCases) { Label($0.title, systemImage: $0.symbol).tag($0) }
+            }
+            Toggle("Sound Check", systemImage: "speaker.wave.2", isOn: Binding(get: { music.soundCheck }, set: { music.setSoundCheck($0) }))
+            Button("Stop", systemImage: "stop.fill", role: .destructive) { music.stop() }
+        } label: { Image(systemName: "ellipsis.circle") }
+            .accessibilityLabel("Player options")
+    }
+    #endif
 }
 
 /// Sound Check, with what the server measured for the playing song, so a library without loudness data says so.
-private struct MusicSoundCheckControl: View {
+struct MusicSoundCheckControl: View {
     let music: JellyfinMusicSession
 
     private var caption: String {
@@ -422,17 +488,47 @@ private struct MusicSoundCheckControl: View {
     }
 }
 
+/// A cover. It comes from `MusicArtworkStore`, so one already seen is there on the first frame, and one that is
+/// not fades in over the placeholder when it arrives.
 struct MusicArtwork: View {
     let item: JellyfinMusicItem
     let music: JellyfinMusicSession
     /// Pixels wide to ask the server for; the mini player window is big enough to want more than a grid tile.
     var maxWidth = 360
-    var body: some View {
-        Group {
-            if let url = music.artworkURL(for: item, maxWidth: maxWidth) { AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { fallback } }
-            else { fallback }
-        }.background(Color.gray.opacity(0.2))
+    @State private var image: MusicImage?
+
+    init(item: JellyfinMusicItem, music: JellyfinMusicSession, maxWidth: Int = 360) {
+        self.item = item
+        self.music = music
+        self.maxWidth = maxWidth
+        let url = music.artworkURL(for: item, maxWidth: maxWidth)
+        _image = State(initialValue: url.flatMap { MusicArtworkStore.shared.cachedImage(for: $0) })
     }
+
+    private var url: URL? { music.artworkURL(for: item, maxWidth: maxWidth) }
+
+    var body: some View {
+        ZStack {
+            Color.gray.opacity(0.2)
+            fallback
+            if let image {
+                Image(decorative: image.cgImage, scale: 1)
+                    .resizable()
+                    .scaledToFill()
+                    .transition(.opacity)
+            }
+        }
+        .clipped()
+        .task(id: url) {
+            guard let url else { image = nil; return }
+            if let cached = MusicArtworkStore.shared.cachedImage(for: url) { image = cached; return }
+            // Another item on a reused view must not keep showing the last one's cover while this one loads.
+            image = nil
+            let loaded = await MusicArtworkStore.shared.image(for: url)
+            withAnimation(.easeOut(duration: 0.28)) { image = loaded }
+        }
+    }
+
     private var fallback: some View {
         Image(systemName: item.Type == "MusicArtist" ? "music.mic" : item.Type == "MusicGenre" ? "guitars" : item.Type == "Playlist" ? "music.note.list" : "music.note")
             .font(.largeTitle).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)

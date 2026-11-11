@@ -19,6 +19,7 @@ struct MusicMiniPlayerWindowView: View {
     @State private var music = JellyfinMusicSession.shared
     @State private var actions = MusicActions()
     @State private var showsQueue = false
+    @OpenWindowProxy private var openWindow
 
     var body: some View {
         Group {
@@ -26,19 +27,24 @@ struct MusicMiniPlayerWindowView: View {
         }
         .frame(width: Self.width)
         .musicActionHost(actions, bottomInset: 16)
+        .musicNamesOpenLibrary(reveal: { MusicNavigator.shared.revealLibrary(openWindow: openWindow) })
         #if os(visionOS)
         .glassBackgroundEffect(in: .rect(cornerRadius: 28))
         #else
         .containerBackground(.regularMaterial, for: .window)
         #endif
-        .animation(.smooth(duration: 0.25), value: music.current?.id)
+        .animation(.smooth(duration: 0.4), value: music.current?.id)
     }
 
     private func panel(_ current: JellyfinMusicItem) -> some View {
-        RAVEMiniPlayerPanel(width: Self.width, title: current.Name, subtitle: current.artist, detail: current.Album) {
-            MusicArtwork(item: current, music: music, maxWidth: 720)
-                .id(current.id)
-                .transition(.opacity)
+        RAVEMiniPlayerPanel(width: Self.width) {
+            ZStack {
+                MusicArtwork(item: current, music: music, maxWidth: 720)
+                    .id(current.id)
+                    .transition(.opacity)
+            }
+        } labels: {
+            MusicTrackLabels(music: music, style: .panel)
         } actions: {
             actionRow(current)
         } transport: {
@@ -54,6 +60,8 @@ struct MusicMiniPlayerWindowView: View {
             }
             .accessibilityLabel(favorite ? "Remove from Favorites" : "Favorite")
             MusicStarsMenu(item: current).labelStyle(.iconOnly)
+            Button { MusicVisualizerView.open(using: openWindow) } label: { Image(systemName: "sparkles") }
+                .accessibilityLabel("Visualizer")
             Button { showsQueue.toggle() } label: { Image(systemName: "list.bullet") }
                 .accessibilityLabel("Up Next")
                 .popover(isPresented: $showsQueue) {

@@ -270,6 +270,14 @@ struct HypnosApp: App {
         .restorationBehavior(.disabled)
         .handlesExternalEvents(matching: [])
 
+        // The music visualizer: the queue's album art as Cover Flow. A window of its own, so it can go full screen.
+        Window("Visualizer", id: MusicVisualizerView.windowID) {
+            MusicVisualizerView(presentation: .window)
+        }
+        .defaultSize(width: 1100, height: 720)
+        .restorationBehavior(.disabled)
+        .handlesExternalEvents(matching: [])
+
         Window("Console", id: HypnosSceneID.console) {
             ConsoleWindowView()
                 .environment(appModel)

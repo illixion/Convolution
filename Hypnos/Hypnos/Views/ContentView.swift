@@ -59,6 +59,11 @@ struct ContentView: View {
             AI3DWarmup.shared.setIntent(windowModel, roles: roles)
         }
         .onDisappear { AI3DWarmup.shared.clearIntent(windowModel) }
+        // A name tapped in the Mini Player, the visualizer or Now Playing opens in the library: switch to it, and
+        // `LibraryTabRootView` takes the request once it is on screen.
+        .onChange(of: MusicNavigator.shared.request?.id) { _, id in
+            if id != nil { MainTabCatalog.select(.library, in: windowModel) }
+        }
         .animation(.smooth(duration: 0.35), value: showWelcome)
         // Filters has nothing to filter by in a file-tree library, and Albums
         // has nothing to browse in one with no folder browser, so each hides
@@ -154,6 +159,8 @@ struct ContentView: View {
         } message: {
             Text("A viewer with this configuration is already open. You can summon it or open a copy.")
         }
+        .onAppear { MusicNavigator.shared.mainWindowAppeared() }
+        .onDisappear { MusicNavigator.shared.mainWindowDisappeared() }
         .onAppear {
             // Only once a scene is on screen: the prompt is presented on the
             // app's own window, so asking for it before that hangs the launch.

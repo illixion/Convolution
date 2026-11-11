@@ -32,40 +32,43 @@ struct MusicSongRow: View {
                 Button(role: .destructive, action: editing.remove) { Image(systemName: "minus.circle.fill").foregroundStyle(.red) }
                     .buttonStyle(.plain).accessibilityLabel("Remove from Playlist")
             }
-            Button {
-                music.play(song, from: list, at: position)
-            } label: {
-                HStack(spacing: 14) {
-                    leading(isCurrent: isCurrent)
-                    if columns {
-                        HStack(spacing: 8) {
-                            Text(song.Name).foregroundStyle(isCurrent ? Color.accentColor : .primary).lineLimit(1)
-                            qualityBadge
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        cell(song.artist)
-                        cell(song.Album ?? "")
-                        Text(song.UserData?.PlayCount.flatMap { $0 > 0 ? String($0) : nil } ?? "")
-                            .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
-                            .frame(width: MusicColumns.plays, alignment: .trailing)
-                        Text(song.RunTimeTicks != nil ? JellyfinMusicItem.clock(song.seconds) : "")
-                            .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
-                            .frame(width: MusicColumns.time, alignment: .trailing)
-                    } else {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(song.Name).foregroundStyle(isCurrent ? Color.accentColor : .primary).lineLimit(1)
-                            Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                        Spacer(minLength: 8)
+            HStack(spacing: 14) {
+                leading(isCurrent: isCurrent)
+                if columns {
+                    HStack(spacing: 8) {
+                        Text(song.Name).foregroundStyle(isCurrent ? Color.accentColor : .primary).lineLimit(1)
+                        qualityBadge
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    MusicArtistLine(item: song).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                    MusicAlbumLink(item: song).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(song.UserData?.PlayCount.flatMap { $0 > 0 ? String($0) : nil } ?? "")
+                        .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                        .frame(width: MusicColumns.plays, alignment: .trailing)
+                    Text(song.RunTimeTicks != nil ? JellyfinMusicItem.clock(song.seconds) : "")
+                        .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                        .frame(width: MusicColumns.time, alignment: .trailing)
+                } else {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(song.Name).foregroundStyle(isCurrent ? Color.accentColor : .primary).lineLimit(1)
+                        MusicSongSubtitle(song: song, showsAlbum: !showsTrackNumber)
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
                 }
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            // The row plays; the names inside it are links of their own, which a Button around the row would swallow.
+            .contentShape(Rectangle())
+            .onTapGesture { music.play(song, from: list, at: position) }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(song.Name)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(named: "Play") { music.play(song, from: list, at: position) }
             if !columns { qualityBadge }
             if userState.isFavorite(song) {
                 Image(systemName: "heart.fill").font(.caption).foregroundStyle(.pink).accessibilityLabel("Favorite")
                     .frame(width: columns ? MusicColumns.heart : nil)
+                    .transition(.scale(scale: 0.4).combined(with: .opacity))
             } else if columns {
                 Color.clear.frame(width: MusicColumns.heart, height: 1)
             }
@@ -90,6 +93,11 @@ struct MusicSongRow: View {
         .padding(.vertical, 8)
         .overlay(alignment: .bottom) { Divider() }
         .contextMenu { MusicItemMenu(item: song) }
+        // A heart, the playing marker and Edit's buttons settle in rather than appear.
+        .animation(.smooth(duration: 0.22), value: userState.isFavorite(song))
+        .animation(.smooth(duration: 0.22), value: isCurrent)
+        .animation(.smooth(duration: 0.22), value: music.isPlaying)
+        .animation(.smooth(duration: 0.22), value: editing == nil)
     }
 
     @ViewBuilder
@@ -103,26 +111,33 @@ struct MusicSongRow: View {
         }
     }
 
-    private func cell(_ text: String) -> some View {
-        Text(text).foregroundStyle(.secondary).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var subtitle: String {
-        showsTrackNumber ? song.artist : [song.artist, song.Album].compactMap { $0 }.joined(separator: " · ")
-    }
-
     @ViewBuilder
     private func leading(isCurrent: Bool) -> some View {
         if showsTrackNumber {
-            Group {
-                if isCurrent { Image(systemName: music.isPlaying ? "waveform" : "pause.fill").foregroundStyle(Color.accentColor) }
-                else { Text(song.IndexNumber.map(String.init) ?? "–").foregroundStyle(.secondary).monospacedDigit() }
+            ZStack {
+                if isCurrent {
+                    Image(systemName: music.isPlaying ? "waveform" : "pause.fill").foregroundStyle(Color.accentColor)
+                        .contentTransition(.symbolEffect(.replace))
+                        .transition(.opacity)
+                } else {
+                    Text(song.IndexNumber.map(String.init) ?? "–").foregroundStyle(.secondary).monospacedDigit()
+                        .transition(.opacity)
+                }
             }
             .frame(width: 30)
         } else {
             MusicArtwork(item: song, music: music)
                 .frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay { if isCurrent { RoundedRectangle(cornerRadius: 6).fill(.black.opacity(0.35)); Image(systemName: music.isPlaying ? "waveform" : "pause.fill").foregroundStyle(.white) } }
+                .overlay {
+                    if isCurrent {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 6).fill(.black.opacity(0.35))
+                            Image(systemName: music.isPlaying ? "waveform" : "pause.fill").foregroundStyle(.white)
+                                .contentTransition(.symbolEffect(.replace))
+                        }
+                        .transition(.opacity)
+                    }
+                }
         }
     }
 }
@@ -214,19 +229,29 @@ struct MusicItemMenu: View {
                 MusicStarsMenu(item: item)
             }
         }
-        if item.isSong, let open {
-            Section {
-                if let albumID = item.AlbumId, let album = JellyfinMusicItem.reference(id: albumID, name: item.Album ?? "Album", type: "MusicAlbum", artist: item.AlbumArtist) {
-                    Button("Go to Album", systemImage: "square.stack") { open(album) }
-                }
-                if let artistID = item.albumArtistID ?? item.artistID,
-                   let artist = JellyfinMusicItem.reference(id: artistID, name: item.AlbumArtists?.first?.Name ?? item.ArtistItems?.first?.Name ?? item.artist, type: "MusicArtist") {
-                    Button("Go to Artist", systemImage: "music.mic") { open(artist) }
-                }
-            }
-        }
+        MusicGoToItems(item: item)
         if let actions, actions.isAdministrator, item.Type != "Playlist" {
             Section { Button("Get Info…", systemImage: "info.circle") { actions.showInfo(item) } }
+        }
+    }
+}
+
+/// "Go to Album" and "Go to Artist" for a song, or "Go to Artist" for an album: the menu spelling of the name links.
+struct MusicGoToItems: View {
+    let item: JellyfinMusicItem
+    @Environment(\.musicOpen) private var open
+
+    var body: some View {
+        if let open, item.isSong || item.Type == "MusicAlbum" {
+            Section {
+                if item.isSong, let album = item.albumReference() {
+                    Button("Go to Album", systemImage: "square.stack") { open(album) }
+                }
+                let artists = item.artistRefs.compactMap { ref in JellyfinMusicItem.artistReference(ref).map { (ref, $0) } }
+                ForEach(Array(artists.enumerated()), id: \.offset) { _, pair in
+                    Button(artists.count > 1 ? "Go to \(pair.0.name)" : "Go to Artist", systemImage: "music.mic") { open(pair.1) }
+                }
+            }
         }
     }
 }

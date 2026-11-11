@@ -51,4 +51,13 @@ class MainWindowModel {
     /// existed — open a group, press back, and the browser returned showing
     /// galleries instead of the groups you came from.
     var albumsShowingVideos: Bool = false
+
+    /// The Library tab's place: Movies & TV or Music, and what is pushed onto its stack. Here for the same reason
+    /// as the two above: leaving the tab destroys its views, and coming back should find the album that was open.
+    #if DEBUG
+    var libraryShowsMusic: Bool = MusicDebugLaunch.showsMusic
+    #else
+    var libraryShowsMusic: Bool = false
+    #endif
+    var libraryPath = NavigationPath()
 }

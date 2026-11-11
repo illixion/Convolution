@@ -35,31 +35,40 @@ enum MusicSection: String, CaseIterable, Identifiable, Sendable {
     static let collections: [MusicSection] = [.playlists, .favorites, .recentlyPlayed, .mostPlayed]
     /// Sections whose rows are songs rather than artwork tiles.
     var listsSongs: Bool { [.songs, .favorites, .recentlyPlayed, .mostPlayed].contains(self) }
-    /// The orders the listener can pick; the others have an order that is their point.
+    /// The orders the listener can pick. Every list can be sorted; Random is in each, to flick through a library.
     var sorts: [MusicSort] {
         switch self {
-        case .albums: [.title, .artist, .year, .dateAdded]
-        case .artists, .playlists: [.title, .dateAdded]
-        case .songs: [.title, .artist, .album, .year, .time, .plays, .lastPlayed, .dateAdded]
-        case .favorites: [.title, .artist, .album, .year, .time, .plays, .dateAdded]
-        default: []
+        case .recent: [.dateAdded, .title, .artist, .year, .random]
+        case .albums: [.title, .artist, .year, .dateAdded, .random]
+        case .artists, .playlists: [.title, .dateAdded, .random]
+        case .genres: [.title, .random]
+        case .songs: [.title, .artist, .album, .year, .time, .plays, .lastPlayed, .dateAdded, .random]
+        case .favorites: [.title, .artist, .album, .year, .time, .plays, .lastPlayed, .dateAdded, .random]
+        case .recentlyPlayed: [.lastPlayed, .plays, .title, .artist, .album, .year, .time, .dateAdded, .random]
+        case .mostPlayed: [.plays, .lastPlayed, .title, .artist, .album, .year, .time, .dateAdded, .random]
         }
     }
     /// The order a section is in until the listener picks another (what its section headers follow).
-    var defaultSort: MusicSort? {
+    var defaultSort: MusicSort {
         switch self {
         case .recent: .dateAdded
         case .albums, .artists, .songs, .genres, .playlists, .favorites: .title
-        case .recentlyPlayed, .mostPlayed: nil
+        case .recentlyPlayed: .lastPlayed
+        case .mostPlayed: .plays
         }
     }
 }
 
 enum MusicSort: String, CaseIterable, Identifiable, Sendable {
+    /// The list's own order: an album's tracks by disc and number, a playlist as it was arranged.
+    case listOrder
     case title, artist, album, year, time, plays, lastPlayed, dateAdded
+    /// A fresh shuffle each time it is picked or dealt again.
+    case random
     var id: Self { self }
     var title: String {
         switch self {
+        case .listOrder: "Original Order"
         case .title: "Title"
         case .artist: "Artist"
         case .album: "Album"
@@ -68,24 +77,49 @@ enum MusicSort: String, CaseIterable, Identifiable, Sendable {
         case .plays: "Plays"
         case .lastPlayed: "Last Played"
         case .dateAdded: "Date Added"
+        case .random: "Random"
         }
     }
-    /// Jellyfin's `SortBy` and `SortOrder` for this order. A song's `SortName` starts with its track number,
-    /// so songs sort by `Name`.
-    func server(songs: Bool) -> (keys: String, descending: Bool) {
+    var symbol: String {
         switch self {
-        case .title: (songs ? "Name" : "SortName", false)
-        case .artist: (songs ? "Artist,Album,ParentIndexNumber,IndexNumber" : "AlbumArtist,ProductionYear,SortName", false)
-        case .album: ("Album,ParentIndexNumber,IndexNumber,SortName", false)
-        case .year: ("ProductionYear,SortName", true)
-        case .time: ("Runtime,SortName", false)
-        case .plays: ("PlayCount,SortName", true)
-        case .lastPlayed: ("DatePlayed", true)
-        case .dateAdded: ("DateCreated", true)
+        case .listOrder: "list.number"
+        case .title: "textformat"
+        case .artist: "music.mic"
+        case .album: "square.stack"
+        case .year: "calendar"
+        case .time: "clock"
+        case .plays: "chart.bar"
+        case .lastPlayed: "clock.arrow.circlepath"
+        case .dateAdded: "plus.circle"
+        case .random: "dice"
+        }
+    }
+    /// What the menu calls this order where it is shown: an album's own order is its track numbers.
+    func label(in request: MusicRequest) -> String {
+        guard self == .listOrder else { return title }
+        return request.playlistID != nil ? "Playlist Order" : request.albumID != nil ? "Track Number" : title
+    }
+    /// Jellyfin's `SortBy` for this order, ending in a name so paging never sees ties in a different order twice.
+    /// A song's `SortName` starts with its track number, so songs break ties by `Name`.
+    func server(songs: Bool) -> (keys: String, descending: Bool) {
+        let tail = songs ? "Name" : "SortName"
+        switch self {
+        case .listOrder: return ("ParentIndexNumber,IndexNumber,\(tail)", false)
+        case .title: return (tail, false)
+        case .artist: return (songs ? "Artist,Album,ParentIndexNumber,IndexNumber" : "AlbumArtist,ProductionYear,SortName", false)
+        case .album: return ("Album,ParentIndexNumber,IndexNumber,\(tail)", false)
+        case .year: return ("ProductionYear,\(tail)", true)
+        case .time: return ("Runtime,\(tail)", false)
+        case .plays: return ("PlayCount,DatePlayed,\(tail)", true)
+        case .lastPlayed: return ("DatePlayed", true)
+        case .dateAdded: return ("DateCreated", true)
+        case .random: return ("Random", false)
         }
     }
     /// The direction a first pick of this order goes (newest, most played and latest year first).
     var startsDescending: Bool { server(songs: false).descending }
+    /// Whether flipping the direction means anything.
+    var hasDirection: Bool { self != .random }
 }
 
 struct MusicRequest: Hashable, Sendable {
@@ -100,12 +134,87 @@ struct MusicRequest: Hashable, Sendable {
     var search = ""
     var playbackSongs = false
     var randomOrder = false
+    /// Dealing Random again changes this: a new request is a new listing, so a new shuffle (an old one stays
+    /// cached while the listener is on it, so the grid doesn't reshuffle under their finger).
+    var shuffleSeed = 0
 
-    /// The order in force, the section's own when none was picked.
-    var effectiveSort: MusicSort? { sort ?? section.defaultSort }
-    var isDescending: Bool { descending ?? effectiveSort?.startsDescending ?? false }
+    /// The orders this screen offers: a section's own, or the ones that mean something inside an album, a
+    /// playlist, an artist or a genre.
+    var sorts: [MusicSort] {
+        if playbackSongs { return [] }
+        if albumID != nil { return [.listOrder, .title, .artist, .time, .plays, .random] }
+        if playlistID != nil { return [.listOrder, .title, .artist, .album, .year, .time, .plays, .dateAdded, .random] }
+        if artistID != nil { return section == .songs ? [] : [.year, .title, .dateAdded, .random] }
+        if genreID != nil { return section == .songs ? [] : [.title, .artist, .year, .dateAdded, .random] }
+        return section.sorts
+    }
+    /// The order a screen is in until the listener picks another.
+    var defaultSort: MusicSort? {
+        if playbackSongs { return nil }
+        if albumID != nil || playlistID != nil { return .listOrder }
+        if artistID != nil { return section == .songs ? nil : .year }
+        if genreID != nil { return section == .songs ? nil : .title }
+        return section.defaultSort
+    }
+    /// The order in force, the screen's own when none was picked (or the one picked isn't offered here).
+    var effectiveSort: MusicSort? {
+        if let sort, sorts.contains(sort) { return sort }
+        return defaultSort
+    }
+    var isDescending: Bool { effectiveSort?.hasDirection == false ? false : (descending ?? effectiveSort?.startsDescending ?? false) }
     /// Whether the screen is one of a section's lists, as opposed to the inside of an album, artist, playlist or genre.
     var isTopLevel: Bool { albumID == nil && artistID == nil && playlistID == nil && genreID == nil && !playbackSongs }
+    /// What a saved order is filed under: a section's own, or the kind of item the screen is inside.
+    var sortKey: String {
+        if albumID != nil { return "album" }
+        if playlistID != nil { return "playlist" }
+        if artistID != nil { return "artist" }
+        if genreID != nil { return "genre" }
+        return section.rawValue
+    }
+}
+
+extension MusicRequest {
+    /// A playlist's songs are sorted here: the server hands a playlist back in its own order and nothing else.
+    var sortsLocally: Bool {
+        guard playlistID != nil, search.isEmpty, !playbackSongs, let sort = effectiveSort else { return false }
+        return sort != .listOrder || isDescending
+    }
+
+    /// `items` in the order in force, stably (equal items keep their place). Random deals them afresh.
+    func sorted(_ items: [JellyfinMusicItem]) -> [JellyfinMusicItem] {
+        guard let sort = effectiveSort else { return items }
+        let descending = isDescending
+        switch sort {
+        case .random: return items.shuffled()
+        case .listOrder: return descending ? items.reversed() : items
+        default: break
+        }
+        func compare<T: Comparable>(_ a: T, _ b: T) -> ComparisonResult { a < b ? .orderedAscending : a > b ? .orderedDescending : .orderedSame }
+        func text(_ a: String?, _ b: String?) -> ComparisonResult { (a ?? "").localizedStandardCompare(b ?? "") }
+        func chain(_ results: ComparisonResult...) -> ComparisonResult { results.first { $0 != .orderedSame } ?? .orderedSame }
+        func track(_ a: JellyfinMusicItem, _ b: JellyfinMusicItem) -> ComparisonResult {
+            chain(compare(a.ParentIndexNumber ?? 1, b.ParentIndexNumber ?? 1), compare(a.IndexNumber ?? 0, b.IndexNumber ?? 0))
+        }
+        func order(_ a: JellyfinMusicItem, _ b: JellyfinMusicItem) -> ComparisonResult {
+            switch sort {
+            case .title: text(a.Name, b.Name)
+            case .artist: chain(text(a.songArtist, b.songArtist), text(a.Album, b.Album), track(a, b))
+            case .album: chain(text(a.Album, b.Album), track(a, b))
+            case .year: compare(a.ProductionYear ?? 0, b.ProductionYear ?? 0)
+            case .time: compare(a.RunTimeTicks ?? 0, b.RunTimeTicks ?? 0)
+            case .plays: compare(a.UserData?.PlayCount ?? 0, b.UserData?.PlayCount ?? 0)
+            case .dateAdded: compare(a.DateCreated ?? "", b.DateCreated ?? "")
+            case .lastPlayed: compare(a.UserData?.LastPlayedDate ?? "", b.UserData?.LastPlayedDate ?? "")
+            case .listOrder, .random: .orderedSame
+            }
+        }
+        return items.enumerated().sorted { left, right in
+            let result = order(left.element, right.element)
+            if result == .orderedSame { return left.offset < right.offset }
+            return descending ? result == .orderedDescending : result == .orderedAscending
+        }.map(\.element)
+    }
 }
 
 struct MusicAlbumGroup: Identifiable {
@@ -137,7 +246,7 @@ enum MusicGrouping: Sendable {
         case .album: return .album
         case .year: return .year
         case .dateAdded: return .dateAdded
-        case .time, .plays, .lastPlayed, nil: return .none
+        case .time, .plays, .lastPlayed, .listOrder, .random, nil: return .none
         }
     }
 
@@ -169,8 +278,8 @@ enum MusicGrouping: Sendable {
 
     static func dateBucket(_ raw: String?, now: Date = Date(), calendar: Calendar = .current) -> String {
         guard let raw, let date = MusicDates.parse(raw) else { return "Earlier" }
-        if calendar.isDateInToday(date) { return "Today" }
-        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        if calendar.isDate(date, inSameDayAs: now) { return "Today" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) { return "Yesterday" }
         if let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day,
            days >= 0, days < 7 { return "This Week" }
         if calendar.isDate(date, equalTo: now, toGranularity: .month) { return "This Month" }
@@ -223,6 +332,8 @@ final class MusicListing {
     private(set) var isLoading = false
     private(set) var hasMore = true
     private(set) var error: String?
+    /// Bumped each time a page is published, so a screen can animate what arrived.
+    private(set) var revision = 0
     @ObservationIgnored private var configuration: String?
     @ObservationIgnored private var loaded = false
     @ObservationIgnored private var offset = 0
@@ -271,24 +382,47 @@ final class MusicListing {
         error = nil
         defer { if ticket == generation { isLoading = false } }
         do {
-            let page: JellyfinMusicPage
-            if !request.search.isEmpty, let hits = await MusicSearchStore.shared.hits(for: request.search) {
-                // The fuzzy index ranks by name, artist and album and forgives typos; the server then
-                // gives those items as the screens show them.
-                let found = try await library.musicItems(ids: hits.map(\.id))
-                let byID = Dictionary(found.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-                let ordered = hits.compactMap { byID[$0.id] }
-                page = JellyfinMusicPage(Items: ordered, TotalRecordCount: ordered.count)
-            } else {
-                page = try await library.musicPage(request, start: offset)
+            // A random order is dealt a page at a time, so a page can repeat what is already here: ask again
+            // (a few times) rather than leave a Load More that adds nothing.
+            let random = request.effectiveSort == .random && request.search.isEmpty
+            // The server can't sort a playlist (its own order is the point), so one that is sorted loads whole.
+            let sortsLocally = request.sortsLocally
+            // Gathered off to the side, so a sort that needs every page never shows the pages half sorted.
+            var pool = items
+            var known = Set(pool.map(\.id))
+            var nextOffset = offset
+            var more = true
+            var attempts = 0
+            while true {
+                let page: JellyfinMusicPage
+                if !request.search.isEmpty, let hits = await MusicSearchStore.shared.hits(for: request.search) {
+                    // The fuzzy index ranks by name, artist and album and forgives typos; the server then
+                    // gives those items as the screens show them.
+                    let found = try await library.musicItems(ids: hits.map(\.id))
+                    let byID = Dictionary(found.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                    let ordered = hits.compactMap { byID[$0.id] }
+                    page = JellyfinMusicPage(Items: ordered, TotalRecordCount: ordered.count)
+                } else {
+                    page = try await library.musicPage(request, start: nextOffset)
+                }
+                try Task.checkCancellation()
+                guard ticket == generation, configuration == LibraryService.configurationKey else { return }
+                let fresh = page.Items.filter { known.insert($0.id).inserted }
+                pool.append(contentsOf: fresh)
+                nextOffset += page.Items.count
+                let total = page.TotalRecordCount ?? (page.Items.count == 60 ? nextOffset + 1 : nextOffset)
+                more = !page.Items.isEmpty && (random ? pool.count < total : nextOffset < total)
+                attempts += 1
+                if sortsLocally, more { continue }
+                if random, fresh.isEmpty, more, attempts < 4 { continue }
+                break
             }
-            try Task.checkCancellation()
-            guard ticket == generation, configuration == LibraryService.configurationKey else { return }
-            let existing = Set(items.map(\.id))
-            items.append(contentsOf: page.Items.filter { !existing.contains($0.id) })
-            offset += page.Items.count
-            hasMore = !page.Items.isEmpty && offset < (page.TotalRecordCount ?? (page.Items.count == 60 ? offset + 1 : offset))
+            if sortsLocally { pool = request.sorted(pool) }
+            items = pool
+            offset = nextOffset
+            hasMore = more
             loaded = true
+            revision += 1
             // Partition once per page, rather than conditionally expanding ForEach rows.
             songs = items.filter(\.isSong)
             albums = items.filter { !$0.isSong }

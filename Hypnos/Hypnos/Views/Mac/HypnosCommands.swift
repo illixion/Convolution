@@ -76,6 +76,8 @@ struct HypnosCommands: Commands {
             Divider()
             Button("Mini Player") { openWindow(id: MusicMiniPlayerWindowView.windowID) }
                 .keyboardShortcut("m", modifiers: [.command, .shift])
+            Button("Visualizer") { openWindow(id: MusicVisualizerView.windowID) }
+                .keyboardShortcut("v", modifiers: [.command, .option])
         }
 
         CommandMenu("Playback") {

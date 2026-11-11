@@ -14,6 +14,7 @@ struct JellyfinMusicUserData: Decodable, Hashable, Sendable {
     let Rating: Double?
     let PlayCount: Int?
     let Likes: Bool?
+    let LastPlayedDate: String?
 }
 
 struct JellyfinMusicStream: Decodable, Hashable, Sendable {
@@ -56,6 +57,8 @@ struct JellyfinMusicItem: Decodable, Identifiable, Hashable, Sendable {
     var isSong: Bool { self.Type == "Audio" }
     var id: String { Id }
     var artist: String { AlbumArtist ?? Artists?.joined(separator: ", ") ?? "Unknown Artist" }
+    /// Who performs a song: its own artists, which differ from the album's on a compilation or a feature.
+    var songArtist: String { Artists.flatMap { $0.isEmpty ? nil : $0.joined(separator: ", ") } ?? artist }
     /// The first audio stream, which is what a lossless badge is read from.
     var audioStream: JellyfinMusicStream? { MediaStreams?.first { $0.Type == "Audio" } }
     var albumArtistID: String? { AlbumArtists?.first?.Id }
@@ -207,6 +210,29 @@ final class JellyfinMusicSession {
         let previous = currentIndex > 0 ? currentIndex - 1 : (repeats ? queue.count - 1 : -1)
         guard previous >= 0 else { player?.seek(to: .zero); return }
         start(at: previous, base: base, token: token)
+    }
+
+    /// The song a Next would play, when it is already known: not at the end of a queue that stops there, and not a
+    /// random queue's refill, which has yet to be fetched. What the title shows peeking in while it is flicked.
+    var nextItem: JellyfinMusicItem? {
+        guard let currentIndex else { return nil }
+        if currentIndex + 1 < queue.count { return queue[currentIndex + 1] }
+        if randomSource == nil, repeats, !queue.isEmpty { return queue[0] }
+        return nil
+    }
+
+    /// The song before the playing one. Unlike the Previous button (which first restarts a song that has played
+    /// for a few seconds) this is always the song before: a deliberate flick back means it.
+    var previousItem: JellyfinMusicItem? {
+        guard let currentIndex else { return nil }
+        if currentIndex > 0 { return queue[currentIndex - 1] }
+        return repeats && queue.count > 1 ? queue[queue.count - 1] : nil
+    }
+
+    /// Go to the song before this one, whatever the clock says. Does nothing at the start of a queue that stops there.
+    func skipBack() {
+        guard let currentIndex, previousItem != nil, let (base, token) = connection() else { return }
+        start(at: currentIndex > 0 ? currentIndex - 1 : queue.count - 1, base: base, token: token)
     }
 
     /// Jump to an entry of the queue (a tap in Up Next).

@@ -88,7 +88,11 @@ enum MusicHarness {
             check("artists list", !artists.isEmpty, artists.first?.Name ?? "")
             if let artist = artists.first {
                 let found = try await songs(library, MusicRequest(section: .albums, search: String(artist.Name.prefix(4))))
-                check("search finds the artist as well as albums", found.contains { $0.Type == "MusicArtist" } && found.contains { $0.Type == "MusicAlbum" }, found.map { $0.Type ?? "?" }.joined(separator: ","))
+                check("search finds the artist", found.contains { $0.Type == "MusicArtist" }, found.map { $0.Type ?? "?" }.joined(separator: ","))
+                if let album = try await songs(library, MusicRequest(section: .albums), limit: 1).first {
+                    let albums = try await songs(library, MusicRequest(section: .albums, search: String(album.Name.prefix(5))))
+                    check("search finds an album by its name", albums.contains { $0.Type == "MusicAlbum" }, albums.map { $0.Type ?? "?" }.joined(separator: ","))
+                }
                 let artistSongs = try await songs(library, MusicRequest(section: .songs, artistID: artist.id))
                 check("an artist's songs are songs", !artistSongs.isEmpty && artistSongs.allSatisfy(\.isSong), "\(artistSongs.count)")
                 let bio = try await library.musicItem(id: artist.id)
@@ -119,9 +123,42 @@ enum MusicHarness {
             }
             let byTitle = try await songs(library, MusicRequest(section: .songs, sort: .title))
             let byTitleDown = try await songs(library, MusicRequest(section: .songs, sort: .title, descending: true))
-            check("flipping the direction reverses the order", byTitle.count < 2 || byTitle.map(\.id) == byTitleDown.map(\.id).reversed(), "\(byTitle.first?.Name ?? "") / \(byTitleDown.first?.Name ?? "")")
+            func inOrder(_ names: [String], ascending: Bool) -> Bool {
+                names.count < 2 || zip(names, names.dropFirst()).allSatisfy {
+                    let result = $0.localizedStandardCompare($1)
+                    return ascending ? result != .orderedDescending : result != .orderedAscending
+                }
+            }
+            check("flipping the direction reverses the order", inOrder(byTitle.map(\.Name), ascending: true) && inOrder(byTitleDown.map(\.Name), ascending: false)
+                  && (byTitle.count < 2 || byTitleDown.first?.Name.localizedStandardCompare(byTitle.first?.Name ?? "") != .orderedAscending),
+                  "\(byTitle.first?.Name ?? "") / \(byTitleDown.first?.Name ?? "")")
             let byTime = try await songs(library, MusicRequest(section: .songs, sort: .time))
             check("songs sort by time, shortest first", byTime.map(\.seconds) == byTime.map(\.seconds).sorted(), byTime.prefix(3).map { JellyfinMusicItem.clock($0.seconds) }.joined(separator: " "))
+            // Every order the screens inside an album, an artist and a genre offer is accepted by the server too.
+            let artistAlbums = MusicRequest(section: .albums, artistID: artists.first?.id)
+            for sort in artistAlbums.sorts {
+                var request = artistAlbums; request.sort = sort
+                let items = try await songs(library, request)
+                check("an artist's albums by \(sort.rawValue) load", !items.isEmpty && items.allSatisfy { $0.Type == "MusicAlbum" }, "\(items.count)")
+            }
+            for sort in MusicRequest(section: .songs, albumID: albumID).sorts {
+                var request = MusicRequest(section: .songs, albumID: albumID); request.sort = sort
+                let items = try await songs(library, request)
+                check("an album's songs by \(sort.rawValue) load", !items.isEmpty && items.allSatisfy(\.isSong), "\(items.count)")
+            }
+            if let genre = genres.first {
+                for sort in MusicRequest(section: .albums, genreID: genre.id).sorts {
+                    var request = MusicRequest(section: .albums, genreID: genre.id); request.sort = sort
+                    check("a genre's albums by \(sort.rawValue) load", !(try await songs(library, request)).isEmpty)
+                }
+            }
+            let byYear = try await songs(library, MusicRequest(section: .albums, sort: .year, descending: false))
+            check("albums sort by year, oldest first", byYear.map { $0.ProductionYear ?? 0 } == byYear.map { $0.ProductionYear ?? 0 }.sorted(), byYear.prefix(4).map { String($0.ProductionYear ?? 0) }.joined(separator: " "))
+            // Random is dealt afresh each time (a library of one album can only repeat itself).
+            var deals = Set<[String]>()
+            for seed in 1...4 { deals.insert(try await songs(library, MusicRequest(section: .albums, sort: .random, shuffleSeed: seed)).map(\.id)) }
+            let albumCount = try await songs(library, MusicRequest(section: .albums), limit: 3).count
+            check("Random deals a different order each time", albumCount < 3 || deals.count > 1, "\(deals.count) different of 4")
             let grouping = MusicGrouping.of(MusicRequest(section: .songs, sort: .dateAdded))
             check("date added sections read as buckets", grouping.runs(byTime, item: { $0 }).allSatisfy { $0.title != nil }, grouping.runs(byTime, item: { $0 }).compactMap(\.title).joined(separator: ", "))
             // The fuzzy search's server half: names only, then the ids resolved to full items.

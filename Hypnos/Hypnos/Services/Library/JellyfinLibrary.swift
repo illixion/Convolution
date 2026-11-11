@@ -364,13 +364,11 @@ actor JellyfinLibrary: MediaServerLibrary {
             case .recent, .albums: break
             }
         }
-        if !searching, request.isTopLevel, !request.section.sorts.isEmpty {
-            if let chosen = request.sort, request.section.sorts.contains(chosen) {
-                let (keys, descending) = chosen.server(songs: type == "Audio")
-                sort = keys
-                order = descending ? "Descending" : "Ascending"
-            }
-            if let descending = request.descending { order = descending ? "Descending" : "Ascending" }
+        // Every screen has an order in force (see `MusicRequest.effectiveSort`). A playlist's own order is the
+        // server's and the rest of its orders are applied after loading (`MusicRequest.sorted`).
+        if !searching, !request.playbackSongs, request.playlistID == nil, let effective = request.effectiveSort {
+            if effective != .listOrder { sort = effective.server(songs: type == "Audio").keys }
+            order = request.isDescending ? "Descending" : "Ascending"
         }
         if path != "Artists/AlbumArtists" && path != "MusicGenres" { query.append(.init(name: "IncludeItemTypes", value: type)) }
         if !sort.isEmpty {

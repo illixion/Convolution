@@ -23,17 +23,21 @@ import DebugTraceUI
 
 struct LibraryTabRootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(MainWindowModel.self) private var windowModel
     @State private var model = LibraryHomeViewModel()
     @State private var playback = LibraryPlayback()
-    @State private var path = NavigationPath()
-    @State private var showsMusic = false
     @State private var showsNowPlaying = false
     @State private var music = JellyfinMusicSession.shared
+    /// Names tapped outside the stack (Now Playing, the Mini Player, the visualizer) arrive here.
+    private let navigator = MusicNavigator.shared
+
+    private var path: Binding<NavigationPath> { Binding(get: { windowModel.libraryPath }, set: { windowModel.libraryPath = $0 }) }
+    private var showsMusic: Binding<Bool> { Binding(get: { windowModel.libraryShowsMusic }, set: { windowModel.libraryShowsMusic = $0 }) }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack(path: path) {
             Group {
-                if showsMusic { LibraryMusicView().rebuildsOnPatch() }
+                if showsMusic.wrappedValue { LibraryMusicView().rebuildsOnPatch() }
                 else { LibraryHomeContentView(model: model, playback: playback) }
             }
                 .navigationDestination(for: LibraryItem.self) { item in
@@ -45,24 +49,24 @@ struct LibraryTabRootView: View {
                 .navigationDestination(for: LibraryDownloadsRequest.self) { _ in
                     LibraryDownloadsView(playback: playback)
                 }
-                .navigationTitle(showsMusic ? "Music" : "Library")
+                .navigationTitle(showsMusic.wrappedValue ? "Music" : "Library")
                 .moreTabBackButton()
                 .toolbar {
                     ToolbarItem(placement: .principal) {
-                        Picker("Library section", selection: $showsMusic.animation(.snappy)) {
+                        Picker("Library section", selection: showsMusic.animation(.snappy)) {
                             Text("Movies & TV").tag(false)
                             Text("Music").tag(true)
                         }
                         .pickerStyle(.segmented)
                         .fixedSize()
                     }
-                    if !showsMusic {
+                    if !showsMusic.wrappedValue {
                         ToolbarItem(placement: .primaryAction) {
-                            LibraryDownloadsToolbarButton { path.append(LibraryDownloadsRequest()) }
+                            LibraryDownloadsToolbarButton { path.wrappedValue.append(LibraryDownloadsRequest()) }
                         }
                         ToolbarItem(placement: .primaryAction) {
                             Button {
-                                path.append(LibraryBrowseRequest(kind: nil))
+                                path.wrappedValue.append(LibraryBrowseRequest(kind: nil))
                             } label: {
                                 Label("Browse & Search", systemImage: "magnifyingglass")
                             }
@@ -78,7 +82,23 @@ struct LibraryTabRootView: View {
                 .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
                 #endif
         }
-        .environment(\.libraryOpenDetail) { path.append($0) }
+        #if DEBUG
+        .onChange(of: music.current != nil) { _, playing in
+            if playing, MusicDebugLaunch.opensNowPlaying { showsNowPlaying = true }
+        }
+        #endif
+        .environment(\.libraryOpenDetail) { windowModel.libraryPath.append($0) }
+        // Every album and artist name in the Music section pushes onto this stack, from any depth.
+        .environment(\.musicOpen) { windowModel.libraryPath.append($0) }
+        .onChange(of: navigator.request?.id, initial: true) { _, _ in
+            guard let request = navigator.take() else { return }
+            // Coming from Movies & TV leaves those pages behind; coming from Music keeps its place to go back to.
+            if !windowModel.libraryShowsMusic {
+                windowModel.libraryPath = NavigationPath()
+                windowModel.libraryShowsMusic = true
+            }
+            windowModel.libraryPath.append(request.item)
+        }
         #if !os(visionOS)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let current = music.current {
@@ -125,12 +145,12 @@ struct LibraryTabRootView: View {
     /// `-UITestDefault libraryAutoPlay=1` it plays it too (read once).
     private func openAutoOpenItemIfRequested() async {
         #if DEBUG
-        guard path.isEmpty,
+        guard windowModel.libraryPath.isEmpty,
               let itemId = HypnosDefaults.store.string(forKey: "libraryAutoOpenItemId"), !itemId.isEmpty,
               let library = LibraryService.current(),
               let item = try? await library.item(id: itemId)
         else { return }
-        path.append(item)
+        windowModel.libraryPath.append(item)
         if HypnosDefaults.store.bool(forKey: "libraryAutoPlay") {
             HypnosDefaults.store.removeObject(forKey: "libraryAutoPlay")
             await playback.play(item)
