@@ -3,9 +3,11 @@
 set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 checks_dir="$(mktemp -d "${TMPDIR:-/tmp}/hypnos-music-checks.XXXXXX")"
+# The session imports RAVEMedia for the equalizer; the checks stub what it uses (see MusicPlayerChecks.swift).
+grep -v '^import RAVEMedia$' "$repo_root/Hypnos/Hypnos/Services/Library/JellyfinMusic.swift" > "$checks_dir/JellyfinMusic.swift"
 swiftc -swift-version 6 -parse-as-library \
     "$repo_root/Hypnos/Hypnos/Support/HypnosDefaults.swift" \
-    "$repo_root/Hypnos/Hypnos/Services/Library/JellyfinMusic.swift" \
+    "$checks_dir/JellyfinMusic.swift" \
     "$repo_root/Hypnos/Hypnos/Services/Library/MusicFlick.swift" \
     "$repo_root/Hypnos/Hypnos/Services/Library/MusicCatalog.swift" \
     "$repo_root/Hypnos/Hypnos/Services/Library/MusicSearchIndex.swift" \

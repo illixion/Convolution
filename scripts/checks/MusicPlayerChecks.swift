@@ -19,6 +19,11 @@ import Observation
     static let shared = SleepTimer()
     func register(_ owner: AnyObject, pause: @escaping @MainActor () -> Bool) {}
 }
+/// The equalizer's part in the session, which lives in RAVEMedia.
+enum EQAttachResult: Equatable, Sendable { case attached }
+extension AVPlayerItem {
+    func attachAudioEQ(player: AVPlayer? = nil, onResult: (@MainActor (EQAttachResult) -> Void)? = nil) { onResult?(.attached) }
+}
 enum AudioSessionConfig {
     static func configureMixedPlayback() {}
     static func configureExclusiveMusicPlayback() {}
