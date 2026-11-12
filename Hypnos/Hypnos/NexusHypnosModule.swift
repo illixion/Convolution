@@ -80,9 +80,10 @@ public final class HypnosSpaceModule: RAVESpaceModule, CinemaSpaceHosting {
         }
     }
 
-    /// What the cinema asks of the shared space: the room dark around Big Screen.
+    /// What the cinema asks of the shared space: the room dark around Big Screen,
+    /// and the picture drawn over the arms in HUD.
     private var requirements: RAVESpaceRequirements {
-        RAVESpaceRequirements(immersion: .mixed, hidesUpperLimbs: false,
+        RAVESpaceRequirements(immersion: .mixed, hidesUpperLimbs: space.hidesUpperLimbs,
                               surroundings: space.wantsDarkSurroundings ? .systemDark : nil,
                               needsHands: false)
     }

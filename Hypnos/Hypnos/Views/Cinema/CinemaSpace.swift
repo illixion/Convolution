@@ -124,6 +124,15 @@ final class CinemaSpace {
     /// What the room around the content should look like: dark behind the Big Screen.
     var wantsDarkSurroundings: Bool { cinema.mode == .bigScreen && cinema.dimsSurroundings }
 
+    /// Whether the picture draws over the viewer's arms. visionOS draws real
+    /// arms over content it judges to be behind them, from a soft, noisy
+    /// mask, and the HUD's picture, close to the viewer, faded in patches
+    /// wherever that mask reached. The same fade on a forearm-worn panel in
+    /// spatial-ai-character stopped once the space hid the mask (worn
+    /// 2026-11-12), so HUD does too. Big Screen is across the room, where
+    /// hands in front of it should look like hands in front of it.
+    var hidesUpperLimbs: Bool { cinema.mode == .hud }
+
     // MARK: The film's sound
 
     /// The film's object audio is played from here while the film owns the cinema.
@@ -496,6 +505,7 @@ struct CinemaSpaceView: View {
             .onChanged { space.dragChanged($0) }
             .onEnded { space.dragEnded($0) })
         .preferredSurroundingsEffect(space.wantsDarkSurroundings ? .systemDark : nil)
+        .upperLimbVisibility(space.hidesUpperLimbs ? .hidden : .automatic)
         .onAppear { space.appeared(actions: (open, dismiss)) }
         .onChange(of: space.presentation.isPresented) { _, shown in
             AppLogger.videoWindow.info("HUD menu requested: \(shown, privacy: .public)")
