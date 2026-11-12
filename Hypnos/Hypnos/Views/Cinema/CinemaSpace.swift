@@ -328,15 +328,17 @@ final class CinemaSpace {
            bounds.extents.x > 1e-4 {
             let scale = cinema.pictureWidth / bounds.extents.x
             let controlsHeight = bounds.extents.y * scale
+            // The grab bar, Close and Recenter/Window are laid out in metres
+            // for the home-sized picture and shrink (or grow) with it, as the
+            // controls do: left at a fixed size they dwarfed a small HUD.
+            let chrome = cinema.pictureWidth / Cinema.hudHomeWidth
             hudControls.scale = SIMD3(repeating: scale)
-            hudControls.position = SIMD3(0, -height / 2 - 0.05 - controlsHeight / 2 - slide, 0.02)
-            let chromeY = -height / 2 - 0.05 - controlsHeight - 0.12 - slide
+            hudControls.position = SIMD3(0, -height / 2 - 0.05 * chrome - controlsHeight / 2 - slide, 0.02)
+            let chromeY = -height / 2 - 0.05 * chrome - controlsHeight - 0.12 * chrome - slide
             hudHandle.position = SIMD3(0, chromeY, 0.02)
-            hudClose.position = SIMD3(-0.18, chromeY, 0.025)
-            hudUtilities.position = SIMD3(0.25, chromeY, 0.025)
-        }
-        if cinema.mode == .hud, hudHandle.scale != SIMD3(repeating: 1) {
-            hudHandle.scale = SIMD3(repeating: 1)
+            hudClose.position = SIMD3(-0.18 * chrome, chromeY, 0.025)
+            hudUtilities.position = SIMD3(0.25 * chrome, chromeY, 0.025)
+            hudHandle.scale = SIMD3(repeating: chrome)
         }
         if cinema.mode == .bigScreen {
             // As large to the eye as the HUD's bar at its 2 m, under the picture.
@@ -345,11 +347,12 @@ final class CinemaSpace {
             hudHandle.position = SIMD3(0, -height / 2 - 0.06 * scale, 0.02 * scale)
         }
         if cinema.mode == .hud, hudClose.isEnabled, hudUtilities.isEnabled {
+            let chrome = cinema.pictureWidth / Cinema.hudHomeWidth
             if let bounds = hudClose.components[ViewAttachmentComponent.self]?.bounds, bounds.extents.x > 1e-4 {
-                hudClose.scale = SIMD3(repeating: 0.085 / bounds.extents.x)
+                hudClose.scale = SIMD3(repeating: 0.085 * chrome / bounds.extents.x)
             }
             if let bounds = hudUtilities.components[ViewAttachmentComponent.self]?.bounds, bounds.extents.x > 1e-4 {
-                hudUtilities.scale = SIMD3(repeating: 0.19 / bounds.extents.x)
+                hudUtilities.scale = SIMD3(repeating: 0.19 * chrome / bounds.extents.x)
             }
         }
         if cinema.mode == .hud {
