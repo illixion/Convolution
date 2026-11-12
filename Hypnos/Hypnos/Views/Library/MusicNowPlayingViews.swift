@@ -329,6 +329,7 @@ struct MusicAudioOptionsMenu: View {
             }
             Divider()
             Toggle("Sound Check", systemImage: "speaker.wave.2", isOn: Binding(get: { music.soundCheck }, set: { music.setSoundCheck($0) }))
+            MusicCrossfadeMenu(music: music)
             Divider()
             Toggle("Equalizer", systemImage: "slider.vertical.3", isOn: Binding(get: { eq.settings.enabled }, set: { eq.setEnabled($0) }))
             Menu("Equalizer Preset") {
@@ -358,6 +359,52 @@ struct MusicAudioOptionsMenu: View {
         #if !os(tvOS)
         .sheet(isPresented: $showsEQEditor, onDismiss: { eq.reloadPresets() }) { AudioEQEditorSheet() }
         #endif
+    }
+}
+
+/// Crossfade: Off (every join gapless) or 2–12 s, and what it does between an album's consecutive tracks
+/// (`MusicCrossfade.swift`). The label says what the next join will be, so a seamless album shows as gapless.
+struct MusicCrossfadeMenu: View {
+    let music: JellyfinMusicSession
+
+    var body: some View {
+        Menu {
+            Section("Crossfade") {
+                ForEach(MusicTransitionRules.crossfadeChoices, id: \.self) { seconds in
+                    Button {
+                        music.setCrossfadeSeconds(seconds)
+                    } label: {
+                        if music.crossfadeSeconds == seconds { Label(Self.name(seconds), systemImage: "checkmark") } else { Text(Self.name(seconds)) }
+                    }
+                }
+            }
+            if music.crossfadeSeconds > 0 {
+                Section("Between an Album's Tracks") {
+                    ForEach(MusicAlbumCrossfade.allCases) { choice in
+                        Button {
+                            music.setAlbumCrossfade(choice)
+                        } label: {
+                            if music.albumCrossfade == choice { Label(choice.title, systemImage: "checkmark") } else { Text(choice.title) }
+                        }
+                    }
+                }
+            }
+            if let next = upcoming { Text(next) }
+        } label: {
+            Label(music.crossfadeSeconds > 0 ? "Crossfade: \(Int(music.crossfadeSeconds)) s" : "Crossfade: Off",
+                  systemImage: "arrow.trianglehead.merge")
+        }
+    }
+
+    private static func name(_ seconds: Double) -> String { seconds == 0 ? "Off" : "\(Int(seconds)) Seconds" }
+
+    /// How the playing song will join the next.
+    private var upcoming: String? {
+        guard music.crossfadeSeconds > 0, let transition = music.upcomingTransition else { return nil }
+        switch transition {
+        case .gapless: return "Next song: gapless"
+        case .crossfade(let seconds): return "Next song: \(Int(seconds)) s crossfade"
+        }
     }
 }
 
@@ -456,6 +503,7 @@ private struct MusicMiniPlayerOptions: View {
                 ForEach(JellyfinMusicAudioMode.allCases) { Label($0.title, systemImage: $0.symbol).tag($0) }
             }
             Toggle("Sound Check", systemImage: "speaker.wave.2", isOn: Binding(get: { music.soundCheck }, set: { music.setSoundCheck($0) }))
+            MusicCrossfadeMenu(music: music)
             Button("Stop", systemImage: "stop.fill", role: .destructive) { music.stop() }
         } label: { Image(systemName: "ellipsis.circle") }
             .accessibilityLabel("Player options")

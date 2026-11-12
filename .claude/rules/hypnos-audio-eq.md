@@ -42,7 +42,7 @@ section in `MusicAudioOptionsMenu`.
 | Local / Photos video, Stash and Nextcloud originals, Jellyfin Direct Play | `NativeMetalVideoPlayerView` item → tap | yes |
 | Stereo (AI 3D / live 3D) player | RAVEMedia engine's item → tap or stream (`RAVEMediaPolicy.audioEQ`) | yes |
 | tvOS player | `observe(_:in:)` → tap or stream | yes |
-| Jellyfin music | `attachEQ(_:in:)` → tap (direct play) or stream (songs it transcodes, HLS TS) | yes |
+| Jellyfin music | the music engine's mixed output (`MusicEngineHooks`, `MusicSampleProcessor`), every song | yes |
 | Film player (object audio) | `FilmPlayer.audioEQ` | yes: objects and room |
 | **HLS**: YouTube master (packed ADTS; surround EC-3 fMP4), the MKV remux (its fragments), Jellyfin remuxes and transcodes (fMP4), Stash transcodes (TS) | `EQStreamPlayback` | yes |
 | tvOS slideshow clips | tap only (muted clips) | files |

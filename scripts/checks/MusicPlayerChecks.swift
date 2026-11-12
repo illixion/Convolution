@@ -24,6 +24,12 @@ enum EQAttachResult: Equatable, Sendable { case attached }
 extension AVPlayerItem {
     func attachAudioEQ(player: AVPlayer? = nil, onResult: (@MainActor (EQAttachResult) -> Void)? = nil) { onResult?(.attached) }
 }
+/// The engine's ties to RAVEMedia and the log (`MusicEngineHooks.swift` in the app).
+@MainActor enum MusicEngineHooks {
+    static func makeProcessor() -> MusicSampleProcessor? { nil }
+    static var hasEqualizer: Bool { false }
+    static func log(failure message: String) {}
+}
 enum AudioSessionConfig {
     static func configureMixedPlayback() {}
     static func configureExclusiveMusicPlayback() {}
@@ -113,13 +119,13 @@ actor JellyfinLibrary {
         music.next()
         precondition(music.current == nil && music.queue.isEmpty && !music.isPlaying)
         var releasedFields = 0
-        for name in ["_player", "_timeObserver", "_endObserver", "_observation", "player", "timeObserver", "endObserver", "observation"] {
+        for name in ["_currentToken", "_preloaded", "currentToken", "preloaded"] {
             if let value = Mirror(reflecting: music).children.first(where: { $0.label == name })?.value {
                 releasedFields += 1
                 precondition(Mirror(reflecting: value).children.isEmpty, "Transport retained \(name) after terminal Next")
             }
         }
-        precondition(releasedFields == 4, "Cleanup checks must inspect all four player/observer fields")
+        precondition(releasedFields == 2, "Cleanup checks must inspect the engine's song handles")
         print("Terminal Next releases playback and observers: PASS")
         music.play(song)
         music.stop()

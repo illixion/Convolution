@@ -9,6 +9,11 @@ swiftc -swift-version 6 -parse-as-library \
     "$repo_root/Hypnos/Hypnos/Support/HypnosDefaults.swift" \
     "$checks_dir/JellyfinMusic.swift" \
     "$repo_root/Hypnos/Hypnos/Services/Library/MusicFlick.swift" \
+    "$repo_root/Hypnos/Hypnos/Services/Library/MusicCrossfade.swift" \
+    "$repo_root/Hypnos/Hypnos/Services/Library/MusicEngine/MusicSongFile.swift" \
+    "$repo_root/Hypnos/Hypnos/Services/Library/MusicEngine/MusicDecoders.swift" \
+    "$repo_root/Hypnos/Hypnos/Services/Library/MusicEngine/MusicTimeline.swift" \
+    "$repo_root/Hypnos/Hypnos/Services/Library/MusicEngine/MusicPlaybackEngine.swift" \
     "$repo_root/Hypnos/Hypnos/Services/Library/MusicCatalog.swift" \
     "$repo_root/Hypnos/Hypnos/Services/Library/MusicSearchIndex.swift" \
     "$repo_root"/../RAVESDK/Sources/RAVESearch/*.swift \

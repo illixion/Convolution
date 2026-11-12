@@ -7,6 +7,11 @@ several albums. This writes ~40 short tone albums with tags and generated cover 
 lengths and file dates so every sort order has something to sort. Includes a two-disc album and a compilation
 whose track artists differ from its album artist.
 
+Ordinary tracks fade out and end in silence, as mastered songs do, so a crossfade has something to blend and the
+seam detector (`MusicSeams`) finds them not seamless. Two albums are one continuous piece cut into tracks at exact
+samples, the way a live album or a DJ mix is: "Unbroken Line" (FLAC) and "Night Drive Mix" (AAC with its priming
+in an edit list). Played gaplessly their tracks join without a click; the seam detector finds them seamless.
+
     scripts/gen-dev-music.py              write the files (skips ones already there)
     scripts/gen-dev-music.py --refresh    also ask the dev Jellyfin to rescan its libraries
     scripts/gen-dev-music.py --clean      delete the synthetic folder
@@ -55,14 +60,47 @@ def cover(path: Path, title: str, artist: str):
     img.save(path, quality=90)
 
 
-def synth(path: Path, cover_path: Path, tags: dict, freq: int, seconds: int):
+def metadata(tags: dict):
     meta = []
     for k, v in tags.items():
         meta += ["-metadata", f"{k}={v}"]
+    return meta
+
+
+def synth(path: Path, cover_path: Path, tags: dict, freq: int, seconds: int):
+    # A short fade in, a two-second fade out and a second of silence: an ordinary mastered song's edges.
+    tone = seconds - 1
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
-                    f"sine=frequency={freq}:duration={seconds}:sample_rate=44100", "-i", str(cover_path),
+                    f"sine=frequency={freq}:duration={tone}:sample_rate=44100", "-i", str(cover_path),
+                    "-af", f"afade=t=in:d=0.05,afade=t=out:st={tone - 2}:d=2,apad=pad_dur=1",
                     "-map", "0:a", "-map", "1:v", "-c:a", "aac", "-b:a", "48k", "-c:v", "mjpeg",
-                    "-disposition:v", "attached_pic", *meta, str(path)], check=True)
+                    "-disposition:v", "attached_pic", *metadata(tags), str(path)], check=True)
+
+
+# One continuous piece: a chord whose pitch glides and whose level swells, so every cut lands mid-sound and a
+# gap or a click at a seam is audible (and measurable). Phase is continuous across the whole piece.
+CONTINUOUS = ("0.25*sin(2*PI*(220*t+40*sin(2*PI*t/23)))+0.18*sin(2*PI*(330*t+60*sin(2*PI*t/23)))"
+              "+0.12*sin(2*PI*(440*t+80*sin(2*PI*t/31)))*(0.6+0.4*sin(2*PI*t/7))")
+
+
+def continuous_album(folder: Path, art: Path, artist: str, album: str, year: int, genre: str, lengths: list,
+                     titles: list, codec: list, ext: str):
+    total = sum(lengths)
+    whole = folder / "whole.wav"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                    f"aevalsrc={CONTINUOUS}:s=44100:d={total}", "-ac", "2", str(whole)], check=True)
+    start = 0
+    for track, (seconds, title) in enumerate(zip(lengths, titles), start=1):
+        end = start + seconds * 44100
+        tags = {"title": title, "artist": artist, "album_artist": artist, "album": album, "date": str(year),
+                "genre": genre, "track": f"{track}/{len(lengths)}", "disc": "1/1"}
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(whole), "-i", str(art),
+                        "-af", f"atrim=start_sample={start}:end_sample={end},asetpts=PTS-STARTPTS",
+                        "-map", "0:a", "-map", "1:v", *codec, "-c:v", "mjpeg", "-disposition:v", "attached_pic",
+                        *metadata(tags), str(folder / f"{track:02d} {title}.{ext}")], check=True)
+        start = end
+    whole.unlink()
+    return len(lengths)
 
 
 def build():
@@ -92,12 +130,31 @@ def build():
                         "genre": genre, "track": f"{track}/{per_disc}", "disc": f"{disc}/{discs}"}
                 synth(folder / name, art, tags, 220 + index * 17 + track * 40, rng.randint(14, 50))
                 files += 1
-        # Spread file dates over ~a year so Date Added has Today / This Week / months to group by.
-        stamp = subprocess.run(["date", "-v", f"-{(index * 9) % 380}d", "+%Y%m%d%H%M"], capture_output=True, text=True).stdout.strip()
-        for f in folder.iterdir():
-            subprocess.run(["touch", "-t", stamp, str(f)], check=True)
-        subprocess.run(["touch", "-t", stamp, str(folder)], check=True)
+        stamp_folder(folder, index)
+    continuous = [
+        ("Echo Harbor", "Unbroken Line", 2016, "Electronic", [24, 31, 19, 27],
+         ["Departure", "Long Exposure", "Crossing", "Arrival"], ["-c:a", "flac"], "flac"),
+        ("Neon Almanac", "Night Drive Mix", 2022, "Synthpop", [22, 18, 26],
+         ["On Ramp", "Sodium Lights", "Exit 9"], ["-c:a", "aac", "-b:a", "128k"], "m4a"),
+    ]
+    for offset, (artist, album, year, genre, lengths, titles, codec, ext) in enumerate(continuous):
+        folder = ROOT / artist / album
+        if folder.exists():
+            continue
+        folder.mkdir(parents=True)
+        art = folder / "cover.jpg"
+        cover(art, album, artist)
+        files += continuous_album(folder, art, artist, album, year, genre, lengths, titles, codec, ext)
+        stamp_folder(folder, len(plan) + offset)
     print(f"wrote {files} files under {ROOT}")
+
+
+def stamp_folder(folder: Path, index: int):
+    # Spread file dates over ~a year so Date Added has Today / This Week / months to group by.
+    stamp = subprocess.run(["date", "-v", f"-{(index * 9) % 380}d", "+%Y%m%d%H%M"], capture_output=True, text=True).stdout.strip()
+    for f in folder.iterdir():
+        subprocess.run(["touch", "-t", stamp, str(f)], check=True)
+    subprocess.run(["touch", "-t", stamp, str(folder)], check=True)
 
 
 def refresh():

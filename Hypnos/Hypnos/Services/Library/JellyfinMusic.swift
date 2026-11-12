@@ -30,6 +30,8 @@ struct JellyfinMusicItem: Decodable, Identifiable, Hashable, Sendable {
     let Id: String
     let Name: String
     let `Type`: String?
+    /// The file's container ("flac", "mp3", "mov,mp4,m4a,3gp,3g2,mj2"): what the music engine fetches.
+    let Container: String?
     let AlbumId: String?
     let DateCreated: String?
     let ChildCount: Int?
@@ -119,28 +121,35 @@ final class JellyfinMusicSession {
     /// Even out song loudness with the server's `NormalizationGain` (Jellyfin's LUFS scan).
     private(set) var soundCheck = HypnosDefaults.store.bool(forKey: "jellyfinMusic.soundCheck")
     var isShuffled = false
-    /// What the equalizer found on the playing song's audio: it can't reach a song Jellyfin
-    /// transcodes to HLS (anything but mp3/aac/m4a/flac/wav/alac). Nil until known.
+    /// Whether the equalizer shapes the music (it filters the engine's output, so every song). Nil before playback.
     private(set) var eqResult: EQAttachResult?
     private(set) var repeatMode = MusicRepeatMode(rawValue: HypnosDefaults.store.string(forKey: "jellyfinMusic.repeatMode") ?? "") ?? .off
     /// Whether the queue wraps around: Repeat All, and Repeat One once the listener moves on by hand.
     var repeats: Bool { repeatMode != .off }
     var error: String?
+    /// Seconds two songs overlap when one gives way to the next; 0 is Off (every join gapless).
+    private(set) var crossfadeSeconds = min(12, max(0, HypnosDefaults.store.object(forKey: "jellyfinMusic.crossfadeSeconds") as? Double ?? 0))
+    /// What a crossfade does between an album's consecutive tracks.
+    private(set) var albumCrossfade = MusicAlbumCrossfade(rawValue: HypnosDefaults.store.string(forKey: "jellyfinMusic.crossfadeAlbums") ?? "") ?? .unlessSeamless
+    /// How the playing song will give way to the next one, once that is planned.
+    private(set) var upcomingTransition: MusicTimeline.Transition?
     @ObservationIgnored private var orderedQueue: [JellyfinMusicItem] = []
     @ObservationIgnored private var randomSource: MusicRequest?
     @ObservationIgnored private var randomLibrary: JellyfinLibrary?
     @ObservationIgnored private var randomConfiguration: String?
     @ObservationIgnored private var refillTask: Task<Void, Never>?
     @ObservationIgnored private var queueGeneration = UUID()
-    /// Each queued item's equalizer result, weakly keyed: a preloaded song reports before it plays.
-    @ObservationIgnored private let eqResults = NSMapTable<AVPlayerItem, EQResultBox>(keyOptions: .weakMemory, valueOptions: .strongMemory)
-    private var player: AVPlayer?
-    private var observation: NSKeyValueObservation?
-    private var itemObservation: NSKeyValueObservation?
-    /// The next song, already queued behind the playing one so the player rolls into it with no gap.
-    private var preloaded: (item: AVPlayerItem, music: JellyfinMusicItem, index: Int)?
-    private var timeObserver: Any?
-    private var endObserver: NSObjectProtocol?
+    /// Plays the queue (`Services/Library/MusicEngine/`): decoded on the device, every join sample-exact.
+    @ObservationIgnored private var engine: MusicPlaybackEngine?
+    /// The playing song's handle in the engine.
+    @ObservationIgnored private var currentToken: UUID?
+    /// The next song, already handed to the engine behind the playing one, and how the two will join.
+    @ObservationIgnored private var preloaded: (token: UUID, music: JellyfinMusicItem, index: Int, transition: MusicTimeline.Transition)?
+    /// Songs whose original file the device couldn't read: fetched as a server FLAC instead.
+    @ObservationIgnored private var transcodeIDs: Set<String> = []
+    @ObservationIgnored private var lastFailureSkip = Date.distantPast
+    @ObservationIgnored private var resumesAfterInterruption = false
+    @ObservationIgnored private var interruptionObserver: NSObjectProtocol?
     private var playSessionId = UUID().uuidString
     private var progressTask: Task<Void, Never>?
     /// The playing song's play state as it was before Jellyfin counted this play (it counts at the start).
@@ -206,9 +215,9 @@ final class JellyfinMusicSession {
 
     func previous() {
         guard let currentIndex, let (base, token) = connection() else { return }
-        if currentTime > 3 { player?.seek(to: .zero); return }
+        if currentTime > 3 { seek(to: 0); return }
         let previous = currentIndex > 0 ? currentIndex - 1 : (repeats ? queue.count - 1 : -1)
-        guard previous >= 0 else { player?.seek(to: .zero); return }
+        guard previous >= 0 else { seek(to: 0); return }
         start(at: previous, base: base, token: token)
     }
 
@@ -328,16 +337,23 @@ final class JellyfinMusicSession {
         queueGeneration = UUID()
         refillTask?.cancel()
         refillTask = nil
-        player?.pause()
+        engine?.setPlaying(false)
         isPlaying = false
         publishNowPlaying()
     }
     func toggle() {
-        guard let player else { return }
-        if isPlaying { pause() }
-        else { player.play(); isPlaying = true; publishNowPlaying() }
+        guard currentToken != nil else { return }
+        if isPlaying { pause() } else { resume() }
     }
-    func toggleMute() { isMuted.toggle(); player?.isMuted = isMuted }
+    private func resume() {
+        guard let engine, currentToken != nil else { return }
+        if audioMode == .music { AudioSessionConfig.configureExclusiveMusicPlayback() }
+        else { AudioSessionConfig.configureMixedPlayback() }
+        engine.setPlaying(true)
+        isPlaying = true
+        publishNowPlaying()
+    }
+    func toggleMute() { isMuted.toggle(); engine?.setMuted(isMuted) }
     func setVolume(_ value: Double) {
         guard value.isFinite else { return }
         volume = min(1, max(0, value))
@@ -362,12 +378,29 @@ final class JellyfinMusicSession {
         return min(1, max(0.05, pow(10, gainDB / 20)))
     }
 
+    /// The listener's volume on the output, and each song's Sound Check gain on its own samples (two songs
+    /// crossfading each keep their own).
     private func applyVolume() {
-        let factor = soundCheck ? Self.soundCheckFactor(gainDB: currentGainDB) : 1
-        player?.volume = Float(volume * factor)
+        guard let engine else { return }
+        engine.setVolume(Float(volume))
+        if let currentToken, let current { engine.setGain(gain(for: current), for: currentToken) }
+        if let preloaded { engine.setGain(gain(for: preloaded.music), for: preloaded.token) }
     }
 
-    func seek(to seconds: Double) { player?.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)); currentTime = seconds; publishNowPlaying() }
+    private func gain(for item: JellyfinMusicItem) -> Float {
+        soundCheck ? Float(Self.soundCheckFactor(gainDB: item.NormalizationGain ?? item.AlbumNormalizationGain)) : 1
+    }
+
+    func seek(to seconds: Double) {
+        guard let engine, let currentToken else { return }
+        let target = max(0, duration > 0 ? min(seconds, duration) : seconds)
+        engine.seek(currentToken, to: target)
+        currentTime = target
+        publishNowPlaying()
+        // The engine drops what it had planned after the song; plan it again.
+        preloaded = nil
+        refreshPreload()
+    }
     func artworkURL(for item: JellyfinMusicItem, maxWidth: Int = 360) -> URL? {
         guard let (base, token) = connection() else { return nil }
         let imageID = item.ImageTags?["Primary"] != nil ? item.Id : item.AlbumId
@@ -399,6 +432,20 @@ final class JellyfinMusicSession {
         refreshPreload()
     }
 
+    // MARK: - Crossfade
+
+    func setCrossfadeSeconds(_ seconds: Double) {
+        crossfadeSeconds = min(12, max(0, seconds))
+        HypnosDefaults.store.set(crossfadeSeconds, forKey: "jellyfinMusic.crossfadeSeconds")
+        refreshPreload()
+    }
+
+    func setAlbumCrossfade(_ value: MusicAlbumCrossfade) {
+        albumCrossfade = value
+        HypnosDefaults.store.set(value.rawValue, forKey: "jellyfinMusic.crossfadeAlbums")
+        refreshPreload()
+    }
+
     /// Everything after the playing song leaves the queue, and a random queue stops refilling: the song plays out
     /// and that is the end (iTunes's Clear Up Next).
     func clearUpNext() {
@@ -427,68 +474,94 @@ final class JellyfinMusicSession {
         applySpatialAudioPreference()
     }
 
-    private func streamURL(for item: JellyfinMusicItem, base: URL, token: String) -> URL? {
-        var c = URLComponents(url: base.appendingPathComponent("Audio/\(item.Id)/universal"), resolvingAgainstBaseURL: false)!
-        c.queryItems = [URLQueryItem(name: "UserId", value: JellyfinAuth.shared.session?.userId), URLQueryItem(name: "ApiKey", value: token),
-            // Direct play what AVFoundation opens; otherwise HLS. A bare `/stream` transcode is an endless,
-            // unseekable pipe: seeking after a long pause left the clock running past the track's length.
-            URLQueryItem(name: "Container", value: "mp3,aac,m4a,m4b,flac,wav,alac"),
-            URLQueryItem(name: "TranscodingContainer", value: "ts"),
-            URLQueryItem(name: "TranscodingProtocol", value: "hls"),
-            URLQueryItem(name: "AudioCodec", value: "aac")].compactMap { item in
-            guard let value = item.value else { return nil }
-            return URLQueryItem(name: item.name, value: value)
-        }
-        return c.url
+    /// The engine, made on first playback with the app's equalizer on its output.
+    private func makeEngine() -> MusicPlaybackEngine {
+        if let engine { return engine }
+        let engine = MusicPlaybackEngine(processor: MusicEngineHooks.makeProcessor())
+        engine.onSongStarted = { [weak self] token in self?.engineStartedSong(token) }
+        engine.onProgress = { [weak self] token, seconds, exact in self?.engineProgress(token, seconds: seconds, exact: exact) }
+        engine.onFinished = { [weak self] token in self?.engineFinished(token) }
+        engine.onFailure = { [weak self] token, message in self?.engineFailed(token, message: message) }
+        self.engine = engine
+        observeInterruptions()
+        return engine
     }
 
-    private func makePlayerItem(for item: JellyfinMusicItem, base: URL, token: String) -> AVPlayerItem? {
-        guard let url = streamURL(for: item, base: base, token: token) else { return nil }
-        let playerItem = AVPlayerItem(url: url)
-        #if os(visionOS)
-        playerItem.allowedAudioSpatializationFormats = .monoStereoAndMultichannel
-        #endif
-        return playerItem
-    }
-
-    /// The equalizer on `item`, once it is in `player`'s queue (a song Jellyfin transcodes is
-    /// HLS, whose sound the equalizer plays in the player's place).
-    private func attachEQ(_ item: AVPlayerItem, in player: AVPlayer) {
-        item.attachAudioEQ(player: player) { [weak self, weak item] result in
-            guard let self, let item else { return }
-            self.eqResults.setObject(EQResultBox(result), forKey: item)
-            self.syncEQResult()
-        }
-    }
-
-    /// `eqResult` follows whichever item the player is on now.
-    private func syncEQResult() {
-        let result = player?.currentItem.flatMap { eqResults.object(forKey: $0)?.result }
-        if eqResult != result { eqResult = result }
+    /// `item` as the engine's song: its file (fetched once, shared by every entry of it) and its gain.
+    private func engineSong(_ item: JellyfinMusicItem, token: UUID, base: URL, apiToken: String) -> MusicTimeline.Song {
+        let file = MusicSongFiles.shared.file(for: item, base: base, token: apiToken, fallback: transcodeIDs.contains(item.Id))
+        return MusicTimeline.Song(token: token, file: file, gain: gain(for: item), estimatedSeconds: item.seconds)
     }
 
     /// Where playback goes after the current song, when that is already known (not a random refill).
+    /// Repeat One plays the same entry again, joined without a gap.
     private func upcomingIndex() -> Int? {
-        guard let currentIndex, repeatMode != .one else { return nil }
+        guard let currentIndex else { return nil }
+        if repeatMode == .one { return currentIndex }
         if currentIndex + 1 < queue.count { return currentIndex + 1 }
         if randomSource == nil, repeats, !queue.isEmpty { return 0 }
         return nil
     }
 
-    /// Queue the next song behind the playing one (or drop a stale one), for gapless playback.
+    /// Hands the engine the song after this one and how to join them (or nothing), after any queue or setting change.
     private func refreshPreload() {
-        guard let queuePlayer = player as? AVQueuePlayer else { return }
-        let wanted = upcomingIndex()
-        if let preloaded, let wanted, preloaded.index == wanted, preloaded.music.id == queue[wanted].id { return }
-        if let preloaded { queuePlayer.remove(preloaded.item); self.preloaded = nil }
-        guard let wanted, let (base, token) = connection(),
-              let item = makePlayerItem(for: queue[wanted], base: base, token: token) else { return }
-        queuePlayer.insert(item, after: queuePlayer.currentItem)
-        attachEQ(item, in: queuePlayer)
-        preloaded = (item, queue[wanted], wanted)
+        guard let engine, let currentToken, let currentIndex, let current else { return }
+        // Already joining or fading into it: too late to change.
+        if let preloaded, engine.hasCommitted(preloaded.token) { return }
+        guard let wanted = upcomingIndex(), queue.indices.contains(wanted), let (base, apiToken) = connection() else {
+            if preloaded != nil { engine.setNext(nil, transition: .gapless, after: currentToken) }
+            preloaded = nil
+            upcomingTransition = nil
+            keepFiles()
+            return
+        }
+        let next = queue[wanted]
+        let transition = transition(from: current, to: next, sameEntry: wanted == currentIndex)
+        if let preloaded, preloaded.index == wanted, preloaded.music.id == next.id {
+            if preloaded.transition != transition {
+                self.preloaded?.transition = transition
+                engine.setNext(engineSong(next, token: preloaded.token, base: base, apiToken: apiToken), transition: transition, after: currentToken)
+            }
+            upcomingTransition = transition
+            return
+        }
+        let token = UUID()
+        engine.setNext(engineSong(next, token: token, base: base, apiToken: apiToken), transition: transition, after: currentToken)
+        preloaded = (token, next, wanted, transition)
+        upcomingTransition = transition
+        keepFiles()
+        measureSeamIfNeeded(from: current, to: next, base: base, apiToken: apiToken)
     }
 
-    /// The queue player rolled into the preloaded song: move the session's state onto it.
+    private func transition(from a: JellyfinMusicItem, to b: JellyfinMusicItem, sameEntry: Bool) -> MusicTimeline.Transition {
+        let seams = MusicSeams.shared
+        let seam = MusicTransitionRules.seam(seams.known(a.Id), seams.known(b.Id))
+        if seam == .continuous, MusicTransitionRules.isAlbumSequence(a, b) { seams.markSeamless(album: a.AlbumId) }
+        return MusicTransitionRules.transition(from: a, to: b, crossfadeSeconds: crossfadeSeconds, albums: albumCrossfade, seam: seam,
+                                               albumIsSeamless: a.AlbumId.map { seams.seamlessAlbums.contains($0) } ?? false,
+                                               repeatingOne: sameEntry)
+    }
+
+    /// Listens to a seam inside an album when whether to crossfade it depends on it; plans again once it's heard.
+    private func measureSeamIfNeeded(from a: JellyfinMusicItem, to b: JellyfinMusicItem, base: URL, apiToken: String) {
+        guard crossfadeSeconds > 0, albumCrossfade == .unlessSeamless, MusicTransitionRules.isAlbumSequence(a, b),
+              !(a.AlbumId.map { MusicSeams.shared.seamlessAlbums.contains($0) } ?? false) else { return }
+        for item in [a, b] {
+            let file = MusicSongFiles.shared.file(for: item, base: base, token: apiToken, fallback: transcodeIDs.contains(item.Id))
+            MusicSeams.shared.measure(item, file: file) { [weak self] in self?.refreshPreload() }
+        }
+    }
+
+    /// The device keeps the playing song's file, the next one's and the one before (a quick Previous).
+    private func keepFiles() {
+        var keep = Set<String>()
+        if let current { keep.insert(current.Id) }
+        if let preloaded { keep.insert(preloaded.music.Id) }
+        if let currentIndex, currentIndex > 0, queue.indices.contains(currentIndex - 1) { keep.insert(queue[currentIndex - 1].Id) }
+        MusicSongFiles.shared.keep(keep)
+    }
+
+    /// The engine has started playing the planned song (a gapless join, or the start of a crossfade).
     private func advanceToPreloaded() {
         guard let preloaded else { return }
         self.preloaded = nil
@@ -496,83 +569,102 @@ final class JellyfinMusicSession {
         playSessionId = UUID().uuidString
         current = preloaded.music
         currentIndex = preloaded.index
+        currentToken = preloaded.token
         currentTime = 0
-        duration = Double(preloaded.music.RunTimeTicks ?? 0) / 10_000_000
+        duration = preloaded.music.seconds
         isPlaying = true
-        applyVolume()
-        syncEQResult()
         reportStarted()
         publishNowPlaying()
         refreshPreload()
     }
 
-    private func start(at index: Int, base: URL, token: String) {
-        guard queue.indices.contains(index),
-              let firstItem = makePlayerItem(for: queue[index], base: base, token: token) else { return }
+    private func start(at index: Int, base: URL, token: String, from seconds: Double = 0) {
+        guard queue.indices.contains(index) else { return }
         let item = queue[index]
         finishReporting()
         releasePlayer()
         playSessionId = UUID().uuidString
         current = item
         currentIndex = index
-        currentTime = 0; duration = Double(item.RunTimeTicks ?? 0) / 10_000_000
+        currentTime = seconds; duration = item.seconds
         if audioMode == .music { AudioSessionConfig.configureExclusiveMusicPlayback() }
         else { AudioSessionConfig.configureMixedPlayback() }
-        let nextPlayer = AVQueuePlayer(items: [firstItem])
-        attachEQ(firstItem, in: nextPlayer)
-        nextPlayer.actionAtItemEnd = .advance
-        player = nextPlayer
-        syncEQResult()
-        nextPlayer.isMuted = isMuted
-        applyVolume()
+        let engine = makeEngine()
+        let songToken = UUID()
+        currentToken = songToken
+        engine.setVolume(Float(volume))
+        engine.setMuted(isMuted)
         applySpatialAudioPreference()
+        engine.start(engineSong(item, token: songToken, base: base, apiToken: token), at: seconds)
+        eqResult = MusicEngineHooks.hasEqualizer ? .attached : nil
+        isPlaying = true
         configureRemoteCommands()
-        nextPlayer.play(); isPlaying = true
-        itemObservation = nextPlayer.observe(\.currentItem, options: [.new]) { [weak self] p, _ in
-            Task { @MainActor in
-                guard let self, self.player === p, let queued = self.preloaded, p.currentItem === queued.item else { return }
-                self.advanceToPreloaded()
-            }
-        }
-        observation = nextPlayer.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
-            Task { @MainActor in
-                guard let self, self.player === p else { return }
-                // Something else paused us (opening an AI 3D photo takes audio focus) while
-                // the listener never asked to: take focus back and carry on.
-                if p.timeControlStatus == .paused, self.isPlaying, self.current != nil,
-                   self.duration <= 0 || self.currentTime < self.duration - 1 {
-                    if self.audioMode == .music { AudioSessionConfig.configureExclusiveMusicPlayback() }
-                    else { AudioSessionConfig.configureMixedPlayback() }
-                    p.play()
-                    return
-                }
-                self.isPlaying = p.timeControlStatus == .playing
-                self.publishNowPlaying()
-            }
-        }
-        timeObserver = nextPlayer.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 2), queue: .main) { [weak self] time in
-            Task { @MainActor in
-                guard let self, self.player === nextPlayer else { return }
-                self.currentTime = time.seconds.isFinite ? max(0, min(time.seconds, self.duration > 0 ? self.duration : time.seconds)) : 0
-                if let d = nextPlayer.currentItem?.duration.seconds, d.isFinite, d > 0 { self.duration = d }
-                self.reportProgress()
-            }
-        }
-        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] note in
-            nonisolated(unsafe) let ended = note.object as? AVPlayerItem
-            Task { @MainActor in
-                // With a song queued behind it the player rolls on by itself (advanceToPreloaded).
-                guard let self, self.preloaded == nil, let ended,
-                      ended === self.player?.currentItem else { return }
-                // Repeat One starts the same song over; nothing is queued behind it, so the end lands here.
-                if self.repeatMode == .one, let index = self.currentIndex, let (base, token) = self.connection() {
-                    self.start(at: index, base: base, token: token)
-                } else { self.next() }
-            }
-        }
         reportStarted()
         publishNowPlaying()
         refreshPreload()
+    }
+
+    // MARK: - What the engine reports
+
+    private func engineStartedSong(_ token: UUID) {
+        guard let preloaded, preloaded.token == token else { return }
+        advanceToPreloaded()
+    }
+
+    private func engineProgress(_ token: UUID, seconds: Double, exact: Double?) {
+        guard token == currentToken else { return }
+        if let exact, exact > 0 { duration = exact }
+        currentTime = max(0, duration > 0 ? min(seconds, duration) : seconds)
+        reportProgress()
+    }
+
+    /// The last planned song has been heard to its end: what Next does from here (a random refill, or the end).
+    private func engineFinished(_ token: UUID) {
+        guard token == currentToken else { return }
+        next()
+    }
+
+    /// A song couldn't be fetched or decoded. An original the device can't read is asked for again as a FLAC
+    /// from the server; anything else skips the song (stopping if songs keep failing back to back).
+    private func engineFailed(_ token: UUID, message: String) {
+        let index = token == currentToken ? currentIndex : (token == preloaded?.token ? preloaded?.index : nil)
+        guard let index, queue.indices.contains(index), let (base, apiToken) = connection() else { return }
+        let item = queue[index]
+        MusicEngineHooks.log(failure: message)
+        let resumeAt = token == currentToken ? currentTime : 0
+        if !transcodeIDs.contains(item.Id), MusicSongFiles.shared.downloadFailure(of: item.Id) == nil {
+            transcodeIDs.insert(item.Id)
+            start(at: index, base: base, token: apiToken, from: resumeAt)
+            return
+        }
+        error = message
+        if Date().timeIntervalSince(lastFailureSkip) > 5, index + 1 < queue.count {
+            lastFailureSkip = Date()
+            start(at: index + 1, base: base, token: apiToken)
+        } else {
+            stop()
+        }
+    }
+
+    /// A phone call or another app's audio stops the music; it carries on afterwards when the system says so.
+    private func observeInterruptions() {
+        #if !os(macOS)
+        guard interruptionObserver == nil else { return }
+        interruptionObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
+            let type = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init(rawValue:))
+            let options = AVAudioSession.InterruptionOptions(rawValue: note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
+            MainActor.assumeIsolated {
+                guard let self, let type else { return }
+                if type == .began {
+                    self.resumesAfterInterruption = self.isPlaying
+                    if self.isPlaying { self.pause() }
+                } else if options.contains(.shouldResume), self.resumesAfterInterruption {
+                    self.resumesAfterInterruption = false
+                    self.resume()
+                }
+            }
+        }
+        #endif
     }
 
     /// End playback before hiding its controls, including a manual Next on the last song.
@@ -588,22 +680,15 @@ final class JellyfinMusicSession {
         duration = 0
         updateRemoteCommandsEnabled()
         publishNowPlaying()
+        keepFiles()
         AudioSessionConfig.configureMixedPlayback()
     }
 
     private func releasePlayer() {
-        observation = nil
-        itemObservation = nil
+        engine?.stop()
+        currentToken = nil
         preloaded = nil
-        player?.pause()
-        if let timeObserver { player?.removeTimeObserver(timeObserver) }
-        timeObserver = nil
-        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
-        endObserver = nil
-        (player as? AVQueuePlayer)?.removeAllItems()
-        player?.replaceCurrentItem(with: nil)
-        player = nil
-        syncEQResult()
+        upcomingTransition = nil
     }
 
     // MARK: - Reporting to Jellyfin
@@ -723,7 +808,7 @@ final class JellyfinMusicSession {
         let center = MPRemoteCommandCenter.shared()
         if !remoteCommandsConfigured {
             remoteCommandsConfigured = true
-            center.playCommand.addTarget { [weak self] _ in MainActor.assumeIsolated { self?.player?.play(); self?.isPlaying = true; self?.publishNowPlaying() }; return .success }
+            center.playCommand.addTarget { [weak self] _ in MainActor.assumeIsolated { self?.resume() }; return .success }
             center.pauseCommand.addTarget { [weak self] _ in MainActor.assumeIsolated { self?.pause() }; return .success }
             center.togglePlayPauseCommand.addTarget { [weak self] _ in MainActor.assumeIsolated { self?.toggle() }; return .success }
             center.nextTrackCommand.addTarget { [weak self] _ in MainActor.assumeIsolated { self?.next() }; return .success }
@@ -751,12 +836,12 @@ final class JellyfinMusicSession {
 
     private func applySpatialAudioPreference() {
         #if os(visionOS)
-        player?.intendedSpatialAudioExperience = headLocked
+        engine?.setSpatialExperience(headLocked
             ? .fixed(soundStageSize: .automatic)
             // Anchored to the user's front, not to whichever window is active: automatic
             // anchoring followed the active scene, so opening a window (a photo viewer)
             // moved the sound's anchor and cut the music.
-            : .headTracked(.front, soundStageSize: .automatic)
+            : .headTracked(.front, soundStageSize: .automatic))
         #endif
     }
     private func connection() -> (URL,String)? {
@@ -766,8 +851,3 @@ final class JellyfinMusicSession {
     }
 }
 
-/// An `EQAttachResult` in a class, for a weak-keyed `NSMapTable`.
-private final class EQResultBox {
-    let result: EQAttachResult
-    init(_ result: EQAttachResult) { self.result = result }
-}

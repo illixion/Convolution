@@ -50,6 +50,7 @@ struct HypnosApp: App {
         #if DEBUG && os(macOS)
         LibraryHarness.runIfRequested()
         MusicHarness.runIfRequested()
+        MusicPlaybackHarness.runIfRequested()
         #endif
         // Sideload builds: CoreRE reads some renderer overrides only once, when
         // its MXI manager starts, so they go in before anything RealityKit does.
