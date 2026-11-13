@@ -309,8 +309,16 @@ public sealed partial class AtmosSceneService
     // MARK: Item state
 
     /// <param name="StreamIndex">The track's index in the file, as ffmpeg numbers it (not Jellyfin's).</param>
+    /// <param name="DurationSeconds">Jellyfin's run time: a length, from the file's start time.</param>
+    /// <param name="OriginMs">The track's first timestamp, on the file's own clock: scene frame 0.</param>
+    /// <param name="StartMs">The file's start time on that clock (Jellyfin's position 0): 0 for
+    /// Matroska, the first timestamp for a transport stream (near 600 s for a Blu-ray M2TS).</param>
     /// <param name="IsDisc">A Blu-ray ISO or BDMV folder, read through <see cref="DiscFeed"/>.</param>
-    private sealed record ItemSource(string Path, int StreamIndex, double DurationSeconds, double OriginMs, AudioCodecKind Codec, bool IsDisc = false);
+    private sealed record ItemSource(string Path, int StreamIndex, double DurationSeconds, double OriginMs, double StartMs, AudioCodecKind Codec, bool IsDisc = false)
+    {
+        /// <summary>The track's length from its origin to the end of the file.</summary>
+        public double TrackSeconds => DurationSeconds - ((OriginMs - StartMs) / 1000);
+    }
 
     /// <summary>A Blu-ray disc image or folder: ffmpeg can only read it through <c>bluray:</c>, which can't seek in usable time.</summary>
     private static bool IsBluray(BaseItem item) => item is Video
@@ -370,11 +378,13 @@ public sealed partial class AtmosSceneService
         }
         else
         {
+            var (originMs, startMs) = ProbeOrigin(item.Path, candidate.FileIndex, disc);
             state.Source = new ItemSource(
                 item.Path,
                 candidate.FileIndex,
                 item.RunTimeTicks is long ticks ? TimeSpan.FromTicks(ticks).TotalSeconds : 0,
-                ProbeOriginMs(item.Path, candidate.FileIndex, disc),
+                originMs,
+                startMs,
                 candidate.Codec,
                 disc);
         }
@@ -386,7 +396,11 @@ public sealed partial class AtmosSceneService
     {
         if (state.Layout is null && File.Exists(ScenePath(itemId)))
         {
-            state.Layout = JsonSerializer.Deserialize<SceneDocument>(File.ReadAllText(ScenePath(itemId)), JsonOptions);
+            var cached = JsonSerializer.Deserialize<SceneDocument>(File.ReadAllText(ScenePath(itemId)), JsonOptions);
+            // An estimate written before the length counted from the file's
+            // start time: negative for a stream whose clock starts late (a
+            // Blu-ray M2TS). Estimated again from the source.
+            state.Layout = cached is { FrameCount: > 0 } ? cached : null;
         }
 
         return state.Layout;
@@ -467,7 +481,12 @@ public sealed partial class AtmosSceneService
         using var feed = source.IsDisc ? DiscFeed.Start(Mvc3dPath, source.Path, atStreamStart ? 0 : seekSeconds - (source.OriginMs / 1000)) : null;
         if (!atStreamStart && feed is null)
         {
-            ffmpegArgs.AddRange(["-ss", seekSeconds.ToString("F3", CultureInfo.InvariantCulture)]);
+            // seekSeconds is on the file's own clock (origin included).
+            // Without -seek_timestamp, ffmpeg adds the file's start time to
+            // -ss, which is 0 for Matroska but not for a transport stream
+            // (a Blu-ray M2TS's clock starts near 600 s, and the cut landed
+            // past the end).
+            ffmpegArgs.AddRange(["-seek_timestamp", "1", "-ss", seekSeconds.ToString("F3", CultureInfo.InvariantCulture)]);
         }
 
         ffmpegArgs.AddRange(["-i", feed is null ? source.Path : "pipe:0", "-map", $"0:{source.StreamIndex}", "-c", "copy", "-copyts", "-f", "matroska", "pipe:1"]);
@@ -968,7 +987,7 @@ public sealed partial class AtmosSceneService
                 return existing;
             }
 
-            var frameCount = (long)Math.Round((source.DurationSeconds - (source.OriginMs / 1000)) * SampleRate);
+            var frameCount = (long)Math.Round(Math.Max(0, source.TrackSeconds) * SampleRate);
             var layout = new SceneDocument
             {
                 SampleRate = SampleRate,
@@ -1068,24 +1087,45 @@ public sealed partial class AtmosSceneService
         File.Move(tmp, path, overwrite: true);
     }
 
-    /// <summary>Timestamp of the track's first packet: scene frame 0.</summary>
-    private double ProbeOriginMs(string mediaPath, int streamIndex, bool disc)
+    /// <summary>
+    /// Timestamp of the track's first packet (scene frame 0), and the file's
+    /// start time, both on the file's own clock, in milliseconds.
+    /// </summary>
+    private (double OriginMs, double StartMs) ProbeOrigin(string mediaPath, int streamIndex, bool disc)
     {
         using var feed = disc ? DiscFeed.Start(Mvc3dPath, mediaPath, 0) : null;
         var args = new List<string>
         {
             "-v", "error", "-i", feed is null ? mediaPath : "pipe:0", "-select_streams", streamIndex.ToString(CultureInfo.InvariantCulture),
-            "-read_intervals", "%+#1", "-show_entries", "packet=pts_time", "-of", "csv=p=0"
+            "-read_intervals", "%+#1", "-show_entries", "packet=pts_time:format=start_time", "-of", "json"
         };
         using var process = StartProcess(_mediaEncoder.ProbePath, args, redirectInput: feed is not null);
         feed?.Connect(process);
         var output = process.StandardOutput.ReadToEnd();
         process.WaitForExit();
-        // A transport stream's packets carry side data, which csv output appends
-        // as an empty field: "0.541711,".
-        return double.TryParse(output.Trim().Split('\n')[0].Split(',')[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds)
-            ? seconds * 1000
-            : 0;
+        return ParseOrigin(output);
+    }
+
+    /// <summary>The first packet's pts_time and the format's start_time from ffprobe's JSON, in ms (0 when absent).</summary>
+    internal static (double OriginMs, double StartMs) ParseOrigin(string json)
+    {
+        static double Ms(JsonElement parent, string name) =>
+            parent.ValueKind == JsonValueKind.Object && parent.TryGetProperty(name, out var value)
+            && double.TryParse(value.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds)
+                ? seconds * 1000
+                : 0;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            var packet = root.TryGetProperty("packets", out var packets) && packets.GetArrayLength() > 0 ? packets[0] : default;
+            var format = root.TryGetProperty("format", out var f) ? f : default;
+            return (Ms(packet, "pts_time"), Ms(format, "start_time"));
+        }
+        catch (JsonException)
+        {
+            return (0, 0);
+        }
     }
 
     internal static void DeleteStale(string directory, string pattern)

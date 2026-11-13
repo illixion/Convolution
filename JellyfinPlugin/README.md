@@ -54,6 +54,33 @@ subtracts the origin. Measured on servo with the same pipeline: first decoded
 audio 3.7 s after a seek to one hour, then about 6.5× realtime.
 
 Blu-ray carries object audio only in TrueHD, so a disc has no E-AC-3 path.
+
+## Transport streams (M2TS)
+
+A Blu-ray's streams also come as one `.m2ts` (a disc's SSIF copied out, a
+tsMuxeR remux), which ffmpeg reads like any file. Two things differ from
+Matroska, because a transport stream's clock doesn't start at 0 (a Blu-ray or
+tsMuxeR M2TS starts near 600 s):
+
+- **Seeks are on the file's own clock.** The cut's `-ss` is the origin plus
+  the segment's time, and ffmpeg adds the file's start time to `-ss` unless
+  told not to, so on an M2TS the cut landed past the end (a seek to 644 s
+  began at 706 s, the last second). Both cuts (`RunDamfSessionAsync`,
+  `Eac3AtmosDecoder`) pass `-seek_timestamp 1`, which changes nothing for
+  Matroska.
+- **The length counts from the start time.** Jellyfin's run time is a length
+  from the file's start time, so the scene's estimated frame count is run time
+  − (origin − start time), the start time read by the same ffprobe as the
+  origin (`ProbeOrigin`); run time − origin gave −48 segments. A layout cached
+  with a frame count of 0 or less is estimated again.
+
+Checked on the native dev Jellyfin's "Object Transport (2020)" (the Atmos demo
+muxed by tsMuxeR): a scene from 44 s in cut at frame 2109960 (43.958 s), the
+frame a replay of the solver over the same packets gives, and its segments
+served. A plain TrueHD 7.1 track is listed like an Atmos one and answers 422
+("no object presentation") once decoded; the app then plays the file's own
+sound.
+
 ## Audio tracks
 
 `GET /AtmosObjects/{id}/Tracks?languages=eng,deu` lists an item's object-audio

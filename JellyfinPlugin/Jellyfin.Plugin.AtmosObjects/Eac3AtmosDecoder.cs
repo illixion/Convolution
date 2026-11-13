@@ -74,7 +74,8 @@ public sealed partial class AtmosSceneService
         var inputArgs = new List<string> { "-v", "error", "-nostdin" };
         if (!atStreamStart)
         {
-            inputArgs.AddRange(["-ss", seekSeconds.ToString("F3", CultureInfo.InvariantCulture)]);
+            // On the file's own clock: see RunDamfSessionAsync.
+            inputArgs.AddRange(["-seek_timestamp", "1", "-ss", seekSeconds.ToString("F3", CultureInfo.InvariantCulture)]);
         }
 
         inputArgs.AddRange(["-copyts", "-i", source.Path, "-map", $"0:{source.StreamIndex}", "-c", "copy"]);
