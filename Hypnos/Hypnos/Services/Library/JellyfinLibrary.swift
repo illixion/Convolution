@@ -764,11 +764,63 @@ actor JellyfinLibrary: MediaServerLibrary {
         if item.isBlurayDisc {
             return .atmosFilmPlayer
         }
-        if await filmPlayerServes(itemId: item.id) {
+        // A 3D Blu-ray remuxed to Matroska plays there too: only the film
+        // player's decoder (Vergence) shows its second eye. Asked alongside
+        // the plugin, so an ordinary file waits for neither in turn.
+        async let isMVC = hasMatroskaMVC(itemId: item.id)
+        async let served = filmPlayerServes(itemId: item.id)
+        let (mvc, serves) = await (isMVC, served)
+        if mvc || serves {
             return .atmosFilmPlayer
         }
         return .genericPlayer(try await streamPlan(itemId: item.id, quality: quality,
                                                    resumeSeconds: item.userData.resumeSeconds))
+    }
+
+    /// The picture the film player decodes itself for `item`, if any.
+    func decodedPicture(for item: LibraryItem) async -> FilmDecodedPicture? {
+        if item.isBlurayDisc { return .disc }
+        return await hasMatroskaMVC(itemId: item.id) ? .matroskaMVC : nil
+    }
+
+    /// Answers by item id, for this run of the app.
+    private static let mvcProbes = OSAllocatedUnfairLock(initialState: [String: Bool]())
+
+    /// Whether the item's file is Matroska with an MVC track (a 3D Blu-ray
+    /// remux: MakeMKV's "3D MVC"). Jellyfin can't say: its `Video3DFormat`
+    /// comes from the file name, and a remux named "…3D…" without an
+    /// "MVC" token has none. So an H.264 Matroska file of 720 lines or more
+    /// has its header read (a few small range requests) once per run.
+    func hasMatroskaMVC(itemId: String) async -> Bool {
+        if let known = Self.mvcProbes.withLock({ $0[itemId] }) { return known }
+        guard let userId = try? await resolveUserId(),
+              let info: JFPlaybackInfo = try? await get("Items/\(itemId)/PlaybackInfo", query: [
+                  .init(name: "userId", value: userId),
+              ]),
+              let source = info.MediaSources?.first
+        else { return false }
+        let containers = (source.Container ?? "").lowercased().split(separator: ",")
+        let video = source.MediaStreams?.first { $0.Type == "Video" }
+        guard containers.contains(where: { $0 == "mkv" || $0 == "matroska" }),
+              video?.Codec?.lowercased() == "h264", (video?.Height ?? 0) >= 720 else {
+            Self.mvcProbes.withLock { $0[itemId] = false }
+            return false
+        }
+        let url = baseURL.appending(path: "Videos/\(itemId)/stream").appending(queryItems: [
+            .init(name: "static", value: "true"),
+            .init(name: "MediaSourceId", value: source.Id ?? itemId),
+        ])
+        let headers = ["Authorization": JellyfinClientIdentity.authorizationHeader(token: authHeaderToken)]
+        do {
+            let isMVC = try await MVCPictureSource.hasMatroskaMVC(url: url, headers: headers)
+            Self.mvcProbes.withLock { $0[itemId] = isMVC }
+            if isMVC { AppLogger.library.info("Matroska file with an MVC track: the film player decodes its 3D") }
+            return isMVC
+        } catch {
+            // Not cached: the next play asks again.
+            AppLogger.library.info("Couldn't read the Matroska header for MVC: \(error.logCode, privacy: .public)")
+            return false
+        }
     }
 
     /// This device's own Jellyfin sign-in, as an analysis coordinator takes it when a stream
@@ -1613,7 +1665,7 @@ actor JellyfinLibrary: MediaServerLibrary {
     func data(path: String, query: [URLQueryItem] = [], timeout: TimeInterval = 60) async throws -> Data {
         var request = JellyfinHTTP(baseURL: baseURL,
             authorization: JellyfinClientIdentity.authorizationHeader(token: authHeaderToken))
-            .request(path, query: query)
+            .request(path, query: ObjectAudioEdition.query(query, forPath: path))
         request.timeoutInterval = timeout
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -1639,7 +1691,8 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// Asks the plugin to decode a film's whole audio track into its cache
     /// (it otherwise decodes only what is played), and reports how far it is.
     func prepareObjectAudio(itemId: String) async {
-        var request = URLRequest(url: baseURL.appending(path: "AtmosObjects/\(itemId)/Prepare"))
+        var request = URLRequest(url: baseURL.appending(path: "AtmosObjects/\(itemId)/Prepare")
+            .appending(queryItems: [ObjectAudioEdition.queryItem]))
         request.httpMethod = "POST"
         request.setValue(JellyfinClientIdentity.authorizationHeader(token: authHeaderToken), forHTTPHeaderField: "Authorization")
         _ = try? await URLSession.shared.data(for: request)
@@ -1763,7 +1816,7 @@ actor JellyfinLibrary: MediaServerLibrary {
     private func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {
         var request = JellyfinHTTP(baseURL: baseURL,
             authorization: JellyfinClientIdentity.authorizationHeader(token: authHeaderToken))
-            .request(path, query: query)
+            .request(path, query: ObjectAudioEdition.query(query, forPath: path))
         // Short while the server is known to be away, so offline screens
         // don't each wait out a full timeout before showing downloads.
         request.timeoutInterval = LibraryConnectivity.seemsOffline ? 4 : 20

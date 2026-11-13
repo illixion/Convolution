@@ -57,7 +57,7 @@ struct LocalDiscHandoffView: View {
             let title = video.title ?? video.streamURL.deletingPathExtension().lastPathComponent
             let loaded = if let download = video.filmDownload {
                 await session.load(itemId: download.id, name: download.item.title, productionYear: download.item.year,
-                                   isBlurayDisc: download.playback == .disc)
+                                   picture: download.playback == .disc ? .disc : nil)
             } else {
                 await session.loadLocalDisc(video.streamURL, title: title)
             }

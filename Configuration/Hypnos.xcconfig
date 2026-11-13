@@ -59,7 +59,17 @@ DOVI_CONDITION =
 // gitignored scripts/build-signing.conf / LocalSigning.xcconfig.
 NC_MODELS_CONDITION =
 
-SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(PRIVATE_API_CONDITION) $(YOUTUBE_CONDITION) $(FFMPEG_CONDITION) $(DOVI_CONDITION) $(NC_MODELS_CONDITION)
+// DTS:X object audio, for sideload builds only: the app lists `dtsx` among
+// the object-audio formats it asks the Atmos Objects plugin for
+// (ObjectAudioEdition.swift), and the plugin then decodes a DTS:X track's
+// objects with harletty on the server, as it does TrueHD Atmos with truehdd.
+// Nothing DTS is compiled into the app either way. Empty here, so a
+// submission build never asks for it. Opt in with
+// `~/bin/build-and-sign --set DTSX_CONDITION=HYPNOS_DTSX`, or in the
+// gitignored scripts/build-signing.conf / LocalSigning.xcconfig.
+DTSX_CONDITION =
+
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(PRIVATE_API_CONDITION) $(YOUTUBE_CONDITION) $(FFMPEG_CONDITION) $(DOVI_CONDITION) $(NC_MODELS_CONDITION) $(DTSX_CONDITION)
 
 // HomeKit for the sleep timer's accessory actions, on iOS and visionOS. Empty
 // here: the shared sideload wildcard profile has no HomeKit capability, and an

@@ -123,7 +123,7 @@ final class LibraryPlayback {
         var route = try await library.playbackRoute(for: item)
         if case .atmosFilmPlayer = route,
            !(await FilmSession.shared.load(itemId: item.id, name: item.title, productionYear: item.year,
-                                            isBlurayDisc: item.isBlurayDisc)) {
+                                            picture: await library.decodedPicture(for: item))) {
             // The film player couldn't open it. Opening its window anyway
             // showed the previous film's last frame with the controls
             // disabled (headset, 2026-10-12). A file plays in the video

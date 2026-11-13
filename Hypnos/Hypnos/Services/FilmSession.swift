@@ -254,11 +254,12 @@ final class FilmSession {
     }
 
     /// Loads `item` into the player. True when its picture is ready to play.
-    /// - Parameter isBlurayDisc: the item is a Blu-ray disc image or folder:
-    ///   its picture is read from the raw disc and decoded on the device
-    ///   (`MVCPictureSource`), the plugin's video segments being unavailable
-    ///   for a disc; the plugin still supplies the audio.
-    func load(_ item: FilmLibraryItem, isBlurayDisc: Bool = false) async -> Bool {
+    /// - Parameter picture: the item's picture is decoded on the device
+    ///   (`MVCPictureSource`) from the raw file: a Blu-ray disc image or
+    ///   folder, or a 3D Blu-ray remuxed to Matroska. The plugin's video
+    ///   segments are unavailable for a disc and 2D for a remux; the plugin
+    ///   still supplies the object audio.
+    func load(_ item: FilmLibraryItem, picture: FilmDecodedPicture? = nil) async -> Bool {
         if let record = LibraryOfflineStore.shared.record(for: item.id), record.playback != .video {
             return await loadDownloaded(record, item: item)
         }
@@ -269,23 +270,37 @@ final class FilmSession {
         stereoFormatTask?.cancel()
         stereoFormat = nil
         var disc: MVCPictureSource?
-        if isBlurayDisc {
+        if let picture {
             let url = serverURL.appending(path: "Videos/\(item.id)/stream").appending(queryItems: [.init(name: "static", value: "true")])
+            let headers = ["Authorization": JellyfinClientIdentity.authorizationHeader(token: token)]
             do {
-                disc = try await MVCPictureSource.open(url: url, headers: ["Authorization": JellyfinClientIdentity.authorizationHeader(token: token)])
+                disc = switch picture {
+                case .disc: try await MVCPictureSource.open(url: url, headers: headers)
+                case .matroskaMVC: try await MVCPictureSource.openMatroska(url: url, headers: headers)
+                }
             } catch {
-                self.error = "The disc couldn't be read: \(error.localizedDescription)"
-                AppLogger.filmPlayer.error("Disc open failed: \(error.localizedDescription)")
+                self.error = picture == .disc ? "The disc couldn't be read: \(error.localizedDescription)"
+                    : "The 3D picture couldn't be read: \(error.localizedDescription)"
+                AppLogger.filmPlayer.error("Decoded picture open failed: \(error.localizedDescription)")
                 subtitles.load(nil)
                 return false
             }
         }
         var client = FilmServerClient(baseURL: serverURL, token: token, itemID: item.id)
         ObjectAudioQuality.preferred.apply(to: &client)
+        client.applyEdition()
         if let disc, await (try? client.audioTracks(languages: FilmServerClient.deviceLanguages))?.isEmpty ?? true {
-            // No object audio from the plugin (not installed, or no TrueHD on
-            // the disc): the disc's own 5.1, read from the same image.
-            await player.load(picture: disc, audio: try? disc.audioSource(itemID: item.id))
+            // No object audio from the plugin (not installed, or no object
+            // track): a disc's own 5.1, read from the same image, or a
+            // remux's own sound, decoded here.
+            // The remux's reader authenticates by query, as the video
+            // window's on-device remux of a Library file does.
+            let audio: (any FilmAudioSource)? = disc.isDisc
+                ? (try? disc.audioSource(itemID: item.id))
+                : await MatroskaFilmAudioSource.open(
+                    itemID: item.id, url: disc.sourceURL.appending(queryItems: [.init(name: "ApiKey", value: token)]),
+                    durationSeconds: disc.durationSeconds)
+            await player.load(picture: disc, audio: audio)
         } else {
             // A fixed lower tier opens there when the plugin offers it.
             await player.load(client, picture: disc, pictureHeight: FilmPictureQuality.preferred.height)
@@ -296,7 +311,7 @@ final class FilmSession {
             return false
         }
         loadedItem = item
-        subtitles.load(disc.map { .disc($0.subtitles, itemId: item.id) } ?? .jellyfin(itemId: item.id))
+        subtitles.load(disc?.subtitles.map { .disc($0, itemId: item.id) } ?? .jellyfin(itemId: item.id))
         subtitles.bindGeneratedFilm(player)
         if let disc {
             // The eyes come top and bottom out of MVCPictureSource's stereo frames.
@@ -348,7 +363,7 @@ final class FilmSession {
                 await player.load(picture: disc, audio: try? disc.audioSource(itemID: record.id))
             }
             stereoFormat = disc.isStereo ? .overUnder : nil
-            subtitleSource = .disc(disc.subtitles, itemId: record.id)
+            if let discSubtitles = disc.subtitles { subtitleSource = .disc(discSubtitles, itemId: record.id) }
         case .video:
             return false
         }
@@ -398,7 +413,7 @@ final class FilmSession {
             return false
         }
         loadedItem = item
-        subtitles.load(.disc(disc.subtitles, itemId: item.id, includeServer: false))
+        subtitles.load(disc.subtitles.map { .disc($0, itemId: item.id, includeServer: false) })
         subtitles.bindGeneratedFilm(player)
         stereoFormat = disc.isStereo ? .overUnder : nil
         AppLogger.filmPlayer.info("Loaded a local disc: \(disc.summary, privacy: .public); audio \(self.player.audioStatus, privacy: .public)")
@@ -427,7 +442,7 @@ final class FilmSession {
     /// without the plugin, or on the device, takes). False for a film that
     /// isn't a disc.
     func switchToDiscAudio() async -> Bool {
-        guard let disc = player.video.pictureSource as? MVCPictureSource, let item = loadedItem else { return false }
+        guard let disc = player.video.pictureSource as? MVCPictureSource, disc.isDisc, let item = loadedItem else { return false }
         let position = player.currentTime
         let wasPlaying = player.isPlaying
         await player.load(picture: disc, audio: try? disc.audioSource(itemID: item.id), startAt: position)
@@ -448,7 +463,16 @@ final class FilmSession {
     /// through `search` first — the Library detail page knows exactly which
     /// item to play. `name`/`productionYear` are for display only (the
     /// tuning section's title, the log line above).
-    func load(itemId: String, name: String, productionYear: Int?, isBlurayDisc: Bool = false) async -> Bool {
-        await load(FilmLibraryItem(id: itemId, name: name, productionYear: productionYear), isBlurayDisc: isBlurayDisc)
+    func load(itemId: String, name: String, productionYear: Int?, picture: FilmDecodedPicture? = nil) async -> Bool {
+        await load(FilmLibraryItem(id: itemId, name: name, productionYear: productionYear), picture: picture)
     }
+}
+
+/// A film whose picture the device decodes from the raw file, because
+/// neither Apple's decoders nor Jellyfin's streams carry its 3D.
+enum FilmDecodedPicture: Sendable, Equatable {
+    /// A Blu-ray disc image or BDMV folder.
+    case disc
+    /// A 3D Blu-ray remuxed to Matroska: MVC in one H.264 track.
+    case matroskaMVC
 }
