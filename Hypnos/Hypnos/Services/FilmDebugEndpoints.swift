@@ -24,6 +24,9 @@ enum FilmDebugEndpoints {
     static func register() {
         guard !registered else { return }
         registered = true
+        #if os(visionOS)
+        DebugSurface.shared.register(CinemaSleeveEndpoints.all)
+        #endif
         DebugSurface.shared.register([
             .query("film", "The film player: transport, the audio clock and its segments, the picture renderer, and "
                    + "for a Blu-ray disc the on-device decoder's current run (phase, frames out, last frame time). "

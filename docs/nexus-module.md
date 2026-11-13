@@ -31,6 +31,10 @@ inside `#if NEXUS_MODULE`.
   module's space.
 - **`NexusHypnosModule.swift`** (`NEXUS_MODULE` only): `HypnosSpaceModule`, the `RAVESpaceModule`. It asks
   for a mixed space with the `.systemDark` surroundings behind Big Screen and keeps that current.
+- **`CinemaSleeve`** (`Views/Cinema/CinemaSleeve.swift`): the media remote on the forearm. Standalone it runs
+  hand tracking in a session of its own; here the module hands it the host's hands (`hostHands`, from
+  `RAVESpatialServices`) and asks the broker for them (`needsHands`) while the remote is switched on. Nexus's
+  `HypnosModule` target links `RAVEPanel` for it.
 
 - **`Services/NexusMediaPublisher.swift`** (`NEXUS_MODULE` only): what the film player tells the other modules
   on RAVEModuleBus (`media.nowPlaying`, `media.subtitle`, and the actions `media.play`/`pause`/`skip`),

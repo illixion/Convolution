@@ -37,6 +37,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSHandsTrackingUsageDescription</key>
+	<string>Convolution reads your hands to show the player's remote on your forearm in HUD and Big Screen, and to let you press it with a finger.</string>
 	<key>NSWorldSensingUsageDescription</key>
 	<string>This is used to determine window locking state to improve user experience.</string>
 	<key>UIWantsDetailedSurfaceInfo</key>

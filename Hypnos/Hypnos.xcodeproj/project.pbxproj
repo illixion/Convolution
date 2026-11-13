@@ -10,6 +10,7 @@
 		AA1900000000000000000001 /* TopShelfContentProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1900000000000000000002 /* TopShelfContentProvider.swift */; };
 		AA1900000000000000000003 /* HypnosTopShelf.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = AA1900000000000000000004 /* HypnosTopShelf.appex */; platformFilters = (tvos, ); settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		AA05000000000000000000B3 /* RAVEDiagnostics in Frameworks */ = {isa = PBXBuildFile; productRef = AA05000000000000000000B2 /* RAVEDiagnostics */; };
+		AA05000000000000000000C3 /* RAVEPanel in Frameworks */ = {isa = PBXBuildFile; platformFilters = (xros, ); productRef = AA05000000000000000000C2 /* RAVEPanel */; };
 		AA06000000000000000000C3 /* RAVEUI in Frameworks */ = {isa = PBXBuildFile; productRef = AA06000000000000000000C2 /* RAVEUI */; };
 		AA06000000000000000000C5 /* RAVEConsole in Frameworks */ = {isa = PBXBuildFile; productRef = AA06000000000000000000C4 /* RAVEConsole */; };
 		AA07000000000000000000D3 /* RAVEMedia in Frameworks */ = {isa = PBXBuildFile; productRef = AA07000000000000000000D2 /* RAVEMedia */; };
@@ -77,6 +78,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				AA05000000000000000000B3 /* RAVEDiagnostics in Frameworks */,
+				AA05000000000000000000C3 /* RAVEPanel in Frameworks */,
 				AA06000000000000000000C3 /* RAVEUI in Frameworks */,
 				AA06000000000000000000C5 /* RAVEConsole in Frameworks */,
 				AA07000000000000000000D3 /* RAVEMedia in Frameworks */,
@@ -184,6 +186,7 @@
 			name = Hypnos;
 			packageProductDependencies = (
 				AA05000000000000000000B2 /* RAVEDiagnostics */,
+				AA05000000000000000000C2 /* RAVEPanel */,
 				AA06000000000000000000C2 /* RAVEUI */,
 				AA06000000000000000000C4 /* RAVEConsole */,
 				AA07000000000000000000D2 /* RAVEMedia */,
@@ -703,6 +706,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AA05000000000000000000B1 /* XCLocalSwiftPackageReference "../../RAVEEngine" */;
 			productName = RAVEDiagnostics;
+		};
+		AA05000000000000000000C2 /* RAVEPanel */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA05000000000000000000B1 /* XCLocalSwiftPackageReference "../../RAVEEngine" */;
+			productName = RAVEPanel;
 		};
 		AA1A0000000000000000A2 /* RAVEHome */ = {
 			isa = XCSwiftPackageProductDependency;

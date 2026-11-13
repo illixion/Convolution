@@ -81,11 +81,12 @@ public final class HypnosSpaceModule: RAVESpaceModule, CinemaSpaceHosting {
     }
 
     /// What the cinema asks of the shared space: the room dark around Big Screen,
-    /// and the picture drawn over the arms in HUD.
+    /// the picture drawn over the arms in HUD (and while the forearm remote shows),
+    /// and hands for that remote.
     private var requirements: RAVESpaceRequirements {
         RAVESpaceRequirements(immersion: .mixed, hidesUpperLimbs: space.hidesUpperLimbs,
                               surroundings: space.wantsDarkSurroundings ? .systemDark : nil,
-                              needsHands: false)
+                              needsHands: CinemaSleeve.shared.isEnabled)
     }
 
     /// Keep the broker's copy of the requirements current while the module is in the space,
@@ -104,6 +105,11 @@ public final class HypnosSpaceModule: RAVESpaceModule, CinemaSpaceHosting {
     public func mount(_ root: Entity, services: RAVESpatialServices) async {
         space.build(appModel: appModel)
         root.addChild(space.root)
+        // The forearm remote reads the host's hands; it runs no session of its own here.
+        CinemaSleeve.shared.hostHands = { [weak services] in
+            guard let services, services.handsRunning else { return nil }
+            return (services.leftHand, services.rightHand)
+        }
         space.appeared()
     }
 
