@@ -36,6 +36,15 @@ struct VideoWindowView: View {
     /// One-shot follow-up after an aspect-lock request: verifies what size the
     /// system actually granted and re-locks if it was clamped (tall videos).
     @State private var aspectRelockTask: Task<Void, Never>?
+    /// The size the aspect lock last asked for (after any clamp), so a
+    /// later re-fit can tell a window the app sized from one the person
+    /// made bigger themselves.
+    @State private var lockedWindowSize: CGSize?
+    /// The tallest the chrome hung under the window has been (strip, gap,
+    /// subtitle band, prompt), measured; starts at an estimate so the first
+    /// lock already leaves room. Only grows: the strip hides while playing,
+    /// and the window shouldn't grow back into the room it needs when shown.
+    @State private var chromeBelowHeight: CGFloat = Self.estimatedChromeBelow
 
     /// Debounced mirror of the window's settled size into
     /// `RestoredWindowTracker`, so "save the current window arrangement" can read
@@ -89,6 +98,42 @@ struct VideoWindowView: View {
     }
 
     static let minimumStripWidth: CGFloat = 760
+
+    // MARK: Vertical footprint (visionOS)
+    //
+    // On visionOS the window is the picture alone: the control strip, the
+    // subtitle band and the prompt hang under it as an ornament, and the
+    // system puts the window bar (grab handle, close) below all of that. So
+    // what a person must reach is the picture's height *plus* the chrome
+    // under it. Capping only the picture's longer side let a film taller
+    // than 16:9 (4:3, 1.85:1, portrait) push the window bar out of reach,
+    // leaving the window immovable and uncloseable outside the Windows tab.
+    // The aspect lock therefore caps the picture so the whole footprint fits
+    // a budget, in 2D and 3D alike (both renderers report through
+    // `lockWindowToVideoAspectRatio`).
+
+    /// The chrome's height before it has been measured: two-row strip, the
+    /// stereo gap and a prompt.
+    static let estimatedChromeBelow: CGFloat = 220
+    /// Room for the system's window bar below the chrome.
+    static let windowBarAllowance: CGFloat = 60
+    /// Never cap the picture below this, whatever the chrome measures.
+    static let minimumCappedPictureHeight: CGFloat = 360
+
+    /// Tallest the picture, the chrome under it and the window bar may be
+    /// together when the app sizes the window. 16:9 at the default 1200 pt
+    /// width (675 + chrome) has always fit; tunable on the device
+    /// (Debug › Panels) until the threshold is confirmed.
+    private var verticalFootprintBudget: CGFloat {
+        CGFloat(DebugTunables.number("video.windowFootprint", 1000, range: 640...1400, step: 20,
+                                     label: "Video window: picture + controls + window bar (pt)"))
+    }
+
+    /// The tallest picture the aspect lock asks for.
+    private var maxLockedPictureHeight: CGFloat {
+        max(verticalFootprintBudget - chromeBelowHeight - Self.windowBarAllowance,
+            Self.minimumCappedPictureHeight)
+    }
 
     #if os(visionOS)
     @AppStorage(StereoSubtitleStyle.key, store: HypnosDefaults.store) private var stereoSubtitleStyle = StereoSubtitleStyle.inPicture
@@ -546,6 +591,7 @@ struct VideoWindowView: View {
                 gap: windowModel.showsStereoPicture ? Self.stereoControlsGap : 12,
                 filmTime: { windowModel.currentTime }
             ) { videoOrnament }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { noteChromeBelow($0) }
         }
         .onChange(of: appModel.aiHDRVideos) { _, _ in windowModel.loadAIHDR() }
         .onChange(of: ornamentBottomPadding) { old, new in
@@ -950,8 +996,12 @@ struct VideoWindowView: View {
         // A window restored from a saved group instead fits the video inside the
         // geometry it was saved at, so the arrangement comes back as it was.
         // Consumed once — see `didApplyRestoredSize`.
+        //
+        // The height is capped further so the chrome hung under the window
+        // and the window bar below it stay in reach (see "Vertical
+        // footprint"): a 4:3 film gets 1000×750, not 1200×900.
         let maxVideoDimension: CGFloat = 1200
-        var box = CGSize(width: maxVideoDimension, height: maxVideoDimension)
+        var box = CGSize(width: maxVideoDimension, height: min(maxVideoDimension, maxLockedPictureHeight))
         if !didApplyRestoredSize,
            let saved = windowValue.restoredSize?.cgSize,
            saved.width > 2, saved.height > 2 {
@@ -974,6 +1024,7 @@ struct VideoWindowView: View {
 
         AppLogger.videoWindow.info("Aspect lock: video \(Int(videoSize.width))x\(Int(videoSize.height)), requesting window \(Int(windowSize.width))x\(Int(windowSize.height)) (pad \(Int(self.ornamentBottomPadding)))")
         WindowGeometry.request(windowScene, size: windowSize, restriction: .uniform)
+        lockedWindowSize = windowSize
 
         // visionOS may clamp the granted size — portrait videos hit the
         // platform's max window height long before landscape ones hit the
@@ -1001,7 +1052,39 @@ struct VideoWindowView: View {
                 "Aspect lock clamped: requested \(Int(windowSize.width))x\(Int(windowSize.height)), granted \(Int(granted.width))x\(Int(granted.height)); re-locking to \(Int(corrected.width))x\(Int(corrected.height))"
             )
             WindowGeometry.request(scene, size: corrected, restriction: .uniform)
+            lockedWindowSize = corrected
         }
+    }
+
+    /// The chrome under the window measured taller than any time before
+    /// (a subtitle band or a prompt appeared): re-fit the window if the
+    /// footprint no longer fits.
+    private func noteChromeBelow(_ height: CGFloat) {
+        guard height > chromeBelowHeight + 4 else { return }
+        chromeBelowHeight = height
+        refitWindowToFootprint()
+    }
+
+    /// Shrinks a window the app sized so its picture is no taller than
+    /// `maxLockedPictureHeight`, keeping the video's aspect. A window the
+    /// person made bigger than the lock left it is theirs, and stays: they
+    /// resized it from its corner, so they could reach it.
+    private func refitWindowToFootprint() {
+        guard PlatformCapabilities.supportsWindowResizing,
+              let scene = resolvedWindowScene,
+              let aspect = windowModel.videoAspectRatio, aspect > 0,
+              let locked = lockedWindowSize else { return }
+        let current = scene.effectiveGeometrySize
+        let pictureHeight = current.height - ornamentBottomPadding
+        let cap = maxLockedPictureHeight.rounded(.down)
+        guard current.width > 0, pictureHeight > cap + 2,
+              current.height <= locked.height + 2 else { return }
+        let size = CGSize(width: (cap * aspect).rounded(.down), height: cap + ornamentBottomPadding)
+        AppLogger.videoWindow.info(
+            "Aspect lock: chrome under the window now \(Int(self.chromeBelowHeight)) pt; shrinking \(Int(current.width))x\(Int(current.height)) to \(Int(size.width))x\(Int(size.height))"
+        )
+        WindowGeometry.request(scene, size: size, restriction: .uniform)
+        lockedWindowSize = size
     }
 
     /// Grows or shrinks the window by `delta` points of height, keeping its
