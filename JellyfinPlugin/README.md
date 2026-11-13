@@ -3,20 +3,32 @@
 Serves the Atmos objects inside a film's audio track as separate audio stems
 plus their position metadata, so Convolution can place its own spatial sources on
 the Vision Pro instead of needing a Dolby renderer. No Dolby code is involved.
-Two source formats are supported, picked per item (TrueHD preferred, since
-it's the higher-quality format and lossless; EAC3 as a fallback):
+Three source formats are supported, picked per item (TrueHD preferred, since
+it's the higher-quality format and lossless; then DTS:X, lossless too; EAC3
+as a fallback):
 
 - **TrueHD Atmos** — decoded by an external subprocess,
   [truehdd](https://github.com/truehdd/truehdd), an open-source TrueHD
   decoder, with a small patch of ours (below).
+- **DTS:X** on DTS-HD MA (Jellyfin's profile "DTS-HD MA + DTS:X", 48 kHz) —
+  decoded by an external subprocess,
+  [harletty](https://github.com/harletty/harletty-bridge), a truehdd fork
+  that also turns DTS:X into a DAMF master set, with two small patches of
+  ours (`harletty/`, below). **Offered only to a client that asks for it**
+  (`objectCodecs=…,dtsx`): Convolution's sideload build does, its App Store
+  build never does (`HYPNOS_DTSX` in the app).
 - **E-AC-3 with JOC objects** (Dolby Digital Plus Atmos) — decoded in-process
   by [Cavern](https://github.com/VoidXH/Cavern), an open-source spatial audio
   engine, via its `Cavern.Format` NuGet package. See "Dependencies" below for
   the licence terms this brings — Cavern must stay confined to this plugin.
 
-Either way the plugin's own output — `scene.json`, segment Events (DAMF
+Whatever the source, the plugin's own output — `scene.json`, segment Events (DAMF
 room-space positions), FLAC channel groups — is identical, so Convolution clients
-need no changes to play either source. See `Eac3AtmosDecoder.cs` for the
+need no changes to play any of them. A DTS:X master set's bed is a whole 7.1
+(TrueHD Atmos scenes carry only an LFE bed), and a client plays bed elements
+unspatialised, so for DTS:X every bed channel but the LFE is served as an
+object pinned at its speaker (`PinnedBedEvents` in `DamfScene.cs`); the
+heights come from harletty's `--bed-conform` as static objects. See `Eac3AtmosDecoder.cs` for the
 Cavern→DAMF coordinate mapping and why E-AC-3 needs no restart-point search
 the way TrueHD does.
 
@@ -45,8 +57,11 @@ Blu-ray carries object audio only in TrueHD, so a disc has no E-AC-3 path.
 ## Audio tracks
 
 `GET /AtmosObjects/{id}/Tracks?languages=eng,deu` lists an item's object-audio
-tracks (TrueHD first, then E-AC-3; a disc has only TrueHD) with index, codec,
-language and a display title, the default marked. Every audio request takes
+tracks (TrueHD first, then DTS:X, then E-AC-3; a disc has no E-AC-3) with index, codec
+(`truehd`, `dtsx`, `eac3`), language and a display title, the default marked.
+Every request takes `objectCodecs`, the formats the client may play
+(`truehd,eac3` when absent): DTS:X tracks are listed, chosen as a default and
+decoded only for a client that adds `dtsx`. Every audio request takes
 `audioStream=<index>` to name a track; each track is its own scene, decoded and
 cached separately (`AtmosTracks.cs`: the scene id is derived from the item id and
 the stream index), so switching back and forth keeps both. Without
@@ -58,6 +73,12 @@ client sends its device languages), then `PreferredAudioLanguage` (default
 *Bumblebee 3D* is a German release that lists German first. A cache from before
 per-track scenes is adopted by its track's scene (`track.txt`, else the first
 TrueHD track).
+A track's `index` is Jellyfin's, which numbers a file's external subtitle files
+first (with a sidecar `.srt`, a film's TrueHD is Jellyfin's 3 and ffmpeg's 1);
+the decoders are fed the file's own index, its position among the embedded
+streams. Before that was fixed every decode of such a film failed or read the
+wrong stream, so verdicts are kept in `unsupported-truehd-eac3-dtsx.txt` now and
+older `unsupported-truehd-eac3.txt` ones are asked again.
 Known limits: both tools pick the feature as the longest title (Vergence the
 longest 3D one), which agrees on ordinary discs; a feature made of several
 clips restarts its timestamps at each clip, as it does through `bluray:`.
@@ -67,6 +88,7 @@ clips restarts its timestamps at each clip, as it does through `bluray:`.
 | Library | Used for | Distribution | Licence |
 |---|---|---|---|
 | [truehdd](https://github.com/truehdd/truehdd) | TrueHD decode (external subprocess) | Source pinned + patched, built locally (`truehdd/build.sh`) | Apache-2.0 |
+| [harletty](https://github.com/harletty/harletty-bridge) | DTS:X decode (external subprocess) | Source pinned + patched, built locally (`harletty/build.sh`) | Apache-2.0 sources; the binary links the LGPL-2.1+ `dca` crate, so it is conveyed under LGPL-3.0 |
 | Vergence | Reading Blu-ray ISOs and folders (external subprocess, disc items only) | Built from source (`swift build -c release`) | MIT |
 | [Cavern](https://github.com/VoidXH/Cavern) / `Cavern.Format` | E-AC-3 JOC decode (in-process) | Official NuGet packages, `Cavern`/`Cavern.Format` 2.1.0, referenced by the `.csproj` | Custom, free but requires crediting the creator — see below |
 
@@ -100,7 +122,9 @@ credit is in the notices file; don't drop it if this plugin is redistributed.
    from NuGet automatically; nothing extra to build for the EAC3 path.
 2. Build truehdd (only needed for the TrueHD path — EAC3 items decode without
    it): `truehdd/build.sh`. It clones upstream at a pinned commit, applies
-   `truehdd/*.patch` and runs `cargo build --release`.
+   `truehdd/*.patch` and runs `cargo build --release`. For DTS:X, build
+   harletty the same way: `harletty/build.sh` (about a minute on an M-series
+   Mac; it needs no Omniphony checkout, see the patches below).
 3. Copy `bin/Release/net10.0/Jellyfin.Plugin.AtmosObjects.dll` into
    `<jellyfin data>/plugins/AtmosObjects_0.1.0.0/` (this now also carries the
    `Cavern.dll`/`Cavern.Format.dll` NuGet assemblies — `dotnet build` copies
@@ -111,6 +135,7 @@ credit is in the notices file; don't drop it if this plugin is redistributed.
    ```xml
    <PluginConfiguration>
      <TruehddPath>/path/to/truehdd/checkout/target/release/truehdd</TruehddPath>
+     <HarlettyPath />              <!-- empty: harletty next to the default truehdd; only DTS:X items need it -->
      <Mvc3dPath />                 <!-- empty: vergence (or mvc3d, from before the rename) next to the default truehdd; only Blu-ray items need it -->
      <PreferredAudioLanguage>eng</PreferredAudioLanguage>  <!-- ISO 639-2, among several object-audio tracks -->
      <CacheDirectory />            <!-- empty: <jellyfin cache>/atmos-objects -->
@@ -130,6 +155,33 @@ decode is still running. `truehdd/audio-stdout.patch` adds
 24-bit little-endian PCM. The DAMF header and metadata still go to files;
 upstream already flushes the metadata after every update. The patch is small
 and self-contained, and could be offered upstream.
+
+### The harletty patches
+
+`harletty/cli-workspace.patch` trims the repository's Cargo workspace to the
+CLI and its decoders: the runtime bridge plugins beside it need an Omniphony
+checkout the CLI never links.
+
+`harletty/audio-stdout.patch` adds `decode --audio-stdout` for DTS input, the
+same contract as truehdd's: 24-bit little-endian PCM, the master set's
+channels interleaved in its order, on stdout; the `.atmos` header (written at
+the first spatial frame) and `.atmos.metadata` (flushed every frame) go to
+`--output-path`. Right after a seek a DTS:X track's first frames can come out
+of the core alone (5.1) until the extension substream's lossless data syncs,
+and harletty then rewrites the file it began as the master set's head, which
+a pipe can't be: those frames are held in memory until the first spatial
+frame (or 4 s, after which the stream is taken for the plain bed it is). The
+plugin runs it as `harletty --codec dts decode - --audio-stdout --bed-conform
+--output-path …`.
+
+Measured on a 2:06:48 MakeMKV remux's DTS:X 7.1 track ("DTS:X-7.1.4",
+Height presentation: 7.1 bed plus 4 fixed heights) on servo: a minute cut
+an hour in decoded in 0.41 s; stdout and the CAF hold the same samples;
+segment 2 of a session started mid-file matched a straight decode of the
+cut at lag 0 (within the 16-bit FLAC's dither). DTS frames are 512 samples, and
+a file cut by ffmpeg without `-copyts` has timestamps up to a millisecond
+off their frame (rounded twice), so the start solver allows 1.5 ms for DTS
+where TrueHD's 40-sample units get the half-millisecond of one rounding.
 
 ## API
 

@@ -1,0 +1,294 @@
+diff --git a/harletty/src/cli/command.rs b/harletty/src/cli/command.rs
+index 4dad883..c718be4 100644
+--- a/harletty/src/cli/command.rs
++++ b/harletty/src/cli/command.rs
+@@ -90,6 +90,14 @@ pub struct DecodeArgs {
+     #[arg(long)]
+     pub no_audio: bool,
+ 
++    /// Stream decoded PCM to stdout (24-bit little-endian, interleaved, the
++    /// master set's channels in its order) instead of writing an audio file,
++    /// so it can be consumed while decoding. DTS only. The `.atmos` header
++    /// and `.atmos.metadata` still go to --output-path, the metadata flushed
++    /// after every update.
++    #[arg(long, conflicts_with_all = ["mono_prefix", "no_audio"])]
++    pub audio_stdout: bool,
++
+     /// Presentation index (0-3).
+     #[arg(long, value_name = "INDEX", default_value_t = 3)]
+     pub presentation: u8,
+diff --git a/harletty/src/cli/decode/decode_impl.rs b/harletty/src/cli/decode/decode_impl.rs
+index 02da02b..14e2bb5 100644
+--- a/harletty/src/cli/decode/decode_impl.rs
++++ b/harletty/src/cli/decode/decode_impl.rs
+@@ -29,6 +29,10 @@ pub fn cmd_decode(args: &DecodeArgs, cli: &Cli, multi: Option<&MultiProgress>) -
+     drop(probe_reader);
+     log::info!("Detected codec: {:?}", codec);
+ 
++    if args.audio_stdout && codec != Codec::Dts {
++        anyhow::bail!("--audio-stdout is for DTS input only");
++    }
++
+     match codec {
+         Codec::Eac3 => return cmd_decode_eac3(args, cli, multi, prefix),
+         Codec::Dts => return cmd_decode_dts(args, cli, multi, prefix),
+@@ -387,6 +391,7 @@ fn cmd_decode_dts(
+     handler.render_folds = !args.no_fold_render;
+     handler.bed_conform = args.bed_conform;
+     handler.mono_prefix = args.mono_prefix.clone();
++    handler.audio_stdout = args.audio_stdout;
+     let start_time = std::time::Instant::now();
+ 
+     while let Ok(result) = rx.recv() {
+diff --git a/harletty/src/cli/decode/dts_handler.rs b/harletty/src/cli/decode/dts_handler.rs
+index a621cc7..0e3fd91 100644
+--- a/harletty/src/cli/decode/dts_handler.rs
++++ b/harletty/src/cli/decode/dts_handler.rs
+@@ -125,8 +125,16 @@ enum AudioTarget {
+     },
+     /// `<prefix>_<n>.wav`, one per channel.
+     Mono { prefix: PathBuf },
++    /// stdout (`--audio-stdout`), or memory until the layout is settled.
++    Stdout,
+ }
+ 
++/// How long `--audio-stdout` holds a stream that hasn't shown a spatial
++/// frame before writing it out as the plain bed it then is. Right after a
++/// seek the first frames of a DTS:X track can come out of the core alone
++/// (5.1), before the extension substream's lossless data has synced.
++const HOLD_SECONDS: usize = 4;
++
+ /// Where one output channel of an HD frame takes its samples from.
+ #[derive(Clone, Copy)]
+ enum Column<'a> {
+@@ -220,6 +228,8 @@ pub struct DtsDecodeHandler {
+     /// Write one mono WAV per channel, `<prefix>_<n>.wav`, instead of the
+     /// interleaved audio file.
+     pub mono_prefix: Option<PathBuf>,
++    /// Stream the audio to stdout (`--audio-stdout`).
++    pub audio_stdout: bool,
+     renderer: FoldRenderer,
+     estimator: FoldEstimator,
+     /// Whether the estimation has been announced.
+@@ -292,6 +302,7 @@ impl Default for DtsDecodeHandler {
+             estimate_folds: true,
+             bed_conform: false,
+             mono_prefix: None,
++            audio_stdout: false,
+             renderer: FoldRenderer::new(),
+             estimator: FoldEstimator::new(),
+             noted_estimation: false,
+@@ -562,6 +573,20 @@ impl DtsDecodeHandler {
+             }
+             Some(_) => {}
+         }
++        // A stream held this long without a spatial frame is a plain bed:
++        // out it goes as one.
++        if self.audio_stdout && !self.has_spatial {
++            if let (Some(AudioWriter::Held(held)), Some(file)) = (&self.audio_writer, &self.layout) {
++                let channels = file.channel_count().max(1);
++                if held.len() / channels > sample_rate as usize * HOLD_SECONDS {
++                    if let Some(AudioWriter::Held(held)) = self.audio_writer.take() {
++                        let mut out = AudioWriter::create_stdout();
++                        out.write_pcm_samples(&held, channels)?;
++                        self.audio_writer = Some(out);
++                    }
++                }
++            }
++        }
+         let Some(file) = &self.layout else {
+             return Ok(());
+         };
+@@ -626,14 +651,23 @@ impl DtsDecodeHandler {
+              rewriting the audio written so far as the head of the master set",
+             self.written_frames
+         );
+-        writer.close_and_drop()?;
++        // What `--audio-stdout` held in memory is read from there; a file
++        // is closed and read back.
++        let mut held = match writer {
++            AudioWriter::Held(samples) => Some(samples),
++            other => {
++                other.close_and_drop()?;
++                None
++            }
++        };
+         let bed_channel_count = bed_layout.channel_count();
+-        let mut written = match &target {
+-            AudioTarget::File { path, container } => {
+-                PcmReadBack::interleaved(path, *container, bed_channel_count, self.written_frames)?
++        let mut written = match (&held, &target) {
++            (Some(_), _) | (None, AudioTarget::Stdout) => None,
++            (None, AudioTarget::File { path, container }) => {
++                Some(PcmReadBack::interleaved(path, *container, bed_channel_count, self.written_frames)?)
+             }
+-            AudioTarget::Mono { prefix } => {
+-                PcmReadBack::mono(prefix, bed_channel_count, self.written_frames)?
++            (None, AudioTarget::Mono { prefix }) => {
++                Some(PcmReadBack::mono(prefix, bed_channel_count, self.written_frames)?)
+             }
+         };
+         let (mut writer, target) = self.create_writer(
+@@ -660,7 +694,14 @@ impl DtsDecodeHandler {
+         sources.resize(channel_count, None);
+         let mut bed_samples = Vec::new();
+         loop {
+-            let frames = written.read(CHUNK_FRAMES, &mut bed_samples)?;
++            let frames = match (written.as_mut(), held.take()) {
++                (Some(written), _) => written.read(CHUNK_FRAMES, &mut bed_samples)?,
++                (None, Some(samples)) => {
++                    bed_samples = samples;
++                    bed_samples.len() / bed_channel_count.max(1)
++                }
++                (None, None) => 0,
++            };
+             if frames == 0 {
+                 break;
+             }
+@@ -678,7 +719,9 @@ impl DtsDecodeHandler {
+                 writer.write_pcm_samples(&self.interleaved, channel_count)?;
+             }
+         }
+-        written.remove()?;
++        if let Some(written) = written {
++            written.remove()?;
++        }
+         self.audio_writer = Some(writer);
+         self.target = Some(target);
+         Ok(())
+@@ -693,6 +736,12 @@ impl DtsDecodeHandler {
+         channel_count: usize,
+         spatial: bool,
+     ) -> Result<(AudioWriter, AudioTarget)> {
++        if self.audio_stdout {
++            // A master set goes straight out; a plain bed is held until the
++            // stream shows whether it is one (`HOLD_SECONDS`).
++            let writer = if spatial { AudioWriter::create_stdout() } else { AudioWriter::Held(Vec::new()) };
++            return Ok((writer, AudioTarget::Stdout));
++        }
+         if let Some(prefix) = &self.mono_prefix {
+             log::info!(
+                 "Creating {channel_count} mono audio files: {}",
+@@ -966,6 +1015,15 @@ impl DtsDecodeHandler {
+     }
+ 
+     pub fn finalize(&mut self) -> Result<()> {
++        // A stream that ended while still held: what it was, a plain bed.
++        if let (Some(AudioWriter::Held(_)), Some(file)) = (&self.audio_writer, &self.layout) {
++            let channels = file.channel_count().max(1);
++            if let Some(AudioWriter::Held(held)) = self.audio_writer.take() {
++                let mut out = AudioWriter::create_stdout();
++                out.write_pcm_samples(&held, channels)?;
++                self.audio_writer = Some(out);
++            }
++        }
+         if let Some(mut writer) = self.audio_writer.take() {
+             writer.finish()?;
+         }
+diff --git a/harletty/src/cli/decode/handler.rs b/harletty/src/cli/decode/handler.rs
+index b16abe4..8800ee1 100644
+--- a/harletty/src/cli/decode/handler.rs
++++ b/harletty/src/cli/decode/handler.rs
+@@ -64,7 +64,7 @@ impl AudioFormatHandler {
+                 Self::rename_and_recreate_caf_writer(current_path, new_path, state)
+             }
+             // These cases should never happen for presentation 3 due to effective_format forcing CAF
+-            AudioWriter::Pcm(_) | AudioWriter::W64(_) | AudioWriter::Mono(_) => {
++            AudioWriter::Pcm(_) | AudioWriter::W64(_) | AudioWriter::Mono(_) | AudioWriter::Stdout(_) | AudioWriter::Held(_) => {
+                 unreachable!(
+                     "PCM/W64 writers should not exist for presentation 3 (Atmos) due to format forcing"
+                 )
+@@ -110,7 +110,7 @@ impl AudioFormatHandler {
+                 drop(w);
+             }
+             // These should not happen due to effective_format forcing CAF
+-            AudioWriter::Pcm(_) | AudioWriter::W64(_) | AudioWriter::Mono(_) => {
++            AudioWriter::Pcm(_) | AudioWriter::W64(_) | AudioWriter::Mono(_) | AudioWriter::Stdout(_) | AudioWriter::Held(_) => {
+                 unreachable!("PCM/W64 writers should not exist for presentation 3 bed conformance")
+             }
+         }
+@@ -1017,6 +1017,10 @@ impl DecodeHandler {
+                     AudioWriter::Mono(mut set) => {
+                         set.finish()?;
+                     }
++                    AudioWriter::Stdout(mut w) => {
++                        w.flush()?;
++                    }
++                    AudioWriter::Held(_) => {}
+                 }
+             }
+ 
+diff --git a/harletty/src/cli/decode/output.rs b/harletty/src/cli/decode/output.rs
+index d2cd36e..99b1733 100644
+--- a/harletty/src/cli/decode/output.rs
++++ b/harletty/src/cli/decode/output.rs
+@@ -70,6 +70,12 @@ pub enum AudioWriter {
+     /// One mono RIFF WAV per channel, `<prefix>_<n>.wav`, n from 0 in the
+     /// order the interleaved file would have had.
+     Mono(MonoWavSet),
++    /// Raw 24-bit little-endian PCM on stdout (`--audio-stdout`).
++    Stdout(BufWriter<std::io::Stdout>),
++    /// Interleaved samples kept in memory: what `--audio-stdout` writes
++    /// before the stream has shown whether it is a master set, since a pipe
++    /// can't be rewritten in another layout the way a file is.
++    Held(Vec<i32>),
+ }
+ 
+ /// A set of mono 24-bit RIFF WAV files written in lockstep, one per channel.
+@@ -210,6 +216,10 @@ impl AudioWriter {
+         )?))
+     }
+ 
++    pub fn create_stdout() -> Self {
++        AudioWriter::Stdout(BufWriter::with_capacity(1 << 16, std::io::stdout()))
++    }
++
+     pub fn create_w64(path: PathBuf, sample_rate: u32, channel_count: u32) -> Result<Self> {
+         let mut w64_writer = WAVWriter::new(File::create(path)?);
+         w64_writer.configure_audio_format(sample_rate, channel_count, 24)?;
+@@ -237,6 +247,12 @@ impl AudioWriter {
+             AudioWriter::Mono(set) => {
+                 set.write_interleaved(samples, channel_count)?;
+             }
++            AudioWriter::Stdout(stdout_writer) => {
++                for &sample in samples {
++                    stdout_writer.write_all(&sample.to_le_bytes()[..3])?;
++                }
++            }
++            AudioWriter::Held(held) => held.extend_from_slice(samples),
+         }
+         Ok(())
+     }
+@@ -259,6 +275,10 @@ impl AudioWriter {
+                 set.finish()?;
+                 drop(set);
+             }
++            AudioWriter::Stdout(mut w) => {
++                w.flush()?;
++            }
++            AudioWriter::Held(_) => {}
+         }
+         Ok(())
+     }
+@@ -277,6 +297,10 @@ impl AudioWriter {
+             AudioWriter::Mono(set) => {
+                 set.finish()?;
+             }
++            AudioWriter::Stdout(stdout_writer) => {
++                stdout_writer.flush()?;
++            }
++            AudioWriter::Held(_) => {}
+         }
+         Ok(())
+     }
+@@ -295,6 +319,10 @@ impl AudioWriter {
+             AudioWriter::W64(_) => {
+                 // W64 writer handles flushing internally
+             }
++            AudioWriter::Stdout(stdout_writer) => {
++                stdout_writer.flush()?;
++            }
++            AudioWriter::Held(_) => {}
+         }
+         Ok(())
+     }

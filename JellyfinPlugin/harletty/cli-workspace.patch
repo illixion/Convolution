@@ -1,0 +1,49 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 0867689..c61e29c 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -8,40 +8,10 @@
+ # the combined router over every family, an rlib kept for the fuzz target,
+ # the bench and the bit-exactness kit.
+ [workspace]
+-members = [
+-    "bridge",
+-    "bridge-common",
+-    "bridge-family-dolby",
+-    "bridge-family-dts",
+-    "bridge-family-iamf",
+-    "plugin-dolby",
+-    "plugin-dts",
+-    "plugin-iamf",
+-    "harletty",
+-    "eac3",
+-    "dca",
+-    "damf",
+-    "auro",
+-    "conceal",
+-]
+-# What a plain `cargo build` / `cargo test` at the root covers: everything but
+-# the IAMF family and its plugin, whose Opus path links libopus. Build or test
+-# them with `-p bridge-family-iamf -p harletty-iamf-bridge`, or through the
+-# bridge's `iamf` feature.
+-default-members = [
+-    "bridge",
+-    "bridge-common",
+-    "bridge-family-dolby",
+-    "bridge-family-dts",
+-    "plugin-dolby",
+-    "plugin-dts",
+-    "harletty",
+-    "eac3",
+-    "dca",
+-    "damf",
+-    "auro",
+-    "conceal",
+-]
++# Trimmed to the harletty CLI and its decoders (Convolution's Jellyfin plugin
++# builds only the CLI): the bridge plugins need an Omniphony checkout.
++members = ["harletty", "eac3", "dca", "damf", "auro", "conceal"]
++default-members = ["harletty", "eac3", "dca", "damf", "auro", "conceal"]
+ resolver = "2"
+ 
+ # What release.yml and build_bridge.sh ship. Thin LTO is the one setting that

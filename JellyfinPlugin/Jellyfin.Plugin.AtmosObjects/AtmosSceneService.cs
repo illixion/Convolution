@@ -33,7 +33,14 @@ public enum AudioCodecKind
     /// <summary>truehdd, an external subprocess (see <see cref="AtmosSceneService"/>'s main doc comment).</summary>
     TrueHd,
     /// <summary>Cavern.Format, in-process (see <c>Eac3AtmosDecoder.cs</c>).</summary>
-    Eac3
+    Eac3,
+    /// <summary>
+    /// DTS:X on DTS-HD MA, through harletty (a truehdd fork that also decodes
+    /// DTS:X into the same DAMF master set; an external subprocess like
+    /// truehdd). Offered only to a client that lists <c>dtsx</c> in
+    /// <c>objectCodecs</c>.
+    /// </summary>
+    Dtsx
 }
 
 /// <summary>
@@ -110,6 +117,33 @@ public sealed partial class AtmosSceneService
         ? Path.Combine(Plugin.Instance?.DataFolderPath ?? _paths.PluginConfigurationsPath, "truehdd")
         : Config.TruehddPath;
 
+    private string HarlettyPath => string.IsNullOrWhiteSpace(Config.HarlettyPath)
+        ? Path.Combine(Plugin.Instance?.DataFolderPath ?? _paths.PluginConfigurationsPath, "harletty")
+        : Config.HarlettyPath;
+
+    /// <summary>
+    /// A decoder that writes a DAMF master set (truehdd for TrueHD, harletty
+    /// for DTS:X), and how the packets ffmpeg copies out are cut for it.
+    /// </summary>
+    /// <param name="Arguments">Everything but the output path, which follows them.</param>
+    /// <param name="StartsAt">Whether a packet can open the stream the decoder is fed.</param>
+    /// <param name="Units">Access units in a packet.</param>
+    /// <param name="SamplesPerUnit">Samples in an access unit, from the first packet fed.</param>
+    /// <param name="MinimumRun">Packets held back until the cut is proven continuous.</param>
+    /// <param name="PinBeds">Bed channels other than the LFE become objects at their speakers (a DTS:X bed is a real 7.1).</param>
+    /// <param name="ToleranceMs">How far a packet's timestamp may stray (<see cref="StartSolver"/>).</param>
+    private sealed record DamfTool(string Name, string Path, string[] Arguments, Func<byte[], bool> StartsAt,
+        Func<byte[], int> Units, Func<byte[], int> SamplesPerUnit, int MinimumRun, bool PinBeds, string Format,
+        double ToleranceMs = 0.5);
+
+    private DamfTool ToolFor(AudioCodecKind codec) => codec == AudioCodecKind.Dtsx
+        ? new DamfTool("harletty", HarlettyPath,
+            ["--loglevel", "error", "--codec", "dts", "decode", "-", "--audio-stdout", "--bed-conform", "--output-path"],
+            p => DtsFrames.StartsAtFrame(p), p => DtsFrames.Count(p), p => DtsFrames.SamplesPerFrame(p),
+            64, PinBeds: true, Format: "DTS:X", ToleranceMs: 1.5)
+        : new DamfTool("truehdd", TruehddPath, ["--loglevel", "error", "decode", "-", "--audio-stdout", "--output-path"],
+            OpensWithMajorSync, CountAccessUnits, _ => SamplesPerAu, 3 * 128, PinBeds: false, Format: "TrueHD");
+
     // The Vergence CLI, installed as "vergence"; servers set up before the
     // rename still have it as "mvc3d".
     private string Mvc3dPath => VergencePath(_paths);
@@ -141,8 +175,12 @@ public sealed partial class AtmosSceneService
     /// that reached it, so a plugin that learns a new format retries instead of
     /// trusting an older verdict: <c>unsupported.txt</c> was written when only
     /// TrueHD was decoded, and marked every EAC3-only film unsupported.
+    /// <c>unsupported-truehd-eac3.txt</c> came before DTS:X, and before tracks
+    /// were mapped to the file's own stream index: a film with a sidecar
+    /// subtitle had its decoder fed the wrong stream, which could read as no
+    /// objects.
     /// </summary>
-    private string UnsupportedPath(Guid itemId) => Path.Combine(ItemDirectory(itemId), "unsupported-truehd-eac3.txt");
+    private string UnsupportedPath(Guid itemId) => Path.Combine(ItemDirectory(itemId), "unsupported-truehd-eac3-dtsx.txt");
 
     // MARK: Client entry points
 
@@ -270,6 +308,7 @@ public sealed partial class AtmosSceneService
 
     // MARK: Item state
 
+    /// <param name="StreamIndex">The track's index in the file, as ffmpeg numbers it (not Jellyfin's).</param>
     /// <param name="IsDisc">A Blu-ray ISO or BDMV folder, read through <see cref="DiscFeed"/>.</param>
     private sealed record ItemSource(string Path, int StreamIndex, double DurationSeconds, double OriginMs, AudioCodecKind Codec, bool IsDisc = false);
 
@@ -333,9 +372,9 @@ public sealed partial class AtmosSceneService
         {
             state.Source = new ItemSource(
                 item.Path,
-                candidate.Index,
+                candidate.FileIndex,
                 item.RunTimeTicks is long ticks ? TimeSpan.FromTicks(ticks).TotalSeconds : 0,
-                ProbeOriginMs(item.Path, candidate.Index, disc),
+                ProbeOriginMs(item.Path, candidate.FileIndex, disc),
                 candidate.Codec,
                 disc);
         }
@@ -403,14 +442,14 @@ public sealed partial class AtmosSceneService
     private Task RunSessionAsync(Guid itemId, ItemState state, ItemSource source, LiveSession session) =>
         source.Codec == AudioCodecKind.Eac3
             ? RunEac3SessionAsync(itemId, state, source, session)
-            : RunTrueHdSessionAsync(itemId, state, source, session);
+            : RunDamfSessionAsync(itemId, state, source, session, ToolFor(source.Codec));
 
-    private async Task RunTrueHdSessionAsync(Guid itemId, ItemState state, ItemSource source, LiveSession session)
+    private async Task RunDamfSessionAsync(Guid itemId, ItemState state, ItemSource source, LiveSession session, DamfTool tool)
     {
         var ct = session.Cancellation.Token;
-        if (!File.Exists(TruehddPath))
+        if (!File.Exists(tool.Path))
         {
-            throw new FileNotFoundException($"truehdd not found at {TruehddPath}; set TruehddPath in the plugin configuration.");
+            throw new FileNotFoundException($"{tool.Name} not found at {tool.Path}; set {(tool.Name == "harletty" ? "HarlettyPath" : "TruehddPath")} in the plugin configuration.");
         }
 
         var segmentFrames = SegmentFrames;
@@ -434,7 +473,7 @@ public sealed partial class AtmosSceneService
         ffmpegArgs.AddRange(["-i", feed is null ? source.Path : "pipe:0", "-map", $"0:{source.StreamIndex}", "-c", "copy", "-copyts", "-f", "matroska", "pipe:1"]);
         using var ffmpeg = StartProcess(_mediaEncoder.EncoderPath, ffmpegArgs, redirectInput: feed is not null);
         feed?.Connect(ffmpeg);
-        using var truehdd = StartProcess(TruehddPath, ["--loglevel", "error", "decode", "-", "--audio-stdout", "--output-path", basePath], redirectInput: true);
+        using var truehdd = StartProcess(tool.Path, [.. tool.Arguments, basePath], redirectInput: true);
         using var kill = ct.Register(() =>
         {
             feed?.Dispose();
@@ -445,14 +484,14 @@ public sealed partial class AtmosSceneService
         var truehddErr = truehdd.StandardError.ReadToEndAsync(CancellationToken.None);
 
         var start = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var feeder = Task.Run(() => FeedAsync(ffmpeg, truehdd, source.OriginMs, start, ct), ct);
+        var feeder = Task.Run(() => FeedAsync(ffmpeg, truehdd, source.OriginMs, start, tool, ct), ct);
         _ = start.Task.ContinueWith(
             t => _logger.LogInformation("Atmos session for {ItemId}: cut starts at frame {Frame} ({Seconds:F3} s)", itemId, t.Result, t.Result / (double)SampleRate),
             TaskContinuationOptions.OnlyOnRanToCompletion);
 
         try
         {
-            var outcome = await ReadAudioAsync(itemId, state, source, session, truehdd, basePath, start.Task, atStreamStart, segmentFrames, ct).ConfigureAwait(false);
+            var outcome = await ReadAudioAsync(itemId, state, source, session, truehdd, basePath, start.Task, atStreamStart, segmentFrames, tool, ct).ConfigureAwait(false);
             _logger.LogInformation("Atmos session for {ItemId}: {Outcome} at segment {Segment}", itemId, outcome, session.NextSegment);
 
             // truehdd's output has ended (or we stopped reading): nothing will
@@ -467,7 +506,7 @@ public sealed partial class AtmosSceneService
 
             if (truehdd.ExitCode != 0 && outcome != AudioOutcome.Stopped)
             {
-                throw new InvalidOperationException($"truehdd exited {truehdd.ExitCode}: {(await truehddErr.ConfigureAwait(false)).Trim()}");
+                throw new InvalidOperationException($"{tool.Name} exited {truehdd.ExitCode}: {(await truehddErr.ConfigureAwait(false)).Trim()}");
             }
 
             if (outcome == AudioOutcome.NoObjects && feeder.IsCompleted)
@@ -479,7 +518,7 @@ public sealed partial class AtmosSceneService
             if (outcome == AudioOutcome.NoObjects)
             {
                 // Only a clean decode of the whole remaining stream says the track has no objects.
-                MarkUnsupported(itemId, "The TrueHD track has no Atmos object presentation.");
+                MarkUnsupported(itemId, $"The {tool.Format} track has no object presentation.");
                 return;
             }
 
@@ -531,9 +570,11 @@ public sealed partial class AtmosSceneService
     /// packet is not followed by its own successors. Any timestamp gap drops the
     /// run and starts again at the next restart point.
     /// </summary>
-    private static async Task FeedAsync(Process ffmpeg, Process truehdd, double originMs, TaskCompletionSource<long> start, CancellationToken ct)
+    private static async Task FeedAsync(Process ffmpeg, Process truehdd, double originMs, TaskCompletionSource<long> start,
+        DamfTool tool, CancellationToken ct)
     {
-        const int MinimumRun = 3 * 128;
+        var minimumRun = tool.MinimumRun;
+        var samplesPerUnit = SamplesPerAu;
         var packets = new MatroskaPackets(ffmpeg.StandardOutput.BaseStream);
         var input = truehdd.StandardInput.BaseStream;
         var run = new List<byte[]>();
@@ -552,30 +593,31 @@ public sealed partial class AtmosSceneService
                 }
 
                 var expected = runStartMs + (runSamples * 1000.0 / SampleRate);
-                if (solver is not null && Math.Abs(time - expected) > 1.5)
+                if (solver is not null && Math.Abs(time - expected) > 0.5 + (2 * tool.ToleranceMs))
                 {
                     // Discontinuity: this run cannot be decoded as one stream.
                     solver = null;
                     run.Clear();
                     if (++dropped > 50)
                     {
-                        throw new InvalidDataException("No continuous run of TrueHD packets after the seek point.");
+                        throw new InvalidDataException($"No continuous run of {tool.Format} packets after the seek point.");
                     }
                 }
 
                 if (solver is null)
                 {
-                    if (!OpensWithMajorSync(data))
+                    if (!tool.StartsAt(data))
                     {
                         continue;
                     }
 
-                    solver = new StartSolver(SampleRate, SamplesPerAu, originMs);
+                    samplesPerUnit = tool.SamplesPerUnit(data);
+                    solver = new StartSolver(SampleRate, samplesPerUnit, originMs, tool.ToleranceMs);
                     runStartMs = time;
                     runSamples = 0;
                 }
 
-                var units = CountAccessUnits(data);
+                var units = tool.Units(data);
                 solver.Add(time, units);
                 if (!solver.IsConsistent)
                 {
@@ -591,9 +633,9 @@ public sealed partial class AtmosSceneService
                     continue;
                 }
 
-                runSamples += (long)units * SamplesPerAu;
+                runSamples += (long)units * samplesPerUnit;
                 run.Add(data);
-                if (run.Count >= MinimumRun && solver.Solve() is long frame)
+                if (run.Count >= minimumRun && solver.Solve() is long frame)
                 {
                     foreach (var held in run)
                     {
@@ -669,7 +711,7 @@ public sealed partial class AtmosSceneService
     /// </summary>
     private async Task<AudioOutcome> ReadAudioAsync(
         Guid itemId, ItemState state, ItemSource source, LiveSession session, Process truehdd, string basePath,
-        Task<long> startTask, bool atStreamStart, int segmentFrames, CancellationToken ct)
+        Task<long> startTask, bool atStreamStart, int segmentFrames, DamfTool tool, CancellationToken ct)
     {
         var stdout = truehdd.StandardOutput.BaseStream;
         var pending = new MemoryStream();
@@ -691,9 +733,13 @@ public sealed partial class AtmosSceneService
                 if (startTask.IsCompleted && File.Exists(basePath + ".atmos"))
                 {
                     var startFrame = await startTask.ConfigureAwait(false);
-                    var elements = DamfReader.ReadElements(basePath + ".atmos");
+                    var (elements, pinned) = DamfReader.ReadElements(basePath + ".atmos", tool.PinBeds);
                     var layout = WriteLayoutIfMissing(itemId, state, source, elements);
-                    var events = new DamfEventSource(new DamfEventStream(startFrame), basePath + ".atmos.metadata");
+                    ISceneEventSource events = new DamfEventSource(new DamfEventStream(startFrame), basePath + ".atmos.metadata");
+                    if (pinned.Count > 0)
+                    {
+                        events = new PinnedBedEvents(events, pinned);
+                    }
                     grid = new Grid(this, itemId, state, session, layout, events, startFrame, atStreamStart, segmentFrames, encoders, encoding);
                     grid.Append(pending.GetBuffer().AsSpan(0, (int)pending.Length));
                     pending = new MemoryStream();

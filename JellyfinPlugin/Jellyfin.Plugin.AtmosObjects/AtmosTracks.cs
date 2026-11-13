@@ -24,23 +24,55 @@ public sealed record AudioTrack(int Index, string Codec, string? Language, strin
 /// </summary>
 public sealed partial class AtmosSceneService
 {
-    private sealed record Candidate(int Index, AudioCodecKind Codec, string? Language, string Title);
+    /// <param name="Index">Jellyfin's stream index: what clients name a track by, and part of its scene id.</param>
+    /// <param name="FileIndex">
+    /// The stream's index in the file, as ffmpeg numbers it. Jellyfin 12.2 numbers a file's external
+    /// subtitles first, so with a sidecar <c>.srt</c> beside it a film's TrueHD is Jellyfin's 3 and ffmpeg's 1
+    /// (measured on the dev seed's Atmos demo); passing the first to <c>-map</c> failed every decode.
+    /// </param>
+    private sealed record Candidate(int Index, AudioCodecKind Codec, string? Language, string Title, int FileIndex);
 
     private readonly ConcurrentDictionary<Guid, (Guid Item, int Stream)> _sceneTargets = new();
     private readonly ConcurrentDictionary<Guid, IReadOnlyList<Candidate>> _candidates = new();
 
     /// <summary>The item's decodable tracks, the default marked. Null for an unknown item.</summary>
-    public IReadOnlyList<AudioTrack>? GetTracks(Guid itemId, string? languages)
+    /// <param name="objectCodecs">The formats the client may play, comma-separated (<c>truehd,eac3,dtsx</c>); null for TrueHD and E-AC-3.</param>
+    public IReadOnlyList<AudioTrack>? GetTracks(Guid itemId, string? languages, string? objectCodecs = null)
     {
-        if (Candidates(itemId) is not { } candidates)
+        if (Candidates(itemId, objectCodecs) is not { } candidates)
         {
             return null;
         }
 
         var chosen = DefaultTrack(candidates, languages);
         return candidates
-            .Select(c => new AudioTrack(c.Index, c.Codec == AudioCodecKind.TrueHd ? "truehd" : "eac3", c.Language, c.Title, c.Index == chosen?.Index))
+            .Select(c => new AudioTrack(c.Index, CodecName(c.Codec), c.Language, c.Title, c.Index == chosen?.Index))
             .ToList();
+    }
+
+    private static string CodecName(AudioCodecKind codec) => codec switch
+    {
+        AudioCodecKind.TrueHd => "truehd",
+        AudioCodecKind.Eac3 => "eac3",
+        _ => "dtsx"
+    };
+
+    /// <summary>
+    /// The candidates a client may be given: TrueHD and E-AC-3 for every client,
+    /// DTS:X only for one that lists <c>dtsx</c> (Convolution's sideload build).
+    /// </summary>
+    private IReadOnlyList<Candidate>? Candidates(Guid itemId, string? objectCodecs)
+    {
+        if (Candidates(itemId) is not { } all)
+        {
+            return null;
+        }
+
+        var allowed = (objectCodecs ?? "truehd,eac3")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(c => c.ToLowerInvariant())
+            .ToHashSet();
+        return all.Where(c => allowed.Contains(CodecName(c.Codec))).ToList();
     }
 
     /// <summary>
@@ -48,9 +80,9 @@ public sealed partial class AtmosSceneService
     /// or its default track. Null for an unknown item; an item with no
     /// decodable track gets a scene that reports itself unsupported.
     /// </summary>
-    public Guid? ResolveScene(Guid itemId, int? audioStream, string? languages)
+    public Guid? ResolveScene(Guid itemId, int? audioStream, string? languages, string? objectCodecs = null)
     {
-        if (Candidates(itemId) is not { } candidates)
+        if (Candidates(itemId, objectCodecs) is not { } candidates)
         {
             return null;
         }
@@ -126,9 +158,10 @@ public sealed partial class AtmosSceneService
     }
 
     /// <summary>
-    /// TrueHD tracks first (lossless, and the only object audio on a disc),
-    /// then E-AC-3 (whether it carries JOC objects is only learnt by decoding
-    /// it). Cached per item; a library rescan that changes the streams needs
+    /// TrueHD tracks first (lossless, and the only Atmos on a disc), then DTS:X
+    /// (lossless too: Jellyfin's profile "DTS-HD MA + DTS:X", 48 kHz, the rate
+    /// harletty decodes it at), then E-AC-3 (whether it carries JOC objects is
+    /// only learnt by decoding it). Cached per item; a library rescan that changes the streams needs
     /// a server restart to be seen, like the rest of the plugin's item state.
     /// </summary>
     private IReadOnlyList<Candidate>? Candidates(Guid itemId)
@@ -145,31 +178,48 @@ public sealed partial class AtmosSceneService
         }
 
         var disc = IsBluray(item);
-        var audio = _mediaSourceManager.GetMediaStreams(itemId).Where(s => s.Type == MediaStreamType.Audio).ToList();
+        var streams = _mediaSourceManager.GetMediaStreams(itemId);
+        var audio = streams.Where(s => s.Type == MediaStreamType.Audio && !s.IsExternal).ToList();
+        // The file's own streams in Jellyfin's order are ffmpeg's 0, 1, 2...
+        var fileIndex = streams.Where(s => !s.IsExternal).OrderBy(s => s.Index)
+            .Select((s, position) => (s.Index, position)).ToDictionary(p => p.Index, p => p.position);
+        int FileIndex(MediaStream s) => fileIndex.GetValueOrDefault(s.Index, s.Index);
         var discLanguages = disc ? DiscTrueHdLanguages(item.Path) : new Dictionary<int, string>();
         var list = new List<Candidate>();
         foreach (var stream in audio.Where(s => string.Equals(s.Codec, "truehd", StringComparison.OrdinalIgnoreCase)))
         {
             var language = discLanguages.GetValueOrDefault(stream.Index) ?? stream.Language;
-            list.Add(new Candidate(stream.Index, AudioCodecKind.TrueHd, language, Title(stream, language)));
+            list.Add(new Candidate(stream.Index, AudioCodecKind.TrueHd, language, Title(stream, language), FileIndex(stream)));
         }
 
-        // Blu-ray carries objects only in TrueHD, so a disc has no E-AC-3 path.
+        foreach (var stream in audio.Where(IsDtsx))
+        {
+            list.Add(new Candidate(stream.Index, AudioCodecKind.Dtsx, stream.Language, Title(stream, stream.Language), FileIndex(stream)));
+        }
+
+        // A disc's Atmos is in TrueHD, so a disc has no E-AC-3 path.
         if (!disc)
         {
             foreach (var stream in audio.Where(s => string.Equals(s.Codec, "eac3", StringComparison.OrdinalIgnoreCase)))
             {
-                list.Add(new Candidate(stream.Index, AudioCodecKind.Eac3, stream.Language, Title(stream, stream.Language)));
+                list.Add(new Candidate(stream.Index, AudioCodecKind.Eac3, stream.Language, Title(stream, stream.Language), FileIndex(stream)));
             }
         }
 
         return _candidates.GetOrAdd(itemId, list);
     }
 
+    /// <summary>A DTS-HD MA track carrying DTS:X (ffprobe's profile, which Jellyfin keeps), at 48 kHz or unstated.</summary>
+    internal static bool IsDtsx(MediaStream stream) =>
+        string.Equals(stream.Codec, "dts", StringComparison.OrdinalIgnoreCase)
+        && (stream.Profile ?? string.Empty).Contains("DTS:X", StringComparison.OrdinalIgnoreCase)
+        && stream.SampleRate is null or 48000;
+
     private static string Title(MediaStream stream, string? language)
     {
         var name = NormalizeLanguage(language) is { } code && TryLanguageName(code) is { } english ? english : null;
-        var codec = string.Equals(stream.Codec, "truehd", StringComparison.OrdinalIgnoreCase) ? "TrueHD" : "E-AC-3";
+        var codec = string.Equals(stream.Codec, "truehd", StringComparison.OrdinalIgnoreCase) ? "TrueHD"
+            : IsDtsx(stream) ? "DTS:X" : "E-AC-3";
         var channels = stream.Channels is int n ? n switch { 8 => " 7.1", 6 => " 5.1", 2 => " Stereo", _ => $" {n} ch" } : string.Empty;
         var title = string.IsNullOrWhiteSpace(stream.Title) ? null : stream.Title.Trim();
         return string.Join(" · ", new[] { name, title, codec + channels }.Where(s => !string.IsNullOrEmpty(s)));

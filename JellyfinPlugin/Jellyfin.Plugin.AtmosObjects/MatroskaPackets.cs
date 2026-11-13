@@ -186,6 +186,7 @@ public sealed class StartSolver
     private readonly double _samplesPerMs;
     private readonly int _samplesPerAu;
     private readonly long _origin;
+    private readonly double _half;
     private long _samplesBefore;
     private long _lo = long.MinValue;
     private long _hi = long.MaxValue;
@@ -193,11 +194,18 @@ public sealed class StartSolver
     /// <param name="sampleRate">Stream sample rate.</param>
     /// <param name="samplesPerAu">Samples per access unit.</param>
     /// <param name="originMs">Timestamp of the stream's first access unit, which is scene frame 0.</param>
-    public StartSolver(int sampleRate, int samplesPerAu, double originMs)
+    /// <param name="toleranceMs">
+    /// How far a packet's timestamp may be from its true time. A tick's rounding is half a millisecond; a
+    /// file cut by ffmpeg without <c>-copyts</c> has its times rounded twice and strays up to a millisecond
+    /// (measured on a DTS track). Only an access unit far longer than twice this pins a frame: DTS's 512
+    /// samples take 1.5 ms, TrueHD's 40 can't.
+    /// </param>
+    public StartSolver(int sampleRate, int samplesPerAu, double originMs, double toleranceMs = 0.5)
     {
         _samplesPerMs = sampleRate / 1000.0;
         _samplesPerAu = samplesPerAu;
         _origin = (long)Math.Round(originMs * _samplesPerMs);
+        _half = toleranceMs * _samplesPerMs;
     }
 
     public int Packets { get; private set; }
@@ -209,9 +217,8 @@ public sealed class StartSolver
     public void Add(double timeMs, int accessUnits)
     {
         var center = (timeMs * _samplesPerMs) - _origin - _samplesBefore;
-        var half = _samplesPerMs / 2;
-        _lo = Math.Max(_lo, (long)Math.Ceiling(center - half));
-        _hi = Math.Min(_hi, (long)Math.Floor(center + half));
+        _lo = Math.Max(_lo, (long)Math.Ceiling(center - _half));
+        _hi = Math.Min(_hi, (long)Math.Floor(center + _half));
         _samplesBefore += (long)accessUnits * _samplesPerAu;
         Packets++;
     }

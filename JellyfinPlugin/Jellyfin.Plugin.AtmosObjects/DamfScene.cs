@@ -62,19 +62,34 @@ public static partial class DamfReader
     [GeneratedRegex(@"^\s+- ID: (\d+)\s*$", RegexOptions.Multiline)]
     private static partial Regex ObjectRegex();
 
-    /// <summary>Elements in audio channel order: beds first, then objects, as the header lists them.</summary>
-    public static List<SceneElement> ReadElements(string headerPath)
+    /// <summary>
+    /// Elements in audio channel order: beds first, then objects, as the header
+    /// lists them. With <paramref name="pinBeds"/>, every bed channel but the
+    /// LFE is made an object, and <c>Pinned</c> gives its speaker's position:
+    /// a client plays a bed element unspatialised (a TrueHD Atmos scene's only
+    /// bed is its LFE), and a DTS:X master set's bed is a whole 7.1.
+    /// </summary>
+    public static (List<SceneElement> Elements, Dictionary<int, double[]> Pinned) ReadElements(string headerPath, bool pinBeds = false)
     {
         var header = File.ReadAllText(headerPath);
         var elements = new List<SceneElement>();
-        foreach (Match m in BedRegex().Matches(header))
+        var pinned = new Dictionary<int, double[]>();
+        var beds = BedRegex().Matches(header).Select(m => (Name: m.Groups[1].Value, Id: int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture))).ToList();
+        var names = beds.Select(b => b.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, id) in beds)
         {
+            var position = pinBeds && !name.StartsWith("LFE", StringComparison.OrdinalIgnoreCase) ? BedPosition(name, names) : null;
+            if (position is not null)
+            {
+                pinned[id] = position;
+            }
+
             elements.Add(new SceneElement
             {
-                Id = int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture),
+                Id = id,
                 Channel = elements.Count,
-                Kind = "bed",
-                BedChannel = m.Groups[1].Value
+                Kind = position is null ? "bed" : "object",
+                BedChannel = position is null ? name : null
             });
         }
 
@@ -91,7 +106,69 @@ public static partial class DamfReader
             }
         }
 
-        return elements;
+        return (elements, pinned);
+    }
+
+    /// <summary>
+    /// A DAMF bed speaker's place in the room (x right, y front, z up), as
+    /// Dolby's layouts put it. Side surrounds stand beside the listener when
+    /// there are rear ones, a little behind otherwise (a 5.1 bed). Null for a
+    /// name not known here, which then stays a bed.
+    /// </summary>
+    public static double[]? BedPosition(string name, IReadOnlySet<string> bed)
+    {
+        var rears = bed.Contains("Lrs") || bed.Contains("Rrs");
+        var side = rears ? 0.0 : -0.35;
+        return name switch
+        {
+            "L" => [-1, 1, 0],
+            "R" => [1, 1, 0],
+            "C" => [0, 1, 0],
+            "Lss" or "Ls" => [-1, side, 0],
+            "Rss" or "Rs" => [1, side, 0],
+            "Lrs" => [-1, -1, 0],
+            "Rrs" => [1, -1, 0],
+            "Lw" => [-1, 0.5, 0],
+            "Rw" => [1, 0.5, 0],
+            "Lts" => [-1, 0, 1],
+            "Rts" => [1, 0, 1],
+            "Lfh" or "Ltf" => [-1, 1, 1],
+            "Rfh" or "Rtf" => [1, 1, 1],
+            "Lrh" or "Ltr" => [-1, -1, 1],
+            "Rrh" or "Rtr" => [1, -1, 1],
+            _ => null
+        };
+    }
+}
+
+/// <summary>
+/// Events for bed channels played as objects (<see cref="DamfReader.ReadElements"/>'s
+/// <c>Pinned</c>): each stands at its speaker in every segment, at the gain
+/// the master set gives it (0 dB when it states none).
+/// </summary>
+public sealed class PinnedBedEvents(ISceneEventSource inner, IReadOnlyDictionary<int, double[]> pinned) : ISceneEventSource
+{
+    public List<SceneEvent> Segment(long from, long to)
+    {
+        var events = inner.Segment(from, to);
+        foreach (var e in events)
+        {
+            if (pinned.TryGetValue(e.Id, out var position))
+            {
+                e.Pos = position;
+            }
+        }
+
+        foreach (var (id, position) in pinned)
+        {
+            if (!events.Any(e => e.Id == id && e.T <= from))
+            {
+                events.Add(new SceneEvent { Id = id, T = from, Ramp = 0, Gain = 0, Pos = position });
+            }
+        }
+
+        events.Sort((a, b) => a.T != b.T ? a.T.CompareTo(b.T) : a.Id.CompareTo(b.Id));
+        return events;
     }
 }
 

@@ -71,6 +71,26 @@ self-contained, and offered upstream as a candidate contribution.
 
 ---
 
+## harletty
+
+**Used by:** the Jellyfin plugin only, as an external subprocess for DTS:X
+tracks (`JellyfinPlugin/Jellyfin.Plugin.AtmosObjects/AtmosSceneService.cs`).
+Not linked into the plugin or the app; built locally from source pinned in
+`JellyfinPlugin/harletty/build.sh`, with `JellyfinPlugin/harletty/*.patch`
+applied (a workspace trimmed to the CLI, and `decode --audio-stdout` for DTS).
+
+- Project: <https://github.com/harletty/harletty-bridge> (a fork of truehdd,
+  above)
+- Licence: the sources are Apache-2.0 (Appendix below), except the `dca`
+  crate, which is LGPL-2.1-or-later (a Rust translation of FFmpeg's DTS
+  decoder). The `harletty` binary links `dca` statically and is conveyed under
+  LGPL-3.0, as its repository's `LICENSES/binary-cli.txt` states. A build
+  carries those licence texts in its checkout's `LICENSES/`.
+- DTS, DTS-HD, DTS-HD Master Audio and DTS:X are trademarks of DTS, Inc.;
+  neither harletty nor this project is affiliated with DTS.
+
+---
+
 ## Depth Anything V2 (Small)
 
 **Used by:** the Convolution app (`Pseudo3DVideoPlayerView` / `CoreMLDepthProvider`

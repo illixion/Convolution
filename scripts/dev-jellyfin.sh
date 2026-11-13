@@ -43,6 +43,14 @@
 # filters the plugin converts profile 5 with; Homebrew's has none), and adds the spatial recording at
 # $HYPNOS_DEV_JELLYFIN_SPATIAL (default ~/Downloads/IMG_0664.MOV) to Movies
 # when that file exists. Both instances can run at once.
+#
+# The native instance also runs DTS:X object audio, with the macOS harletty
+# (JellyfinPlugin/harletty/build.sh), and adds a 3D Blu-ray remux in Matroska
+# (MVC in one track) from $HYPNOS_DEV_JELLYFIN_MVC (default
+# <instance>/inputs/mvc-dtsx.mkv) as "Stereo Remux (1993)" when that file
+# exists. Nothing makes one: cut a minute from a remux you own with
+# `ffmpeg -ss 3600 -i FILM.mkv -map 0:v:0 -map 0:a:0 -c copy -t 60 mvc-dtsx.mkv`
+# (ffmpeg's copy keeps both views and the mvcC record).
 set -euo pipefail
 
 native=0
@@ -66,6 +74,7 @@ native_sha256=f56a76b84471ac615ddf597f66d7445a9b1e90f3a8f76dedbe8fc30fbad732ca
 ffmpeg_version=8.1.3-1
 ffmpeg_sha256=22445d7299742749ad2eeb9ce87963d50def0357e45b3e6c7b69987c8365dbf6
 spatial="${HYPNOS_DEV_JELLYFIN_SPATIAL:-$HOME/Downloads/IMG_0664.MOV}"
+mvc="${HYPNOS_DEV_JELLYFIN_MVC:-$root/inputs/mvc-dtsx.mkv}"
 base="http://127.0.0.1:$port"
 apikey_file="$root/config/dev-api-key.txt"
 demo="${HYPNOS_DEV_JELLYFIN_DEMO:-$HOME/Downloads/DolbyElement4K_VisionAtmos.mkv}"
@@ -407,6 +416,10 @@ seed_media() {
             mkdir -p "$root/data/movies/Spatial Sample"
             ln -sf "$spatial" "$root/data/movies/Spatial Sample/Spatial Sample.mov"
         fi
+        if [[ -f "$mvc" ]]; then
+            mkdir -p "$root/data/movies/Stereo Remux (1993)"
+            ln -sf "$mvc" "$root/data/movies/Stereo Remux (1993)/Stereo Remux (1993).mkv"
+        fi
     else
         touch "$root/data/movies/DolbyElement4K_VisionAtmos.mkv"
     fi
@@ -547,10 +560,13 @@ META
 }
 
 install_plugin_config() {
-    local truehdd=/truehdd/truehdd vergence="" models=""
+    local truehdd=/truehdd/truehdd vergence="" models="" harletty=""
     if (( native )); then
         truehdd="$repo_root/JellyfinPlugin/truehdd/checkout/target/release/truehdd"
         vergence="$root/vergence-build/release/vergence"
+        # DTS:X objects; the container has no Linux harletty (yet).
+        harletty="$repo_root/JellyfinPlugin/harletty/checkout/target/release/harletty"
+        [[ -x "$harletty" ]] || harletty=""
         # Smooth Motion's Core ML models, converted by scripts/convert-interp-model.py.
         [[ -d "$repo_root/build/interp-models" ]] && models="$repo_root/build/interp-models"
     fi
@@ -559,6 +575,7 @@ install_plugin_config() {
 <?xml version="1.0" encoding="utf-8"?>
 <PluginConfiguration>
   <TruehddPath>$truehdd</TruehddPath>
+  <HarlettyPath>$harletty</HarlettyPath>
   <Mvc3dPath>$vergence</Mvc3dPath>
   <SmoothMotionModelsPath>$models</SmoothMotionModelsPath>
   <CacheDirectory />

@@ -40,6 +40,12 @@ public class PluginConfiguration : MediaBrowser.Model.Plugins.BasePluginConfigur
     /// <summary>Path to the truehdd binary. Empty means "truehdd" next to the plugin's data folder.</summary>
     public string TruehddPath { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Path to the harletty binary (DTS:X objects; built by <c>harletty/build.sh</c>). Empty means "harletty"
+    /// next to the plugin's data folder. Without it DTS:X tracks are offered but fail to decode.
+    /// </summary>
+    public string HarlettyPath { get; set; } = string.Empty;
+
     /// <summary>Path to the Vergence CLI, which reads Blu-ray ISOs and folders. Empty means "vergence" (or, from before the rename, "mvc3d") next to truehdd's default. The key keeps its old name so saved configurations still apply.</summary>
     public string Mvc3dPath { get; set; } = string.Empty;
 

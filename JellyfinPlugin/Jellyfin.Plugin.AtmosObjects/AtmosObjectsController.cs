@@ -23,7 +23,9 @@ namespace Jellyfin.Plugin.AtmosObjects;
 /// from Tracks; each track is decoded and cached separately) and
 /// <c>languages</c> (ISO 639 codes in the client's order of preference, which
 /// pick the default track when no stream is given). A client should read
-/// Tracks once and then name its track on every request.
+/// Tracks once and then name its track on every request. <c>objectCodecs</c>
+/// lists the formats the client may play (<c>truehd,eac3</c> when absent);
+/// DTS:X tracks are offered only to a client that adds <c>dtsx</c>.
 ///
 /// And the film's video, copied untouched as fragmented MP4 in film time, so
 /// the client can render it on the audio's clock:
@@ -52,9 +54,9 @@ public class AtmosObjectsController : ControllerBase
 
     [HttpGet("{itemId}")]
     [Produces(MediaTypeNames.Application.Json)]
-    public ActionResult<object> GetStatus([FromRoute] Guid itemId, [FromQuery] int? audioStream, [FromQuery] string? languages)
+    public ActionResult<object> GetStatus([FromRoute] Guid itemId, [FromQuery] int? audioStream, [FromQuery] string? languages, [FromQuery] string? objectCodecs)
     {
-        if (_scenes.ResolveScene(itemId, audioStream, languages) is not Guid scene)
+        if (_scenes.ResolveScene(itemId, audioStream, languages, objectCodecs) is not Guid scene)
         {
             return NotFound();
         }
@@ -72,19 +74,19 @@ public class AtmosObjectsController : ControllerBase
     [HttpPost("{itemId}/Prepare")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult Prepare([FromRoute] Guid itemId, [FromQuery] int? audioStream, [FromQuery] string? languages)
-        => _scenes.ResolveScene(itemId, audioStream, languages) is Guid scene && _scenes.Prepare(scene) ? Accepted() : NotFound();
+    public ActionResult Prepare([FromRoute] Guid itemId, [FromQuery] int? audioStream, [FromQuery] string? languages, [FromQuery] string? objectCodecs)
+        => _scenes.ResolveScene(itemId, audioStream, languages, objectCodecs) is Guid scene && _scenes.Prepare(scene) ? Accepted() : NotFound();
 
     [HttpGet("{itemId}/Tracks")]
     [Produces(MediaTypeNames.Application.Json)]
-    public ActionResult GetTracks([FromRoute] Guid itemId, [FromQuery] string? languages)
-        => _scenes.GetTracks(itemId, languages) is { } tracks ? new JsonResult(tracks, AtmosSceneService.JsonOptions) : NotFound();
+    public ActionResult GetTracks([FromRoute] Guid itemId, [FromQuery] string? languages, [FromQuery] string? objectCodecs)
+        => _scenes.GetTracks(itemId, languages, objectCodecs) is { } tracks ? new JsonResult(tracks, AtmosSceneService.JsonOptions) : NotFound();
 
     [HttpGet("{itemId}/Scene")]
     public async Task<ActionResult> GetScene([FromRoute] Guid itemId, [FromQuery] double startSeconds,
-                                             [FromQuery] int? audioStream, [FromQuery] string? languages, CancellationToken ct)
+                                             [FromQuery] int? audioStream, [FromQuery] string? languages, [FromQuery] string? objectCodecs, CancellationToken ct)
     {
-        if (_scenes.ResolveScene(itemId, audioStream, languages) is not Guid id)
+        if (_scenes.ResolveScene(itemId, audioStream, languages, objectCodecs) is not Guid id)
         {
             return NotFound();
         }
@@ -108,9 +110,9 @@ public class AtmosObjectsController : ControllerBase
 
     [HttpGet("{itemId}/Segments/{segment:int}/Events")]
     public async Task<ActionResult> GetSegmentEvents([FromRoute] Guid itemId, [FromRoute] int segment,
-                                                     [FromQuery] int? audioStream, [FromQuery] string? languages, CancellationToken ct)
+                                                     [FromQuery] int? audioStream, [FromQuery] string? languages, [FromQuery] string? objectCodecs, CancellationToken ct)
     {
-        if (_scenes.ResolveScene(itemId, audioStream, languages) is not Guid scene
+        if (_scenes.ResolveScene(itemId, audioStream, languages, objectCodecs) is not Guid scene
             || !await _scenes.EnsureSegmentAsync(scene, segment, ct).ConfigureAwait(false))
         {
             return NotFound();
@@ -123,7 +125,7 @@ public class AtmosObjectsController : ControllerBase
     [HttpGet("{itemId}/Segments/{segment:int}/Bundle")]
     public async Task<ActionResult> GetSegmentBundle([FromRoute] Guid itemId, [FromRoute] int segment,
                                                      [FromQuery] string? codec, [FromQuery] int? bitrate, [FromQuery] int? budget,
-                                                     [FromQuery] int? audioStream, [FromQuery] string? languages, CancellationToken ct)
+                                                     [FromQuery] int? audioStream, [FromQuery] string? languages, [FromQuery] string? objectCodecs, CancellationToken ct)
     {
         BundleCodec? kind = codec?.ToLowerInvariant() switch
         {
@@ -136,7 +138,7 @@ public class AtmosObjectsController : ControllerBase
             return BadRequest("codec must be aac or opus");
         }
 
-        if (_scenes.ResolveScene(itemId, audioStream, languages) is not Guid scene
+        if (_scenes.ResolveScene(itemId, audioStream, languages, objectCodecs) is not Guid scene
             || !await _scenes.EnsureSegmentAsync(scene, segment, ct).ConfigureAwait(false))
         {
             return NotFound();
@@ -149,9 +151,9 @@ public class AtmosObjectsController : ControllerBase
 
     [HttpGet("{itemId}/Segments/{segment:int}/{group:int}")]
     public async Task<ActionResult> GetSegment([FromRoute] Guid itemId, [FromRoute] int segment, [FromRoute] int group,
-                                               [FromQuery] int? audioStream, [FromQuery] string? languages, CancellationToken ct)
+                                               [FromQuery] int? audioStream, [FromQuery] string? languages, [FromQuery] string? objectCodecs, CancellationToken ct)
     {
-        if (_scenes.ResolveScene(itemId, audioStream, languages) is not Guid scene
+        if (_scenes.ResolveScene(itemId, audioStream, languages, objectCodecs) is not Guid scene
             || !await _scenes.EnsureSegmentAsync(scene, segment, ct).ConfigureAwait(false))
         {
             return NotFound();
