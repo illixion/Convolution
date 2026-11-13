@@ -215,8 +215,17 @@ struct MetalImageView {
         let hdr = texture.map { MetalImageRenderer.headroom(of: $0) > 1 } ?? false
         guard let layer = view.layer as? CAMetalLayer else { return }
         layer.wantsExtendedDynamicRangeContent = hdr
-        layer.colorspace = CGColorSpace(name: hdr ? CGColorSpace.extendedLinearDisplayP3
-            : view.colorPixelFormat == .bgra8Unorm ? CGColorSpace.sRGB : CGColorSpace.extendedLinearSRGB)
+        // A half-float texture is extended linear Display P3 whether or not
+        // it is HDR (`MetalImageRenderer.createTexture` renders every deep
+        // colour image into that space), so the layer says the same. Tagged
+        // extended linear sRGB, a 16-bit SDR photo's P3 values were shown
+        // with sRGB's primaries: desaturated.
+        layer.colorspace = CGColorSpace(name: view.colorPixelFormat == .bgra8Unorm
+            ? CGColorSpace.sRGB : CGColorSpace.extendedLinearDisplayP3)
+        #if os(macOS) || os(iOS)
+        // macOS and iOS 26 tone-map a layer to SDR unless it asks for more.
+        layer.preferredDynamicRange = hdr ? .high : .standard
+        #endif
         #endif
     }
 

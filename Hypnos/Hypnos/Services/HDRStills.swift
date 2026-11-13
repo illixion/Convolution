@@ -15,13 +15,15 @@
  exactly as before.
 
  `photoHDR` (default on) and `photoHDRHeadroom` are UserDefaults keys the
- debug server sets for A/B checks on the device.
+ debug server sets for A/B checks on the device. The decode and tone map
+ themselves are RAVEMedia's `RAVEHDRStill`, shared with the other apps.
  */
 
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import Foundation
 import ImageIO
+import RAVEMedia
 
 enum HDRStills {
     static let enabledKey = "photoHDR"
@@ -42,9 +44,7 @@ enum HDRStills {
     /// expanded). An SDR source decodes to the same pixels as without it.
     static func decodeOptions(_ options: [CFString: Any]) -> [CFString: Any] {
         guard isEnabled else { return options }
-        var options = options
-        options[kCGImageSourceDecodeRequest] = kCGImageSourceDecodeToHDR
-        return options
+        return RAVEHDRStill.decodeOptions(options)
     }
 
     /// True when an enabled HDR decode will apply a gain map to `source`.
@@ -65,29 +65,15 @@ enum HDRStills {
     /// `image` as Core Image input, its highlights brought within the
     /// display's headroom. Nil for an SDR image (use it as it is).
     static func toneMapped(_ image: CGImage) -> (image: CIImage, headroom: Float)? {
-        let content = Float(image.contentHeadroom)
-        guard isEnabled, content > 1 else { return nil }
-        let input = CIImage(cgImage: image)
-        let target = targetHeadroom
-        guard content > target else { return (input, content) }
-        let filter = CIFilter.toneMapHeadroom()
-        filter.inputImage = input
-        filter.sourceHeadroom = content
-        filter.targetHeadroom = target
-        guard let output = filter.outputImage else { return nil }
-        return (output, target)
+        guard isEnabled else { return nil }
+        return RAVEHDRStill.toneMapped(image, headroom: targetHeadroom)
     }
-
-    private static let linear = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)!
-    private static let context = CIContext(options: [.workingColorSpace: linear, .cacheIntermediates: false])
 
     /// `toneMapped` baked into a half-float, extended linear P3 bitmap, for
     /// consumers that take a CGImage (AI 3D). Its headroom travels beside it:
     /// a rendered CGImage no longer reports one.
     static func toneMappedImage(_ image: CGImage) -> (image: CGImage, headroom: Float)? {
-        guard let mapped = toneMapped(image),
-              let baked = context.createCGImage(mapped.image, from: mapped.image.extent,
-                                                format: .RGBAh, colorSpace: linear) else { return nil }
-        return (baked, mapped.headroom)
+        guard isEnabled, let baked = RAVEHDRStill.toneMappedImage(image, headroom: targetHeadroom) else { return nil }
+        return (baked.image, baked.headroom)
     }
 }

@@ -162,6 +162,9 @@ final class SystemVideoLayerView: NativePlayerPlatformView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         playerLayer.videoGravity = .resizeAspect
+        // iOS 26 tone-maps a layer to SDR unless it asks for more; this
+        // layer is the Dolby Vision profile 5 path.
+        RAVEHDRLayer.allowHDR(on: playerLayer)
         isUserInteractionEnabled = false
     }
     #endif
@@ -1390,8 +1393,8 @@ struct NativeMetalVideoPlayerView {
             case .sdr, .unknown: layer.edrMetadata = nil
             }
             #endif
-            #if os(macOS)
-            // macOS 26 tone-maps a layer to SDR unless it asks for more.
+            #if os(macOS) || os(iOS)
+            // macOS and iOS 26 tone-map a layer to SDR unless it asks for more.
             layer.preferredDynamicRange = range.isHDR ? .high : .standard
             #endif
         }
@@ -1409,9 +1412,7 @@ struct NativeMetalVideoPlayerView {
             layer.wantsExtendedDynamicRangeContent = true
             layer.edrMetadata = nil
             #endif
-            #if os(macOS)
-            layer.preferredDynamicRange = .high
-            #endif
+            RAVEHDRLayer.allowHDR(on: layer)
             AppLogger.videoWindow.info("Native player: AI HDR on (an SDR picture through a worker's gain grids)")
         }
 
