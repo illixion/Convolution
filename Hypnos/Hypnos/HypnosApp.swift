@@ -146,6 +146,8 @@ struct HypnosApp: App {
         // The players' cinema: the film's object audio around the wearer's
         // head and, for Big Screen, a picture on a screen further and larger
         // than a window may go (see Views/Cinema/Cinema.swift).
+        RAVEViewerHUDScene()
+
         ImmersiveSpace(id: Cinema.spaceID) {
             CinemaSpaceView().environment(appModel)
         }

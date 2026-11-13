@@ -50,6 +50,9 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
 
     var body: some View {
         HStack(spacing: RAVEChromeMetrics.spacing) {
+            #if os(visionOS)
+            RAVEViewerHUDButton().labelStyle(.iconOnly).raveChromeButtonStyle()
+            #endif
             // Gallery / Back button
             Button(action: onGalleryButtonTap) {
                 Image(systemName: "square.grid.2x2")

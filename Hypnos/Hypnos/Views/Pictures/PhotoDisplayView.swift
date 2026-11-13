@@ -7,6 +7,7 @@
  */
 
 import DebugTrace
+import RAVEUI
 import RAVEMedia
 import RealityKit
 import SwiftUI
@@ -26,8 +27,12 @@ struct PhotoDisplayView: View {
     @Environment(\.scenePhase) private var scenePhase
     #if os(visionOS)
     @Environment(\.surfaceSnappingInfo) private var snappingInfo: SurfaceSnappingInfo
-    @Environment(\.openImmersiveSpace) private var openImmersiveSpace
-    @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
+    @State private var hudEntryAspect: CGFloat?
+    @Environment(\.raveViewerHUD) private var viewerHUD
+    @Environment(\.openImmersiveSpace) private var sceneOpenSpace
+    private var openImmersiveSpace: OpenImmersiveSpaceAction { viewerHUD?.openSpace ?? sceneOpenSpace }
+    @Environment(\.dismissImmersiveSpace) private var sceneDismissSpace
+    private var dismissImmersiveSpace: DismissImmersiveSpaceAction { viewerHUD?.dismissSpace ?? sceneDismissSpace }
     #endif
 
     /// Whether the window is snapped to a surface. Only visionOS windows can be.
@@ -326,6 +331,23 @@ struct PhotoDisplayView: View {
                 .offset(z: autoRestorePillDepth)
             }
         }
+        #if os(visionOS)
+        .onChange(of: viewerHUD?.isInHUD) { _, inHUD in
+            if inHUD == true {
+                hudEntryAspect = windowModel.imageAspectRatio
+            } else if let aspect = hudEntryAspect {
+                hudEntryAspect = nil
+                if windowModel.isUIHidden { windowModel.toggleUIVisibility() }
+                else { windowModel.startAutoHideTimer() }
+                // Swiping to another shape in HUD defers the window resize.
+                // Returning to the same image leaves the user's placement alone.
+                if abs(aspect - windowModel.imageAspectRatio) > 0.001 {
+                    resizeCoalescer.invalidate()
+                    resizeWindowToFit(windowModel.imageAspectRatio, within: currentBounds)
+                }
+            }
+        }
+        #endif
         #if os(iOS)
         // A photo viewer is a full-bleed surface: fit the picture to the whole
         // screen, not the safe area. Otherwise a tall photo stopped short of the
@@ -1431,6 +1453,12 @@ struct PhotoDisplayView: View {
     }
 
     private var resolvedWindowScene: PlatformWindowScene? {
+        #if os(visionOS)
+        // HUD geometry belongs to the attachment. A photo change must never
+        // resize whichever unrelated UIWindowScene happens to be active.
+        if viewerHUD?.isInHUD == true { return nil }
+        if let scene = viewerHUD?.windowScene { return scene }
+        #endif
         if let sceneDelegate {
             return sceneDelegate.windowScene
         }

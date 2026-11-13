@@ -139,3 +139,15 @@ photo's own peak instead of 1.0. An SDR photo decodes as before.
 Uses RealityKit's `ImagePresentationComponent` for 2D→3D conversion. States tracked via `Spatial3DImageState` enum: notGenerated → generating → generated. `ImagePresentationComponent` is a black-box component — it manages its own geometry and materials internally, so there's no direct access to its mesh or rendering pipeline.
 
 **visionOS limitation:** `PostProcessEffect` / `PostProcessEffectContext` are unavailable on visionOS. Custom post-processing on `RealityView` content must use SwiftUI-level modifiers (`.mask()`, `.overlay()`) instead.
+
+## Viewer HUD
+
+The visionOS photo/shared-photo/slideshow scene roots use RAVEUI's
+`raveViewerHUDWindow`, with `RAVEViewerHUDScene` declared by `HypnosApp`.
+The live hosting view moves into the head-following attachment; models, media
+players and tasks are retained. `raveViewerControls` switches the existing
+ornament to inline HUD controls. Scene actions cross through `raveWindowShell`
+and `raveViewerHUD`; source-window geometry comes from the portal. Never send
+window geometry requests while in HUD. A photo aspect change during HUD is
+applied through `WindowResizeCoalescer` on return. The source window retains a
+return control, including when the system's attachment controls are unavailable.

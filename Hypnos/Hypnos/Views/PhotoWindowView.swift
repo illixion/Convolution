@@ -109,11 +109,7 @@ struct PhotoWindowView: View {
         #endif
         .raveSystemOverlays(windowModel.isWindowControlsHidden ? .hidden : .visible)
         .hidesStatusBar(windowModel.isUIHidden)
-        .ornament(
-            visibility: windowModel.isUIHidden ? .hidden : .visible,
-            attachmentAnchor: .scene(.bottomFront),
-            contentAlignment: .top,
-            ornament: {
+        .raveViewerControls(visible: !windowModel.isUIHidden, controls: {
                 PhotoOrnamentView(
                     windowModel: windowModel,
                     context: isStacked ? .pushedFromGallery : .standalone,

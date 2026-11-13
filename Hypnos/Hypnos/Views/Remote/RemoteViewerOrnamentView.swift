@@ -16,6 +16,9 @@ struct RemoteViewerOrnamentView: View {
 
     var body: some View {
         HStack(spacing: RAVEChromeMetrics.spacing) {
+            #if os(visionOS)
+            RAVEViewerHUDButton().labelStyle(.iconOnly).raveChromeButtonStyle()
+            #endif
             // Grid - Open main app window
             Button {
                 appModel.showMainWindow(openWindow: openWindow)

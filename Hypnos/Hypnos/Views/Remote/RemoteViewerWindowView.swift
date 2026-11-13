@@ -23,6 +23,10 @@ struct RemoteViewerWindowView: View {
     @OpenWindowProxy private var openWindow
     @DismissWindowProxy private var dismissWindow
 
+    #if os(visionOS)
+    @Environment(\.raveViewerHUD) private var viewerHUD
+    #endif
+
     @State private var stereoReadyImage: ObjectIdentifier?
     @State private var viewerModel: RemoteViewerModel?
     @State private var windowSize: CGSize = .zero
@@ -145,17 +149,18 @@ struct RemoteViewerWindowView: View {
                 sizePersistence?.scheduleWriteback(newSize)
             }
         }
-        .ornament(
-            visibility: controlsVisible ? .visible : .hidden,
-            attachmentAnchor: .scene(.bottomFront),
-            contentAlignment: .top,
-            ornament: {
+        .raveViewerControls(visible: controlsVisible, controls: {
                 if let model = viewerModel {
                     RemoteViewerOrnamentView(model: model)
                         .offset(z: model.enableDiorama ? 30 : 0)
                 }
             }
         )
+        #if os(visionOS)
+        .onChange(of: viewerHUD?.isInHUD) { _, inHUD in
+            if inHUD == false { controlsVisible = true; resetAutoHideTimer() }
+        }
+        #endif
         .onAppear {
             isRestoredWindow = RestoredWindowTracker.isRestored(windowValue.id)
             showRestorationPlaceholder = isRestoredWindow
@@ -911,6 +916,9 @@ struct RemoteViewerWindowView: View {
     }
 
     private func nudgeWindowSizeForCalibration() {
+        #if os(visionOS)
+        guard viewerHUD?.isInHUD != true else { return }
+        #endif
         guard let windowScene = resolvedWindowScene else { return }
         let delta: CGFloat = nudgeAlternator ? 1 : -1
         nudgeAlternator.toggle()

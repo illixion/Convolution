@@ -54,6 +54,8 @@ struct HypnosWindows: Scene {
                 $windowValue.wrappedValue?.restoredSize = RAVECodableSize(size)
             })
                 .environment(appModel)
+                .raveViewerHUDWindow()
+                .environment(appModel)
                 .captureOpenWindowAction()
                 .handleIncomingMediaURLs(appModel: appModel)
                 .debugApprovalPrompts()
@@ -90,6 +92,8 @@ struct HypnosWindows: Scene {
     WindowGroup(id: HypnosSceneID.sharedPhoto, for: SharedMediaItem.self) { $item in
         if let item = item {
             SharedPhotoWindowView(item: item, appModel: appModel)
+                .environment(appModel)
+                .raveViewerHUDWindow()
                 .environment(appModel)
                 .captureOpenWindowAction()
                 .handleIncomingMediaURLs(appModel: appModel)
@@ -150,6 +154,8 @@ struct HypnosWindows: Scene {
             RemoteViewerWindowView(windowValue: windowValue, onSizeSettled: { size in
                 $windowValue.wrappedValue?.restoredSize = RAVECodableSize(size)
             })
+                .environment(appModel)
+                .raveViewerHUDWindow()
                 .environment(appModel)
                 .captureOpenWindowAction()
                 .handleIncomingMediaURLs(appModel: appModel)

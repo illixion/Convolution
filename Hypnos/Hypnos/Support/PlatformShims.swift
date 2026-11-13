@@ -529,3 +529,13 @@ func platformDisclosureGroup<Content: View>(
 ) -> some View {
     platformDisclosureGroup(content: content) { Text(titleKey) }
 }
+
+#if !os(visionOS)
+extension View {
+    /// Keep the existing edge controls on platforms without immersive HUDs.
+    func raveViewerControls<Controls: View>(visible: Bool, @ViewBuilder controls: () -> Controls) -> some View {
+        ornament(visibility: visible ? .visible : .hidden,
+                 attachmentAnchor: .scene(.bottomFront), contentAlignment: .top, ornament: controls)
+    }
+}
+#endif

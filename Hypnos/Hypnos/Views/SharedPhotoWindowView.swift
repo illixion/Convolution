@@ -6,6 +6,7 @@
  Includes a Save button to persist the image to Documents/Photos/.
  */
 
+import RAVEUI
 import DebugTrace
 import SwiftUI
 
@@ -36,11 +37,7 @@ struct SharedPhotoWindowView: View {
         .opacity(appModel.allWindowsHidden ? 0 : 1)
         .persistentSystemOverlays(windowModel.isWindowControlsHidden ? .hidden : .visible)
         .hidesStatusBar(windowModel.isUIHidden)
-        .ornament(
-            visibility: windowModel.isUIHidden ? .hidden : .visible,
-            attachmentAnchor: .scene(.bottomFront),
-            contentAlignment: .top,
-            ornament: {
+        .raveViewerControls(visible: !windowModel.isUIHidden, controls: {
                 PhotoOrnamentView(
                     windowModel: windowModel,
                     context: .shared,
