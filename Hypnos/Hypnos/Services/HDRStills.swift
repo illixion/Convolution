@@ -5,14 +5,19 @@
  still) decode to extended-range linear colour, where 1.0 is SDR white and
  the brightest highlight sits at the image's content headroom (often 4-8x).
 
- No API reports the display's headroom, so it was measured in a photo
- window on the device (2026-10-27, `photoHDRTest`): small dots keep getting
- brighter up to about 3-4x SDR white, and window-filling bars stop at about
- 2.5-3x (a brightness limiter). Oneiros's immersive test found one stop
- (compositor-metal4-backend.md), which may be a different path. Highlights are
- tone mapped down to `targetHeadroom` with Core Image's headroom tone map,
- which keeps everything well below the peak as it was. SDR photos decode
- exactly as before.
+ Highlights are tone mapped down to `targetHeadroom` with Core Image's
+ headroom tone map, which keeps everything well below the peak as it was.
+ SDR photos decode exactly as before.
+
+ On visionOS no API reports the display's headroom, so it was measured in a
+ photo window on the device (2026-10-27, `photoHDRTest`): small dots keep
+ getting brighter up to about 3-4x SDR white, and window-filling bars stop at
+ about 2.5-3x (a brightness limiter). On iOS and macOS the screen says: a
+ photo is decoded to the most it can ever show (`RAVEDisplayHeadroom
+ .potential`, 8x on an iPhone, 16x on an XDR panel), and `MetalImageView`
+ rolls the highlights off to what it can show right now on every draw,
+ since that falls as brightness rises and a Metal layer clips above it.
+ tvOS keeps the visionOS value.
 
  `photoHDR` (default on) and `photoHDRHeadroom` are UserDefaults keys the
  debug server sets for A/B checks on the device. The decode and tone map
@@ -34,10 +39,18 @@ enum HDRStills {
         HypnosDefaults.store.object(forKey: enabledKey) as? Bool ?? true
     }
 
-    /// How far above SDR white the display goes, as a multiple of it.
+    /// How far above SDR white the display goes, as a multiple of it: the
+    /// debug override, else the screen's potential on iOS and macOS (as last
+    /// read on the main actor; decodes run off it), else the visionOS
+    /// measurement.
     static var targetHeadroom: Float {
         let stored = HypnosDefaults.store.float(forKey: headroomKey)
-        return stored >= 1 ? stored : 2.5
+        if stored >= 1 { return stored }
+        #if os(iOS) || os(macOS)
+        return Float(RAVEDisplayHeadroom.lastKnownPotential)
+        #else
+        return Float(RAVEDisplayHeadroom.measuredVisionWindow)
+        #endif
     }
 
     /// Options asking ImageIO for the HDR rendition (gain map applied, PQ/HLG

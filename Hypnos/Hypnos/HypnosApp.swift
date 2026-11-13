@@ -13,6 +13,7 @@
 import DebugTrace
 import DebugTraceServer
 import DebugTraceUI
+import RAVEMedia
 import RAVESupport
 import RAVEUI
 import SwiftUI
@@ -58,6 +59,9 @@ struct HypnosApp: App {
         PrivateSpatial3DTuningStore.installAtLaunch()
         #endif
         _appModel = State(initialValue: AppModel())
+        // HDR photos decode off the main actor to the screen's headroom,
+        // which is read on it: once now, then by every photo view.
+        RAVEDisplayHeadroom.refresh()
         // Reconnects downloads that ran while the app was closed.
         LibraryDownloads.shared.start()
         #if DEBUG && os(macOS)

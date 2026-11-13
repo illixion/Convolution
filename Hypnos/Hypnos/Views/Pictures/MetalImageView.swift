@@ -10,6 +10,8 @@
 
 import DebugTrace
 import MetalKit
+import RAVEMedia
+import RAVEMediaCore
 import SwiftUI
 
 // A `UIViewRepresentable` on iOS, tvOS and visionOS and an
@@ -87,6 +89,9 @@ private struct AAUniforms {
     var saturation: Float
     var applyResolve: Float
     var peak: Float
+    /// Highlight roll-off to the screen's current headroom (`Shaders.metal`).
+    var knee: Float = 0
+    var ceiling: Float = 0
 }
 
 @MainActor
@@ -110,6 +115,8 @@ struct MetalImageView {
         guard let renderer = MetalImageRenderer.shared else {
             return MTKView()
         }
+        // HDR decodes read it off the main actor (`HDRStills.targetHeadroom`).
+        RAVEDisplayHeadroom.refresh()
 
         let mtkView = ResilientMTKView(frame: .zero, device: renderer.device)
         mtkView.delegate = coordinator
@@ -261,6 +268,38 @@ struct MetalImageView {
         private let diagnosticID = String(UUID().uuidString.prefix(8))
         var onFramePresented: (() -> Void)?
         var onRenderStalled: (() -> Void)?
+
+        #if os(iOS) || os(macOS)
+        /// The screen's headroom the last HDR frame was rolled off to.
+        private var drawnCeiling = 0.0
+        /// Re-reads it while an HDR picture shows: it moves with brightness
+        /// and ambient light, and nothing announces that on macOS.
+        private var headroomWatch: Timer?
+
+        private func watchHeadroom(of view: MTKView) {
+            guard headroomWatch == nil else { return }
+            headroomWatch = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self, weak view] timer in
+                guard let self, let view else {
+                    timer.invalidate()
+                    return
+                }
+                MainActor.assumeIsolated { self.checkHeadroom(of: view) }
+            }
+        }
+
+        private func checkHeadroom(of view: MTKView) {
+            guard view.window != nil else { return stopWatchingHeadroom() }
+            let now = RAVEDisplayHeadroom.current(for: view)
+            if abs(now - drawnCeiling) > 0.02 * max(drawnCeiling, 1) {
+                requestRedraw(in: view)
+            }
+        }
+
+        private func stopWatchingHeadroom() {
+            headroomWatch?.invalidate()
+            headroomWatch = nil
+        }
+        #endif
 
         /// Offscreen RCAS target. Allocated lazily and reused across draws.
         /// Reallocated when drawable size or pixel format changes.
@@ -453,6 +492,19 @@ struct MetalImageView {
                 applyResolve: didSupersample ? 1.0 : 0.0,
                 peak: peak
             )
+            #if os(iOS) || os(macOS)
+            if peak > 1 {
+                let now = RAVEDisplayHeadroom.current(for: view)
+                drawnCeiling = now
+                if let rolloff = HDRColorMath.Rolloff(contentPeak: Double(peak), headroom: now) {
+                    aaU.knee = Float(rolloff.knee)
+                    aaU.ceiling = Float(rolloff.ceiling)
+                }
+                watchHeadroom(of: view)
+            } else {
+                stopWatchingHeadroom()
+            }
+            #endif
             pass2Encoder.setFragmentBytes(&aaU, length: MemoryLayout<AAUniforms>.size, index: 0)
             pass2Encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
             pass2Encoder.endEncoding()

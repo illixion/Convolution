@@ -40,6 +40,9 @@ private struct VideoAAUniforms {
     var saturation: Float
     var applyResolve: Float
     var peak: Float = 1
+    /// `AAUniforms`' highlight roll-off, unused for video.
+    var knee: Float = 0
+    var ceiling: Float = 0
 }
 
 /// What the decoded frames are, read off the first one's attachments. The
@@ -101,25 +104,17 @@ final class NativeVideoHostView: NativePlayerPlatformView {
     var displayCriteria: AVDisplayCriteria? {
         didSet {
             if let displayCriteria { Self.lastStatedCriteria = displayCriteria }
-            applyDisplayCriteria()
+            criteriaStatement.update(displayCriteria, in: window)
         }
     }
     /// The criteria a video window last stated, for the debug comparison's
     /// plain-layer renderer (`videoCompare`).
     static var lastStatedCriteria: AVDisplayCriteria?
-    private weak var criteriaWindow: UIWindow?
+    private let criteriaStatement = RAVEDisplayCriteriaStatement()
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        applyDisplayCriteria()
-    }
-
-    private func applyDisplayCriteria() {
-        if let criteriaWindow, criteriaWindow !== window {
-            criteriaWindow.avDisplayManager.preferredDisplayCriteria = nil
-        }
-        criteriaWindow = window
-        window?.avDisplayManager.preferredDisplayCriteria = displayCriteria
+        criteriaStatement.update(displayCriteria, in: window)
     }
     #endif
 }

@@ -122,6 +122,8 @@ struct AAUniforms {
     float saturation;
     float applyResolve; // 1.0 = rotated-grid resolve, 0.0 = single bilinear sample
     float peak;         // as ImageUniforms.peak
+    float knee;         // highlight roll-off: values above knee bend to land
+    float ceiling;      // on ceiling (the screen's headroom now) at peak; 0 = off
 };
 
 static float4 imageResolveAndTone(VertexOut in, texture2d<float> tex, constant AAUniforms &uniforms) {
@@ -158,6 +160,21 @@ static float4 imageResolveAndTone(VertexOut in, texture2d<float> tex, constant A
     color.rgb = mix(float3(luminance), color.rgb, uniforms.saturation);
 
     color.rgb = clamp(color.rgb, 0.0, uniforms.peak);
+
+    // A CAMetalLayer clips at the screen's current headroom, which on iOS and
+    // macOS falls below the decoded peak as brightness rises: bend the
+    // highlights to land on it instead. On the brightest channel, so hues
+    // hold. Kept in step with RAVEMediaCore's `HDRColorMath.Rolloff.applied`.
+    if (uniforms.ceiling > 0.0 && uniforms.peak > uniforms.ceiling) {
+        float knee = uniforms.knee, peak = uniforms.peak, ceiling = uniforms.ceiling;
+        float m = max(color.r, max(color.g, color.b));
+        if (m > knee) {
+            float span = (ceiling - knee) / (peak - knee);
+            float a = span / (1.0 - span);
+            float t = min((m - knee) / (peak - knee), 1.0);
+            color.rgb *= (knee + (ceiling - knee) * t * (1.0 + a) / (t + a)) / m;
+        }
+    }
     return color;
 }
 
