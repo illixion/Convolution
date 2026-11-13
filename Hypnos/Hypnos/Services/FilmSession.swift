@@ -256,7 +256,8 @@ final class FilmSession {
     /// Loads `item` into the player. True when its picture is ready to play.
     /// - Parameter picture: the item's picture is decoded on the device
     ///   (`MVCPictureSource`) from the raw file: a Blu-ray disc image or
-    ///   folder, or a 3D Blu-ray remuxed to Matroska. The plugin's video
+    ///   folder, a 3D Blu-ray remuxed to Matroska, or both views in one
+    ///   transport stream (read and sounded as a disc is). The plugin's video
     ///   segments are unavailable for a disc and 2D for a remux; the plugin
     ///   still supplies the object audio.
     func load(_ item: FilmLibraryItem, picture: FilmDecodedPicture? = nil) async -> Bool {
@@ -277,6 +278,7 @@ final class FilmSession {
                 disc = switch picture {
                 case .disc: try await MVCPictureSource.open(url: url, headers: headers)
                 case .matroskaMVC: try await MVCPictureSource.openMatroska(url: url, headers: headers)
+                case .transportStreamMVC: try await MVCPictureSource.openTransportStream(url: url, headers: headers)
                 }
             } catch {
                 self.error = picture == .disc ? "The disc couldn't be read: \(error.localizedDescription)"
@@ -289,21 +291,19 @@ final class FilmSession {
         var client = FilmServerClient(baseURL: serverURL, token: token, itemID: item.id)
         ObjectAudioQuality.preferred.apply(to: &client)
         client.applyEdition()
-        if let disc, await (try? client.audioTracks(languages: FilmServerClient.deviceLanguages))?.isEmpty ?? true {
-            // No object audio from the plugin (not installed, or no object
-            // track): a disc's own 5.1, read from the same image, or a
-            // remux's own sound, decoded here.
+        if let disc {
             // The remux's reader authenticates by query, as the video
             // window's on-device remux of a Library file does.
-            let audio: (any FilmAudioSource)? = disc.isDisc
-                ? (try? disc.audioSource(itemID: item.id))
-                : await MatroskaFilmAudioSource.open(
-                    itemID: item.id, url: disc.sourceURL.appending(queryItems: [.init(name: "ApiKey", value: token)]),
-                    durationSeconds: disc.durationSeconds)
-            await player.load(picture: disc, audio: audio)
+            await Self.load(player, client: client, decoded: disc, pictureHeight: FilmPictureQuality.preferred.height) {
+                disc.isDisc
+                    ? (try? disc.audioSource(itemID: item.id))
+                    : await MatroskaFilmAudioSource.open(
+                        itemID: item.id, url: disc.sourceURL.appending(queryItems: [.init(name: "ApiKey", value: token)]),
+                        durationSeconds: disc.durationSeconds)
+            }
         } else {
             // A fixed lower tier opens there when the plugin offers it.
-            await player.load(client, picture: disc, pictureHeight: FilmPictureQuality.preferred.height)
+            await player.load(client, pictureHeight: FilmPictureQuality.preferred.height)
         }
         guard player.video.isLoaded else {
             error = player.video.status
@@ -463,6 +463,25 @@ final class FilmSession {
     /// through `search` first — the Library detail page knows exactly which
     /// item to play. `name`/`productionYear` are for display only (the
     /// tuning section's title, the log line above).
+    /// Loads a picture decoded on the device with the plugin's object audio,
+    /// or with the file's own sound (`ownSound`: a disc's 5.1, read from the
+    /// same image or transport stream, or a Matroska remux's track decoded
+    /// here) when the plugin has none for it: no plugin, no object track, or
+    /// a track it lists but has no objects in. It lists a TrueHD track before
+    /// decoding it, and a plain 7.1 one then answers 422; the picture would
+    /// otherwise play silent.
+    static func load(_ player: FilmPlayer, client: FilmServerClient, decoded picture: MVCPictureSource,
+                     pictureHeight: Int?, ownSound: () async -> (any FilmAudioSource)?) async {
+        if await (try? client.audioTracks(languages: FilmServerClient.deviceLanguages))?.isEmpty ?? true {
+            await player.load(picture: picture, audio: await ownSound())
+            return
+        }
+        await player.load(client, picture: picture, pictureHeight: pictureHeight)
+        guard player.video.isLoaded, !player.hasAudioScene else { return }
+        AppLogger.filmPlayer.info("No object audio from the plugin (\(player.audioStatus, privacy: .public)); playing the file's own sound")
+        await player.load(picture: picture, audio: await ownSound())
+    }
+
     func load(itemId: String, name: String, productionYear: Int?, picture: FilmDecodedPicture? = nil) async -> Bool {
         await load(FilmLibraryItem(id: itemId, name: name, productionYear: productionYear), picture: picture)
     }
@@ -475,4 +494,7 @@ enum FilmDecodedPicture: Sendable, Equatable {
     case disc
     /// A 3D Blu-ray remuxed to Matroska: MVC in one H.264 track.
     case matroskaMVC
+    /// Both views in one transport stream (.m2ts): a disc's SSIF copied
+    /// out, a tsMuxeR remux, a 3D camcorder clip.
+    case transportStreamMVC
 }

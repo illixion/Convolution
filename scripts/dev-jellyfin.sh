@@ -51,6 +51,17 @@
 # exists. Nothing makes one: cut a minute from a remux you own with
 # `ffmpeg -ss 3600 -i FILM.mkv -map 0:v:0 -map 0:a:0 -c copy -t 60 mvc-dtsx.mkv`
 # (ffmpeg's copy keeps both views and the mvcC record).
+#
+# Likewise both views in one transport stream, from $HYPNOS_DEV_JELLYFIN_MVC_TS
+# (default <instance>/inputs/mvc.m2ts) as "Stereo Transport (2001)", and an
+# object-audio M2TS from $HYPNOS_DEV_JELLYFIN_ATMOS_TS (default
+# <instance>/inputs/atmos.m2ts) as "Object Transport (2020)", for the plugin's
+# seek on a stream whose clock starts at 600 s. Make the first with tsMuxeR
+# (built from github.com/justdan96/tsMuxer) from a cut like the one above:
+# split its H.264 into the base view and the MVC view (`mkvextract` the
+# track, then NAL 15, 20, SEI 37 and the PPS of the subset SPS to the .mvc),
+# then mux `V_MPEG4/ISO/AVC` + `V_MPEG4/ISO/MVC` + its audio to an .m2ts.
+# The second is the demo muxed by tsMuxeR (`V_MPEGH/ISO/HEVC` + `A_MLP`).
 set -euo pipefail
 
 native=0
@@ -75,6 +86,8 @@ ffmpeg_version=8.1.3-1
 ffmpeg_sha256=22445d7299742749ad2eeb9ce87963d50def0357e45b3e6c7b69987c8365dbf6
 spatial="${HYPNOS_DEV_JELLYFIN_SPATIAL:-$HOME/Downloads/IMG_0664.MOV}"
 mvc="${HYPNOS_DEV_JELLYFIN_MVC:-$root/inputs/mvc-dtsx.mkv}"
+mvc_ts="${HYPNOS_DEV_JELLYFIN_MVC_TS:-$root/inputs/mvc.m2ts}"
+atmos_ts="${HYPNOS_DEV_JELLYFIN_ATMOS_TS:-$root/inputs/atmos.m2ts}"
 base="http://127.0.0.1:$port"
 apikey_file="$root/config/dev-api-key.txt"
 demo="${HYPNOS_DEV_JELLYFIN_DEMO:-$HOME/Downloads/DolbyElement4K_VisionAtmos.mkv}"
@@ -419,6 +432,14 @@ seed_media() {
         if [[ -f "$mvc" ]]; then
             mkdir -p "$root/data/movies/Stereo Remux (1993)"
             ln -sf "$mvc" "$root/data/movies/Stereo Remux (1993)/Stereo Remux (1993).mkv"
+        fi
+        if [[ -f "$mvc_ts" ]]; then
+            mkdir -p "$root/data/movies/Stereo Transport (2001)"
+            ln -sf "$mvc_ts" "$root/data/movies/Stereo Transport (2001)/Stereo Transport (2001).m2ts"
+        fi
+        if [[ -f "$atmos_ts" ]]; then
+            mkdir -p "$root/data/movies/Object Transport (2020)"
+            ln -sf "$atmos_ts" "$root/data/movies/Object Transport (2020)/Object Transport (2020).m2ts"
         fi
     else
         touch "$root/data/movies/DolbyElement4K_VisionAtmos.mkv"

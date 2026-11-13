@@ -14,6 +14,11 @@
  got to. Over HTTP that is a second read of the clip around the playhead
  (the audio is interleaved with the video); on the device it is a local
  file.
+
+ A transport stream holding a disc's streams (`TransportStreamFile`) is read
+ the same way. One remuxed from Matroska can have TrueHD without the AC-3
+ core a disc's always has: such a track would play silent, so it is left
+ out (checked once, from the file's first megabytes).
  */
 
 import AVFoundation
@@ -28,19 +33,33 @@ final class DiscAudioSource: FilmAudioSource, @unchecked Sendable {
 
     /// The disc and its readers, shared by every track's copy of the source.
     private final class Shared: @unchecked Sendable {
-        let disc: BlurayDisc
+        let disc: any ClipSource
         let playlist: BlurayPlaylist
         let originSeconds: Double
-        let tracks: [BlurayPlaylist.Stream]
         let lock = NSLock()
         var readers: [UInt16: PlaylistAudioReader] = [:]
+        private var checked: [BlurayPlaylist.Stream]?
 
-        init(disc: BlurayDisc, playlist: BlurayPlaylist, originSeconds: Double) {
+        init(disc: any ClipSource, playlist: BlurayPlaylist, originSeconds: Double) {
             self.disc = disc
             self.playlist = playlist
             self.originSeconds = originSeconds
-            // AC-3, TrueHD (its AC-3 core) and E-AC-3: what Apple's decoders cover.
-            tracks = (playlist.items.first?.audioStreams ?? []).filter { [0x81, 0x83, 0x84].contains($0.codingType) }
+        }
+
+        /// AC-3, TrueHD (its AC-3 core) and E-AC-3: what Apple's decoders
+        /// cover, less a transport stream's TrueHD without a core. Reads the
+        /// file the first time, so off the main actor.
+        func tracks() async -> [BlurayPlaylist.Stream] {
+            if let checked = lock.withLock({ checked }) { return checked }
+            let found = await Task.detached(priority: .userInitiated) { [self] in
+                (playlist.items.first?.audioStreams ?? []).filter { stream in
+                    guard [0x81, 0x83, 0x84].contains(stream.codingType) else { return false }
+                    guard stream.codingType == 0x83, let file = disc as? TransportStreamFile else { return true }
+                    return (try? file.carriesAC3Frames(pid: stream.pid)) ?? true
+                }
+            }.value
+            lock.withLock { checked = found }
+            return found
         }
     }
 
@@ -58,7 +77,7 @@ final class DiscAudioSource: FilmAudioSource, @unchecked Sendable {
         ("object", nil, [1, -0.35, 0]),
     ]
 
-    init(itemID: String, disc: BlurayDisc, playlist: BlurayPlaylist, originSeconds: Double) {
+    init(itemID: String, disc: any ClipSource, playlist: BlurayPlaylist, originSeconds: Double) {
         self.itemID = itemID
         audioStream = nil
         shared = Shared(disc: disc, playlist: playlist, originSeconds: originSeconds)
@@ -75,7 +94,7 @@ final class DiscAudioSource: FilmAudioSource, @unchecked Sendable {
     }
 
     func audioTracks(languages: [String]) async throws -> [FilmAudioTrack] {
-        let tracks = shared.tracks
+        let tracks = await shared.tracks()
         let wanted = languages.map(Self.normalized)
         let chosen = wanted.lazy.compactMap { language in tracks.first { Self.normalized($0.language) == language } }.first
             ?? tracks.first
@@ -93,7 +112,7 @@ final class DiscAudioSource: FilmAudioSource, @unchecked Sendable {
     }
 
     func audioScene(startSeconds: Double) async throws -> AtmosScene? {
-        guard track != nil else { return nil }
+        guard await track() != nil else { return nil }
         let frames = Int(shared.playlist.duration * Double(Self.sampleRate))
         let segmentFrames = Self.segmentSeconds * Self.sampleRate
         return AtmosScene(
@@ -109,7 +128,7 @@ final class DiscAudioSource: FilmAudioSource, @unchecked Sendable {
     }
 
     func audioSegment(_ segment: Int, of scene: AtmosScene) async throws -> FilmAudioSegment {
-        guard let track else { throw CocoaError(.fileReadNoSuchFile) }
+        guard let track = await track() else { throw CocoaError(.fileReadNoSuchFile) }
         let shared = self.shared
         let planes = try await Task.detached(priority: .userInitiated) {
             try shared.lock.withLock {
@@ -137,8 +156,9 @@ final class DiscAudioSource: FilmAudioSource, @unchecked Sendable {
         return FilmAudioSegment(events: events, buffers: [buffer])
     }
 
-    private var track: BlurayPlaylist.Stream? {
-        shared.tracks.first { Int($0.pid) == audioStream } ?? shared.tracks.first
+    private func track() async -> BlurayPlaylist.Stream? {
+        let tracks = await shared.tracks()
+        return tracks.first { Int($0.pid) == audioStream } ?? tracks.first
     }
 
     private static func normalized(_ code: String?) -> String? {

@@ -10,7 +10,11 @@
    its base and dependent clips;
  - a disc remuxed to Matroska (MakeMKV's 3D MVC MKV, and the remuxes made
    from it): one video track with both views in every Block, read by
-   `MatroskaStereoReader`, seeking by the file's Cues.
+   `MatroskaStereoReader`, seeking by the file's Cues;
+ - both views in one transport stream (an .m2ts with two video streams: a
+   disc's SSIF copied out, a tsMuxeR remux, a 3D camcorder clip): Vergence's
+   `TransportStreamFile` makes it a disc of one clip, finding entry points by
+   searching the file, so it is read, sounded and subtitled as a disc is.
 
  Each frame is copied into pixel buffers: the left eye for the film player's
  own layer, and both eyes top and bottom for the stereo tap, which crops the
@@ -22,15 +26,17 @@
  from that same IN time, so film time = playlist time + `originSeconds`. A
  feature made of several clips restarts the stream clock at each clip, which
  this mapping (and the plugin's) doesn't follow; the features seen so far are
- one clip. A Matroska file's time is its own, as the plugin's is for it, so
- its origin is 0.
+ one clip. A lone transport stream is the same: film time is its clock, from
+ its first picture (often 600 s), as the plugin's scene for it is. A
+ Matroska file's time is its own, as the plugin's is for it, so its origin
+ is 0.
 
  Decoding runs on its own serial queue, at most `queuedFrames` ahead of the
  player taking them; the player keeps under a second queued in its layer.
 
  A disc's own subtitles (PGS bitmaps) are read from the same bytes as the
- base view and collected in `subtitles` (`DiscSubtitles`). A Matroska file's
- come through Jellyfin like any file's.
+ base view and collected in `subtitles` (`DiscSubtitles`), a transport
+ stream's too. A Matroska file's come through Jellyfin like any file's.
  */
 
 import CoreMedia
@@ -50,11 +56,14 @@ final class MVCPictureSource: FilmPictureSource, @unchecked Sendable {
     /// The disc's PGS subtitle tracks, collected as the picture is read; nil
     /// for a Matroska file.
     let subtitles: DiscSubtitles?
-    /// A disc image or folder, rather than a Matroska remux of one.
-    var isDisc: Bool { if case .disc = origin { true } else { false } }
+    /// A disc image or folder, or a transport stream holding a disc's
+    /// streams: its sound is the disc's own (`audioSource`), its subtitles
+    /// `subtitles`. False for a Matroska remux.
+    var isDisc: Bool { if case .matroska = origin { false } else { true } }
 
     private enum Origin {
         case disc(BlurayDisc, BlurayPlaylist)
+        case transportStream(TransportStreamFile)
         case matroska(ByteSource, MatroskaFile)
     }
     private let origin: Origin
@@ -124,6 +133,15 @@ final class MVCPictureSource: FilmPictureSource, @unchecked Sendable {
         }.value
     }
 
+    /// Opens a transport stream holding both views at `url`. Reads its
+    /// program map and first timestamps (its first 4 MB) and its last (its
+    /// last 4 MB).
+    static func openTransportStream(url: URL, headers: [String: String]) async throws -> MVCPictureSource {
+        try await Task.detached(priority: .userInitiated) {
+            try MVCPictureSource(transportStreamURL: url, headers: headers)
+        }.value
+    }
+
     private init(discURL url: URL, headers: [String: String]) throws {
         self.url = url
         self.headers = headers
@@ -156,6 +174,22 @@ final class MVCPictureSource: FilmPictureSource, @unchecked Sendable {
         summary = "Blu-ray remux \(isStereo ? "MVC 3D" : "H.264") in Matroska, \(file.cues.count) cues, decoded on device"
     }
 
+    private init(transportStreamURL url: URL, headers: [String: String]) throws {
+        self.url = url
+        self.headers = headers
+        let file = try TransportStreamFile(source: Self.byteSource(url: url, headers: headers))
+        guard file.isStereo else { throw FormatError("no MVC stream in the transport stream") }
+        origin = .transportStream(file)
+        let playlist = file.playlist
+        isStereo = true
+        swapsEyes = false
+        (frameRate, frameDuration) = Self.frameRate(nanosecondsPerFrame: UInt64(file.frameTicks) * 1_000_000_000 / 90_000)
+        originSeconds = Double(playlist.items.first?.inPTS ?? 0) / 90_000
+        durationSeconds = originSeconds + playlist.duration
+        subtitles = DiscSubtitles(playlist: playlist, originSeconds: originSeconds)
+        summary = "Blu-ray MVC 3D in one transport stream (\(file.packetSize)-byte packets), decoded on device"
+    }
+
     /// A track's frame rate, snapped to the broadcast rate it stands for.
     private static func frameRate(nanosecondsPerFrame: UInt64?) -> (Double, CMTime) {
         let standard: [(Int64, Int32)] = [(1001, 24000), (1, 24), (1, 25), (1001, 30000), (1, 30), (1, 50), (1001, 60000), (1, 60)]
@@ -174,6 +208,17 @@ final class MVCPictureSource: FilmPictureSource, @unchecked Sendable {
             let source = try Self.byteSource(url: url, headers: headers, probing: true)
             guard MatroskaFile.looksLikeMatroska(try source.read(at: 0, count: 4)) else { return false }
             return try MatroskaFile(source: source, readCues: false).video?.isMVC ?? false
+        }.value
+    }
+
+    /// Whether the transport stream at `url` carries an MVC dependent view
+    /// (stream type 0x20), from the program map in its first 512 kB. An
+    /// SSIF opens with the dependent clip's, which lists just that stream.
+    static func hasTransportStreamMVC(url: URL, headers: [String: String]) async throws -> Bool {
+        try await Task.detached(priority: .userInitiated) {
+            let source = try Self.byteSource(url: url, headers: headers, probing: true)
+            let head = try source.read(at: 0, count: 512 << 10)
+            return TransportStreamFile.programStreams(in: head)?.streams.contains { $0.streamType == 0x20 } ?? false
         }.value
     }
 
@@ -198,12 +243,20 @@ final class MVCPictureSource: FilmPictureSource, @unchecked Sendable {
         return BlurayDisc(fileSystem: try UDFFileSystem(image: FileByteSource(url: url)))
     }
 
-    /// The feature playlist's audio, on its own reader of the same disc. Nil
-    /// for a Matroska file, whose sound is read apart from its picture.
+    /// The feature playlist's audio, on its own reader of the same disc (or
+    /// transport stream). Nil for a Matroska file, whose sound is read apart
+    /// from its picture.
     func audioSource(itemID: String) throws -> DiscAudioSource? {
-        guard case .disc(_, let playlist) = origin else { return nil }
-        return try DiscAudioSource(itemID: itemID, disc: Self.openDisc(url: url, headers: headers),
-                                   playlist: playlist, originSeconds: originSeconds)
+        switch origin {
+        case .disc(_, let playlist):
+            return try DiscAudioSource(itemID: itemID, disc: Self.openDisc(url: url, headers: headers),
+                                       playlist: playlist, originSeconds: originSeconds)
+        case .transportStream(let file):
+            let reader = file.reopened(on: try Self.byteSource(url: url, headers: headers))
+            return DiscAudioSource(itemID: itemID, disc: reader, playlist: reader.playlist, originSeconds: originSeconds)
+        case .matroska:
+            return nil
+        }
     }
 
     /// Opens the decoder (decode queue only), set up for a run from
@@ -212,21 +265,29 @@ final class MVCPictureSource: FilmPictureSource, @unchecked Sendable {
                                                                   decode: ((StereoFrame) throws -> Bool) throws -> Void) {
         switch origin {
         case .disc(let disc, let playlist):
-            let decoder = try playlistDecoder ?? PlaylistDecoder(disc: disc, playlist: playlist, threads: Self.decodeThreads)
-            playlistDecoder = decoder
-            if let subtitles {
-                // Subtitles come out of the same reads as the picture.
-                decoder.sidePIDs = subtitles.pids
-                decoder.onSidePackets = { subtitles.feed($0) }
-                subtitles.beginRun(at: Int64(((filmTime - originSeconds) * 90_000).rounded()))
-            }
-            return (decoder.seek(to:), decoder.decode(output:))
+            return try discDecoder(disc, playlist, from: filmTime)
+        case .transportStream(let file):
+            return try discDecoder(file, file.playlist, from: filmTime)
         case .matroska(let source, let file):
             let decoder = try matroskaDecoder
                 ?? StereoDecoder(reader: MatroskaStereoReader(source: source, file: file), threads: Self.decodeThreads)
             matroskaDecoder = decoder
             return (decoder.seek(to:), decoder.decode(output:))
         }
+    }
+
+    /// A disc playlist's decoder, or a transport stream's (decode queue only).
+    private func discDecoder(_ clips: any ClipSource, _ playlist: BlurayPlaylist, from filmTime: Double) throws
+        -> (seek: (Double) throws -> Void, decode: ((StereoFrame) throws -> Bool) throws -> Void) {
+        let decoder = try playlistDecoder ?? PlaylistDecoder(disc: clips, playlist: playlist, threads: Self.decodeThreads)
+        playlistDecoder = decoder
+        if let subtitles {
+            // Subtitles come out of the same reads as the picture.
+            decoder.sidePIDs = subtitles.pids
+            decoder.onSidePackets = { subtitles.feed($0) }
+            subtitles.beginRun(at: Int64(((filmTime - originSeconds) * 90_000).rounded()))
+        }
+        return (decoder.seek(to:), decoder.decode(output:))
     }
 
     func frames(from filmTime: Double, stereo: Bool) -> AsyncThrowingStream<FilmPictureFrame, Error> {

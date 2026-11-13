@@ -673,36 +673,52 @@ enum LibraryHarness {
         return "STALLED (\(player.reasonForWaitingToPlay?.rawValue ?? "paused"))"
     }
 
-    /// A 3D Blu-ray remux in Matroska (`scripts/dev-jellyfin.sh native`'s
-    /// "Stereo Remux (1993)", made from a remux you own; skipped without it):
-    /// told apart from an ordinary H.264 MKV by its header, routed to the film
-    /// player, its picture decoded in 3D from a seek over HTTP, and its sound
-    /// offered as this build may play it (the plugin's DTS:X objects with
-    /// HYPNOS_DTSX, else the file's own track decoded here when a decoder for
-    /// it is built in).
+    /// The 3D Blu-ray files the film player decodes itself, from
+    /// `scripts/dev-jellyfin.sh native` (each made from a film you own;
+    /// skipped without it): "Stereo Remux (1993)", a remux in Matroska, and
+    /// "Stereo Transport (2001)", both views in one M2TS. Each is told apart
+    /// from an ordinary H.264 file by its header, routed to the film player,
+    /// its picture decoded in 3D from a seek over HTTP, and its sound offered
+    /// as this build may play it: the plugin's objects when it has a track
+    /// for this edition, else the file's own sound decoded here (the remux's
+    /// track through MatroskaRemux; the transport stream's AC-3 the way a
+    /// disc's is).
     private static func checkMatroskaMVC(library: JellyfinLibrary, server: URL, apiKey: String) async {
-        guard let found = try? await FilmServerClient.search(baseURL: server, token: apiKey, term: "Stereo Remux").first,
+        if let plain = try? await FilmServerClient.search(baseURL: server, token: apiKey, term: "Subtitle Window").first {
+            log("matroskaMVC plainMKV stereoPicture=\(await library.stereoPicture(itemId: plain.id).map { "\($0)" } ?? "nil") (expect nil)")
+        }
+        await checkStereoFile(library: library, server: server, apiKey: apiKey, label: "matroskaMVC",
+                              term: "Stereo Remux", expect: .matroskaMVC)
+        await checkStereoFile(library: library, server: server, apiKey: apiKey, label: "transportMVC",
+                              term: "Stereo Transport", expect: .transportStreamMVC)
+    }
+
+    private static func checkStereoFile(library: JellyfinLibrary, server: URL, apiKey: String, label: String,
+                                        term: String, expect: FilmDecodedPicture) async {
+        guard let found = try? await FilmServerClient.search(baseURL: server, token: apiKey, term: term).first,
               let item = try? await library.item(id: found.id) else {
-            log("matroskaMVC SKIPPED: no Stereo Remux item")
+            log("\(label) SKIPPED: no \(term) item")
             return
         }
         let picture = await library.decodedPicture(for: item)
-        log("matroskaMVC decodedPicture=\(picture.map { "\($0)" } ?? "nil") (expect matroskaMVC)")
+        log("\(label) decodedPicture=\(picture.map { "\($0)" } ?? "nil") (expect \(expect))")
         if let route = try? await library.playbackRoute(for: item) {
-            log("matroskaMVC playbackRoute=\(describeRoute(route)) (expect atmosFilmPlayer)")
-        }
-        if let plain = try? await FilmServerClient.search(baseURL: server, token: apiKey, term: "Subtitle Window").first {
-            log("matroskaMVC plainMKV hasMatroskaMVC=\(await library.hasMatroskaMVC(itemId: plain.id)) (expect false)")
+            log("\(label) playbackRoute=\(describeRoute(route)) (expect atmosFilmPlayer)")
         }
 
         let url = server.appending(path: "Videos/\(item.id)/stream").appending(queryItems: [.init(name: "static", value: "true")])
+        let headers = ["Authorization": JellyfinClientIdentity.authorizationHeader(token: apiKey)]
         do {
             let opened = ContinuousClock.now
-            let source = try await MVCPictureSource.openMatroska(url: url, headers: ["Authorization": JellyfinClientIdentity.authorizationHeader(token: apiKey)])
+            let source = expect == .transportStreamMVC
+                ? try await MVCPictureSource.openTransportStream(url: url, headers: headers)
+                : try await MVCPictureSource.openMatroska(url: url, headers: headers)
             let openTime = ContinuousClock.now - opened
+            // 20 s into the film: film time counts from the stream's own origin.
+            let from = source.originSeconds + 20
             var frames = 0, stereo = 0, first: Double?, last = 0.0
             let started = ContinuousClock.now
-            for try await frame in source.frames(from: 20, stereo: true) {
+            for try await frame in source.frames(from: from, stereo: true) {
                 let time = frame.picture.presentationTimeStamp.seconds
                 if first == nil { first = time }
                 last = time
@@ -711,33 +727,52 @@ enum LibraryHarness {
                 if frames == 96 { break }
             }
             let decodeTime = ContinuousClock.now - started
-            log(String(format: "matroskaMVC picture: stereo=%@ %.0f fps, open %@, %d frames from %.3f to %.3f s, %d stereo, %@ (%@)",
-                       "\(source.isStereo)", source.frameRate, "\(openTime)", frames, first ?? -1, last, stereo,
-                       "\(decodeTime)", source.summary))
+            log(String(format: "%@ picture: stereo=%@ %.3f fps, origin %.3f s, open %@, %d frames from %.3f to %.3f s, %d stereo, %d subtitle tracks, %@ (%@)",
+                       label, "\(source.isStereo)", source.frameRate, source.originSeconds, "\(openTime)", frames, first ?? -1, last,
+                       stereo, source.subtitles?.pids.count ?? 0, "\(decodeTime)", source.summary))
             var client = FilmServerClient(baseURL: server, token: apiKey, itemID: item.id)
             client.applyEdition()
             let tracks = (try? await client.audioTracks(languages: ["eng"])) ?? []
-            log("matroskaMVC objectTracks=\(tracks.map { "\($0.codec):\($0.title)" }) edition=\(ObjectAudioEdition.codecs)")
+            log("\(label) objectTracks=\(tracks.map { "\($0.codec):\($0.title)" }) edition=\(ObjectAudioEdition.codecs)")
             // The file's own sound, what plays when the plugin has no track
             // for this build (checked whether or not it has one).
-            do {
-                let audioURL = url.appending(queryItems: [.init(name: "ApiKey", value: apiKey)])
-                if let audio = await MatroskaFilmAudioSource.open(itemID: item.id, url: audioURL, durationSeconds: source.durationSeconds),
-                   let scene = try await audio.audioScene(startSeconds: 20) {
-                    let segment = try await audio.audioSegment(5, of: scene)
-                    let peak = segment.buffers.first.map { buffer in
-                        (0 ..< Int(buffer.format.channelCount)).map { c in
-                            (0 ..< Int(buffer.frameLength)).reduce(Float(0)) { max($0, abs(buffer.floatChannelData![c][$1])) }
-                        }.max() ?? 0
-                    } ?? 0
-                    log("matroskaMVC deviceAudio: \(scene.elements.count) channels at \(scene.sampleRate) Hz, segment 5 peak \(peak)")
-                } else {
-                    log("matroskaMVC deviceAudio: none decodable in this build (expected without HYPNOS_FFMPEG for DTS)")
-                }
+            let ownSound = { @Sendable () async -> (any FilmAudioSource)? in
+                source.isDisc
+                    ? try? source.audioSource(itemID: item.id)
+                    : await MatroskaFilmAudioSource.open(itemID: item.id, url: url.appending(queryItems: [.init(name: "ApiKey", value: apiKey)]),
+                                                         durationSeconds: source.durationSeconds)
+            }
+            // What the film player ends up playing: the plugin's objects, or
+            // the file's own sound when the plugin has none for it (a plain
+            // TrueHD 7.1 it lists, then answers 422 for).
+            log("\(label) filmPlayer: \(await filmPlayerOutcome(client: client, source: source, ownSound: ownSound))")
+            let audio = await ownSound()
+            let own = try await audio?.audioTracks(languages: ["eng"]) ?? []
+            if let audio, let scene = try await audio.audioScene(startSeconds: from) {
+                let segment = try await audio.audioSegment(5, of: scene)
+                let peak = segment.buffers.first.map { buffer in
+                    (0 ..< Int(buffer.format.channelCount)).map { c in
+                        (0 ..< Int(buffer.frameLength)).reduce(Float(0)) { max($0, abs(buffer.floatChannelData![c][$1])) }
+                    }.max() ?? 0
+                } ?? 0
+                log("\(label) deviceAudio: tracks \(own.map(\.title)), \(scene.elements.count) channels at \(scene.sampleRate) Hz, start \(scene.startSeconds) s, segment 5 peak \(peak)")
+            } else {
+                log("\(label) deviceAudio: none decodable in this build (expected without HYPNOS_FFMPEG for DTS)")
             }
         } catch {
-            log("matroskaMVC FAILED: \(error)")
+            log("\(label) FAILED: \(error)")
         }
+    }
+
+    /// Loads a film player the way `FilmSession` does for a decoded picture
+    /// and says what it ended up with.
+    @MainActor
+    private static func filmPlayerOutcome(client: FilmServerClient, source: MVCPictureSource,
+                                          ownSound: @Sendable () async -> (any FilmAudioSource)?) async -> String {
+        let player = FilmPlayer()
+        await FilmSession.load(player, client: client, decoded: source, pictureHeight: nil, ownSound: ownSound)
+        defer { player.stop() }
+        return "picture \(player.video.isLoaded), sound \(player.hasAudioScene ? "playing" : "none") (\(player.audioStatus)), tracks \(player.audioTracks.map(\.title))"
     }
 
     private static func describeRoute(_ route: PlaybackRoute) -> String {

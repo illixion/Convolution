@@ -764,13 +764,14 @@ actor JellyfinLibrary: MediaServerLibrary {
         if item.isBlurayDisc {
             return .atmosFilmPlayer
         }
-        // A 3D Blu-ray remuxed to Matroska plays there too: only the film
-        // player's decoder (Vergence) shows its second eye. Asked alongside
-        // the plugin, so an ordinary file waits for neither in turn.
-        async let isMVC = hasMatroskaMVC(itemId: item.id)
+        // A 3D Blu-ray remuxed to Matroska or a transport stream plays there
+        // too: only the film player's decoder (Vergence) shows its second
+        // eye. Asked alongside the plugin, so an ordinary file waits for
+        // neither in turn.
+        async let stereo = stereoPicture(itemId: item.id)
         async let served = filmPlayerServes(itemId: item.id)
-        let (mvc, serves) = await (isMVC, served)
-        if mvc || serves {
+        let (mvc, serves) = await (stereo, served)
+        if mvc != nil || serves {
             return .atmosFilmPlayer
         }
         return .genericPlayer(try await streamPlan(itemId: item.id, quality: quality,
@@ -780,31 +781,39 @@ actor JellyfinLibrary: MediaServerLibrary {
     /// The picture the film player decodes itself for `item`, if any.
     func decodedPicture(for item: LibraryItem) async -> FilmDecodedPicture? {
         if item.isBlurayDisc { return .disc }
-        return await hasMatroskaMVC(itemId: item.id) ? .matroskaMVC : nil
+        return await stereoPicture(itemId: item.id)
     }
 
     /// Answers by item id, for this run of the app.
-    private static let mvcProbes = OSAllocatedUnfairLock(initialState: [String: Bool]())
+    private static let mvcProbes = OSAllocatedUnfairLock(initialState: [String: FilmDecodedPicture?]())
 
-    /// Whether the item's file is Matroska with an MVC track (a 3D Blu-ray
-    /// remux: MakeMKV's "3D MVC"). Jellyfin can't say: its `Video3DFormat`
-    /// comes from the file name, and a remux named "…3D…" without an
-    /// "MVC" token has none. So an H.264 Matroska file of 720 lines or more
-    /// has its header read (a few small range requests) once per run.
-    func hasMatroskaMVC(itemId: String) async -> Bool {
+    /// The item's MVC 3D, when its file has one: Matroska with an MVC track
+    /// (a 3D Blu-ray remux: MakeMKV's "3D MVC"), or a transport stream with
+    /// an MVC dependent view (both views in one .m2ts). Jellyfin can't say:
+    /// its `Video3DFormat` comes from the file name, and a remux named
+    /// "…3D…" without an "MVC" token has none. So an H.264 file of 720 lines
+    /// or more in either container has its header read (a few small range
+    /// requests) once per run.
+    func stereoPicture(itemId: String) async -> FilmDecodedPicture? {
         if let known = Self.mvcProbes.withLock({ $0[itemId] }) { return known }
         guard let userId = try? await resolveUserId(),
               let info: JFPlaybackInfo = try? await get("Items/\(itemId)/PlaybackInfo", query: [
                   .init(name: "userId", value: userId),
               ]),
               let source = info.MediaSources?.first
-        else { return false }
+        else { return nil }
         let containers = (source.Container ?? "").lowercased().split(separator: ",")
         let video = source.MediaStreams?.first { $0.Type == "Video" }
-        guard containers.contains(where: { $0 == "mkv" || $0 == "matroska" }),
-              video?.Codec?.lowercased() == "h264", (video?.Height ?? 0) >= 720 else {
-            Self.mvcProbes.withLock { $0[itemId] = false }
-            return false
+        let kind: FilmDecodedPicture? = if containers.contains(where: { $0 == "mkv" || $0 == "matroska" }) {
+            .matroskaMVC
+        } else if containers.contains(where: { ["ts", "m2ts", "mts", "mpegts"].contains($0) }) {
+            .transportStreamMVC
+        } else {
+            nil
+        }
+        guard let kind, video?.Codec?.lowercased() == "h264", (video?.Height ?? 0) >= 720 else {
+            Self.mvcProbes.withLock { $0[itemId] = .some(nil) }
+            return nil
         }
         let url = baseURL.appending(path: "Videos/\(itemId)/stream").appending(queryItems: [
             .init(name: "static", value: "true"),
@@ -812,14 +821,17 @@ actor JellyfinLibrary: MediaServerLibrary {
         ])
         let headers = ["Authorization": JellyfinClientIdentity.authorizationHeader(token: authHeaderToken)]
         do {
-            let isMVC = try await MVCPictureSource.hasMatroskaMVC(url: url, headers: headers)
-            Self.mvcProbes.withLock { $0[itemId] = isMVC }
-            if isMVC { AppLogger.library.info("Matroska file with an MVC track: the film player decodes its 3D") }
-            return isMVC
+            let isMVC = kind == .matroskaMVC
+                ? try await MVCPictureSource.hasMatroskaMVC(url: url, headers: headers)
+                : try await MVCPictureSource.hasTransportStreamMVC(url: url, headers: headers)
+            let picture = isMVC ? kind : nil
+            Self.mvcProbes.withLock { $0[itemId] = .some(picture) }
+            if isMVC { AppLogger.library.info("\(kind == .matroskaMVC ? "Matroska file with an MVC track" : "Transport stream with an MVC view", privacy: .public): the film player decodes its 3D") }
+            return picture
         } catch {
             // Not cached: the next play asks again.
-            AppLogger.library.info("Couldn't read the Matroska header for MVC: \(error.logCode, privacy: .public)")
-            return false
+            AppLogger.library.info("Couldn't read the file's header for MVC: \(error.logCode, privacy: .public)")
+            return nil
         }
     }
 
