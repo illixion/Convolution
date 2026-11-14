@@ -220,6 +220,16 @@ struct VideoWindowView: View {
         return "\(video.id)_\(mode)_\(windowModel.playbackAttempt)"
     }
 
+    /// The picture is in the HUD: the window shows nothing at all (see
+    /// `Cinema.windowVanishes`).
+    private var vanishesForHUD: Bool {
+        #if os(visionOS)
+        Cinema.shared.windowVanishes(for: .video(ObjectIdentifier(windowModel)))
+        #else
+        false
+        #endif
+    }
+
     /// This window's picture is on the cinema's big screen.
     private var cinemaShowsScreen: Bool {
         #if os(visionOS)
@@ -431,7 +441,7 @@ struct VideoWindowView: View {
             #endif
 
             #if os(visionOS)
-            if cinemaShowsScreen {
+            if cinemaShowsScreen, !vanishesForHUD {
                 CinemaBigScreenCard(owner: .video(ObjectIdentifier(windowModel))) {
                     windowModel.toggleUIVisibility()
                 }
@@ -575,7 +585,9 @@ struct VideoWindowView: View {
             let width = (newSize.width / 20).rounded() * 20
             if width != windowWidth { windowWidth = width }
         }
-        .raveSystemOverlays(windowModel.isWindowControlsHidden ? .hidden : .visible)
+        .raveSystemOverlays(windowModel.isWindowControlsHidden || vanishesForHUD ? .hidden : .visible)
+        // Nothing of an invisible window may take a look or a pinch.
+        .allowsHitTesting(!vanishesForHUD)
         .hidesStatusBar(windowModel.isUIHidden)
         #if os(visionOS)
         // Hung under the window, outside it: the window holds only the

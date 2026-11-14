@@ -213,11 +213,23 @@ final class Cinema {
         if simd_distance(fitted, hudOffset) > 1e-4 { hudOffset = fitted }
     }
 
+    /// Recenter (the HUD's own button, the forearm remote's): the picture
+    /// straight ahead, at the distance and width it has, its controls under it
+    /// in easy reach. It used to go back to where the HUD opens, low in the
+    /// right of the view: a HUD already there didn't move ("does nothing"), and
+    /// the controls under a picture that low could sit past reach (user,
+    /// 2026-11-14). The HUD still opens where it was left, or at home.
     func recenterHUD() {
-        hudOffset = Self.hudHomeOffset
-        hudWidth = Self.hudHomeWidth
+        let distance = min(HUDFraming.maxDistance, max(HUDFraming.minDistance, simd_length(hudOffset)))
+        hudOffset = SIMD3(0, 0, -distance)
         refitHUD()
         save()
+    }
+
+    /// The picture in front of the wearer: the HUD recentred, the Big Screen
+    /// placed ahead.
+    func placeInFront() {
+        if mode == .hud { recenterHUD() } else { placeScreenInFront() }
     }
 
     /// The wearer let go of the HUD after moving or resizing it: it opens there next time.
@@ -360,6 +372,15 @@ final class Cinema {
     var screenWidth: Float { 2 * screenDistance * tanf(screenWidthDegrees * .pi / 360) }
 
     func mode(for owner: CinemaOwner) -> CinemaMode { self.owner == owner ? mode : .window }
+
+    /// The owner's picture is in the HUD, so its window shows nothing at all:
+    /// no picture, no card, no window bar, nothing to look at or pinch. It
+    /// stays open (its player, progress reporting and skip segments live
+    /// there) and comes back as it was with Window. It used to show a card
+    /// whose Place in Front of Me did nothing to the HUD; Recenter and Window
+    /// are on the HUD and on the forearm remote instead (user, 2026-11-14).
+    /// Big Screen keeps the window: its controls are there.
+    func windowVanishes(for owner: CinemaOwner) -> Bool { mode(for: owner) == .hud }
 
     /// The owner's picture is on the big screen, so its window shows the card.
     func showsScreen(for owner: CinemaOwner) -> Bool { self.owner == owner && screenAttached }
@@ -960,10 +981,7 @@ struct CinemaBigScreenCard: View {
             Image(systemName: "sparkles.tv").font(.system(size: 44))
             Text(Cinema.shared.screenAttached ? "Playing in \(Cinema.shared.mode.title)" : "Opening \(Cinema.shared.mode.title)…").font(.title2)
             HStack(spacing: 12) {
-                Button("Place in Front of Me", systemImage: "scope") {
-                    if Cinema.shared.mode == .hud { Cinema.shared.recenterHUD() }
-                    else { Cinema.shared.placeScreenInFront() }
-                }
+                Button("Place in Front of Me", systemImage: "scope") { Cinema.shared.placeInFront() }
                 Button("Back to Window", systemImage: "macwindow") {
                     Task { await Cinema.shared.setMode(.window, for: owner, open: openImmersiveSpace, dismiss: dismissImmersiveSpace) }
                 }

@@ -34,10 +34,16 @@ struct VideoControlBar<Accessories: View>: View {
     private var readoutInPanel: Bool { windowModel.playbackInfo.isShown(playbackInfoVisibility) }
     #endif
 
-    private var liveState: RAVEPlayerControlState {
+    /// The bar's state now. The body leaves the playhead out (`withTime`
+    /// false) and hands the strip a clock instead, which only its timeline
+    /// reads: with the playhead in the state, each of its 30 reports a second
+    /// re-rendered the whole strip, and the strip measured all six ways of
+    /// filling its row each time (main thread 98 % busy with the bar up in the
+    /// HUD, starving the forearm remote, 2026-11-14).
+    private func liveState(withTime: Bool) -> RAVEPlayerControlState {
         RAVEPlayerControlState(
-            currentTime: windowModel.currentTime, duration: windowModel.duration,
-            bufferedUntil: windowModel.bufferedEnd, isPlaying: !windowModel.isPaused,
+            currentTime: withTime ? windowModel.currentTime : 0, duration: windowModel.duration,
+            bufferedUntil: withTime ? windowModel.bufferedEnd : 0, isPlaying: !windowModel.isPaused,
             isMuted: windowModel.isMuted, volume: windowModel.volume,
             markers: [windowModel.loopController.pointA, windowModel.loopController.pointB].compactMap { $0 },
             // The picture's readout is in the playback info panel, unless
@@ -45,6 +51,11 @@ struct VideoControlBar<Accessories: View>: View {
             details: readoutInPanel ? nil : windowModel.pictureDetails,
             markedRanges: windowModel.segmentSkipper.markedRanges
         )
+    }
+
+    private var clock: RAVEPlayerClock {
+        let model = windowModel
+        return RAVEPlayerClock { (model.currentTime, model.bufferedEnd) }
     }
 
     /// Previous and next video beside the transport, when the window browses
@@ -63,7 +74,7 @@ struct VideoControlBar<Accessories: View>: View {
     /// is one of those menus, and its slider and mute must show what they
     /// set as they set it (they lagged a whole menu behind).
     private var state: RAVEPlayerControlState {
-        guard var state = frozenState else { return liveState }
+        guard var state = frozenState else { return liveState(withTime: false) }
         state.volume = windowModel.volume
         state.isMuted = windowModel.isMuted
         return state
@@ -72,6 +83,8 @@ struct VideoControlBar<Accessories: View>: View {
     var body: some View {
         RAVEPlayerControls(
             state: state,
+            // Frozen while a menu is open: the state's own playhead then.
+            clock: frozenState == nil ? clock : nil,
             togglePlayback: { windowModel.togglePlayPause() },
             seek: { windowModel.endScrub(at: $0) },
             toggleMute: { windowModel.toggleMute() },
@@ -93,7 +106,7 @@ struct VideoControlBar<Accessories: View>: View {
         }
         .frame(width: width)
         .onChange(of: windowModel.openOrnamentMenuCount > 0) { _, open in
-            frozenState = open ? liveState : nil
+            frozenState = open ? liveState(withTime: true) : nil
         }
     }
 }

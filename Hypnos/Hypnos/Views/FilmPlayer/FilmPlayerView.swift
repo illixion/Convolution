@@ -509,7 +509,7 @@ struct FilmPlayerView: View {
                         }
                         .frame(depth: 0)
                     }
-                if cinema.hidesPicture(for: .film) {
+                if cinema.hidesPicture(for: .film), !cinema.windowVanishes(for: .film) {
                     CinemaBigScreenCard(owner: .film, onTap: { toggleChrome() })
                 }
                 if let source = stereoSource {
@@ -559,7 +559,9 @@ struct FilmPlayerView: View {
             let rounded = (width / 20).rounded() * 20
             if rounded != windowWidth { windowWidth = rounded }
         }
-        .raveSystemOverlays(chromeVisible ? .visible : .hidden)
+        .raveSystemOverlays(chromeVisible && !cinema.windowVanishes(for: .film) ? .visible : .hidden)
+        // Nothing of an invisible window may take a look or a pinch.
+        .allowsHitTesting(!cinema.windowVanishes(for: .film))
         // The strip rises into place and sinks away (`playerChromeOrnament`).
         .playerChromeOrnament(
             isPresented: chromeVisible && cinema.mode(for: .film) != .hud,
@@ -1010,9 +1012,12 @@ struct FilmTransport: View {
     /// A scrub holding the controls up (true) or done.
     var onHold: (Bool) -> Void = { _ in }
     @Bindable private var session = FilmSession.shared
+    /// The playhead while a menu is open (`menuOpen`); otherwise the strip's
+    /// timeline reads the film's clock itself, four times a second, and the
+    /// rest of the bar doesn't re-render with it (`RAVEPlayerClock`).
     @State private var now = 0.0
     /// One of the bar's menus is open: the bar then reads nothing that moves
-    /// (the clock stops updating `now`, the buffered position isn't read),
+    /// (the clock is held at `now`, the buffered position isn't read),
     /// since every update re-renders and re-lays out the bar, and an open
     /// visionOS menu redrew with it each time (device, 2026-10-08).
     @State private var openMenus: Set<String> = []
@@ -1027,8 +1032,11 @@ struct FilmTransport: View {
             // While a menu is open the bar reads nothing that moves (see `menuOpen`):
             // the buffered position updates twice a second too.
             state: RAVEPlayerControlState(currentTime: now, duration: player.duration,
-                bufferedUntil: menuOpen ? now : player.video.bufferedUntil, isPlaying: player.isPlaying, isMuted: player.isMuted,
+                bufferedUntil: now, isPlaying: player.isPlaying, isMuted: player.isMuted,
                 volume: Double(player.volume), details: pictureDetails, markedRanges: markedRanges),
+            clock: menuOpen ? nil : RAVEPlayerClock(refresh: .milliseconds(250)) { [player] in
+                (player.currentTime, player.video.bufferedUntil)
+            },
             togglePlayback: { player.isPlaying ? player.pause() : player.play() },
             seek: { player.seek(to: $0) }, toggleMute: { player.isMuted.toggle() },
             onInteraction: onInteraction,
@@ -1079,11 +1087,9 @@ struct FilmTransport: View {
         // The host closes every menu with this; a menu that never reported
         // closing mustn't leave the clock stopped.
         .onChange(of: menuDismissal) { openMenus = [] }
-        .task {
-            while !Task.isCancelled {
-                if !menuOpen { now = player.currentTime }
-                try? await Task.sleep(for: .milliseconds(250))
-            }
+        // Held where it was when a menu opened.
+        .onChange(of: menuOpen, initial: true) { _, open in
+            if open { now = player.currentTime }
         }
     }
 

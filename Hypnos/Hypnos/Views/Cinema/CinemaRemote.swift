@@ -3,9 +3,12 @@
 //  Hypnos
 //
 //  What the forearm remote (`ForearmSleeve`) shows while a picture is in the cinema's space (HUD
-//  or Big Screen): RAVE Engine's `RAVESleevePresets.mediaRemote`, the title, a seek bar, back /
+//  or Big Screen): RAVE Engine's `RAVESleevePresets.mediaRemote` without its title (the picture
+//  names what plays, and five rows put the last ones out of easy reach, user 2026-11-14), a seek bar, back /
 //  play-pause / forward / next, and the volume, wired to whichever player owns the cinema
-//  (`CinemaOwner`).
+//  (`CinemaOwner`); then Recenter (the HUD straight ahead, the Big Screen placed in front) and
+//  Window (back to the player's window), which were the left-behind window's card until the
+//  window stopped showing anything in the HUD (2026-11-14).
 //
 //  Big Screen had no controls in the space at all (they stayed in the window, behind the
 //  viewer or across the room), and the HUD's strip hides with the chrome. The sleeve is the
@@ -29,10 +32,29 @@ final class CinemaRemote: SleeveRemote {
     /// Seconds Back and Forward jump.
     static let skipSeconds = 10
 
+    /// The cinema's own tiles, under the media remote's.
+    enum SpaceTile {
+        static let recenter = "cinema.recenter"
+        static let window = "cinema.window"
+    }
+
+    private enum SpaceAction {
+        static let recenter = "cinema.recenter"
+        static let window = "cinema.window"
+    }
+
     let kind = "cinema"
-    let layout = RAVESleeveLayout(outer: [
-        RAVESleevePresets.mediaRemote(skipSeconds: CinemaRemote.skipSeconds, volume: true),
-    ])
+    let layout: RAVESleeveLayout = {
+        var page = RAVESleevePresets.mediaRemote(skipSeconds: CinemaRemote.skipSeconds, volume: true)
+        page.rows.removeAll { row in row.contains { $0.id == Tile.title } }
+        page.rows.append([
+            RAVESleeveTile(SpaceTile.recenter, .button(RAVESleeveAction(SpaceAction.recenter)),
+                           label: "Recenter", icon: "scope", span: 2),
+            RAVESleeveTile(SpaceTile.window, .button(RAVESleeveAction(SpaceAction.window)),
+                           label: "Window", icon: "macwindow", span: 2),
+        ])
+        return RAVESleeveLayout(outer: [page])
+    }()
 
     /// Where the seek bar is being dragged to; applied when it is let go, so a
     /// drag is one seek and not one per frame.
@@ -51,7 +73,6 @@ final class CinemaRemote: SleeveRemote {
         let player = Player.current
         current = player
         guard let player else {
-            set(wearer, Tile.title, RAVESleeveTileState(text: "Nothing playing"))
             for id in [Tile.progress, Tile.back, Tile.playPause, Tile.forward, Tile.next, Tile.volume] {
                 set(wearer, id, RAVESleeveTileState(disabled: true))
             }
@@ -61,7 +82,6 @@ final class CinemaRemote: SleeveRemote {
         let seekable = duration > 0
         let fraction = scrub ?? (seekable ? Float(min(max(player.time / duration, 0), 1)) : 0)
         let shownTime = scrub.map { Double($0) * duration } ?? player.time
-        set(wearer, Tile.title, RAVESleeveTileState(text: player.title))
         set(wearer, Tile.progress, RAVESleeveTileState(
             fraction: fraction,
             text: seekable ? "\(Self.clock(shownTime)) / \(Self.clock(duration))" : Self.clock(shownTime),
@@ -75,7 +95,22 @@ final class CinemaRemote: SleeveRemote {
     }
 
     func handle(_ event: RAVESleeveEvent, _ wearer: RAVESleeveWearer) {
-        guard let player = current, let action = event.action else { return }
+        guard let action = event.action else { return }
+        let cinema = Cinema.shared
+        switch (action.id, event.kind) {
+        case (SpaceAction.recenter, .fired):
+            logger.info("Sleeve: recenter by \(event.source.rawValue, privacy: .public)")
+            cinema.placeInFront()
+            return
+        case (SpaceAction.window, .fired):
+            guard let owner = cinema.owner else { return }
+            logger.info("Sleeve: back to the window by \(event.source.rawValue, privacy: .public)")
+            Task { await cinema.returnToWindow(owner) }
+            return
+        default:
+            break
+        }
+        guard let player = current else { return }
         typealias Action = RAVESleevePresets.MediaAction
         switch (action.id, event.kind) {
         case (Action.play, .toggled(let play)):
@@ -126,7 +161,6 @@ final class CinemaRemote: SleeveRemote {
 /// picture is in the space. The same calls its own controls make.
 @MainActor
 private struct Player {
-    let title: String
     let isPlaying: Bool
     let time: Double
     let duration: Double
@@ -150,7 +184,7 @@ private struct Player {
             guard let item = session.loadedItem else { return nil }
             let player = session.player
             return Player(
-                title: item.name, isPlaying: player.isPlaying,
+                isPlaying: player.isPlaying,
                 time: player.currentTime, duration: player.duration,
                 volume: Double(player.volume), isMuted: false, canPlayNext: false,
                 setPlaying: { $0 ? player.play() : player.pause() },
@@ -167,7 +201,7 @@ private struct Player {
         case .video(let id):
             guard let model = cinema.hudVideoModel, ObjectIdentifier(model) == id else { return nil }
             return Player(
-                title: model.video.title ?? "Video", isPlaying: !model.isPaused,
+                isPlaying: !model.isPaused,
                 time: model.currentTime, duration: model.duration,
                 volume: model.isMuted ? 0 : model.volume, isMuted: model.isMuted,
                 canPlayNext: model.hasNextVideo,
