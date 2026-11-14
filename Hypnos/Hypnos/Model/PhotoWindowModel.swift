@@ -129,6 +129,9 @@ class PhotoWindowModel {
     /// that already exists resets the window's viewing mode to mono. Held by
     /// the model because the window's view state can start over meanwhile.
     @ObservationIgnored var spatialPictureLentToHUD = false
+    /// A popover is open over a RealityKit 3D picture, which shows flat
+    /// meanwhile (`flattenForPopover`). The user's mode is unchanged.
+    @ObservationIgnored var flattenedForPopover = false
 
     /// True while this window owns the Spatial3D ImmersiveSpace presentation.
     /// Set by the view-mode switch when `AppModel.fullyImmersive3DMode` is on

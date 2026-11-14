@@ -494,7 +494,7 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
         }
         .raveChromeButtonStyle()
         .help("Adjustments")
-        .popover(isPresented: Bindable(windowModel).showAdjustmentsPopover) {
+        .photoViewerPopover(isPresented: Bindable(windowModel).showAdjustmentsPopover) {
             VisualAdjustmentsPopover(
                 currentAdjustments: Binding(
                     get: { windowModel.currentAdjustments },
@@ -646,3 +646,21 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
         .disabled(isDisabled)
     }
 }
+
+extension View {
+    /// A popover from the photo's controls. In the viewer HUD, an immersive
+    /// space where visionOS presents no popover (Adjustments only turned the
+    /// picture flat there, device 2026-11-14), RAVEUI draws it beside the
+    /// picture instead (`ravePlayerPopover`, the HUD portal's `presentation`);
+    /// in the window it is a popover as before.
+    @ViewBuilder
+    func photoViewerPopover<Content: View>(isPresented: Binding<Bool>,
+                                           @ViewBuilder content: @escaping () -> Content) -> some View {
+        #if os(visionOS)
+        ravePlayerPopover(isPresented: isPresented, arrowEdge: .bottom, content: content)
+        #else
+        popover(isPresented: isPresented, content: content)
+        #endif
+    }
+}
+

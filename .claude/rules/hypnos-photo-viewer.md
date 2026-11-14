@@ -176,17 +176,46 @@ RealityView on return, which adopts the component as it is
 (`spatialPictureLentToHUD`) instead of `createImagePresentationComponent`'s
 path for an existing component, which resets the mode to mono.
 
-**The HUD's forearm remote** (`Views/Pictures/PhotoSleeveRemote.swift`): visionOS
-rejects popovers in an immersive space, so the Adjustments popover can't open in
-the HUD. While a photo is there the wearer gets the shared `ForearmSleeve`
+**The HUD's forearm remote** (`Views/Pictures/PhotoSleeveRemote.swift`): the
+HUD's controls by hand, without reaching for the bar. While a photo is there the
+wearer gets the shared `ForearmSleeve`
 (`Views/Sleeve/`) with the photo remote: the picture's name and place, previous /
 next, the chrome, Return to Window, 2D / RK 3D / Immersive / AI 3D, and an Adjust
 page (brightness, contrast, saturation, opacity, Reset). Each press makes the
 window's own call (`toggleRealityKit3D`, `showFlat`, the popover's slider curve);
 a slider is committed (tracked, 3D re-baked) once let go. It is attached through
-RAVEUI's `spaceDidOpen` / `spaceDidClose` on the HUD portal (`installSleeveHooks`
+RAVEUI's `spaceDidOpen` / `spaceDidClose` on the HUD portal (`installHUDHooks`
 in `PhotoDisplayView`); its switch and arm are the cinema's (Sound and Picture ›
-Cinema).
+Cinema). The HUD bar's slider is the picture's **opacity** (`PhotoHUDOpacitySlider`
+through RAVEUI's `barControl`, in place of the HUD size slider): a RealityKit 3D
+picture, Immersive above all, covers the view. The window's SwiftUI opacity doesn't
+reach a picture lent to the HUD's space, so `fitSpatialPicture` puts an
+`OpacityComponent` on it (taken off when it goes back). **A picture lent in
+Immersive drew nothing** in the HUD's space, while one switched to Immersive there
+drew right (device, 2026-11-14): `reenterImmersiveInHUD` shows it as RealityKit 3D
+until it is in the space's scene, then Immersive again. Not yet seen on the headset.
+
+**The HUD's frame:** its bottom bar hides with the ornaments (`chromeFollowsControls`),
+and its white move handle, which looks like a window's bar, is hidden while the
+picture is Immersive RealityKit 3D and shown otherwise, where it is how the HUD moves
+(user, 2026-11-14).
+
+**Adjustments in the HUD** is a panel over the right of the picture: the button uses
+`photoViewerPopover` (RAVEUI's `ravePlayerPopover` on visionOS), which in the HUD
+hands its content to the portal's `presentation` (a plain popover only turned the
+picture flat there and never showed, device 2026-11-14). Confirmed working on the
+headset; its size by angle came after.
+
+**A popover over RealityKit 3D flattens the picture** (`flattenForPopover`, the
+Adjustments and Info popovers, windowed 3D and Immersive; not in the HUD, whose panel sits in front, clear of the picture's depth): the spatial scene stands
+out of the window and covered the popover (Immersive hid it entirely, device
+2026-11-14). Only the component's own mode goes `.mono`; the generated scene stays
+on it, the user's mode (`desiredViewingMode`) is kept, and closing the popover puts
+it back through `applyDesiredViewingMode`. **Never use the 3D menu's 2D for this:**
+`deactivate3DMode` lets the picture go and returning regenerates it (user). The
+menus don't flatten (the 3D menu changes the mode itself, and `deactivate3DMode`
+reads a flattened component as already flat). A re-bake under the popover (an
+adjustment) generates flat and keeps Immersive as the choice only.
 
 **Teardown waits** (`onTeardown`, `Support/TeardownOnDisappear.swift`): the
 photo, shared-photo and slideshow windows clean up only once they have stayed

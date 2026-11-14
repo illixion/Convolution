@@ -332,6 +332,16 @@ struct PhotoDisplayView: View {
             }
         }
         #if os(visionOS)
+        // The HUD's move handle, which looks like a window's bar, sits over an
+        // Immersive picture; elsewhere it is how the HUD is moved (user, 2026-11-14).
+        .onChange(of: windowModel.is3DMode && windowModel.desiredViewingMode == .spatial3DImmersive,
+                  initial: true) { _, immersive in
+            viewerHUD?.showsMoveHandle = !immersive
+        }
+        // A RealityKit 3D picture would cover a popover: flat while one is open.
+        .onChange(of: windowModel.showAdjustmentsPopover || windowModel.showMediaInfoPopover) { _, open in
+            windowModel.flattenForPopover(open)
+        }
         .onChange(of: viewerHUD?.isInHUD) { _, inHUD in
             if inHUD == true {
                 hudEntryAspect = windowModel.imageAspectRatio
@@ -348,7 +358,7 @@ struct PhotoDisplayView: View {
             }
         }
         // Before the HUD opens: its space calls them as it comes up.
-        .onAppear { installSleeveHooks() }
+        .onAppear { installHUDHooks() }
         #endif
         #if os(iOS)
         // A photo viewer is a full-bleed surface: fit the picture to the whole
@@ -1327,11 +1337,41 @@ struct PhotoDisplayView: View {
         }
         portal.onSpatialContentTap = { [weak windowModel] in windowModel?.toggleUIVisibility() }
         portal.spatialContent = windowModel.contentEntity
+        reenterImmersiveInHUD()
         if windowModel.pendingGenerate3D {
             windowModel.pendingGenerate3D = false
             await windowModel.generateSpatial3DImage()
         } else {
             await windowModel.autoGenerateSpatial3DIfNeeded()
+        }
+    }
+
+    /// A picture lent in Immersive drew nothing in the HUD's space, while one
+    /// switched to Immersive there drew right (device, 2026-11-14): the mode
+    /// is taken up again only when it changes. So it shows as RealityKit 3D
+    /// until it is in the HUD's scene and then goes Immersive again. Both are
+    /// switches of a generated picture: nothing generates again, and the
+    /// user's choice (`desiredViewingMode`) stays Immersive throughout.
+    private func reenterImmersiveInHUD() {
+        let entity = windowModel.contentEntity
+        guard windowModel.desiredViewingMode == .spatial3DImmersive,
+              var ipc = entity.components[ImagePresentationComponent.self],
+              ipc.desiredViewingMode == .spatial3DImmersive else { return }
+        ipc.desiredViewingMode = .spatial3D
+        entity.components.set(ipc)
+        Task { @MainActor [weak windowModel, weak portal = viewerHUD] in
+            // Into the HUD's scene (it may take a frame or two), then a moment
+            // for the 3D mode to settle there.
+            for _ in 0 ..< 60 where entity.scene == nil || portal?.spatialContent !== entity {
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+            try? await Task.sleep(for: .milliseconds(250))
+            guard let windowModel, let portal, portal.isInHUD, portal.spatialContent === entity,
+                  windowModel.desiredViewingMode == .spatial3DImmersive,
+                  var ipc = entity.components[ImagePresentationComponent.self],
+                  ipc.desiredViewingMode == .spatial3D else { return }
+            ipc.desiredViewingMode = .spatial3DImmersive
+            entity.components.set(ipc)
         }
     }
 
@@ -1350,13 +1390,22 @@ struct PhotoDisplayView: View {
             portal.onSpatialContentTap = nil
         }
         windowModel.contentEntity.removeFromParent()
+        // The window applies its opacity itself (`fitSpatialPicture`).
+        windowModel.contentEntity.components.remove(OpacityComponent.self)
         if !windowModel.is3DMode { windowModel.spatialPictureLentToHUD = false }
     }
 
-    /// The forearm remote (`PhotoSleeveRemote`) for this photo while it is in
-    /// the HUD, joined to the HUD's space through the portal's hooks.
-    private func installSleeveHooks() {
+    /// What this photo adds to the HUD: the forearm remote
+    /// (`PhotoSleeveRemote`), joined to the HUD's space through the portal's
+    /// hooks, and an opacity slider on the HUD's bar in place of its size
+    /// slider. A RealityKit 3D picture, Immersive most of all, covers the
+    /// view, and its opacity was otherwise behind a popover the HUD can't
+    /// show (user, 2026-11-14).
+    private func installHUDHooks() {
         guard let portal = viewerHUD else { return }
+        portal.barControl = AnyView(PhotoHUDOpacitySlider(model: windowModel))
+        // The bar hides with the ornaments (user, 2026-11-14).
+        portal.chromeFollowsControls = true
         portal.spaceDidOpen = { [weak windowModel, weak portal] root in
             guard let windowModel else { return }
             let remote = PhotoSleeveRemote(model: windowModel) { [weak portal] in
@@ -1385,6 +1434,14 @@ struct PhotoDisplayView: View {
         // Behind the HUD's controls and its tap plane (5 mm back), which the
         // picture's depth otherwise covered.
         entity.position = SIMD3<Float>(0, 0, -hudSpatialRecess)
+        // The window's SwiftUI opacity doesn't reach the picture here. Read
+        // here, so a change refits it; taken off again when it goes back.
+        let opacity = Float(model.effectiveAdjustments.opacity)
+        if opacity >= 0.999 {
+            entity.components.remove(OpacityComponent.self)
+        } else if entity.components[OpacityComponent.self]?.opacity != opacity {
+            entity.components.set(OpacityComponent(opacity: opacity))
+        }
     }
 
     /// How far behind the HUD's attachment the RealityKit picture sits, in
@@ -1669,6 +1726,33 @@ private struct EntitySwipeGestureModifier: ViewModifier {
                     onEnded(value.translation.width, value.predictedEndTranslation.width)
                 }
         )
+    }
+}
+#endif
+
+#if os(visionOS)
+/// The photo HUD bar's slider: the picture's opacity, the same value the
+/// Adjustments popover's Opacity sets (linear, 1-100 %), remembered with the
+/// picture's other adjustments when let go.
+struct PhotoHUDOpacitySlider: View {
+    let model: PhotoWindowModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "circle.lefthalf.filled")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Slider(value: Binding(get: { model.currentAdjustments.opacity },
+                                  set: { model.currentAdjustments.opacity = $0 }),
+                   in: 0.01 ... 1,
+                   onEditingChanged: { editing in
+                       guard !editing else { return }
+                       Task { await model.trackAdjustments() }
+                       model.reloadImagePresentationWithAdjustments()
+                   })
+                .frame(width: 180)
+                .accessibilityLabel("Opacity")
+        }
     }
 }
 #endif

@@ -387,7 +387,9 @@ extension PhotoWindowModel {
         // Set the desired viewing mode before generating so that it will trigger the
         // generation animation. Preserve .spatial3DImmersive if already set (e.g. when
         // the user clicked immersive or auto-restore targets immersive).
-        imagePresentationComponent.desiredViewingMode = .spatial3D
+        // Flat while a popover is open (an adjustment re-bakes under it); the
+        // popover's closing turns the generated scene on.
+        imagePresentationComponent.desiredViewingMode = flattenedForPopover ? .mono : .spatial3D
         if desiredViewingMode != .spatial3DImmersive {
             desiredViewingMode = .spatial3D
         }
@@ -425,7 +427,13 @@ extension PhotoWindowModel {
 
                 // Apply the final viewing mode (immersive or spatial3D)
                 if shouldBeImmersive {
-                    self.applyDesiredViewingMode(.spatial3DImmersive)
+                    // Under a popover only the choice is kept; its closing
+                    // shows it (`flattenForPopover`).
+                    if self.flattenedForPopover {
+                        self.desiredViewingMode = .spatial3DImmersive
+                    } else {
+                        self.applyDesiredViewingMode(.spatial3DImmersive)
+                    }
                     await self.trackViewingMode(.spatial3DImmersive)
                 } else {
                     if let aspectRatio = imagePresentationComponent.aspectRatio(for: .spatial3D) {
@@ -520,6 +528,45 @@ extension PhotoWindowModel {
 
         await createImagePresentationComponent()
         await generateSpatial3DImage()
+    }
+
+    // MARK: - Flat while a popover is open
+
+    /// The Adjustments or Info popover opened or closed over the window.
+    ///
+    /// A RealityKit 3D picture stands out of the window, in front of where
+    /// the system draws a popover, and covers it. So while one is open the
+    /// picture shows flat, as AI 3D video turns its 3D off under a menu. Only
+    /// the component's own mode changes: the generated scene stays on it, and
+    /// switching back is the same switch `switchToViewingMode` makes for a
+    /// generated picture, with no new generation. Picking 2D in the 3D menu
+    /// is not that: `deactivate3DMode` lets the picture go, and coming back
+    /// regenerates it, which this must never do (user, 2026-11-14). The menus
+    /// don't flatten it: the 3D menu changes the mode itself, and
+    /// `deactivate3DMode` reads a flattened component as already flat.
+    /// Immersive too: its picture covered the popover the same way (device,
+    /// 2026-11-14), and it comes back through `applyDesiredViewingMode`, which
+    /// sizes the window for it again. Not in the HUD, whose panel hangs beside
+    /// the picture rather than in front of it.
+    func flattenForPopover(_ open: Bool) {
+        let shows3D = desiredViewingMode == .spatial3D || desiredViewingMode == .spatial3DImmersive
+        if open {
+            guard !flattenedForPopover, !spatialPictureLentToHUD, is3DMode, shows3D,
+                  var ipc = contentEntity.components[ImagePresentationComponent.self],
+                  ipc.desiredViewingMode == desiredViewingMode else { return }
+            flattenedForPopover = true
+            ipc.desiredViewingMode = .mono
+            contentEntity.components.set(ipc)
+        } else {
+            guard flattenedForPopover else { return }
+            flattenedForPopover = false
+            // Gone (an adjustment's 2D preview took it) or no longer wanted:
+            // whoever makes it next asks for the mode the user chose.
+            guard is3DMode, shows3D,
+                  let ipc = contentEntity.components[ImagePresentationComponent.self],
+                  ipc.desiredViewingMode == .mono else { return }
+            applyDesiredViewingMode(desiredViewingMode)
+        }
     }
 
     // MARK: - The 3D menu's choices
