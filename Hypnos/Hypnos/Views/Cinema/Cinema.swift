@@ -1168,7 +1168,7 @@ struct CinemaSettings: View {
             Slider(value: $cinema.screenWidthDegrees, in: 30 ... 100, step: 1)
         }
         Toggle("Dim Surroundings", isOn: $cinema.dimsSurroundings)
-        CinemaSleeveSettings()
+        ForearmSleeveSettings()
         Text("Cinema: \(cinema.status)").font(.caption).foregroundStyle(.secondary)
     }
 }

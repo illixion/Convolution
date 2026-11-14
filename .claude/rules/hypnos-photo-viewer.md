@@ -174,8 +174,19 @@ the churn below re-created it, and the old one's onDisappear took back what the
 new one had just lent, leaving the picture in no scene. The window makes a new
 RealityView on return, which adopts the component as it is
 (`spatialPictureLentToHUD`) instead of `createImagePresentationComponent`'s
-path for an existing component, which resets the mode to mono. Not yet on the
-HUD: popovers (Adjustments), which visionOS rejects in an immersive space.
+path for an existing component, which resets the mode to mono.
+
+**The HUD's forearm remote** (`Views/Pictures/PhotoSleeveRemote.swift`): visionOS
+rejects popovers in an immersive space, so the Adjustments popover can't open in
+the HUD. While a photo is there the wearer gets the shared `ForearmSleeve`
+(`Views/Sleeve/`) with the photo remote: the picture's name and place, previous /
+next, the chrome, Return to Window, 2D / RK 3D / Immersive / AI 3D, and an Adjust
+page (brightness, contrast, saturation, opacity, Reset). Each press makes the
+window's own call (`toggleRealityKit3D`, `showFlat`, the popover's slider curve);
+a slider is committed (tracked, 3D re-baked) once let go. It is attached through
+RAVEUI's `spaceDidOpen` / `spaceDidClose` on the HUD portal (`installSleeveHooks`
+in `PhotoDisplayView`); its switch and arm are the cinema's (Sound and Picture ›
+Cinema).
 
 **Teardown waits** (`onTeardown`, `Support/TeardownOnDisappear.swift`): the
 photo, shared-photo and slideshow windows clean up only once they have stayed

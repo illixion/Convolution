@@ -25,7 +25,7 @@ enum FilmDebugEndpoints {
         guard !registered else { return }
         registered = true
         #if os(visionOS)
-        DebugSurface.shared.register(CinemaSleeveEndpoints.all)
+        DebugSurface.shared.register(ForearmSleeveEndpoints.all)
         #endif
         DebugSurface.shared.register([
             .query("film", "The film player: transport, the audio clock and its segments, the picture renderer, and "

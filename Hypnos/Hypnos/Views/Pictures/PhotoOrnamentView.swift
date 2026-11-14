@@ -244,14 +244,7 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
                     isChecked: windowModel.desiredViewingMode == .spatial3D && !windowModel.isRawSplatMode,
                     isDisabled: windowModel.spatial3DImageState == .generating && windowModel.desiredViewingMode != .spatial3DImmersive
                 ) {
-                    Task {
-                        if windowModel.desiredViewingMode == .spatial3D && !windowModel.isRawSplatMode {
-                            await windowModel.switchToViewingMode(.mono)
-                        } else {
-                            await leaveRawSplat()
-                            await windowModel.switchToViewingMode(.spatial3D)
-                        }
-                    }
+                    Task { await windowModel.toggleRealityKit3D(immersive: false) }
                 }
 
                 nativeMenuButton(
@@ -260,14 +253,7 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
                     isChecked: windowModel.desiredViewingMode == .spatial3DImmersive && !windowModel.isRawSplatMode,
                     isDisabled: windowModel.spatial3DImageState == .generating && windowModel.desiredViewingMode != .spatial3D
                 ) {
-                    Task {
-                        if windowModel.desiredViewingMode == .spatial3DImmersive && !windowModel.isRawSplatMode {
-                            await windowModel.switchToViewingMode(.mono)
-                        } else {
-                            await leaveRawSplat()
-                            await windowModel.switchToViewingMode(.spatial3DImmersive)
-                        }
-                    }
+                    Task { await windowModel.toggleRealityKit3D(immersive: true) }
                 }
 
                 #if HYPNOS_PRIVATE_API && os(visionOS)
@@ -327,18 +313,7 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
                         icon: "rectangle",
                         isChecked: false
                     ) {
-                        Task {
-                            windowModel.isRawSplatMode = false
-                            if windowModel.isDioramaMode {
-                                await windowModel.setDioramaMode(false)
-                            }
-                            if windowModel.isAIDepthMode {
-                                await windowModel.setAIDepthMode(false)
-                            }
-                            if windowModel.desiredViewingMode != .mono {
-                                await windowModel.switchToViewingMode(.mono)
-                            }
-                        }
+                        Task { await windowModel.showFlat() }
                     }
                 }
             }
@@ -384,16 +359,6 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
         case .spatial3DImmersive: return "3D: RK 3D (Immersive)"
         default: return "3D"
         }
-    }
-
-    /// Picking a stock RealityKit item from Raw Splat 3D: turn two-pass back on
-    /// for the component the window keeps.
-    private func leaveRawSplat() async {
-        guard windowModel.isRawSplatMode else { return }
-        windowModel.isRawSplatMode = false
-        #if HYPNOS_PRIVATE_API && os(visionOS)
-        windowModel.applyPrivateSpatial3DTuning()
-        #endif
     }
 
     private var is3DModeActive: Bool {

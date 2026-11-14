@@ -347,6 +347,8 @@ struct PhotoDisplayView: View {
                 }
             }
         }
+        // Before the HUD opens: its space calls them as it comes up.
+        .onAppear { installSleeveHooks() }
         #endif
         #if os(iOS)
         // A photo viewer is a full-bleed surface: fit the picture to the whole
@@ -1349,6 +1351,21 @@ struct PhotoDisplayView: View {
         }
         windowModel.contentEntity.removeFromParent()
         if !windowModel.is3DMode { windowModel.spatialPictureLentToHUD = false }
+    }
+
+    /// The forearm remote (`PhotoSleeveRemote`) for this photo while it is in
+    /// the HUD, joined to the HUD's space through the portal's hooks.
+    private func installSleeveHooks() {
+        guard let portal = viewerHUD else { return }
+        portal.spaceDidOpen = { [weak windowModel, weak portal] root in
+            guard let windowModel else { return }
+            let remote = PhotoSleeveRemote(model: windowModel) { [weak portal] in
+                Task { await portal?.returnToWindow() }
+            }
+            ForearmSleeve.shared.spaceOpened(remote)
+            ForearmSleeve.shared.attach(to: root)
+        }
+        portal.spaceDidClose = { ForearmSleeve.shared.spaceClosed() }
     }
 
     /// `scaleImagePresentationToFit` for the HUD: fits the presentation in

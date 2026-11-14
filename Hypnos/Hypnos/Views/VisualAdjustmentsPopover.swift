@@ -434,7 +434,7 @@ struct VisualAdjustmentsPopover: View {
 
     /// Exponent for non-linear slider curve. Higher values give more precision
     /// near the default and faster acceleration toward the extremes.
-    private static let curveExponent: Double = 2.0
+    nonisolated private static let curveExponent: Double = 2.0
 
     @ViewBuilder
     private func adjustmentSlider(
@@ -479,35 +479,40 @@ struct VisualAdjustmentsPopover: View {
         range: ClosedRange<Double>,
         defaultValue: Double
     ) -> Binding<Double> {
-        let exponent = Self.curveExponent
-        let lower = range.lowerBound
-        let upper = range.upperBound
-
-        return Binding<Double>(
-            get: {
-                let v = value.wrappedValue
-                if v <= defaultValue {
-                    let fraction = defaultValue > lower
-                        ? (defaultValue - v) / (defaultValue - lower)
-                        : 0
-                    return 0.5 - pow(fraction, 1.0 / exponent) * 0.5
-                } else {
-                    let fraction = upper > defaultValue
-                        ? (v - defaultValue) / (upper - defaultValue)
-                        : 0
-                    return 0.5 + pow(fraction, 1.0 / exponent) * 0.5
-                }
-            },
-            set: { t in
-                if t <= 0.5 {
-                    let halfT = (0.5 - t) / 0.5
-                    value.wrappedValue = defaultValue - pow(halfT, exponent) * (defaultValue - lower)
-                } else {
-                    let halfT = (t - 0.5) / 0.5
-                    value.wrappedValue = defaultValue + pow(halfT, exponent) * (upper - defaultValue)
-                }
-            }
+        Binding<Double>(
+            get: { Self.sliderPosition(of: value.wrappedValue, in: range, defaultValue: defaultValue) },
+            set: { value.wrappedValue = Self.value(atSliderPosition: $0, in: range, defaultValue: defaultValue) }
         )
+    }
+
+    /// Where `value` sits on an adjustment slider (0…1, the default at 0.5),
+    /// on the power curve that gives small changes near the default more
+    /// travel. The forearm remote's sliders use it too.
+    nonisolated static func sliderPosition(of value: Double, in range: ClosedRange<Double>, defaultValue: Double) -> Double {
+        let exponent = curveExponent
+        if value <= defaultValue {
+            let fraction = defaultValue > range.lowerBound
+                ? (defaultValue - value) / (defaultValue - range.lowerBound)
+                : 0
+            return 0.5 - pow(max(fraction, 0), 1.0 / exponent) * 0.5
+        } else {
+            let fraction = range.upperBound > defaultValue
+                ? (value - defaultValue) / (range.upperBound - defaultValue)
+                : 0
+            return 0.5 + pow(max(fraction, 0), 1.0 / exponent) * 0.5
+        }
+    }
+
+    /// The value at slider position `t` (0…1): the inverse of `sliderPosition`.
+    nonisolated static func value(atSliderPosition t: Double, in range: ClosedRange<Double>, defaultValue: Double) -> Double {
+        let exponent = curveExponent
+        if t <= 0.5 {
+            let halfT = (0.5 - t) / 0.5
+            return defaultValue - pow(halfT, exponent) * (defaultValue - range.lowerBound)
+        } else {
+            let halfT = (t - 0.5) / 0.5
+            return defaultValue + pow(halfT, exponent) * (range.upperBound - defaultValue)
+        }
     }
 
     /// Format slideshow delay as human-readable string

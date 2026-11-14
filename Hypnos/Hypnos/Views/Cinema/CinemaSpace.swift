@@ -102,7 +102,7 @@ final class CinemaSpace {
     /// The space is up: placement runs, and the cinema learns it is open.
     func appeared(actions: (open: OpenImmersiveSpaceAction, dismiss: DismissImmersiveSpaceAction)? = nil) {
         cinema.spaceAppeared(actions: actions)
-        CinemaSleeve.shared.spaceOpened()
+        ForearmSleeve.shared.spaceOpened(CinemaRemote.shared, headPose: { Cinema.shared.hudDevicePose() })
         // Placed in a loop rather than on a view update: the window's plane view may still lay
         // the entity out once after it moves here.
         ticking?.cancel()
@@ -119,7 +119,7 @@ final class CinemaSpace {
         ticking = nil
         stopStage()
         presentation.dismiss()
-        CinemaSleeve.shared.spaceClosed()
+        ForearmSleeve.shared.spaceClosed()
         cinema.spaceDisappeared()
     }
 
@@ -133,9 +133,9 @@ final class CinemaSpace {
     /// spatial-ai-character stopped once the space hid the mask (worn
     /// 2026-11-12), so HUD does too. Big Screen is across the room, where
     /// hands in front of it should look like hands in front of it; but while
-    /// the remote on the forearm shows (`CinemaSleeve`), its tiles are a
+    /// the remote on the forearm shows (`ForearmSleeve`), its tiles are a
     /// centimetre off that arm and fade the same way, so the mask goes then too.
-    var hidesUpperLimbs: Bool { cinema.mode == .hud || CinemaSleeve.shared.isVisible }
+    var hidesUpperLimbs: Bool { cinema.mode == .hud || ForearmSleeve.shared.isVisible }
 
     // MARK: The film's sound
 
@@ -201,7 +201,7 @@ final class CinemaSpace {
     private func placeScreen() {
         followFilmStage()
         // The remote on the forearm steps itself once it has the scene.
-        CinemaSleeve.shared.attach(to: root)
+        ForearmSleeve.shared.attach(to: root)
         let filmPicture = session.player.video.videoEntity
         // A film picture left here by a previous owner goes back to its
         // window, which re-adds it once it shows it again.

@@ -522,6 +522,38 @@ extension PhotoWindowModel {
         await generateSpatial3DImage()
     }
 
+    // MARK: - The 3D menu's choices
+
+    /// Picking a stock RealityKit item from Raw Splat 3D: turn two-pass back on
+    /// for the component the window keeps.
+    func leaveRawSplatMode() {
+        guard isRawSplatMode else { return }
+        isRawSplatMode = false
+        #if HYPNOS_PRIVATE_API && os(visionOS)
+        applyPrivateSpatial3DTuning()
+        #endif
+    }
+
+    /// The 3D menu's RealityKit items, from the ornament or the forearm remote:
+    /// picking the mode already in force goes back to 2D.
+    func toggleRealityKit3D(immersive: Bool) async {
+        let mode: ImagePresentationComponent.ViewingMode = immersive ? .spatial3DImmersive : .spatial3D
+        if desiredViewingMode == mode && !isRawSplatMode {
+            await switchToViewingMode(.mono)
+        } else {
+            leaveRawSplatMode()
+            await switchToViewingMode(mode)
+        }
+    }
+
+    /// The 3D menu's 2D item: every 3D mode off.
+    func showFlat() async {
+        isRawSplatMode = false
+        if isDioramaMode { await setDioramaMode(false) }
+        if isAIDepthMode { await setAIDepthMode(false) }
+        if desiredViewingMode != .mono { await switchToViewingMode(.mono) }
+    }
+
     // MARK: - Viewing Mode Switching
 
     /// Switch directly to a specific viewing mode without cycling.

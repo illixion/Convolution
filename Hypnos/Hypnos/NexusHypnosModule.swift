@@ -86,7 +86,7 @@ public final class HypnosSpaceModule: RAVESpaceModule, CinemaSpaceHosting {
     private var requirements: RAVESpaceRequirements {
         RAVESpaceRequirements(immersion: .mixed, hidesUpperLimbs: space.hidesUpperLimbs,
                               surroundings: space.wantsDarkSurroundings ? .systemDark : nil,
-                              needsHands: CinemaSleeve.shared.isEnabled)
+                              needsHands: ForearmSleeve.shared.isEnabled)
     }
 
     /// Keep the broker's copy of the requirements current while the module is in the space,
@@ -106,7 +106,7 @@ public final class HypnosSpaceModule: RAVESpaceModule, CinemaSpaceHosting {
         space.build(appModel: appModel)
         root.addChild(space.root)
         // The forearm remote reads the host's hands; it runs no session of its own here.
-        CinemaSleeve.shared.hostHands = { [weak services] in
+        ForearmSleeve.shared.hostHands = { [weak services] in
             guard let services, services.handsRunning else { return nil }
             return (services.leftHand, services.rightHand)
         }
