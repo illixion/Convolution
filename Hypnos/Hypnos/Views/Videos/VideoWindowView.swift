@@ -267,6 +267,10 @@ struct VideoWindowView: View {
                             startMuted: windowModel.isMuted,
                             loops: windowModel.loopsAtEnd,
                             onPlaybackError: {
+                                #if HYPNOS_YOUTUBE
+                                // A retired YouTube stream: a new one, still in 3D.
+                                if windowModel.recoverYouTubeStream(reason: "the 3D player failed on it") { return }
+                                #endif
                                 // Fall back to the flat native player if the
                                 // stereo pipeline can't decode this source.
                                 if liveLayout != nil {

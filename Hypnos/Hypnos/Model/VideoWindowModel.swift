@@ -641,6 +641,10 @@ final class VideoWindowModel {
     @ObservationIgnored var youTubeSurroundTask: Task<Void, Never>?
     /// The surround stream failed to play: this video stays stereo.
     @ObservationIgnored var youTubeSurroundRefused = false
+    /// When the master playing was last read from YouTube. A player that
+    /// fails on a stream older than a moment resolves the video again
+    /// (`recoverYouTubeStream`) instead of falling back to WebKit.
+    @ObservationIgnored var youTubeStreamReadAt: Date?
     #endif
 
     // MARK: - Initialization (side-effect-free)
@@ -1009,6 +1013,14 @@ final class VideoWindowModel {
         pseudo3DEnabled = false
         remuxedStreamURL = nil
         remuxRefused = false
+        #if HYPNOS_YOUTUBE
+        // YouTube's stream URLs die without warning (a sleep, a long pause):
+        // retrying the same one fails the same way, so ask for a new one.
+        if refreshYouTubeStream(reason: "retry") {
+            armLoadStallWatch()
+            return
+        }
+        #endif
         resolvePlaybackRenderer()
         armLoadStallWatch()
     }
@@ -1755,6 +1767,7 @@ final class VideoWindowModel {
             return
         }
         #if HYPNOS_YOUTUBE
+        if recoverYouTubeStream(reason: "the native player failed on it") { return }
         if dropYouTubeHDR(reason: "the native player couldn't play the HDR variants") { return }
         if dropYouTubeSurround(reason: "the native player couldn't play the surround stream") { return }
         #endif

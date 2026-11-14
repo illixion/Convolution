@@ -75,6 +75,37 @@ extension VideoWindowModel {
         return true
     }
 
+    /// How long after its master was read a stream counts as possibly
+    /// retired, so that a player failing on it resolves the video again.
+    /// Shorter than any lifetime seen (a 404 seven minutes in), longer than
+    /// a fresh stream's own failures take to show (HDR, surround: seconds),
+    /// so those still reach their own fallbacks.
+    private static let youTubeStreamGrace: TimeInterval = 30
+
+    /// True when the window is resolving the video again because a player
+    /// failed on a stream read more than `youTubeStreamGrace` ago. YouTube
+    /// retires the variant playlists behind a master long before the
+    /// master's own `expire` (a headset asleep for a while, or just minutes
+    /// of playing): the player already running keeps what it fetched and
+    /// plays on, but any new one (AI 3D, a retry, a wake) gets 404 for every
+    /// variant, and WebKit fails on the same URLs. The new stream plays from
+    /// the playhead in the mode the window is in (AI 3D stays on).
+    func recoverYouTubeStream(reason: String) -> Bool {
+        guard youTubeID != nil, let readAt = youTubeStreamReadAt,
+              Date().timeIntervalSince(readAt) > Self.youTubeStreamGrace else { return false }
+        return refreshYouTubeStream(reason: reason)
+    }
+
+    /// Resolves the video again and plays the new stream from the playhead;
+    /// false when this isn't a YouTube video.
+    func refreshYouTubeStream(reason: String) -> Bool {
+        guard let id = youTubeID else { return false }
+        // Until the new master is read, a failure is not this one again.
+        youTubeStreamReadAt = nil
+        reopenYouTube(id, reason: reason)
+        return true
+    }
+
     private func reopenYouTube(_ id: YouTubeVideoID, reason: String) {
         AppLogger.youtube.info("Resolving the video again: \(reason, privacy: .public)")
         playbackRenderer = .resolving
@@ -105,6 +136,7 @@ extension VideoWindowModel {
         youTubeRenditionTask = Task { [weak self] in
             let text = await YouTubeRenditions.playlistText(at: master)
             guard let self, !Task.isCancelled else { return }
+            if text != nil { self.youTubeStreamReadAt = Date() }
             let renditions = text.map { YouTubeRenditions.parse(master: $0) } ?? []
             if let text, !renditions.isEmpty {
                 self.youTubeMaster = (master, text)
