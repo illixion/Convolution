@@ -63,7 +63,7 @@ struct SharedPhotoWindowView: View {
             // See PhotoWindowView: a disconnected scene keeps its views.
             sceneDelegate?.onDisconnect { [weak windowModel] in windowModel?.cleanup() }
         }
-        .onDisappear {
+        .onTeardown(key: ObjectIdentifier(windowModel)) {
             windowModel.cleanup()
             Task {
                 await SharedMediaCache.shared.removeCachedFile(for: item.id)

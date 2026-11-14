@@ -158,3 +158,13 @@ and `raveViewerHUD`; source-window geometry comes from the portal. Never send
 window geometry requests while in HUD. A photo aspect change during HUD is
 applied through `WindowResizeCoalescer` on return. The source window retains a
 return control, including when the system's attachment controls are unavailable.
+
+**Teardown waits** (`onTeardown`, `Support/TeardownOnDisappear.swift`): the
+photo, shared-photo and slideshow windows clean up only once they have stayed
+gone for a second. Inside the HUD wrapper SwiftUI reported `onDisappear` then
+`onAppear` for a live photo window ~0.2 s after its first frame and at each
+scene-phase change (device, 2026-11-14; `--inject` builds, cause not found: the
+hosting view never left its window and the hosted root was not replaced), and
+the immediate `cleanup()` left the window on its spinner for good. The pending
+teardown is keyed by the window's model or value, not view state, which the pair
+resets. A real close is still torn down at once by `SceneDelegate.onDisconnect`.

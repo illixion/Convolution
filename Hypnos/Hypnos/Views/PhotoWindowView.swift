@@ -186,7 +186,7 @@ struct PhotoWindowView: View {
             // model) alive with no onDisappear: give its textures back.
             sceneDelegate?.onDisconnect { [weak windowModel] in windowModel?.cleanup() }
         }
-        .onDisappear {
+        .onTeardown(key: ObjectIdentifier(windowModel)) {
             renderRecoveryTask?.cancel()
             windowModel.cleanup()
         }

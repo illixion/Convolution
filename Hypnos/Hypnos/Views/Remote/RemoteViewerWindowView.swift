@@ -183,7 +183,7 @@ struct RemoteViewerWindowView: View {
             // onDisappear, and the slideshow would run on unseen.
             sceneDelegate?.onDisconnect { [self] in tearDown() }
         }
-        .onDisappear { tearDown() }
+        .onTeardown(key: windowValue) { tearDown() }
         .onChange(of: viewerModel?.isTransitioning) { _, isTransitioning in
             // Refresh IPC's off-axis blur calibration mid-crossfade so
             // the window's 1pt size flicker is masked by the fade
