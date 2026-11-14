@@ -159,6 +159,24 @@ window geometry requests while in HUD. A photo aspect change during HUD is
 applied through `WindowResizeCoalescer` on return. The source window retains a
 return control, including when the system's attachment controls are unavailable.
 
+**RealityKit 3D in the HUD** (2026-11-14): an `ImagePresentationComponent`
+shows nothing inside the HUD's attachment (RealityKit 3D and its immersive mode
+were transparent on the device), and a RealityView moved there and back left the
+window white. So in the HUD `PhotoDisplayView` swaps the window's RealityView for
+`hudSpatialPicture`, a clear stand-in (taps, swipes, size), and lends
+`contentEntity` to the HUD's space through the portal's `spatialContent`
+(`fitSpatialContent` scales it into the viewer's area, with the Distance scale,
+and sets it `photo.hudSpatialRecess` behind the attachment, 5 cm by default: at
+the attachment's plane it covered the HUD's controls). Taps come through the
+portal's tap plane (`onSpatialContentTap`), since the clear stand-in takes none.
+The stand-in gives the picture back only on a real exit (left the HUD or 3D):
+the churn below re-created it, and the old one's onDisappear took back what the
+new one had just lent, leaving the picture in no scene. The window makes a new
+RealityView on return, which adopts the component as it is
+(`spatialPictureLentToHUD`) instead of `createImagePresentationComponent`'s
+path for an existing component, which resets the mode to mono. Not yet on the
+HUD: popovers (Adjustments), which visionOS rejects in an immersive space.
+
 **Teardown waits** (`onTeardown`, `Support/TeardownOnDisappear.swift`): the
 photo, shared-photo and slideshow windows clean up only once they have stayed
 gone for a second. Inside the HUD wrapper SwiftUI reported `onDisappear` then

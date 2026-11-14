@@ -122,6 +122,14 @@ class PhotoWindowModel {
 
     var inputPlaneEntity: Entity = Entity()
 
+    /// The RealityKit picture (`contentEntity`) is lent to the viewer HUD's
+    /// space, or just came back from it. The window's RealityView, made anew
+    /// on return, adopts the existing component as it is instead of going
+    /// through `createImagePresentationComponent`, whose path for a component
+    /// that already exists resets the window's viewing mode to mono. Held by
+    /// the model because the window's view state can start over meanwhile.
+    @ObservationIgnored var spatialPictureLentToHUD = false
+
     /// True while this window owns the Spatial3D ImmersiveSpace presentation.
     /// Set by the view-mode switch when `AppModel.fullyImmersive3DMode` is on
     /// and the user picks Immersive 3D; PhotoDisplayView observes this and

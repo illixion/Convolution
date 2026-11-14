@@ -644,10 +644,21 @@ struct PhotoDisplayView: View {
     private var nonAnimatedImageContent: some View {
         if windowModel.is3DMode {
             #if os(visionOS)
+            if viewerHUD?.isInHUD == true {
+                // The HUD's attachment can't show the RealityKit picture: it
+                // goes to the HUD's space (`hudSpatialPicture`).
+                hudSpatialPicture
+            } else {
             // Display with RealityKit for 3D spatial conversion (full resolution)
             GeometryReader3D { geometry in
                 RealityView { content in
-                    await windowModel.createImagePresentationComponent()
+                    if windowModel.spatialPictureLentToHUD {
+                        // Back from the HUD: the component and its mode are as
+                        // the HUD left them.
+                        windowModel.spatialPictureLentToHUD = false
+                    } else {
+                        await windowModel.createImagePresentationComponent()
+                    }
                     let availableBounds = content.convert(geometry.frame(in: .local), from: .local, to: .scene)
                     scaleImagePresentationToFit(in: availableBounds)
                     if windowModel.contentEntity.parent == nil {
@@ -773,6 +784,7 @@ struct PhotoDisplayView: View {
                 cornerRadius: windowModel.isViewingSpatial3DImmersive ? 0 : appModel.photoCornerRadius,
                 style: .continuous
             ))
+            }
             #else
             // Spatial 3D is visionOS-only; `is3DMode` is never set on iOS
             // (PlatformCapabilities.supportsSpatial3D), so this is a guard
@@ -1277,6 +1289,94 @@ struct PhotoDisplayView: View {
             }
         }
     }
+
+    #if os(visionOS)
+    /// The RealityKit picture while the viewer is in the HUD. An
+    /// `ImagePresentationComponent` shows nothing inside the HUD's attachment
+    /// (RealityKit 3D and its immersive mode came out transparent, device
+    /// 2026-11-14), and a RealityView moved there and back left the window
+    /// white. So the entity is lent to the HUD's own space, which places it
+    /// over this clear stand-in; the stand-in keeps the picture's size, taps
+    /// and swipes. The window's RealityView is made anew on return.
+    private var hudSpatialPicture: some View {
+        Color.clear
+            .aspectRatio(windowModel.imageAspectRatio, contentMode: .fit)
+            .contentShape(.rect)
+            .onTapGesture { windowModel.toggleUIVisibility() }
+            .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissDragAction))
+            .task { await lendSpatialPictureToHUD() }
+            .onDisappear { reclaimSpatialPictureFromHUD() }
+    }
+
+    /// What the window's RealityView make closure does, with the HUD's space
+    /// in place of the window's scene.
+    private func lendSpatialPictureToHUD() async {
+        guard let portal = viewerHUD, portal.isInHUD else { return }
+        // A picture already in 3D keeps its component and mode; one switched
+        // to 3D in the HUD gets its component here.
+        if windowModel.contentEntity.components[ImagePresentationComponent.self] == nil {
+            await windowModel.createImagePresentationComponent()
+        }
+        guard windowModel.is3DMode, portal.isInHUD else { return }
+        windowModel.spatialPictureLentToHUD = true
+        portal.fitSpatialContent = { [weak windowModel] entity, box in
+            guard let windowModel else { return }
+            Self.fitSpatialPicture(entity, into: box, model: windowModel)
+        }
+        portal.onSpatialContentTap = { [weak windowModel] in windowModel?.toggleUIVisibility() }
+        portal.spatialContent = windowModel.contentEntity
+        if windowModel.pendingGenerate3D {
+            windowModel.pendingGenerate3D = false
+            await windowModel.generateSpatial3DImage()
+        } else {
+            await windowModel.autoGenerateSpatial3DIfNeeded()
+        }
+    }
+
+    /// Takes the picture back from the HUD's space: on return to the window
+    /// (whose new RealityView adopts it as it is) or on leaving 3D. Not on a
+    /// disappearance while still in the HUD and in 3D: SwiftUI churns this
+    /// stand-in (see `onTeardown`), and the new one can lend the picture
+    /// before the old one's onDisappear, which then took it back and left it
+    /// in no scene (device, 2026-11-14). The HUD's space hands it back by
+    /// itself when it closes.
+    private func reclaimSpatialPictureFromHUD() {
+        if viewerHUD?.isInHUD == true, windowModel.is3DMode { return }
+        if let portal = viewerHUD, portal.spatialContent === windowModel.contentEntity {
+            portal.spatialContent = nil
+            portal.fitSpatialContent = nil
+            portal.onSpatialContentTap = nil
+        }
+        windowModel.contentEntity.removeFromParent()
+        if !windowModel.is3DMode { windowModel.spatialPictureLentToHUD = false }
+    }
+
+    /// `scaleImagePresentationToFit` for the HUD: fits the presentation in
+    /// the viewer's area of the HUD (metres), with the user's Distance scale.
+    /// Runs in the HUD space's RealityView update; reading the component
+    /// through `observable` refits it when generation changes its size.
+    private static func fitSpatialPicture(_ entity: Entity, into box: SIMD2<Float>, model: PhotoWindowModel) {
+        guard let ipc = entity.observable.components[ImagePresentationComponent.self] else { return }
+        let screen = ipc.presentationScreenSize
+        guard screen.x > 0, screen.y > 0, box.x > 0, box.y > 0 else { return }
+        let fit = min(box.x / screen.x, box.y / screen.y)
+        let userScale = model.desiredViewingMode == .spatial3DImmersive
+            ? model.currentAdjustments.immersiveScale
+            : model.currentAdjustments.scale
+        let scale = fit * Float(userScale)
+        entity.scale = SIMD3<Float>(scale, scale, 1)
+        // Behind the HUD's controls and its tap plane (5 mm back), which the
+        // picture's depth otherwise covered.
+        entity.position = SIMD3<Float>(0, 0, -hudSpatialRecess)
+    }
+
+    /// How far behind the HUD's attachment the RealityKit picture sits, in
+    /// metres. A tunable until the right depth is seen on the headset.
+    private static var hudSpatialRecess: Float {
+        DebugTunables.number("photo.hudSpatialRecess", Float(0.05), range: 0.01...0.3, step: 0.01,
+                             label: "Photo HUD: RealityKit 3D picture behind the controls (m)")
+    }
+    #endif
 
     /// Toggles the ornaments on a tap over an animated picture. Its web view
     /// takes every tap that reaches it, so without this a tap could only bring
