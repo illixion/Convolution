@@ -528,15 +528,9 @@ struct PhotoDisplayView: View {
             .aspectRatio(windowModel.imageAspectRatio, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: appModel.photoCornerRadius, style: .continuous))
             .overlay {
-                // Transparent tap target to re-show photo ornaments when UI is hidden.
-                // When visible, taps pass through to the HTML video controls instead.
-                if windowModel.isUIHidden {
-                    Color.clear
-                        .contentShape(.rect)
-                        .onTapGesture {
-                            windowModel.toggleUIVisibility()
-                        }
-                }
+                // The <video> fallback shows its own controls with the chrome:
+                // taps reach them then. The <img> tier has none.
+                chromeTapCatcher(passesTapsThroughWhileVisible: windowModel.animatedImgPlaybackFailed)
             }
             .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissDragAction))
             .onAppear {
@@ -565,15 +559,7 @@ struct PhotoDisplayView: View {
                 .opacity(windowModel.effectiveAdjustments.opacity)
                 .aspectRatio(windowModel.imageAspectRatio, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: appModel.photoCornerRadius, style: .continuous))
-                .overlay {
-                    if windowModel.isUIHidden {
-                        Color.clear
-                            .contentShape(.rect)
-                            .onTapGesture {
-                                windowModel.toggleUIVisibility()
-                            }
-                    }
-                }
+                .overlay { chromeTapCatcher() }
                 .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissDragAction))
                 .onAppear {
                     onFirstFramePresented?()
@@ -595,15 +581,7 @@ struct PhotoDisplayView: View {
                 .opacity(windowModel.effectiveAdjustments.opacity)
                 .aspectRatio(windowModel.imageAspectRatio, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: appModel.photoCornerRadius, style: .continuous))
-                .overlay {
-                    if windowModel.isUIHidden {
-                        Color.clear
-                            .contentShape(.rect)
-                            .onTapGesture {
-                                windowModel.toggleUIVisibility()
-                            }
-                    }
-                }
+                .overlay { chromeTapCatcher() }
                 .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissDragAction))
                 .onAppear {
                     onFirstFramePresented?()
@@ -635,15 +613,7 @@ struct PhotoDisplayView: View {
                 .opacity(windowModel.effectiveAdjustments.opacity)
                 .aspectRatio(windowModel.imageAspectRatio, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: appModel.photoCornerRadius, style: .continuous))
-                .overlay {
-                    if windowModel.isUIHidden {
-                        Color.clear
-                            .contentShape(.rect)
-                            .onTapGesture {
-                                windowModel.toggleUIVisibility()
-                            }
-                    }
-                }
+                .overlay { chromeTapCatcher() }
                 .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissDragAction))
                 .onAppear {
                     onFirstFramePresented?()
@@ -1305,6 +1275,21 @@ struct PhotoDisplayView: View {
                     force: true
                 )
             }
+        }
+    }
+
+    /// Toggles the ornaments on a tap over an animated picture. Its web view
+    /// takes every tap that reaches it, so without this a tap could only bring
+    /// the chrome back, never hide it. `passesTapsThroughWhileVisible` leaves
+    /// taps to a web player's own controls while the chrome (and so they) show.
+    @ViewBuilder
+    private func chromeTapCatcher(passesTapsThroughWhileVisible: Bool = false) -> some View {
+        if windowModel.isUIHidden || !passesTapsThroughWhileVisible {
+            Color.clear
+                .contentShape(.rect)
+                .onTapGesture {
+                    windowModel.toggleUIVisibility()
+                }
         }
     }
 

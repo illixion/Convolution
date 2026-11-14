@@ -36,6 +36,13 @@ The two thin wrapper views:
 
 **Important pattern:** `PhotoWindowModel.init` must be side-effect-free because SwiftUI may re-create the view struct multiple times while `@State` discards duplicate models. All side effects (window count tracking, image loading tasks) are deferred to the `start()` method called from `onAppear`.
 
+## Animated pictures
+GIF, animated WebP and animated JXL play in WebKit (`AnimatedImageWebView`), GIF and JXL through an HEVC conversion once
+one is cached. **Stash lists an animated WebP as a `VideoFile`** (it reads such files with ffprobe), so `visualFileType`
+alone can't decide `<video>` over `<img>`: a `<video>` element plays no WebP and the window showed nothing, transparent
+(device, 2026-11-14, a 1000×1000 animated WebP with alpha). `isAnimatedWebVisual` (the `<video>` path) is set only when
+the bytes aren't a picture ImageIO recognizes (`Data.isImageFile`: WebP, GIF, PNG/APNG, HEIC… yes; MP4 and WebM no).
+
 ## Image Display Strategy
 - **Default (Dynamic Image Resolution on):** Images open in GPU-backed 2D mode using an `MTLTexture` with `.private` storage (not counted as dirty CPU memory by jetsam). The source is downsampled via `CGImageSource`, uploaded to GPU via `CIContext.render`, and displayed through `MetalImageView` (MTKView wrapper). Re-downsampled on window resize (1-second debounce, 20% threshold). RealityKit is only loaded when the user activates 3D mode.
 - **Dynamic Image Resolution off:** Images load at full native resolution. No re-downsampling on resize.

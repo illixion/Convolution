@@ -24,6 +24,16 @@ extension Data {
         return CGImageSourceGetCount(source) > 1
     }
 
+    /// ImageIO reads these bytes as a picture (WebP, GIF, PNG/APNG, HEIC, …).
+    /// A video clip (MP4, WebM) is not one.
+    var isImageFile: Bool {
+        if isWebPContainer { return true }
+        guard let source = CGImageSourceCreateWithData(self as CFData, nil),
+              let sourceType = CGImageSourceGetType(source),
+              let type = UTType(sourceType as String) else { return false }
+        return type.conforms(to: .image)
+    }
+
     var isAnimatedWebP: Bool {
         guard isWebPContainer else { return false }
         return hasAnimatedWebPChunks

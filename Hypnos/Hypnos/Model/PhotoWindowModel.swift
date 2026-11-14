@@ -871,7 +871,11 @@ class PhotoWindowModel {
         let isWebPByFileName = fileNameExtension == "webp"
         let isWebPByBytes = data.isWebP
         let isAnimatedWebPByBytes = data.isAnimatedWebP
-        isAnimatedWebVisual = visualFileType == "VideoFile"
+        // Stash lists an animated WebP (any file ffprobe can read as frames)
+        // as a VideoFile, but a <video> element can't play a WebP and shows
+        // nothing. Only a real clip (MP4, WebM) plays as video; a picture
+        // goes to the <img> path that Safari uses for it too.
+        isAnimatedWebVisual = visualFileType == "VideoFile" && !data.isImageFile
         // Stash image endpoints often hide the real file extension in the URL.
         // Use the original filename from GraphQL as the format hint, then hand
         // the asset to the browser-based renderer which can display both static
