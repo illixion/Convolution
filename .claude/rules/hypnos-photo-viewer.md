@@ -195,10 +195,11 @@ Immersive drew nothing** in the HUD's space, while one switched to Immersive the
 drew right (device, 2026-11-14): `reenterImmersiveInHUD` shows it as RealityKit 3D
 until it is in the space's scene, then Immersive again. Not yet seen on the headset.
 
-**The HUD's frame:** its bottom bar hides with the ornaments (`chromeFollowsControls`),
-and its white move handle, which looks like a window's bar, is hidden while the
-picture is Immersive RealityKit 3D and shown otherwise, where it is how the HUD moves
-(user, 2026-11-14).
+**The HUD's frame** is laid out like the video HUD's (RAVEUI's viewer HUD, 2026-11-14):
+one row under the picture with the grab bar in the middle, the Opacity slider on its
+left and Recenter / Window on its right. The row hides with the ornaments
+(`chromeFollowsControls`), and the grab bar, which looks like a window's bar, is
+hidden while the picture is Immersive RealityKit 3D (user).
 
 **Adjustments in the HUD** is a panel over the right of the picture: the button uses
 `photoViewerPopover` (RAVEUI's `ravePlayerPopover` on visionOS), which in the HUD
