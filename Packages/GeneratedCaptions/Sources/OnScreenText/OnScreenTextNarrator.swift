@@ -129,6 +129,7 @@ public final class OnScreenTextNarrator {
               OnScreenTextKokoro.isDownloaded else { return }
         usedKokoro = true
         onDiagnostic?("Narration: loading the Kokoro voice")
+        OnScreenTextKokoro.shared.retain()
         Task { try? await OnScreenTextKokoro.shared.prepare() }
     }
 
@@ -140,7 +141,7 @@ public final class OnScreenTextNarrator {
         kokoroTask?.cancel(); kokoroTask = nil; kokoroFailed = false
         if usedKokoro {
             usedKokoro = false
-            Task { await OnScreenTextKokoro.shared.unload() }
+            OnScreenTextKokoro.shared.release()
         }
         engine?.stop()
         engine = nil; playerNode = nil; timePitch = nil; engineFormat = nil

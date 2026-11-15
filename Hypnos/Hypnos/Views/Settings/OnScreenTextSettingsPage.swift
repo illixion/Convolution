@@ -172,9 +172,10 @@ struct OnScreenTextSettingsPage: View {
         kokoroBusy = true
         kokoroError = nil
         Task {
+            OnScreenTextKokoro.shared.retain()
+            defer { OnScreenTextKokoro.shared.release() }
             do {
                 try await OnScreenTextKokoro.shared.prepare()
-                await OnScreenTextKokoro.shared.unload()
                 kokoroDownloaded = true
                 kokoroSize = OnScreenTextKokoro.diskSize()
             } catch {
@@ -242,9 +243,11 @@ private final class KokoroSamplePlayer {
     private var engine: AVAudioEngine?
     private var node: AVAudioPlayerNode?
     private var task: Task<Void, Never>?
+    private var retained = false
 
     func play(voice: String, rate: Float) {
         stopPlayback()
+        if !retained { retained = true; OnScreenTextKokoro.shared.retain() }
         task = Task {
             guard let buffer = try? await OnScreenTextKokoro.shared.synthesize(
                 "Turns out, this van is bulletproof.", voice: voice, speed: rate), !Task.isCancelled else { return }
@@ -269,6 +272,6 @@ private final class KokoroSamplePlayer {
 
     func stop() {
         stopPlayback()
-        Task { await OnScreenTextKokoro.shared.unload() }
+        if retained { retained = false; OnScreenTextKokoro.shared.release() }
     }
 }

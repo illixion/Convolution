@@ -77,6 +77,31 @@ public actor OnScreenTextKokoro {
         return total
     }
 
+    // Who is using the models (a narrating video, the Settings sample, a
+    // download). Counted outside the actor so a retain is never reordered
+    // behind a release; the models unload when the last user lets go.
+    private nonisolated let users = NSLock()
+    private nonisolated(unsafe) var userCount = 0
+
+    /// Marks the models as in use; pair with `release()`.
+    public nonisolated func retain() {
+        users.withLock { userCount += 1 }
+    }
+
+    /// Ends one use; the last one out unloads the models.
+    public nonisolated func release() {
+        let idle = users.withLock { () -> Bool in
+            userCount = max(0, userCount - 1)
+            return userCount == 0
+        }
+        if idle { Task { await unloadIfIdle() } }
+    }
+
+    private func unloadIfIdle() async {
+        guard users.withLock({ userCount }) == 0 else { return }
+        await unload()
+    }
+
     private var manager: KokoroAneManager?
     private var loading: Task<KokoroAneManager, Error>?
 
@@ -99,8 +124,9 @@ public actor OnScreenTextKokoro {
         return buffer
     }
 
-    /// Releases the loaded models (they stay on disk).
-    public func unload() async {
+    /// Releases the loaded models (they stay on disk). Prefer `release()`,
+    /// which leaves them loaded while anything else is using them.
+    func unload() async {
         loading?.cancel()
         loading = nil
         if let manager { await manager.cleanup() }
