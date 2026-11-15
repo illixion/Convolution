@@ -955,6 +955,12 @@ struct NativeMetalVideoPlayerView {
                             try? await Task.sleep(for: .seconds(1))
                             continue
                         }
+                        // Reported as the standard rate it is: the raw
+                        // reading wanders (60.0, 60.39, 60.70 for one 60 fps
+                        // stream), and each new value changed the readout
+                        // and redrew the whole control strip, a 50 ms stall
+                        // every 2 s in the HUD (device, 2026-11-15).
+                        rate = snapped
                     }
                     if rate > 0, rate != reported {
                         let changed = reported.map(PlaybackFrameRate.snapped) != PlaybackFrameRate.snapped(rate)

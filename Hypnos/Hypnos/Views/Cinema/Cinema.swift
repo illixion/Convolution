@@ -430,23 +430,56 @@ final class Cinema {
         await sync(open: nil, dismiss: nil)
     }
 
+    /// What a player in the HUD should sound like.
+    enum HUDSound: String {
+        /// AVPlayer's own choice, which follows the picture's `VideoPlayerComponent`.
+        case automatic
+        /// Head-locked surround: spatial, but it turns with the head.
+        case fixed
+        /// Head-locked stereo or mono: not spatialized at all, as in the window.
+        case bypassed
+    }
+
+    /// Head-locked stereo and mono play unspatialized, exactly as they do in
+    /// the window (`RAVEMediaPolicy.headLockedSound`): `.fixed` still
+    /// virtualizes stereo as a pair of speakers in front of the head, which is
+    /// the "spatialized stereo" the HUD used to play. Only surround, or stereo
+    /// the user has asked to spatialize, goes `.fixed`. Audio not probed yet
+    /// counts as stereo, as the policy does.
+    func hudSound(for player: AVPlayer) -> HUDSound {
+        guard headLocked(for: player) else { return .automatic }
+        return player.spatialAudioIsMultichannel == true || RAVEMediaPolicy.spatializeStereo ? .fixed : .bypassed
+    }
+
     /// Whether `player` already plays the HUD's sound.
     func hudSoundApplied(to player: AVPlayer) -> Bool {
         let experience = player.intendedSpatialAudioExperience
-        return headLocked(for: player) ? experience is FixedSpatialAudio : experience is AutomaticSpatialAudio
+        switch hudSound(for: player) {
+        case .automatic: return experience is AutomaticSpatialAudio
+        case .fixed: return experience is FixedSpatialAudio
+        case .bypassed: return experience is BypassedSpatialAudio
+        }
     }
 
-    /// The sound a player in the HUD plays with: head-locked (`.fixed`) when
-    /// its sound is head-locked (always, or stereo and mono under By Audio
-    /// Layout), otherwise AVPlayer's automatic choice. Cheap when already
-    /// right, so it can run every tick, which is also what picks up the
-    /// audio probe's answer once it arrives.
+    /// The sound a player in the HUD plays with (`hudSound(for:)`). Cheap when
+    /// already right, so it can run every tick, which is also what picks up
+    /// the audio probe's answer once it arrives.
     func applyHUDSound(to player: AVPlayer) {
+        let sound = hudSound(for: player)
+        // Stereo may only be upmixed and spatialized when it isn't head-locked.
+        // Checked apart from the experience, which the window's policy may
+        // already have set to the same thing.
+        let formats: AVAudioSpatializationFormats = sound == .bypassed ? .multichannel : .monoStereoAndMultichannel
+        if let item = player.currentItem, item.allowedAudioSpatializationFormats != formats {
+            item.allowedAudioSpatializationFormats = formats
+        }
         guard !hudSoundApplied(to: player) else { return }
-        let locked = headLocked(for: player)
-        player.intendedSpatialAudioExperience = locked
-            ? .fixed(soundStageSize: .automatic) : AutomaticSpatialAudio.automatic
-        logger.info("Cinema: HUD sound \(locked ? "head-locked" : "automatic", privacy: .public)")
+        switch sound {
+        case .automatic: player.intendedSpatialAudioExperience = AutomaticSpatialAudio.automatic
+        case .fixed: player.intendedSpatialAudioExperience = .fixed(soundStageSize: .automatic)
+        case .bypassed: player.intendedSpatialAudioExperience = .bypassed
+        }
+        logger.info("Cinema: HUD sound \(sound.rawValue, privacy: .public)")
     }
 
     /// Sets the mode without touching the space: the Settings page's picker,
@@ -1158,11 +1191,16 @@ struct CinemaVideoWindowHook: ViewModifier {
         guard let player = windowModel.nativePlayer, let item = player.currentItem,
               let asset = item.asset as? AVURLAsset else { return }
         if cinema.mode(for: owner) == .hud {
+            // A player the policy never saw (one made while the picture was
+            // already in the HUD) has its layout probed first, without a scene,
+            // so the HUD can tell stereo from surround.
+            if player.spatialAudioIsMultichannel == nil {
+                player.applySpatialAudioPolicy(for: asset)
+            }
             // Let AVPlayer follow its VideoPlayerComponent in the immersive scene
-            // instead of the window whose scene was named by the Metal renderer.
-            item.allowedAudioSpatializationFormats = .monoStereoAndMultichannel
-            player.intendedSpatialAudioExperience = cinema.headLocked(for: player)
-                ? .fixed(soundStageSize: .automatic) : AutomaticSpatialAudio.automatic
+            // instead of the window whose scene was named by the Metal renderer;
+            // head-locked stereo plays unspatialized.
+            cinema.applyHUDSound(to: player)
         } else {
             let identifier = sceneDelegate?.spatialAudioSceneIdentifier
             item.applySpatialAudioPolicy(sceneIdentifier: identifier)
