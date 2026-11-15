@@ -35,11 +35,7 @@ struct OnScreenTextSettingsPage: View {
             } header: {
                 Text("Availability")
             } footer: {
-                Text("""
-                Some videos, such as narration-free YouTube channels and game footage with a creator's captions, write                 their words on the picture instead of saying them. AI Narration reads that text off the picture on this                 device, a few seconds ahead of the video, and speaks it aloud in the voice chosen below, lowering the                 video's own sound while it talks. The picture is never sent anywhere, and no subtitle track is made or                 changed. It works with the system voices and, if you download them, Kokoro's natural-sounding ones.
-
-                This switch only adds an AI Narration button to a video's controls.                 It never starts by itself: you turn it on, per video, from that menu. Reading ahead costs some battery                 and heat, and the video waits briefly at the start while the first words are read.
-                """)
+                Text("Some videos, such as narration-free YouTube channels and game footage with a creator's captions, write their words on the picture instead of saying them. AI Narration reads that text off the picture on this device, a few seconds ahead of the video, and speaks it aloud in the voice chosen below, lowering the video's own sound while it talks. The picture is never sent anywhere, and no subtitle track is made or changed. It works with the system voices and, if you download them, Kokoro's natural-sounding ones.\n\nThis switch only adds AI Narration to a video's sound menu. It never starts by itself: you turn it on, per video, from that menu. Reading ahead costs some battery and heat, and the video waits briefly at the start while the first words are read.")
             }
 
             Section("Speed") {
