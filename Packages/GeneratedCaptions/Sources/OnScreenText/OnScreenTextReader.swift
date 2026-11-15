@@ -114,7 +114,11 @@ public final class OnScreenTextReader {
             // Kokoro's models were compiling) must not hold the reader on
             // "Preparing" for ever. Reading then starts anyway; a frame
             // that comes back empty is retried at `.fast`.
-            let finished = await Self.warmUp(analysis, timeout: 20)
+            let recognizer = analysis.recognizer
+            // The accurate model loads on the side (minutes the first time on
+            // a Vision Pro); frames are read at `.fast` until it has.
+            Task.detached(priority: .utility) { recognizer.warmUpAccurate() }
+            let finished = await Self.warmUp(recognizer, timeout: 20)
             guard let self, self.generation == token else { return }
             self.onDiagnostic?(String(format: "On-screen text: recognizer %@ after %.1f s", finished ? "ready" : "still loading, reading anyway", Date.now.timeIntervalSince(began)))
             self.onRecognizerReady?()
@@ -123,11 +127,11 @@ public final class OnScreenTextReader {
         }
     }
 
-    private nonisolated static func warmUp(_ analysis: OnScreenTextAnalysis, timeout: Double) async -> Bool {
+    private nonisolated static func warmUp(_ recognizer: OnScreenTextRecognizer, timeout: Double) async -> Bool {
         await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             let once = OnceFlag()
             Task.detached {
-                await analysis.warmUp()
+                recognizer.warmUpFast()
                 if once.take() { continuation.resume(returning: true) }
             }
             Task.detached {
@@ -398,7 +402,7 @@ actor OnScreenTextAnalysis {
         var failure: Int?
     }
 
-    private let recognizer: OnScreenTextRecognizer
+    nonisolated let recognizer: OnScreenTextRecognizer
     private var builder: OnScreenCueBuilder
     private let region: OnScreenTextRegion
 
@@ -407,8 +411,6 @@ actor OnScreenTextAnalysis {
         recognizer = OnScreenTextRecognizer(languages: languages)
         builder = OnScreenCueBuilder(configuration: .init(region: region, sampleInterval: sampleInterval))
     }
-
-    func warmUp() { recognizer.warmUp() }
 
     func restart(at time: Double) {
         recognizer.reset()

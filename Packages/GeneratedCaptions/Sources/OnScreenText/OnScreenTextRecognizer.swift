@@ -39,6 +39,7 @@ public final class OnScreenTextRecognizer: @unchecked Sendable {
     private var lastRegion: OnScreenTextRegion?
     private var stats = Statistics()
     private let languages: [String]?
+    private var accurateLoaded = false
 
     /// `languages`: BCP-47 codes to prefer; nil keeps Vision's default.
     public init(languages: [String]? = nil) {
@@ -47,15 +48,33 @@ public final class OnScreenTextRecognizer: @unchecked Sendable {
 
     public var statistics: Statistics { lock.withLock { stats } }
 
-    /// Loads the recognizer's model so the first real frame isn't the one
-    /// that pays for it (or comes back empty while it loads).
+    /// Loads the recognizer's models so the first real frame isn't the one
+    /// that pays for it (or comes back empty while it loads). The fast one is
+    /// ready in moments; the accurate one took minutes on a Vision Pro, so
+    /// `read` uses `.fast` until `warmUpAccurate` has finished.
     public func warmUp() {
-        // A subtitle-sized frame with text on it: a tiny blank image left
-        // part of the model unloaded, and the first real frame paid for it.
+        warmUpFast()
+        warmUpAccurate()
+    }
+
+    public func warmUpFast() {
+        guard let handler = Self.warmUpHandler() else { return }
+        _ = try? perform(handler, level: .fast, region: nil)
+    }
+
+    public func warmUpAccurate() {
+        guard let handler = Self.warmUpHandler() else { return }
+        _ = try? perform(handler, level: .accurate, region: nil)
+        lock.withLock { accurateLoaded = true }
+    }
+
+    /// A subtitle-sized frame with text on it: a tiny blank image left
+    /// part of the model unloaded, and the first real frame paid for it.
+    private static func warmUpHandler() -> VNImageRequestHandler? {
         let width = 1280, height = 320
         guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
                                       space: CGColorSpaceCreateDeviceRGB(),
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         context.setFillColor(CGColor(gray: 0.1, alpha: 1))
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         context.setFillColor(CGColor(gray: 1, alpha: 1))
@@ -66,10 +85,8 @@ public final class OnScreenTextRecognizer: @unchecked Sendable {
             context.fill(CGRect(x: x, y: 140, width: 30, height: 10))
             context.fill(CGRect(x: x, y: 174, width: 30, height: 10))
         }
-        guard let image = context.makeImage() else { return }
-        let handler = VNImageRequestHandler(cgImage: image)
-        _ = try? perform(handler, level: .accurate, region: nil)
-        _ = try? perform(handler, level: .fast, region: nil)
+        guard let image = context.makeImage() else { return nil }
+        return VNImageRequestHandler(cgImage: image)
     }
 
     /// Forgets the last reading (a seek: the next frame is unrelated).
@@ -98,7 +115,8 @@ public final class OnScreenTextRecognizer: @unchecked Sendable {
 
         let started = Date()
         let handler = VNImageRequestHandler(cvPixelBuffer: buffer)
-        var observations = try perform(handler, level: .accurate, region: region)
+        let accurate = lock.withLock { accurateLoaded }
+        var observations = accurate ? try perform(handler, level: .accurate, region: region) : []
         var fellBack = false
         if observations.isEmpty {
             observations = try perform(handler, level: .fast, region: region)
