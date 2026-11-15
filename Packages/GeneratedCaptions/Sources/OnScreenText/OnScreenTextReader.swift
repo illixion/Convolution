@@ -48,6 +48,9 @@ public final class OnScreenTextReader {
     /// How far ahead the scout aims to be, in media seconds at 1x.
     public var leadSeconds = 8.0
     public var onChange: (() -> Void)?
+    /// The recognizer is loaded (or gave up loading). Heavy model loads that
+    /// compete with it for the Neural Engine wait for this.
+    public var onRecognizerReady: (() -> Void)?
     /// The host holds sound and picture together while true.
     public var onBuffering: ((Bool) -> Void)?
     /// Code-defined diagnostics; never URLs or the text read.
@@ -107,11 +110,30 @@ public final class OnScreenTextReader {
             // once on a Mac in a fresh process, and requests made meanwhile
             // can come back empty.
             let began = Date.now
-            await analysis.warmUp()
+            // Bounded: a warm-up that never returns (seen on a headset while
+            // Kokoro's models were compiling) must not hold the reader on
+            // "Preparing" for ever. Reading then starts anyway; a frame
+            // that comes back empty is retried at `.fast`.
+            let finished = await Self.warmUp(analysis, timeout: 20)
             guard let self, self.generation == token else { return }
-            self.onDiagnostic?(String(format: "On-screen text: recognizer ready in %.1f s", Date.now.timeIntervalSince(began)))
+            self.onDiagnostic?(String(format: "On-screen text: recognizer %@ after %.1f s", finished ? "ready" : "still loading, reading anyway", Date.now.timeIntervalSince(began)))
+            self.onRecognizerReady?()
             self.status = "Reading on-screen text…"
             await self.run(main: player, item: item, analysis: analysis, token: token)
+        }
+    }
+
+    private nonisolated static func warmUp(_ analysis: OnScreenTextAnalysis, timeout: Double) async -> Bool {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            let once = OnceFlag()
+            Task.detached {
+                await analysis.warmUp()
+                if once.take() { continuation.resume(returning: true) }
+            }
+            Task.detached {
+                try? await Task.sleep(for: .seconds(timeout))
+                if once.take() { continuation.resume(returning: false) }
+            }
         }
     }
 
@@ -408,4 +430,10 @@ actor OnScreenTextAnalysis {
 
 private extension Double {
     var finiteOrZero: Double { isFinite ? self : 0 }
+}
+
+private final class OnceFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var taken = false
+    func take() -> Bool { lock.withLock { defer { taken = true }; return !taken } }
 }

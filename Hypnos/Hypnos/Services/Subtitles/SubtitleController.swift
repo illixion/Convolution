@@ -289,7 +289,11 @@ final class SubtitleController {
         cues = nil; error = nil; isFetching = false
         onScreen.region = OnScreenTextSettings.region
         narrator.settings = OnScreenTextSettings.narratorSettings
-        if OnScreenTextSettings.narrates { narrator.preload() }
+        // Kokoro's Core ML load waits for Vision's model: loaded together they
+        // left the reader on "Preparing text recognition" for ever (headset).
+        onScreen.onRecognizerReady = { [weak self] in
+            if OnScreenTextSettings.narrates { self?.narrator.preload() }
+        }
         onScreen.start()
     }
 
