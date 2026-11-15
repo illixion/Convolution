@@ -706,18 +706,21 @@ struct PhotoDisplayView: View {
                         .presentationScreenSize, presentationScreenSize != .zero else {
                             return
                     }
-                    let originalPosition = windowModel.contentEntity.position(relativeTo: nil)
+                    let availableBounds = content.convert(geometry.frame(in: .local), from: .local, to: .scene)
+                    // Scale first: an animated move below carries the scale
+                    // it starts with to its end.
+                    scaleImagePresentationToFit(in: availableBounds)
                     // Experimental: recess the spatial3D scene slightly behind the
                     // window glass to mask the off-axis comfort-cone falloff. Pairs
                     // with the soft BillboardComponent set by updateExperimentalSpatial3DTuning().
                     let experimentalZ: Float = windowModel.shouldApplyExperimentalSpatial3DTuning
                         ? PhotoWindowModel.experimentalSpatial3DZInset
                         : 0.0
-                    // Raw Splat 3D's Bring Closer: toward the viewer (+z).
-                    let forwardZ: Float = windowModel.isRawSplatMode ? Float(windowModel.rawSplatForwardOffset) : 0
-                    windowModel.contentEntity.setPosition(SIMD3<Float>(originalPosition.x, originalPosition.y, experimentalZ + forwardZ), relativeTo: nil)
-                    let availableBounds = content.convert(geometry.frame(in: .local), from: .local, to: .scene)
-                    scaleImagePresentationToFit(in: availableBounds)
+                    // Raw Splat 3D's Bring Closer: toward the viewer (+z),
+                    // only while the ornaments are hidden.
+                    let forwardZ: Float = windowModel.isRawSplatMode && windowModel.isUIHidden
+                        ? Float(windowModel.rawSplatForwardOffset) : 0
+                    placeSpatialPicture(atZ: experimentalZ + forwardZ)
                     if windowModel.contentEntity.parent == nil {
                         content.add(windowModel.contentEntity)
                     }
@@ -1594,6 +1597,32 @@ struct PhotoDisplayView: View {
 
     func resetWindowRestrictions() {
         resizeCoalescer.request(resolvedWindowScene, restriction: .freeform, animated: true)
+    }
+
+    /// Put the spatial picture at depth `z`, keeping its x and y. A change of
+    /// target (Raw Splat's Bring Closer going in or out with the ornaments)
+    /// animates; otherwise the depth is just held, as the update pass always
+    /// did, unless a move is still running.
+    private func placeSpatialPicture(atZ z: Float) {
+        let entity = windowModel.contentEntity
+        let current = entity.position(relativeTo: nil)
+        if z != windowModel.rawSplatTargetZ {
+            windowModel.rawSplatTargetZ = z
+            windowModel.rawSplatMoveAnimation?.stop()
+            let transform = Transform(
+                scale: entity.scale(relativeTo: nil),
+                rotation: entity.orientation(relativeTo: nil),
+                translation: SIMD3<Float>(current.x, current.y, z)
+            )
+            windowModel.rawSplatMoveAnimation = entity.move(
+                to: transform, relativeTo: nil, duration: 0.35, timingFunction: .easeInOut
+            )
+            return
+        }
+        if windowModel.rawSplatMoveAnimation?.isPlaying == true { return }
+        if current.z != z {
+            entity.setPosition(SIMD3<Float>(current.x, current.y, z), relativeTo: nil)
+        }
     }
 
     /// Fit the image presentation inside a bounding box by scaling the content entity.

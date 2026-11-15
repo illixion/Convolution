@@ -228,6 +228,14 @@ class PhotoWindowModel {
     /// disparity a translation caused on the two-pass portal.
     var rawSplatForwardOffset: Double = 0
 
+    /// The z the window's RealityView last asked the picture to move to, and
+    /// the animation doing it. Bring Closer retracts behind the glass while the
+    /// ornaments show (a splat in front of the window covers them, visually and
+    /// for gaze) and comes back out when they hide; this lets the view animate
+    /// that once per change instead of snapping on every update pass.
+    @ObservationIgnored var rawSplatTargetZ: Float = 0
+    @ObservationIgnored var rawSplatMoveAnimation: AnimationPlaybackController?
+
     /// Depth (z) scale for the spatial picture given the user's Distance value.
     /// The two-pass portal keeps its depth fixed (1): its stereo is baked to the
     /// portal. The raw splat is a volume, so depth follows Distance and the
