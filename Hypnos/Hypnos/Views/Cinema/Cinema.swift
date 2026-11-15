@@ -1027,64 +1027,58 @@ struct CinemaBigScreenCard: View {
     }
 }
 
-/// The control strip's Cinema button: the owner's modes and head-locked sound.
-struct CinemaButton: View {
+/// The owner's cinema modes, head-locked sound and (in the HUD) stabilization: the Cinema half
+/// of the unified Sound & Cinema menu (`AudioEQMenu`).
+struct CinemaMenuSections: View {
     let owner: CinemaOwner
     /// Big Screen can be had (a video that can reach the AVFoundation renderer).
     var bigScreenAvailable = true
-    /// Bumped by the host to close the popover (a tap on the picture).
-    var dismissal = 0
-    var onOpenChanged: (Bool) -> Void = { _ in }
+    let close: () -> Void
     private let cinema = Cinema.shared
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
 
-    private var badge: String? {
+    /// What the menu's icon shows for the cinema: the mode, else "Head" for head-locked sound.
+    static func badge(owner: CinemaOwner) -> String? {
+        let cinema = Cinema.shared
         let mode = cinema.mode(for: owner)
         if mode != .window { return mode.title }
         return cinema.headLocked ? "Head" : nil
     }
 
     var body: some View {
-        PlayerChoiceMenu(title: "Cinema", systemImage: "sparkles.tv", badge: badge,
-                         badgeIsActive: cinema.mode(for: owner) != .window,
-                         help: "Big screen and how the sound is placed",
-                         dismissal: dismissal,
-                         onOpenChanged: onOpenChanged) { close in
-            ForEach(owner.modes) { mode in
-                Button {
-                    close()
-                    Task { await cinema.setMode(mode, for: owner, open: openImmersiveSpace, dismiss: dismissImmersiveSpace) }
-                } label: {
-                    PlayerChoiceRow(mode.title, isChecked: mode == cinema.mode(for: owner))
-                }
-                .disabled(mode.showsPicture && !bigScreenAvailable)
+        ForEach(owner.modes) { mode in
+            Button {
+                close()
+                Task { await cinema.setMode(mode, for: owner, open: openImmersiveSpace, dismiss: dismissImmersiveSpace) }
+            } label: {
+                PlayerChoiceRow(mode.title, isChecked: mode == cinema.mode(for: owner))
             }
-            Divider()
-            Text("Head-Locked Sound")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-            ForEach(RAVEHeadLockedSound.allCases, id: \.self) { sound in
-                Button {
-                    close()
-                    Task {
-                        await cinema.setHeadLockedMode(sound, for: owner,
-                                                       open: openImmersiveSpace, dismiss: dismissImmersiveSpace)
-                    }
-                } label: {
-                    PlayerChoiceRow(sound.title, isChecked: sound == cinema.headLockedMode)
-                }
-                .help(sound.help)
-            }
-            if cinema.mode(for: owner) == .hud {
-                Divider()
-                HUDStabilizationControl()
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-            }
+            .disabled(mode.showsPicture && !bigScreenAvailable)
         }
-        .accessibilityIdentifier("player.cinema")
+        Divider()
+        Text("Head-Locked Sound")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+        ForEach(RAVEHeadLockedSound.allCases, id: \.self) { sound in
+            Button {
+                close()
+                Task {
+                    await cinema.setHeadLockedMode(sound, for: owner,
+                                                   open: openImmersiveSpace, dismiss: dismissImmersiveSpace)
+                }
+            } label: {
+                PlayerChoiceRow(sound.title, isChecked: sound == cinema.headLockedMode)
+            }
+            .help(sound.help)
+        }
+        if cinema.mode(for: owner) == .hud {
+            Divider()
+            HUDStabilizationControl()
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+        }
     }
 }
 

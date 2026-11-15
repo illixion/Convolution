@@ -1096,8 +1096,8 @@ struct FilmTransport: View {
     /// The Cinema button, kept on the bar; elsewhere the system's Picture in Picture.
     private var cinemaButton: AnyView? {
         #if os(visionOS)
-        AnyView(CinemaButton(owner: .film, dismissal: menuDismissal,
-                             onOpenChanged: { onModalChanged("Cinema", $0) }))
+        AnyView(AudioEQMenu(cinema: (.film, true), dismissal: menuDismissal,
+                            onOpenChanged: { onModalChanged("Sound & Cinema", $0) }))
         #else
         let pip = session.pictureInPicture
         guard pip.isPossible || pip.isActive else { return nil }
@@ -1179,7 +1179,9 @@ struct FilmTransport: View {
                 player.setSpeed(speed)
             }
             // The film's objects and room are always reached, so no coverage to report.
+            #if !os(visionOS)
             AudioEQMenu(onOpenChanged: { menuChanged("Equalizer", $0) })
+            #endif
             SleepTimerMenu(onOpenChanged: { menuChanged("Sleep Timer", $0) })
         }
         if shows(2) {

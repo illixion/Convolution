@@ -1,3 +1,4 @@
+import OnScreenText
 import RAVEMedia
 import RAVEUI
 import SwiftUI
@@ -11,6 +12,16 @@ struct AudioEQMenu: View {
     /// What the playing item's tap said; nil while unknown, and for audio the EQ always reaches
     /// (the film's objects).
     var coverage: EQAttachResult?
+    /// The video window's subtitle controller, for its AI Narration section: nil where the
+    /// player can't read its picture, or Settings doesn't offer the feature.
+    var narration: SubtitleController?
+    #if os(visionOS)
+    /// Set where the player has a Cinema: the menu then also holds its modes and Head-Locked Sound,
+    /// and is the one "Sound & Cinema" button.
+    var cinema: (owner: CinemaOwner, bigScreenAvailable: Bool)?
+    #endif
+    /// Bumped by the host to close the popover.
+    var dismissal = 0
     var onOpenChanged: (Bool) -> Void = { _ in }
 
     @Bindable private var eq = AudioEQ.shared
@@ -25,10 +36,37 @@ struct AudioEQMenu: View {
 
     private var unreachable: Bool { AudioEQ.explanation(for: coverage) != nil }
 
+    private var hasCinema: Bool {
+        #if os(visionOS)
+        cinema != nil
+        #else
+        false
+        #endif
+    }
+
+    private var badge: String? {
+        #if os(visionOS)
+        if let cinema, let mode = CinemaMenuSections.badge(owner: cinema.owner), mode != "Head" { return mode }
+        #endif
+        if eq.isActive && !unreachable { return "EQ" }
+        if narration?.onScreen.enabled == true { return "AI" }
+        #if os(visionOS)
+        if let cinema { return CinemaMenuSections.badge(owner: cinema.owner) }
+        #endif
+        return nil
+    }
+
     var body: some View {
-        PlayerChoiceMenu(title: "Equalizer", systemImage: "slider.vertical.3",
-                         badge: eq.isActive && !unreachable ? "EQ" : nil, badgeIsActive: true,
-                         help: helpText, onOpenChanged: onOpenChanged) { close in
+        PlayerChoiceMenu(title: hasCinema ? "Sound & Cinema" : "Equalizer",
+                         systemImage: hasCinema ? "sparkles.tv" : "slider.vertical.3",
+                         badge: badge, badgeIsActive: true,
+                         help: helpText, dismissal: dismissal, onOpenChanged: onOpenChanged) { close in
+            #if os(visionOS)
+            if let cinema {
+                CinemaMenuSections(owner: cinema.owner, bigScreenAvailable: cinema.bigScreenAvailable, close: close)
+                Divider()
+            }
+            #endif
             Toggle(isOn: Binding(get: { eq.settings.enabled }, set: { eq.setEnabled($0) })) {
                 Label("Equalizer", systemImage: "slider.vertical.3")
             }
@@ -44,6 +82,10 @@ struct AudioEQMenu: View {
                     PlayerChoiceRow(preset.name, isChecked: eq.matches(preset))
                 }
             }
+            if let narration {
+                Divider()
+                AINarrationSection(controller: narration)
+            }
             #if !os(tvOS)
             if canEdit {
                 Divider()
@@ -56,7 +98,7 @@ struct AudioEQMenu: View {
             }
             #endif
         }
-        .accessibilityIdentifier("player.equalizer")
+        .accessibilityIdentifier(hasCinema ? "player.cinema" : "player.equalizer")
         .onAppear { eq.reloadPresets() }
         #if !os(tvOS)
         .sheet(isPresented: $showsEditor, onDismiss: { eq.reloadPresets() }) { AudioEQEditorSheet() }
@@ -64,7 +106,9 @@ struct AudioEQMenu: View {
     }
 
     private var helpText: String {
+        if hasCinema { return "Big screen, how the sound is placed, equalizer and AI Narration" }
         if unreachable { return "Equalizer: can't reach this sound" }
+        if narration?.onScreen.enabled == true, !eq.isActive { return "AI Narration is on" }
         return eq.isActive ? "Equalizer: \(AudioEQ.statusLabel)" : "Equalizer"
     }
 }

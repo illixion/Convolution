@@ -5,8 +5,9 @@
  so nothing plays until it is due) into PCM buffers, and played through an
  `AVAudioEngine` when the playhead reaches the cue's start. A line longer than
  the time it has (until the next cue, or a second past its own end) is sped up
- by a time-pitch unit, by at most 1.4x; at that speed it overruns rather than
- gabbles. In the prototype (Daniel Enhanced, 185 wpm) 3 lines in 65 needed it.
+ by a time-pitch unit, by at most 1.8x; at that speed it overruns rather than
+ gabbles. Lines that queue up behind a long one are spoken in order, up to four
+ seconds late, and skipped after that. In the prototype (Daniel Enhanced, 185 wpm) 3 lines in 65 needed it.
 
  The narration follows the video: it pauses with it, stops on a seek, and is
  spoken at the video's speed. While it speaks the host lowers the video's
@@ -101,19 +102,31 @@ public final class OnScreenTextNarrator {
             if playing { timePitch?.rate = Float(currentStretch * max(0.25, speed)) }
         }
 
-        // Synthesize what's coming, nearest first, one at a time.
+        // Synthesize what's coming, nearest first, one at a time. A line that
+        // is a little late is still worth preparing: fast text queues up.
         if preparing == nil, let next = cues.first(where: { cue in
-            cue.start >= playhead - 1 && cue.start <= playhead + prepareAhead
+            cue.start >= playhead - Self.maxLateness && cue.start <= playhead + prepareAhead
                 && !spoken.contains(cue.id) && prepared[cue.id]?.text != cue.text
         }) {
             prepare(next)
         }
 
-        // Speak the cue that is due.
+        // Speak the cue that is due. Text that changes faster than it can be
+        // read aloud queues up: lines are spoken in order, each as soon as the
+        // one before ends, so long as they are not too late to matter; older
+        // ones than that are skipped, so the voice catches up instead of
+        // trailing the picture further and further.
         guard playing, speaking == nil else { return }
-        guard let index = cues.firstIndex(where: { cue in
-            !spoken.contains(cue.id) && playhead >= cue.start - 0.05 && playhead < cue.start + 1.0
-        }) else { return }
+        let due = cues.indices.filter { index in
+            let cue = cues[index]
+            return !spoken.contains(cue.id) && playhead >= cue.start - 0.05
+        }
+        guard !due.isEmpty else { return }
+        for index in due where playhead >= cues[index].start + Self.maxLateness {
+            spoken.insert(cues[index].id)
+            onDiagnostic?("Narration: skipped a line that came too late to speak")
+        }
+        guard let index = due.first(where: { !spoken.contains(cues[$0].id) }) else { return }
         let cue = cues[index]
         guard let ready = prepared[cue.id], ready.text == cue.text else {
             if reportedUnready != cue.id {
@@ -122,8 +135,12 @@ public final class OnScreenTextNarrator {
             }
             return
         }
+        // The time it has: until the next cue, or a second past its own end;
+        // less as lines queue behind it, so a backlog is spoken faster.
         let nextStart = index + 1 < cues.count ? cues[index + 1].start : cue.end + 1.0
-        let slot = max(0.5, nextStart - 0.15 - playhead)
+        let queued = due.filter { $0 > index && !spoken.contains(cues[$0].id) }.count
+        var slot = max(0.5, nextStart - 0.15 - playhead)
+        if queued > 0 { slot = max(0.5, min(slot, ready.duration / (1 + 0.25 * Double(queued)))) }
         speak(cue, ready, slot: slot, speed: speed)
     }
 
@@ -156,13 +173,17 @@ public final class OnScreenTextNarrator {
     // MARK: Speaking
 
     private var currentStretch = 1.0
+    /// The most a line is sped up to fit: past it speech stops being clear.
+    private static let maxStretch = 1.8
+    /// How late (seconds after its start) a line can still be spoken.
+    private static let maxLateness = 4.0
 
     private func speak(_ cue: OnScreenTextCue, _ ready: Prepared, slot: Double, speed: Double) {
         guard let format = ready.buffers.first?.format, let node = node(for: format) else { return }
         spoken.insert(cue.id)
         speaking = cue.id
         paused = false
-        currentStretch = min(1.4, max(1, ready.duration / slot))
+        currentStretch = min(Self.maxStretch, max(1, ready.duration / slot))
         timePitch?.rate = Float(currentStretch * max(0.25, speed))
         onDiagnostic?(String(format: "Narration: speaking a %.1f s line in %.1f s", ready.duration, slot))
         if currentStretch > 1.01 { onDiagnostic?(String(format: "Narration: line sped up %.2fx to fit", currentStretch)) }

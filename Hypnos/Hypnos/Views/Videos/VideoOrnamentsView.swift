@@ -71,13 +71,10 @@ struct VideoOrnamentsView: View {
         }
     }
 
-    /// The Cinema button, kept on the bar.
+    /// Kept on the bar: on visionOS the unified Sound & Cinema button, elsewhere Picture in Picture.
     private var cinemaButton: AnyView? {
         #if os(visionOS)
-        AnyView(CinemaButton(owner: .video(ObjectIdentifier(windowModel)),
-                             bigScreenAvailable: windowModel.playbackRenderer == .nativeMetal || windowModel.canUseTranscodedStream,
-                             dismissal: windowModel.menuDismissals,
-                             onOpenChanged: { windowModel.ornamentMenu("Cinema", opened: $0) }))
+        AnyView(audioEQMenu)
         #elseif os(iOS) || os(macOS)
         // Where visionOS has its Cinema: the system's Picture in Picture.
         guard windowModel.pictureInPicturePossible || windowModel.pictureInPictureActive else { return nil }
@@ -115,9 +112,10 @@ struct VideoOrnamentsView: View {
         if room >= 1 {
             subtitleMenu
             audioMenu
-            aiNarrationMenu
             speedMenu
+            #if !os(visionOS)
             audioEQMenu
+            #endif
             sleepTimerMenu
             // Depth-conversion status for THIS video — visible at a glance
             // without keeping the ViewMode menu open. Isolated in its own view
@@ -153,9 +151,10 @@ struct VideoOrnamentsView: View {
             if room < 1 {
                 subtitleMenu
                 audioMenu
-                aiNarrationMenu
-                speedMenu
+                    speedMenu
+                #if !os(visionOS)
                 audioEQMenu
+                #endif
                 sleepTimerMenu
                 ConversionStatusRow(videoIdentity: video.identity)
             }
@@ -314,14 +313,6 @@ struct VideoOrnamentsView: View {
         }
     }
 
-    /// AI Narration, for a player whose picture can be read (not tvOS's AVKit).
-    @ViewBuilder
-    private var aiNarrationMenu: some View {
-        if windowModel.subtitles.canReadScreen, aiNarrationAvailable {
-            AINarrationMenu(controller: windowModel.subtitles, onOpenChanged: { chromeMenu("AI Narration", opened: $0) })
-        }
-    }
-
     @ViewBuilder
     private var audioMenu: some View {
         if !windowModel.audioTracks.isEmpty {
@@ -363,7 +354,18 @@ struct VideoOrnamentsView: View {
 
     /// The listener's equalizer, with what it found on this video's sound (the menu says when it isn't shaping it).
     private var audioEQMenu: some View {
-        AudioEQMenu(coverage: windowModel.audioEQResult, onOpenChanged: { chromeMenu("Equalizer", opened: $0) })
+        #if os(visionOS)
+        AudioEQMenu(coverage: windowModel.audioEQResult,
+                    narration: windowModel.subtitles.canReadScreen && aiNarrationAvailable ? windowModel.subtitles : nil,
+                    cinema: (.video(ObjectIdentifier(windowModel)),
+                             windowModel.playbackRenderer == .nativeMetal || windowModel.canUseTranscodedStream),
+                    dismissal: windowModel.menuDismissals,
+                    onOpenChanged: { chromeMenu("Sound & Cinema", opened: $0) })
+        #else
+        AudioEQMenu(coverage: windowModel.audioEQResult,
+                    narration: windowModel.subtitles.canReadScreen && aiNarrationAvailable ? windowModel.subtitles : nil,
+                    onOpenChanged: { chromeMenu("Equalizer", opened: $0) })
+        #endif
     }
 
     private var sleepTimerMenu: some View {

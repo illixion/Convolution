@@ -16,7 +16,7 @@
  3. Frames whose kept text is alike (edit-distance ratio over 0.6, a dropped
     frame or two allowed) form one cue; its text is the reading most like the
     others (OCR noise such as "Em Da but…" on one frame loses the vote).
- 4. Clean-up: a cue shorter than ~0.5 s is noise; the same text split by a
+ 4. Clean-up: a cue seen in fewer than two frames is noise; the same text split by a
     short gap is one cue; a cue that is only the first line of the next one
     (two-line subtitles whose second line fades in later) folds into it.
 
@@ -138,8 +138,9 @@ public struct OnScreenCueBuilder: Sendable {
         guard let current = open else { return }
         open = nil
         let interval = configuration.sampleInterval
-        // Under ~0.5 s on screen: a misread, not a subtitle.
-        guard current.lastTime - current.firstTime >= interval * 1.9 else { return }
+        // Fewer than two agreeing frames (~0.2 s on screen): a misread, not a subtitle.
+        // Quick text (fast dialogue, rapid captions) lives for a few frames only.
+        guard current.lastTime - current.firstTime >= interval * 0.9 else { return }
         let cue = OnScreenTextCue(start: current.firstTime, end: current.lastTime + interval,
                                   text: Self.medoid(current.texts), id: 0)
         append(cue)
