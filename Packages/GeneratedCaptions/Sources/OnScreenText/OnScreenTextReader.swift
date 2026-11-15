@@ -166,6 +166,7 @@ public final class OnScreenTextReader {
         inFlight = false
         var holdingSince: Date?
         reportedFrames = false
+        stallRecoveries = 0
         startScout(asset: item.asset, at: playhead)
         await analysis.restart(at: playhead)
 
@@ -264,17 +265,35 @@ public final class OnScreenTextReader {
                                              rate: speed, alreadyHolding: isBuffering)
             if needsHold {
                 holdingSince = holdingSince ?? .now
-                if Date.now.timeIntervalSince(holdingSince!) > 15 {
-                    fail("On-screen text couldn't be read quickly enough to keep up with the video.", code: 0)
-                    return
+                if Date.now.timeIntervalSince(holdingSince!) > Self.holdLimit {
+                    // The reader stalled (a frame that never came back, a scout
+                    // that stopped). Say what state it was in, then start it
+                    // again at the playhead; only a second stall in a row fails.
+                    onDiagnostic?(String(format: "On-screen text: stalled %.0f s: scout %.1f, playhead %.1f, read through %.1f, in flight %d, seeking %d, rate %.1f, item %d",
+                                         Self.holdLimit, scoutTime, now, readThrough, inFlight ? 1 : 0,
+                                         scoutSeeking ? 1 : 0, scout.rate, scoutItem.status.rawValue))
+                    stallRecoveries += 1
+                    if stallRecoveries > 2 {
+                        fail("On-screen text couldn't be read quickly enough to keep up with the video.", code: 0)
+                        return
+                    }
+                    holdingSince = nil
+                    inFlight = false
+                    nextSample = now + 1
+                    await analysis.restart(at: now + 1)
+                    seekScout(to: now + 1)
+                    continue
                 }
-            } else { holdingSince = nil }
+            } else { holdingSince = nil; stallRecoveries = 0 }
             setBuffering(needsHold)
             status = needsHold ? "Reading ahead…" : "On-Screen Text"
             try? await Task.sleep(for: .milliseconds(50))
         }
     }
 
+    /// How long the viewer's video may be held for reading before the reader is restarted.
+    private static let holdLimit = 15.0
+    private var stallRecoveries = 0
     private var readThrough = 0.0
     private var inFlight = false
     private var scoutSeeking = false
