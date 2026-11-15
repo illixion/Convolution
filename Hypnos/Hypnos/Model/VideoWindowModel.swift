@@ -712,6 +712,43 @@ final class VideoWindowModel {
         armStartupQualityWatch()
         subtitles.load(SubtitleSource.forVideo(video))
         loadSharedFields()
+        restorePlaybackIfNeeded()
+    }
+
+    // MARK: - Restart restore
+
+    /// Set while a window reopened after an app restart still owes its saved
+    /// playhead and play/pause state; reports are not recorded meanwhile, or
+    /// the new player's 0 would overwrite what is being restored.
+    @ObservationIgnored private(set) var restoredPlayback: VideoPlaybackRestore.Entry?
+    @ObservationIgnored private var restoreAwaitingPause = false
+
+    private func restorePlaybackIfNeeded() {
+        guard isRestoredPopOut, let id = popOutWindowValue?.id,
+              let saved = VideoPlaybackRestore.entry(for: id), saved.identity == video.identity else { return }
+        restoredPlayback = saved
+        restoreAwaitingPause = saved.paused
+        if saved.seconds > 1 { resumeAtLibraryPosition(saved.seconds) }
+        AppLogger.videoWindow.info("Restoring the playhead at \(saved.seconds, format: .fixed(precision: 2))s, \(saved.paused ? "paused" : "playing", privacy: .public)")
+    }
+
+    /// Called with each applied state report: finishes a pending paused
+    /// restore, else records the state for the next restart.
+    private func noteStateForRestore(paused: Bool) {
+        guard let id = popOutWindowValue?.id else { return }
+        if restoreAwaitingPause {
+            if paused { restoreAwaitingPause = false } else if duration > 0, let pauseCommand {
+                restoreAwaitingPause = false
+                pauseCommand()
+            }
+        }
+        if restoredPlayback != nil {
+            // Done once the player is at the saved place (or there was none to reach).
+            guard !restoreAwaitingPause, carriedPosition == nil else { return }
+            restoredPlayback = nil
+        }
+        VideoPlaybackRestore.record(windowID: id, identity: video.identity, seconds: currentTime,
+                                    paused: restoreAwaitingPause ? true : paused)
     }
 
     /// Looks for the analysis track of a 3D Library title: by its Jellyfin
@@ -2169,6 +2206,7 @@ final class VideoWindowModel {
         if !paused { pausedSince = nil } else if pausedSince == nil { pausedSince = Date() }
         self.isMuted = muted
         self.bufferedEnd = buffered
+        noteStateForRestore(paused: paused)
         noticeEndIfReached(currentTime: currentTime, duration: self.duration, paused: paused)
     }
 

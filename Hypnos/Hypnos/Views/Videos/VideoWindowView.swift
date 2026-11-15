@@ -856,7 +856,7 @@ struct VideoWindowView: View {
     /// window replays it long after: a Library title resumes from where the
     /// server says it was left instead, when it says.
     private func applyStartPositionIfNeeded() async {
-        guard !appliedStartPosition,
+        guard !appliedStartPosition, windowModel.restoredPlayback == nil,
               let snapshot = windowValue.startSeconds, snapshot > 0,
               video.identity == windowValue.video.identity
         else { return }
