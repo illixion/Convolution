@@ -534,7 +534,7 @@ extension PhotoWindowModel {
 
     /// The Adjustments or Info popover opened or closed over the window.
     ///
-    /// A RealityKit 3D picture stands out of the window, in front of where
+    /// An Immersive RealityKit 3D picture stands out of the window, in front of where
     /// the system draws a popover, and covers it. So while one is open the
     /// picture shows flat, as AI 3D video turns its 3D off under a menu. Only
     /// the component's own mode changes: the generated scene stays on it, and
@@ -549,7 +549,9 @@ extension PhotoWindowModel {
     /// sizes the window for it again. Not in the HUD, whose panel hangs beside
     /// the picture rather than in front of it.
     func flattenForPopover(_ open: Bool) {
-        let shows3D = desiredViewingMode == .spatial3D || desiredViewingMode == .spatial3DImmersive
+        // Only Immersive: its picture covers the popover. The regular RealityKit 3D
+        // picture in the window stays 3D under one (user, 2026-11-15).
+        let shows3D = desiredViewingMode == .spatial3DImmersive
         if open {
             guard !flattenedForPopover, !spatialPictureLentToHUD, is3DMode, shows3D,
                   var ipc = contentEntity.components[ImagePresentationComponent.self],

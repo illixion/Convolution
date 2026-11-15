@@ -338,7 +338,8 @@ struct PhotoDisplayView: View {
                   initial: true) { _, immersive in
             viewerHUD?.showsMoveHandle = !immersive
         }
-        // A RealityKit 3D picture would cover a popover: flat while one is open.
+        // An Immersive 3D picture would cover a popover: flat while one is open
+        // (the regular 3D picture in the window stays 3D).
         .onChange(of: windowModel.showAdjustmentsPopover || windowModel.showMediaInfoPopover) { _, open in
             windowModel.flattenForPopover(open)
         }
