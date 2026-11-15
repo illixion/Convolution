@@ -12,6 +12,7 @@
 
 import DebugTrace
 import GeneratedCaptions
+import OnScreenText
 import RAVEMedia
 import RAVEUI
 import SwiftUI
@@ -57,6 +58,9 @@ struct SubtitleMenu: View {
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                 }
+            }
+            if controller.canReadScreen {
+                OnScreenTextMenuRows(controller: controller, close: close)
             }
             #if os(iOS) || os(macOS)
             if controller.canTranslate {
@@ -165,6 +169,7 @@ struct SubtitleMenu: View {
 
     private var statusText: String {
         if let error = controller.generated.error { return "AI captions failed: \(error)" }
+        if let error = controller.onScreen.error { return "On-screen text failed: \(error)" }
         if let error = controller.error { return "Subtitles failed: \(error)" }
         if controller.isFetching { return "Loading subtitles…" }
         return controller.selected.map { "Subtitles: \($0.title)" } ?? "Subtitles"
@@ -578,3 +583,55 @@ struct PlayerOrnamentStack<Controls: View>: View {
     }
 }
 #endif
+
+/// On-Screen Text's rows in the subtitle menu: the choice itself, then while
+/// it is on its progress, Narrate and where in the picture to read.
+private struct OnScreenTextMenuRows: View {
+    let controller: SubtitleController
+    let close: () -> Void
+    @AppStorage(OnScreenTextSettings.narrateKey, store: HypnosDefaults.store) private var narrates = true
+    @AppStorage(OnScreenTextSettings.areaKey, store: HypnosDefaults.store) private var area = OnScreenTextSettings.Area.bottom.rawValue
+
+    var body: some View {
+        let reader = controller.onScreen
+        Button { close(); controller.selectOnScreenText() } label: {
+            PlayerChoiceRow("On-Screen Text", isChecked: reader.enabled)
+        }
+        .accessibilityIdentifier("player.subtitles.onScreenText")
+        if reader.enabled {
+            if reader.status != "On-Screen Text" {
+                HStack(spacing: 8) {
+                    if !reader.isBuffering { ProgressView().controlSize(.small) }
+                    Text(reader.status).font(.caption)
+                }
+                .foregroundStyle(.secondary)
+            }
+            if reader.isBuffering {
+                ProgressView(value: reader.lookaheadProgress)
+                    .accessibilityLabel("Picture read ahead")
+                Text(String(format: "%.1f seconds read ahead", reader.readAheadSeconds))
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Toggle(isOn: $narrates) {
+                Label("Narrate", systemImage: "waveform")
+            }
+            .accessibilityIdentifier("player.subtitles.onScreenText.narrate")
+            Menu {
+                ForEach(OnScreenTextSettings.Area.allCases.filter { $0 != .custom || area == $0.rawValue }) { choice in
+                    Button {
+                        area = choice.rawValue
+                        reader.region = OnScreenTextSettings.region
+                    } label: {
+                        PlayerChoiceRow(choice.title, isChecked: area == choice.rawValue)
+                    }
+                }
+            } label: {
+                Label("Where to Read: \(OnScreenTextSettings.Area(rawValue: area)?.title ?? "Bottom")", systemImage: "text.viewfinder")
+            }
+            .menuStyle(.button)
+        }
+        if let error = reader.error {
+            Text(error).font(.caption)
+        }
+    }
+}

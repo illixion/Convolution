@@ -29,7 +29,7 @@ import RAVEUI
 import SwiftUI
 
 enum TVSettingsPage: String, Hashable {
-    case deviceSetup, librarySource, jellyfin, stash, nextcloud, cache, developer, aiCaptions, subtitles, sleepTimer, equalizer
+    case deviceSetup, librarySource, jellyfin, stash, nextcloud, cache, developer, aiCaptions, onScreenText, subtitles, sleepTimer, equalizer
     #if HYPNOS_YOUTUBE
     case youtube
     #endif
@@ -107,6 +107,7 @@ struct TVSettingsView: View {
                 Section {
                     row(.subtitles, "Subtitles", systemImage: "textformat.size", value: "")
                     row(.aiCaptions, "AI Captions", systemImage: "captions.bubble", value: "")
+                    row(.onScreenText, "On-Screen Text", systemImage: "text.viewfinder", value: "")
                     row(.sleepTimer, "Sleep Timer", systemImage: "moon.zzz", value: "")
                     row(.equalizer, "Equalizer", systemImage: "slider.vertical.3", value: AudioEQ.statusLabel)
                     row(.cache, "Cache", systemImage: "internaldrive", value: cachePreset.label)
@@ -123,6 +124,8 @@ struct TVSettingsView: View {
                     DeviceSetupReceiveView { state.path.removeAll() }
                 } else if page == .aiCaptions {
                     AICaptionSettingsPage()
+                } else if page == .onScreenText {
+                    OnScreenTextSettingsPage()
                 } else if page == .subtitles {
                     SubtitleSettingsPage()
                 } else {
@@ -166,6 +169,7 @@ struct TVSettingsView: View {
         case .stash: "Stash"
         case .nextcloud: "Nextcloud"
         case .aiCaptions: "AI Captions"
+        case .onScreenText: "On-Screen Text"
         case .subtitles: "Subtitles"
         case .sleepTimer: "Sleep Timer"
         case .equalizer: "Equalizer"
@@ -185,7 +189,7 @@ struct TVSettingsView: View {
         case .jellyfin: JellyfinServerSection()
         case .stash: StashServerSection()
         case .nextcloud: NextcloudSettingsSection()
-        case .aiCaptions, .subtitles: EmptyView()
+        case .aiCaptions, .onScreenText, .subtitles: EmptyView()
         case .sleepTimer: SleepTimerSettingsSections()
         case .equalizer: AudioEQSettingsSections()
         case .cache: CacheSettingsSection()

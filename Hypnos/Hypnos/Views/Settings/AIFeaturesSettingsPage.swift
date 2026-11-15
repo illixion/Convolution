@@ -93,6 +93,9 @@ struct AIFeaturesSettingsPage: View {
                 NavigationLink(value: SettingsTabView.Page.aiCaptions) {
                     Label("AI Captions", systemImage: "captions.bubble")
                 }
+                NavigationLink(value: SettingsTabView.Page.onScreenText) {
+                    Label("On-Screen Text", systemImage: "text.viewfinder")
+                }
                 #if os(visionOS)
                 NavigationLink(value: SettingsTabView.Page.compute) {
                     LabeledContent {

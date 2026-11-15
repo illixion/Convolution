@@ -40,6 +40,7 @@ public final class HypnosSpaceModule: RAVESpaceModule, CinemaSpaceHosting {
         // server and its configuration).
         FilmDebugEndpoints.register()
         VideoPlayerDebugEndpoints.register()
+        OnScreenTextDebugEndpoints.register()
         PhotoStereoDebugEndpoints.register()
         InterpolationDebugEndpoints.register()
         appModel = AppModel()

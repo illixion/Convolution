@@ -24,6 +24,7 @@
 		AA17000000000000000000A3 /* RAVESearch in Frameworks */ = {isa = PBXBuildFile; productRef = AA17000000000000000000A2 /* RAVESearch */; };
 		AA1A0000000000000000A3 /* RAVEHome in Frameworks */ = {isa = PBXBuildFile; productRef = AA1A0000000000000000A2 /* RAVEHome */; };
 		AA14000000000000000000A3 /* GeneratedCaptions in Frameworks */ = {isa = PBXBuildFile; productRef = AA14000000000000000000A2 /* GeneratedCaptions */; };
+		AA14000000000000000000B3 /* OnScreenText in Frameworks */ = {isa = PBXBuildFile; productRef = AA14000000000000000000B2 /* OnScreenText */; };
 		AA20000000000000000000A3 /* RAVESupport in Frameworks */ = {isa = PBXBuildFile; productRef = AA20000000000000000000A2 /* RAVESupport */; };
 		AA11000000000000000000A3 /* RAVEFilm in Frameworks */ = {isa = PBXBuildFile; productRef = AA11000000000000000000A2 /* RAVEFilm */; };
 		AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */ = {isa = PBXBuildFile; productRef = AA12000000000000000000A2 /* RAVEDeviceSetup */; };
@@ -91,6 +92,7 @@
 				AA11000000000000000000A3 /* RAVEFilm in Frameworks */,
 				AA20000000000000000000A3 /* RAVESupport in Frameworks */,
 				AA14000000000000000000A3 /* GeneratedCaptions in Frameworks */,
+				AA14000000000000000000B3 /* OnScreenText in Frameworks */,
 				AA12000000000000000000A3 /* RAVEDeviceSetup in Frameworks */,
 				AA18000000000000000000A3 /* RAVECompanion in Frameworks */,
 				967834AC244B65FE72E57FB4 /* DebugTrace in Frameworks */,
@@ -201,6 +203,7 @@
 				AA12000000000000000000A2 /* RAVEDeviceSetup */,
 				AA18000000000000000000A2 /* RAVECompanion */,
 				AA14000000000000000000A2 /* GeneratedCaptions */,
+				AA14000000000000000000B2 /* OnScreenText */,
 				7ECF8E7CC7BA800706D085EF /* DebugTrace */,
 				C3D000000000000000000D01 /* VergenceApple */,
 				35FAAC11FBCE4C04FDB901C5 /* DebugTraceServer */,
@@ -766,6 +769,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AA14000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/GeneratedCaptions" */;
 			productName = GeneratedCaptions;
+		};
+		AA14000000000000000000B2 /* OnScreenText */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA14000000000000000000A1 /* XCLocalSwiftPackageReference "../Packages/GeneratedCaptions" */;
+			productName = OnScreenText;
 		};
 		AA20000000000000000000A2 /* RAVESupport */ = {
 			isa = XCSwiftPackageProductDependency;

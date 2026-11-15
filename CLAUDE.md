@@ -203,7 +203,7 @@ work on an area without having touched one of those files yet.
 | `hypnos-video-window.md` | Video window, ornaments and control bar, WebKit / native Metal players, stream-URL strategy, the Matroska remux, visionOS player chrome |
 | `hypnos-ai-3d-video.md` | AI 3D (fake-3D) engage flow, depth models and cache, `Pseudo3DSettings`, live stereo, 3D overload |
 | `hypnos-film-player.md` | Object-audio film player, audio governor, Dolby Vision, picture tiers, the room |
-| `hypnos-library-jellyfin.md` | Library tab, stream quality, Jellyfin 12.x, subtitles, offline downloads |
+| `hypnos-library-jellyfin.md` | Library tab, stream quality, Jellyfin 12.x, subtitles, AI Captions, On-Screen Text (burned-in subtitles + narration), offline downloads |
 | `hypnos-youtube.md` | YouTube resolver chain, surround splice, quality caps, SponsorBlock |
 | `hypnos-slideshows.md` | Picture and video slideshows, their profiles and window, Slideshow 3D |
 | `hypnos-sleep-timer.md` | Sleep timer: what ends and in what order, player registration, Home Assistant / HomeKit accessory actions via `RAVEHome`, HomeKit signing |

@@ -4,7 +4,10 @@ import PackageDescription
 let package = Package(
     name: "GeneratedCaptions",
     platforms: [.iOS(.v26), .macOS(.v26), .tvOS(.v26), .visionOS(.v26)],
-    products: [.library(name: "GeneratedCaptions", targets: ["GeneratedCaptions"])],
+    products: [
+        .library(name: "GeneratedCaptions", targets: ["GeneratedCaptions"]),
+        .library(name: "OnScreenText", targets: ["OnScreenText"]),
+    ],
     dependencies: [
         .package(path: "../../../vergence"),
         .package(url: "https://github.com/FluidInference/FluidAudio.git",
@@ -15,6 +18,10 @@ let package = Package(
             .product(name: "VergenceApple", package: "vergence"),
             .product(name: "FluidAudio", package: "FluidAudio"),
         ]),
+        // Burned-in subtitles read from the picture (Vision), and narration of
+        // them (AVSpeechSynthesizer). System frameworks only.
+        .target(name: "OnScreenText"),
+        .testTarget(name: "OnScreenTextTests", dependencies: ["OnScreenText"], resources: [.copy("Fixtures")]),
         .testTarget(name: "GeneratedCaptionsTests", dependencies: ["GeneratedCaptions"],
                 resources: [.copy("Fixtures")]),
     ]

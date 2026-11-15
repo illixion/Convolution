@@ -42,6 +42,7 @@ struct HypnosApp: App {
         DebugTraceServer.startIfRequested()
         FilmDebugEndpoints.register()
         VideoPlayerDebugEndpoints.register()
+        OnScreenTextDebugEndpoints.register()
         PhotoStereoDebugEndpoints.register()
         InterpolationDebugEndpoints.register()
         #if DEBUG

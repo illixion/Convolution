@@ -62,7 +62,7 @@ struct SettingsTabView: View {
     enum Page: Hashable {
         case jellyfin, stash, nextcloud, photoLibrary, localFiles, deviceSetup
         case general, gallery, photos, videos, subtitles, slideshows, windowGroups, sleepTimer, equalizer
-        case aiFeatures, ai3D, aiCaptions, smartActivation, compute
+        case aiFeatures, ai3D, aiCaptions, onScreenText, smartActivation, compute
         case cache, backup, developer
         #if HYPNOS_YOUTUBE
         case youtube
@@ -187,6 +187,7 @@ struct SettingsTabView: View {
         case .subtitles: SubtitleSettingsPage()
         case .ai3D: AI3DSettingsPage()
         case .aiCaptions: AICaptionSettingsPage()
+        case .onScreenText: OnScreenTextSettingsPage()
         case .aiFeatures, .smartActivation, .compute:
             // Never shown on tvOS (`TVSettingsView`), whose AI settings are AI Captions.
             #if os(tvOS)

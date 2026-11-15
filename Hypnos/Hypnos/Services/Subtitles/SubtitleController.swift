@@ -46,6 +46,7 @@ import Foundation
 import SwiftUI
 import MatroskaRemux
 import Observation
+import OnScreenText
 import RAVEUI
 
 /// A language a source can translate its captions into.
@@ -259,9 +260,111 @@ final class SubtitleController {
     }
     private static let generatedTrack = LibrarySubtitleTrack(id: -10000, sourceId: "generated", language: nil, name: "AI Captions")
 
+    // MARK: On-screen text
+
+    /// Burned-in subtitles read from the picture, and their narration
+    /// (`OnScreenText` in Packages/GeneratedCaptions).
+    let onScreen = OnScreenTextReader()
+    @ObservationIgnored let narrator = OnScreenTextNarrator()
+    /// A player whose picture can be read (any AVPlayer-backed one).
+    private(set) var canReadScreen = false
+    static let onScreenTrack = LibrarySubtitleTrack(id: -10001, sourceId: "onscreen", language: nil, name: "On-Screen Text")
+    @ObservationIgnored private weak var analysisPlayer: AVPlayer?
+    /// The player's volume before narration lowered it, while it is lowered.
+    @ObservationIgnored private var duckedFrom: Float?
+    @ObservationIgnored private var duckTarget: Float?
+    @ObservationIgnored private var duckTask: Task<Void, Never>?
+
+    func selectOnScreenText() {
+        guard canReadScreen else { return }
+        if selected == Self.onScreenTrack, onScreen.enabled {
+            select(nil)
+            return
+        }
+        translator.stop()
+        generated.stop()
+        fetchTask?.cancel()
+        selectionMadeForSource = true
+        selected = Self.onScreenTrack
+        cues = nil; error = nil; isFetching = false
+        onScreen.region = OnScreenTextSettings.region
+        narrator.settings = OnScreenTextSettings.narratorSettings
+        onScreen.start()
+    }
+
+    /// Narration is speaking (the player's volume is lowered).
+    var isNarrating: Bool { duckedFrom != nil }
+
+    private func stopOnScreenText() {
+        onScreen.stop()
+        narrator.stop()
+        setDuck(1)
+    }
+
+    /// Called by the reader's loop (~20 Hz): narration follows the player's
+    /// clock, shifted by the subtitle offset like the cues on screen.
+    private func narrationTick(playhead: Double, playing: Bool, speed: Double) {
+        guard OnScreenTextSettings.narrates, let player = analysisPlayer else {
+            narrator.stop()
+            setDuck(1)
+            return
+        }
+        narrator.settings = OnScreenTextSettings.narratorSettings
+        narrator.volume = duckedFrom ?? player.volume
+        narrator.update(playhead: cueTime(forFilmTime: playhead), playing: playing && !player.isMuted,
+                        speed: speed, cues: onScreen.cues)
+    }
+
+    /// Lowers the bound player's volume to `level` of what it was (1
+    /// restores it), over a quarter of a second. Never persisted: a volume
+    /// the viewer sets meanwhile becomes the one restored.
+    private func setDuck(_ level: Float) {
+        guard let player = analysisPlayer else { duckedFrom = nil; return }
+        if level >= 1 {
+            guard let base = duckedFrom else { return }
+            // Someone set the volume while it was lowered: keep theirs.
+            let restoreTo = duckTarget.map { abs(player.volume - $0) > 0.01 } == true ? player.volume : base
+            duckedFrom = nil; duckTarget = nil
+            ramp(player, to: restoreTo)
+        } else {
+            let base = duckedFrom ?? player.volume
+            duckedFrom = base
+            duckTarget = base * level
+            ramp(player, to: base * level)
+        }
+    }
+
+    private func ramp(_ player: AVPlayer, to target: Float) {
+        duckTask?.cancel()
+        let from = player.volume
+        duckTask = Task { @MainActor [weak player] in
+            for step in 1...8 {
+                try? await Task.sleep(for: .milliseconds(30))
+                guard !Task.isCancelled, let player else { return }
+                player.volume = from + (target - from) * Float(step) / 8
+            }
+        }
+    }
+
     init() {
         generated.onDiagnostic = { message in
             AppLogger.subtitles.info("\(message, privacy: .public)")
+        }
+        onScreen.onDiagnostic = { message in
+            AppLogger.subtitles.info("\(message, privacy: .public)")
+        }
+        narrator.onDiagnostic = { message in
+            AppLogger.subtitles.info("\(message, privacy: .public)")
+        }
+        narrator.onDuck = { [weak self] level in self?.setDuck(level) }
+        onScreen.onTick = { [weak self] playhead, playing, speed in
+            self?.narrationTick(playhead: playhead, playing: playing, speed: speed)
+        }
+        onScreen.onChange = { [weak self] in
+            guard let self, self.selected == Self.onScreenTrack else { return }
+            self.cues = RAVESubtitleTrack(cues: self.onScreen.cues.map { cue in
+                RAVESubtitleCue(start: cue.start, end: cue.end, text: AttributedString(cue.text))
+            })
         }
         generated.onChange = { [weak self] in
             #if os(iOS) || os(macOS)
@@ -280,6 +383,11 @@ final class SubtitleController {
         generated.bind(player: nil)
         generated.onBuffering = buffering
         canGenerate = player != nil
+        if analysisPlayer !== player { setDuck(1); narrator.stop() }
+        analysisPlayer = player
+        onScreen.onBuffering = buffering
+        onScreen.bind(player: player)
+        canReadScreen = player != nil
         generated.bind(player: player, audioSource: { item, start in
             // A device remux's own fragments, else any other HLS stream's
             // segments; a file the player reads directly needs neither.
@@ -290,6 +398,11 @@ final class SubtitleController {
     func bindGeneratedFilm(_ player: FilmPlayer) {
         let resume = generated.enabled
         generated.stop()
+        // The film player has no AVPlayer picture to read.
+        stopOnScreenText()
+        onScreen.bind(player: nil)
+        analysisPlayer = nil
+        canReadScreen = false
         generated.onBuffering = { [weak player] held in player?.setAnalysisBuffering(held) }
         generated.bindExternal(position: { [weak player] in player?.currentTime ?? 0 },
             duration: { [weak player] in player?.duration ?? 0 },
@@ -384,7 +497,7 @@ final class SubtitleController {
 
     /// Whether a player's control bar has a Subtitles menu: something to
     /// choose from, or a file to pick.
-    var offersMenu: Bool { !tracks.isEmpty || canGenerate || Self.canPickFile }
+    var offersMenu: Bool { !tracks.isEmpty || canGenerate || canReadScreen || Self.canPickFile }
 
     /// Shows the source's machine translation of its captions into
     /// `language`, which joins the track list while it is the one showing.
@@ -448,6 +561,7 @@ final class SubtitleController {
         selectionMadeForSource = true
         translator.stop()
         generated.stop()
+        stopOnScreenText()
         fetchTask?.cancel()
         selected = track
         cues = pickedCues[track.id]
@@ -464,6 +578,7 @@ final class SubtitleController {
         selectionMadeForSource = true
         translator.stop()
         generated.stop()
+        stopOnScreenText()
         // A translation is the viewer's choice for this video, not their language.
         if track?.isTranslated != true { SubtitlePreference.remember(track) }
         guard let track else {
@@ -480,6 +595,7 @@ final class SubtitleController {
     func reset(keepingPickedFile keep: Bool = false) {
         translator.stop()
         generated.stop()
+        stopOnScreenText()
         listTask?.cancel()
         fetchTask?.cancel()
         let keptSelection = keep ? selected.flatMap { pickedCues[$0.id] != nil ? $0 : nil } : nil
@@ -523,6 +639,7 @@ final class SubtitleController {
         fetchTask?.cancel()
         selectionMadeForSource = true
         generated.stop()
+        stopOnScreenText()
         selected = track
         cues = nil
         error = nil
