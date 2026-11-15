@@ -81,12 +81,13 @@ public final class HypnosSpaceModule: RAVESpaceModule, CinemaSpaceHosting {
         }
     }
 
-    /// What the cinema asks of the shared space: the room dark around Big Screen,
+    /// What the cinema asks of the shared space: the passthrough filter picked for the mode
+    /// (a preference; Nexus's own room filter is the fallback or an override),
     /// the picture drawn over the arms in HUD (and while the forearm remote shows),
     /// and hands for that remote.
     private var requirements: RAVESpaceRequirements {
         RAVESpaceRequirements(immersion: .mixed, hidesUpperLimbs: space.hidesUpperLimbs,
-                              surroundings: space.wantsDarkSurroundings ? .systemDark : nil,
+                              surroundings: space.surroundings,
                               needsHands: ForearmSleeve.shared.isEnabled)
     }
 

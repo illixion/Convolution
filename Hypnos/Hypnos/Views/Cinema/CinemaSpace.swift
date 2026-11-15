@@ -16,6 +16,7 @@ import AVFoundation
 import DebugLog
 import RAVEFilm
 import RAVEMedia
+import RAVESharedSpace
 import RAVEUI
 import RealityKit
 import SwiftUI
@@ -123,8 +124,9 @@ final class CinemaSpace {
         cinema.spaceDisappeared()
     }
 
-    /// What the room around the content should look like: dark behind the Big Screen.
-    var wantsDarkSurroundings: Bool { cinema.mode == .bigScreen && cinema.dimsSurroundings }
+    /// What the room around the content should look like: the passthrough filter the wearer
+    /// picked for the mode (Big Screen dark by default, HUD none; `Cinema.surroundings`).
+    var surroundings: RAVESpaceSurroundings? { cinema.surroundings }
 
     /// Whether the picture draws over the viewer's arms. visionOS draws real
     /// arms over content it judges to be behind them, from a soft, noisy
@@ -510,7 +512,7 @@ struct CinemaSpaceView: View {
         .simultaneousGesture(DragGesture().targetedToAnyEntity()
             .onChanged { space.dragChanged($0) }
             .onEnded { space.dragEnded($0) })
-        .preferredSurroundingsEffect(space.wantsDarkSurroundings ? .systemDark : nil)
+        .preferredSurroundingsEffect(space.surroundings?.effect)
         .upperLimbVisibility(space.hidesUpperLimbs ? .hidden : .automatic)
         .onAppear { space.appeared(actions: (open, dismiss)) }
         .onChange(of: space.presentation.isPresented) { _, shown in

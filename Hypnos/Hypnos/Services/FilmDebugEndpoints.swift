@@ -13,6 +13,7 @@ import DebugTrace
 import Foundation
 import RAVEFilm
 #if os(visionOS)
+import RAVESharedSpace
 import RAVEMedia
 import simd
 #endif
@@ -35,7 +36,7 @@ enum FilmDebugEndpoints {
                 reply()
             },
             .query("filmCinema", "The players' cinema space (visionOS): its owner (film or a video window), mode "
-                   + "(window, roomSound, bigScreen), head-locked sound, whether the space is open and holds the "
+                   + "(window, roomSound, bigScreen), head-locked sound, the passthrough filters for Big Screen and the HUD and what the room shows now, whether the space is open and holds the "
                    + "picture (and for a video window whether it lent its player), and in the space's metres the head, the film "
                    + "window, the room's centre and the screen, with the distances between them. A head that never "
                    + "appears means head tracking isn't running; a window that never appears means the window's "
@@ -284,6 +285,11 @@ enum FilmDebugEndpoints {
         var headToWindowMetres: Float?
         var headToScreenMetres: Float?
         var screenWidthMetres: Float?
+        /// The passthrough filters (RAVEPassthroughFilter raw values) and what the room shows now.
+        var bigScreenFilter: String = "none"
+        var hudFilter: String = "none"
+        var passthroughTint: [Double]?
+        var surroundings: String?
     }
 
     private static func cinemaReply() -> CinemaReply {
@@ -307,7 +313,10 @@ enum FilmDebugEndpoints {
             room: array(position(cinema.roomPose)), screen: array(screen),
             headToWindowMetres: head.flatMap { h in window.map { simd_distance(h, $0) } },
             headToScreenMetres: head.flatMap { h in screen.map { simd_distance(h, $0) } },
-            screenWidthMetres: cinema.screenPose == nil ? nil : cinema.screenWidth
+            screenWidthMetres: cinema.screenPose == nil ? nil : cinema.screenWidth,
+            bigScreenFilter: cinema.bigScreenFilter.rawValue, hudFilter: cinema.hudFilter.rawValue,
+            passthroughTint: [cinema.passthroughTint.red, cinema.passthroughTint.green, cinema.passthroughTint.blue],
+            surroundings: cinema.surroundings.map { String(describing: $0) }
         )
         #else
         return CinemaReply(headLocked: false, headLockedMode: "off", screenPlayer: false, mode: "window", open: false, screenAttached: false,

@@ -62,6 +62,7 @@ import DebugTrace
 import QuartzCore
 import RAVEFilm
 import RAVEMedia
+import RAVESharedSpace
 import RAVEUI
 import RealityKit
 import simd
@@ -301,9 +302,51 @@ final class Cinema {
     var screenWidthDegrees: Float = 55 {
         didSet { save() }
     }
-    /// Dim passthrough (or the environment) while the screen is up.
-    var dimsSurroundings = true {
-        didSet { save() }
+    /// The passthrough filter around the Big Screen (dark by default, as Apple's players
+    /// dim the room) and around the HUD (none), from RAVE's catalog, the same list
+    /// spatial-ai-character offers. In a shared space (Nexus) it is this module's
+    /// preference; the host's own pick is the fallback or an override (`RAVESpacePolicy`).
+    var bigScreenFilter = RAVEPassthroughFilter.dark {
+        didSet { if bigScreenFilter != oldValue { save() } }
+    }
+    var hudFilter = RAVEPassthroughFilter.none {
+        didSet { if hudFilter != oldValue { save() } }
+    }
+    /// The tint both modes' Custom filter uses. Saved once a slider rests, not per step:
+    /// a write to `HypnosDefaults.store` re-renders every `@AppStorage` view (~40 ms).
+    var passthroughTint = RAVEPassthroughTint.neutral {
+        didSet {
+            guard passthroughTint != oldValue else { return }
+            tintSave?.cancel()
+            tintSave = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(600))
+                guard !Task.isCancelled else { return }
+                self?.save()
+            }
+        }
+    }
+    @ObservationIgnored private var tintSave: Task<Void, Never>?
+
+    /// The filter a mode shows; the window has none (the space, if open, is only for sound).
+    func passthroughFilter(for mode: CinemaMode) -> RAVEPassthroughFilter {
+        switch mode {
+        case .bigScreen: bigScreenFilter
+        case .hud: hudFilter
+        default: .none
+        }
+    }
+
+    func setPassthroughFilter(_ filter: RAVEPassthroughFilter, for mode: CinemaMode) {
+        switch mode {
+        case .bigScreen: bigScreenFilter = filter
+        case .hud: hudFilter = filter
+        default: break
+        }
+    }
+
+    /// What the room around the space should look like now.
+    var surroundings: RAVESpaceSurroundings? {
+        passthroughFilter(for: mode).surroundings(custom: passthroughTint)
     }
 
     /// The film window's centre in the space, from `FilmWindowMarker`.
@@ -325,7 +368,12 @@ final class Cinema {
     private struct Settings: Codable {
         var screenDistance: Float
         var screenWidthDegrees: Float
+        /// Still written (true when the Big Screen has a filter) so an older build reads it.
         var dimsSurroundings: Bool
+        /// Optional: settings saved before them take `dimsSurroundings` (dark or none) and none.
+        var bigScreenFilter: String?
+        var hudFilter: String?
+        var passthroughTint: RAVEPassthroughTint?
         /// Optional: settings saved before it existed decode as off. Still
         /// written (true for `.always`) so an older build reads a sensible value.
         var headLocked: Bool?
@@ -343,7 +391,10 @@ final class Cinema {
            let settings = try? JSONDecoder().decode(Settings.self, from: data) {
             screenDistance = settings.screenDistance
             screenWidthDegrees = settings.screenWidthDegrees
-            dimsSurroundings = settings.dimsSurroundings
+            bigScreenFilter = settings.bigScreenFilter.flatMap(RAVEPassthroughFilter.init(rawValue:))
+                ?? (settings.dimsSurroundings ? .dark : .none)
+            hudFilter = settings.hudFilter.flatMap(RAVEPassthroughFilter.init(rawValue:)) ?? .none
+            passthroughTint = settings.passthroughTint?.clamped ?? .neutral
             headLockedMode = settings.headLockedMode.flatMap(RAVEHeadLockedSound.init(rawValue:))
                 ?? ((settings.headLocked ?? false) ? .always : .off)
             hudStabilization = min(1, max(0, settings.hudStabilization ?? 1))
@@ -359,7 +410,9 @@ final class Cinema {
 
     private func save() {
         let settings = Settings(screenDistance: screenDistance, screenWidthDegrees: screenWidthDegrees,
-                                dimsSurroundings: dimsSurroundings, headLocked: headLocked,
+                                dimsSurroundings: bigScreenFilter != .none,
+                                bigScreenFilter: bigScreenFilter.rawValue, hudFilter: hudFilter.rawValue,
+                                passthroughTint: passthroughTint, headLocked: headLocked,
                                 headLockedMode: headLockedMode.rawValue,
                                 hudStabilization: hudStabilization,
                                 hudOffset: [hudOffset.x, hudOffset.y, hudOffset.z], hudWidth: hudWidth)
@@ -1073,11 +1126,51 @@ struct CinemaMenuSections: View {
             }
             .help(sound.help)
         }
-        if cinema.mode(for: owner) == .hud {
+        let mode = cinema.mode(for: owner)
+        if mode == .hud || mode == .bigScreen {
+            Divider()
+            CinemaPassthroughControl(mode: mode)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+        }
+        if mode == .hud {
             Divider()
             HUDStabilizationControl()
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
+        }
+    }
+}
+
+/// The passthrough filter for the HUD or the Big Screen, in the Cinema menu while that
+/// mode is up: RAVE's filter buttons in a row that scrolls (the menu is 360 pt wide),
+/// and the custom tint's sliders while Custom is picked.
+struct CinemaPassthroughControl: View {
+    let mode: CinemaMode
+    @Bindable private var cinema = Cinema.shared
+
+    var body: some View {
+        let selected = cinema.passthroughFilter(for: mode)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Passthrough: \(selected.displayName)").font(.caption)
+            ScrollView(.horizontal) {
+                HStack(spacing: 4) {
+                    ForEach(RAVEPassthroughFilter.allCases) { filter in
+                        RAVEPassthroughFilterButton(
+                            filter: filter, isSelected: filter == selected,
+                            fill: filter == .custom ? cinema.passthroughTint.clamped.color : nil
+                        ) {
+                            cinema.setPassthroughFilter(filter, for: mode)
+                        }
+                        .frame(width: 66)
+                        .accessibilityIdentifier("player.cinema.passthrough.\(filter.rawValue)")
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+            if selected == .custom {
+                RAVEPassthroughTintSliders(tint: $cinema.passthroughTint)
+            }
         }
     }
 }
@@ -1217,7 +1310,15 @@ struct CinemaSettings: View {
                 .font(.caption)
             Slider(value: $cinema.screenWidthDegrees, in: 30 ... 100, step: 1)
         }
-        Toggle("Dim Surroundings", isOn: $cinema.dimsSurroundings)
+        Picker("Big Screen Passthrough", selection: $cinema.bigScreenFilter) {
+            ForEach(RAVEPassthroughFilter.allCases) { Text($0.displayName).tag($0) }
+        }
+        Picker("HUD Passthrough", selection: $cinema.hudFilter) {
+            ForEach(RAVEPassthroughFilter.allCases) { Text($0.displayName).tag($0) }
+        }
+        if cinema.bigScreenFilter == .custom || cinema.hudFilter == .custom {
+            RAVEPassthroughTintSliders(tint: $cinema.passthroughTint)
+        }
         ForearmSleeveSettings()
         Text("Cinema: \(cinema.status)").font(.caption).foregroundStyle(.secondary)
     }
