@@ -40,6 +40,10 @@ struct VisualAdjustmentsPopover: View {
     /// two are persisted separately.
     var scale3D: Binding<Double>? = nil
 
+    /// When set (Raw Splat 3D), shows a "Bring Closer" slider: metres the
+    /// splat is pulled toward the viewer from behind the window glass.
+    var forward3D: Binding<Double>? = nil
+
     /// Whether auto-enhance is currently processing
     var isProcessingAutoEnhance: Bool = false
 
@@ -236,6 +240,16 @@ struct VisualAdjustmentsPopover: View {
                 )
             }
 
+            if let forward3D {
+                adjustmentSlider(
+                    label: "Bring Closer",
+                    value: forward3D,
+                    range: 0.0...1.5,
+                    defaultValue: 0.0,
+                    linear: true
+                )
+            }
+
             if let pseudo3DSettings {
                 Divider()
                 // (No Stereo Separation control: strength is fixed at the
@@ -260,6 +274,7 @@ struct VisualAdjustmentsPopover: View {
                 currentAdjustments.opacity = 1.0
                 currentAdjustments.scale = 1.0
                 currentAdjustments.immersiveScale = 1.0
+                forward3D?.wrappedValue = 0.0
                 pseudo3DSettings?.wrappedValue = .default
                 // Note: auto-enhance is toggled separately, not reset here
                 onCurrentAdjustmentsChanged?(currentAdjustments)
@@ -273,6 +288,7 @@ struct VisualAdjustmentsPopover: View {
                 && currentAdjustments.opacity == 1.0
                 && currentAdjustments.scale == 1.0
                 && currentAdjustments.immersiveScale == 1.0
+                && (forward3D?.wrappedValue ?? 0) == 0
                 && !(pseudo3DSettings?.wrappedValue.isModified ?? false)
             )
         }

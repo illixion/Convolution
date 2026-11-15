@@ -222,6 +222,20 @@ class PhotoWindowModel {
     /// everywhere else it stays false and nothing reads it.
     var isRawSplatMode: Bool = false
 
+    /// Raw Splat 3D only: how far (metres) the splat is pulled toward the
+    /// viewer from where RealityKit puts it, behind the window glass. The raw
+    /// splat is real geometry, so moving the entity moves the scene without the
+    /// disparity a translation caused on the two-pass portal.
+    var rawSplatForwardOffset: Double = 0
+
+    /// Depth (z) scale for the spatial picture given the user's Distance value.
+    /// The two-pass portal keeps its depth fixed (1): its stereo is baked to the
+    /// portal. The raw splat is a volume, so depth follows Distance and the
+    /// scene keeps its proportions instead of flattening as it grows.
+    func spatial3DDepthScale(userScale: Float) -> Float {
+        isRawSplatMode ? userScale : 1
+    }
+
     /// Scale factor for converting window points to texture pixels
     /// (visionOS rendering density + headroom)
     static let displayScaleFactor: CGFloat = 2.5

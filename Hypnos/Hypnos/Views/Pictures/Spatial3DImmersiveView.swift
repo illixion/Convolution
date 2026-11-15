@@ -154,7 +154,7 @@ struct Spatial3DImmersiveView: View {
     @MainActor
     private func applyUserScale(to entity: Entity) {
         let s = Float(appModel.immersiveLoanOwner?.currentAdjustments.immersiveScale ?? 1.0)
-        entity.scale = SIMD3<Float>(s, s, 1)
+        entity.scale = SIMD3<Float>(s, s, appModel.immersiveLoanOwner?.spatial3DDepthScale(userScale: s) ?? 1)
     }
 
     @MainActor

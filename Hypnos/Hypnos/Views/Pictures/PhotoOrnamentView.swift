@@ -532,6 +532,11 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
                         }
                     }
                 ) : nil,
+                // Raw Splat 3D only: the volume can come out of the window.
+                forward3D: windowModel.is3DMode && windowModel.isRawSplatMode ? Binding(
+                    get: { windowModel.rawSplatForwardOffset },
+                    set: { windowModel.rawSplatForwardOffset = $0 }
+                ) : nil,
                 isProcessingAutoEnhance: windowModel.isProcessingAutoEnhance,
                 onToggleAutoEnhance: {
                     Task {

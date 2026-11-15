@@ -713,7 +713,9 @@ struct PhotoDisplayView: View {
                     let experimentalZ: Float = windowModel.shouldApplyExperimentalSpatial3DTuning
                         ? PhotoWindowModel.experimentalSpatial3DZInset
                         : 0.0
-                    windowModel.contentEntity.setPosition(SIMD3<Float>(originalPosition.x, originalPosition.y, experimentalZ), relativeTo: nil)
+                    // Raw Splat 3D's Bring Closer: toward the viewer (+z).
+                    let forwardZ: Float = windowModel.isRawSplatMode ? Float(windowModel.rawSplatForwardOffset) : 0
+                    windowModel.contentEntity.setPosition(SIMD3<Float>(originalPosition.x, originalPosition.y, experimentalZ + forwardZ), relativeTo: nil)
                     let availableBounds = content.convert(geometry.frame(in: .local), from: .local, to: .scene)
                     scaleImagePresentationToFit(in: availableBounds)
                     if windowModel.contentEntity.parent == nil {
@@ -796,6 +798,14 @@ struct PhotoDisplayView: View {
                 cornerRadius: windowModel.isViewingSpatial3DImmersive ? 0 : appModel.photoCornerRadius,
                 style: .continuous
             ))
+            // Raw Splat 3D pulled toward the viewer extends in front of the
+            // window, where visionOS clips window content by default. Ask for
+            // room in front (the system grants what it allows; 0 = stock).
+            .preferredWindowClippingMargins(
+                .front,
+                windowModel.isRawSplatMode && windowModel.rawSplatForwardOffset > 0
+                    ? Self.rawSplatFrontMarginPoints : 0
+            )
             }
             #else
             // Spatial 3D is visionOS-only; `is3DMode` is never set on iOS
@@ -1430,7 +1440,7 @@ struct PhotoDisplayView: View {
             ? model.currentAdjustments.immersiveScale
             : model.currentAdjustments.scale
         let scale = fit * Float(userScale)
-        entity.scale = SIMD3<Float>(scale, scale, 1)
+        entity.scale = SIMD3<Float>(scale, scale, model.spatial3DDepthScale(userScale: Float(userScale)))
         // Behind the HUD's controls and its tap plane (5 mm back), which the
         // picture's depth otherwise covered.
         entity.position = SIMD3<Float>(0, 0, -hudSpatialRecess)
@@ -1449,6 +1459,14 @@ struct PhotoDisplayView: View {
     private static var hudSpatialRecess: Float {
         DebugTunables.number("photo.hudSpatialRecess", Float(0.05), range: 0.01...0.3, step: 0.01,
                              label: "Photo HUD: RealityKit 3D picture behind the controls (m)")
+    }
+
+    /// Front clipping margin asked for while Raw Splat 3D is pulled closer, in
+    /// points (about 1.5 m at a window's default scale). The system clamps it
+    /// to what it allows; a tunable until the limit is seen on the headset.
+    private static var rawSplatFrontMarginPoints: CGFloat {
+        CGFloat(DebugTunables.number("photo.rawSplatFrontMargin", Float(2000), range: 0...4000, step: 100,
+                                     label: "Raw Splat 3D: room in front of the window (pt)"))
     }
     #endif
 
@@ -1597,7 +1615,9 @@ struct PhotoDisplayView: View {
             : windowModel.currentAdjustments.scale
         let scale = fit * Float(userScale)
 
-        windowModel.contentEntity.scale = SIMD3<Float>(scale, scale, 1.0)
+        windowModel.contentEntity.scale = SIMD3<Float>(
+            scale, scale, windowModel.spatial3DDepthScale(userScale: Float(userScale))
+        )
     }
 
     /// Match the input plane to the current window bounds for hit-testing.
