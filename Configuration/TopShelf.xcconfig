@@ -1,0 +1,8 @@
+// The Apple TV Top Shelf extension: signed like the app, with the app's
+// bundle id plus ".topshelf". An extension's id must start with its app's, and
+// the app's comes from the signing files (com.illixion.hypnos, or the local
+// override's), so it is derived here rather than written into the target.
+#include "DefaultSigning.xcconfig"
+#include? "LocalSigning.xcconfig"
+
+PRODUCT_BUNDLE_IDENTIFIER = $(inherited).topshelf
