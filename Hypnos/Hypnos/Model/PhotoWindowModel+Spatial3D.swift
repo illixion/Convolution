@@ -534,7 +534,10 @@ extension PhotoWindowModel {
 
     /// The Adjustments or Info popover opened or closed over the window.
     ///
-    /// An Immersive RealityKit 3D picture stands out of the window, in front of where
+    /// Only while the photo is in the HUD (user, 2026-11-15); a picture in the
+    /// regular window is left alone, and may then cover the popover.
+    ///
+    /// A RealityKit 3D picture stands out of the window, in front of where
     /// the system draws a popover, and covers it. So while one is open the
     /// picture shows flat, as AI 3D video turns its 3D off under a menu. Only
     /// the component's own mode changes: the generated scene stays on it, and
@@ -544,16 +547,14 @@ extension PhotoWindowModel {
     /// regenerates it, which this must never do (user, 2026-11-14). The menus
     /// don't flatten it: the 3D menu changes the mode itself, and
     /// `deactivate3DMode` reads a flattened component as already flat.
-    /// Immersive too: its picture covered the popover the same way (device,
-    /// 2026-11-14), and it comes back through `applyDesiredViewingMode`, which
-    /// sizes the window for it again. Not in the HUD, whose panel hangs beside
-    /// the picture rather than in front of it.
-    func flattenForPopover(_ open: Bool) {
-        // Only Immersive: its picture covers the popover. The regular RealityKit 3D
-        // picture in the window stays 3D under one (user, 2026-11-15).
-        let shows3D = desiredViewingMode == .spatial3DImmersive
+    /// Immersive too: it comes back through `applyDesiredViewingMode`, which
+    /// sizes the window for it again.
+    func flattenForPopover(_ open: Bool, inHUD: Bool) {
+        // Only in the HUD (user, 2026-11-15): a picture in the regular window, RealityKit 3D
+        // or Immersive, stays as it is under a popover.
+        let shows3D = desiredViewingMode == .spatial3D || desiredViewingMode == .spatial3DImmersive
         if open {
-            guard !flattenedForPopover, !spatialPictureLentToHUD, is3DMode, shows3D,
+            guard inHUD, !flattenedForPopover, is3DMode, shows3D,
                   var ipc = contentEntity.components[ImagePresentationComponent.self],
                   ipc.desiredViewingMode == desiredViewingMode else { return }
             flattenedForPopover = true

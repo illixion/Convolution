@@ -207,8 +207,8 @@ hands its content to the portal's `presentation` (a plain popover only turned th
 picture flat there and never showed, device 2026-11-14). Confirmed working on the
 headset; its size by angle came after.
 
-**A popover over an Immersive RealityKit 3D picture flattens it** (`flattenForPopover`, the
-Adjustments and Info popovers, Immersive only: the regular windowed 3D picture stays 3D under them, user 2026-11-15; not in the HUD, whose panel sits in front, clear of the picture's depth): the spatial scene stands
+**A popover over a RealityKit 3D picture in the HUD flattens it** (`flattenForPopover(_:inHUD:)`, the
+Adjustments and Info popovers; only when `viewerHUD.isInHUD`: the picture in the regular window, 3D or Immersive, is left alone, user 2026-11-15, even though an Immersive one may then cover the popover, device 2026-11-14): the spatial scene stands
 out of the window and covered the popover (Immersive hid it entirely, device
 2026-11-14). Only the component's own mode goes `.mono`; the generated scene stays
 on it, the user's mode (`desiredViewingMode`) is kept, and closing the popover puts

@@ -338,10 +338,9 @@ struct PhotoDisplayView: View {
                   initial: true) { _, immersive in
             viewerHUD?.showsMoveHandle = !immersive
         }
-        // An Immersive 3D picture would cover a popover: flat while one is open
-        // (the regular 3D picture in the window stays 3D).
+        // In the HUD a 3D picture goes flat while a popover is open; in the window it stays as it is.
         .onChange(of: windowModel.showAdjustmentsPopover || windowModel.showMediaInfoPopover) { _, open in
-            windowModel.flattenForPopover(open)
+            windowModel.flattenForPopover(open, inHUD: viewerHUD?.isInHUD == true)
         }
         .onChange(of: viewerHUD?.isInHUD) { _, inHUD in
             if inHUD == true {
