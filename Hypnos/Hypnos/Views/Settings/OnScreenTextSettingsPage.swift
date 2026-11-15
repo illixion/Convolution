@@ -1,13 +1,15 @@
 /*
  Hypnos - Settings → On-Screen Text
 
- Narration of burned-in subtitles: on or off, the voice (the system's
- installed voices, best first; Personal Voice once allowed), how fast, and
+ Narration of burned-in subtitles: on or off, the voice (Kokoro's neural
+ voices once downloaded; the system's installed voices, best first; Personal
+ Voice once allowed), how fast, and
  where in the picture to read. Every platform; tvOS has no Slider, so its
  speed is stepped and it has no custom area.
  */
 
 import AVFoundation
+import OnScreenText
 import SwiftUI
 
 struct OnScreenTextSettingsPage: View {
@@ -20,6 +22,11 @@ struct OnScreenTextSettingsPage: View {
     @State private var voices: [AVSpeechSynthesisVoice] = []
     @State private var personalVoice = AVSpeechSynthesizer.personalVoiceAuthorizationStatus
     @State private var preview = AVSpeechSynthesizer()
+    @State private var kokoroDownloaded = OnScreenTextKokoro.isDownloaded
+    @State private var kokoroBusy = false
+    @State private var kokoroError: String?
+    @State private var kokoroSize: Int64 = 0
+    @State private var kokoroSample = KokoroSamplePlayer()
 
     var body: some View {
         SettingsPage("On-Screen Text") {
@@ -49,6 +56,8 @@ struct OnScreenTextSettingsPage: View {
                 Text(String(format: "%.2f× normal speed", rate)).font(.caption).foregroundStyle(.secondary)
                 #endif
             }
+
+            kokoroSection
 
             Section {
                 voiceRow(nil)
@@ -107,7 +116,83 @@ struct OnScreenTextSettingsPage: View {
                 Text("Bottom fits nearly every video. Lines centred in the area, in the size and colour the video's subtitles mostly use, are read; a game's own smaller or differently coloured subtitles and other text on screen are left out.")
             }
         }
-        .task { voices = OnScreenTextSettings.voices() }
+        .task {
+            voices = OnScreenTextSettings.voices()
+            if kokoroDownloaded { kokoroSize = OnScreenTextKokoro.diskSize() }
+        }
+        .onDisappear { kokoroSample.stop() }
+    }
+
+    @ViewBuilder
+    private var kokoroSection: some View {
+        Section {
+            if kokoroDownloaded {
+                ForEach(OnScreenTextKokoro.voices) { kokoroRow($0) }
+                Button("Remove Kokoro Voices", role: .destructive) { removeKokoro() }
+                    .disabled(kokoroBusy)
+            } else if kokoroBusy {
+                HStack {
+                    ProgressView()
+                    Text("Downloading and preparing Kokoro…").foregroundStyle(.secondary)
+                }
+            } else {
+                Button("Download Kokoro Voices") { downloadKokoro() }
+            }
+            if let kokoroError {
+                Text(kokoroError).font(.caption).foregroundStyle(.red)
+            }
+        } header: {
+            Text("Kokoro Voices")
+        } footer: {
+            Text(kokoroDownloaded
+                 ? "Natural-sounding English voices that run on this device. They use \(ByteCountFormatter.string(fromByteCount: kokoroSize, countStyle: .file)) of storage."
+                 : "Natural-sounding English voices that run on this device. About 100 MB, downloaded once from Hugging Face; preparing them the first time takes up to a minute.")
+        }
+    }
+
+    private func kokoroRow(_ voice: OnScreenTextKokoro.Voice) -> some View {
+        Button {
+            voiceID = voice.identifier
+            preview.stopSpeaking(at: .immediate)
+            kokoroSample.play(voice: voice.id, rate: Float(rate))
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(voice.name).foregroundStyle(.primary)
+                    Text("\(voice.detail) · Kokoro").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if voiceID == voice.identifier { Image(systemName: "checkmark") }
+            }
+        }
+        .accessibilityHint("Selects this voice and plays a sample")
+    }
+
+    private func downloadKokoro() {
+        kokoroBusy = true
+        kokoroError = nil
+        Task {
+            do {
+                try await OnScreenTextKokoro.shared.prepare()
+                await OnScreenTextKokoro.shared.unload()
+                kokoroDownloaded = true
+                kokoroSize = OnScreenTextKokoro.diskSize()
+            } catch {
+                kokoroError = "Couldn't download Kokoro: \(error.localizedDescription)"
+            }
+            kokoroBusy = false
+        }
+    }
+
+    private func removeKokoro() {
+        kokoroSample.stop()
+        if OnScreenTextKokoro.voice(forIdentifier: voiceID) != nil { voiceID = "" }
+        kokoroBusy = true
+        Task {
+            try? await OnScreenTextKokoro.shared.remove()
+            kokoroDownloaded = OnScreenTextKokoro.isDownloaded
+            kokoroBusy = false
+        }
     }
 
     private var availableAreas: [OnScreenTextSettings.Area] {
@@ -141,10 +226,49 @@ struct OnScreenTextSettingsPage: View {
     }
 
     private func speakSample(_ voice: AVSpeechSynthesisVoice?) {
+        kokoroSample.stop()
         preview.stopSpeaking(at: .immediate)
         let utterance = AVSpeechUtterance(string: "Turns out, this van is bulletproof.")
         utterance.voice = voice ?? AVSpeechSynthesisVoice(language: AVSpeechSynthesisVoice.currentLanguageCode())
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate * Float(rate)
         preview.speak(utterance)
+    }
+}
+
+/// Plays a Kokoro sample in Settings; the models are loaded for it and
+/// released again when the page closes.
+@MainActor
+private final class KokoroSamplePlayer {
+    private var engine: AVAudioEngine?
+    private var node: AVAudioPlayerNode?
+    private var task: Task<Void, Never>?
+
+    func play(voice: String, rate: Float) {
+        stopPlayback()
+        task = Task {
+            guard let buffer = try? await OnScreenTextKokoro.shared.synthesize(
+                "Turns out, this van is bulletproof.", voice: voice, speed: rate), !Task.isCancelled else { return }
+            let engine = AVAudioEngine()
+            let node = AVAudioPlayerNode()
+            engine.attach(node)
+            engine.connect(node, to: engine.mainMixerNode, format: buffer.format)
+            guard (try? engine.start()) != nil else { return }
+            node.scheduleBuffer(buffer, completionHandler: nil)
+            node.play()
+            self.engine = engine
+            self.node = node
+        }
+    }
+
+    private func stopPlayback() {
+        task?.cancel()
+        node?.stop()
+        engine?.stop()
+        engine = nil; node = nil
+    }
+
+    func stop() {
+        stopPlayback()
+        Task { await OnScreenTextKokoro.shared.unload() }
     }
 }

@@ -14,7 +14,9 @@
 
  Voices are the system's (`AVSpeechSynthesisVoice.speechVoices()`): premium
  and enhanced voices the person downloaded in Settings, and their Personal
- Voice once they allow it. Siri's voices are not offered to apps.
+ Voice once they allow it. Siri's voices are not offered to apps. Or a Kokoro
+ voice (`OnScreenTextKokoro`, identifier `kokoro:<pack>`), once its models are
+ downloaded; if it fails, the line is spoken in the system voice instead.
  */
 
 import AVFoundation
@@ -23,7 +25,8 @@ import Foundation
 @MainActor
 public final class OnScreenTextNarrator {
     public struct Settings: Sendable, Equatable {
-        /// `AVSpeechSynthesisVoice.identifier`; nil for the system language's default.
+        /// `AVSpeechSynthesisVoice.identifier`, or `kokoro:<pack>` for a
+        /// Kokoro voice; nil for the system language's default.
         public var voiceIdentifier: String?
         /// Multiplies the default speaking rate (0.5...1.5).
         public var rate: Float
@@ -63,6 +66,11 @@ public final class OnScreenTextNarrator {
     private var lastPlayhead: Double?
     private var paused = false
     private var reportedUnready: Int?
+    /// Kokoro's models are loaded for this narration (released by `stop`).
+    private var usedKokoro = false
+    /// Kokoro failed this narration: the system voice speaks instead.
+    private var kokoroFailed = false
+    private var kokoroTask: Task<Void, Never>?
 
     private var engine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
@@ -113,11 +121,27 @@ public final class OnScreenTextNarrator {
         speak(cue, ready, slot: slot, speed: speed)
     }
 
+    /// Starts loading a Kokoro voice's models, when one is chosen, so the
+    /// first line isn't held up by it (the first load after a download
+    /// compiles them, about 20 to 30 s). `stop` releases them.
+    public func preload() {
+        guard !usedKokoro, OnScreenTextKokoro.voice(forIdentifier: settings.voiceIdentifier) != nil,
+              OnScreenTextKokoro.isDownloaded else { return }
+        usedKokoro = true
+        onDiagnostic?("Narration: loading the Kokoro voice")
+        Task { try? await OnScreenTextKokoro.shared.prepare() }
+    }
+
     /// Silences everything and forgets what was prepared and spoken.
     public func stop() {
         stopSpeaking()
         synthesizer.stopSpeaking(at: .immediate)
         prepared = [:]; preparing = nil; spoken = []; lastPlayhead = nil
+        kokoroTask?.cancel(); kokoroTask = nil; kokoroFailed = false
+        if usedKokoro {
+            usedKokoro = false
+            Task { await OnScreenTextKokoro.shared.unload() }
+        }
         engine?.stop()
         engine = nil; playerNode = nil; timePitch = nil; engineFormat = nil
     }
@@ -189,8 +213,35 @@ public final class OnScreenTextNarrator {
 
     private func prepare(_ cue: OnScreenTextCue) {
         preparing = cue.id
+        if !kokoroFailed, let voice = OnScreenTextKokoro.voice(forIdentifier: settings.voiceIdentifier),
+           OnScreenTextKokoro.isDownloaded {
+            prepareWithKokoro(cue, voice: voice)
+            return
+        }
+        prepareWithSystemVoice(cue)
+    }
+
+    private func prepareWithKokoro(_ cue: OnScreenTextCue, voice: OnScreenTextKokoro.Voice) {
+        preload()
+        let id = cue.id, text = cue.text, speed = settings.rate
+        kokoroTask = Task { [weak self] in
+            do {
+                let buffer = try await OnScreenTextKokoro.shared.synthesize(text, voice: voice.id, speed: speed)
+                guard !Task.isCancelled else { return }
+                self?.finishedPreparing(id, text: text, buffers: [buffer])
+            } catch {
+                guard !Task.isCancelled, let self, self.preparing == id else { return }
+                self.onDiagnostic?("Narration: the Kokoro voice failed (code \((error as NSError).code)); using the system voice")
+                self.kokoroFailed = true
+                self.prepareWithSystemVoice(cue)
+            }
+        }
+    }
+
+    private func prepareWithSystemVoice(_ cue: OnScreenTextCue) {
         let utterance = AVSpeechUtterance(string: cue.text)
-        if let id = settings.voiceIdentifier, let voice = AVSpeechSynthesisVoice(identifier: id) {
+        if let id = settings.voiceIdentifier, !id.hasPrefix(OnScreenTextKokoro.identifierPrefix),
+           let voice = AVSpeechSynthesisVoice(identifier: id) {
             utterance.voice = voice
         } else {
             utterance.voice = AVSpeechSynthesisVoice(language: AVSpeechSynthesisVoice.currentLanguageCode())

@@ -289,6 +289,7 @@ final class SubtitleController {
         cues = nil; error = nil; isFetching = false
         onScreen.region = OnScreenTextSettings.region
         narrator.settings = OnScreenTextSettings.narratorSettings
+        if OnScreenTextSettings.narrates { narrator.preload() }
         onScreen.start()
     }
 

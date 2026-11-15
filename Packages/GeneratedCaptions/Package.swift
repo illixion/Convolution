@@ -11,7 +11,7 @@ let package = Package(
     dependencies: [
         .package(path: "../../../vergence"),
         .package(url: "https://github.com/FluidInference/FluidAudio.git",
-                 revision: "1b0ed50d686873128a4129b3510ce3914c849bab", traits: ["Diarizer"]),
+                 revision: "1b0ed50d686873128a4129b3510ce3914c849bab", traits: ["Diarizer", "TTS"]),
     ],
     targets: [
         .target(name: "GeneratedCaptions", dependencies: [
@@ -19,8 +19,10 @@ let package = Package(
             .product(name: "FluidAudio", package: "FluidAudio"),
         ]),
         // Burned-in subtitles read from the picture (Vision), and narration of
-        // them (AVSpeechSynthesizer). System frameworks only.
-        .target(name: "OnScreenText"),
+        // them (AVSpeechSynthesizer, or FluidAudio's Kokoro voices).
+        .target(name: "OnScreenText", dependencies: [
+            .product(name: "FluidAudio", package: "FluidAudio"),
+        ]),
         .testTarget(name: "OnScreenTextTests", dependencies: ["OnScreenText"], resources: [.copy("Fixtures")]),
         .testTarget(name: "GeneratedCaptionsTests", dependencies: ["GeneratedCaptions"],
                 resources: [.copy("Fixtures")]),
