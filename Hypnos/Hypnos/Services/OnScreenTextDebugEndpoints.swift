@@ -44,14 +44,14 @@ enum OnScreenTextDebugEndpoints {
                     ]
                 }
             },
-            .command("onScreenTextSelect", "Turns On-Screen Text on or off in the first video window that can read its picture.",
-                     parameters: [.boolean("on", "true to read the picture, false for no subtitles", required: true)]) { args in
+            .command("onScreenTextSelect", "Turns AI Narration on or off in the first video window that can read its picture.",
+                     parameters: [.boolean("on", "true to turn AI Narration on, false for off", required: true)]) { args in
                 guard let model = VideoWindowModel.withNativePlayers.allObjects.first(where: { $0.subtitles.canReadScreen }) else {
                     return ["available": false]
                 }
                 let on = args.bool("on") ?? true
                 if on != model.subtitles.onScreen.enabled {
-                    if on { model.subtitles.selectOnScreenText() } else { model.subtitles.select(nil) }
+                    model.subtitles.toggleAINarration()
                 }
                 return ["available": true, "enabled": model.subtitles.onScreen.enabled]
             },

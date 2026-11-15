@@ -1,9 +1,9 @@
 /*
  Hypnos - On-Screen Text settings
 
- On-Screen Text reads a video's burned-in subtitles off the picture and can
- speak them (`OnScreenText` in Packages/GeneratedCaptions; chosen in a video's
- subtitle menu). These are its saved choices: whether to narrate, the voice,
+ AI Narration reads a video's burned-in subtitles off the picture and speaks
+ them (`OnScreenText` in Packages/GeneratedCaptions; an effect in a video's
+ AI Narration menu, not a subtitle track). These are its saved choices: the voice,
  how fast, and where in the picture to look. Read on every pass of the
  reader's loop, so a change applies to the next line; never written during
  playback (see "Never write to HypnosDefaults.store" in CLAUDE.md).
@@ -14,7 +14,10 @@ import Foundation
 import OnScreenText
 
 enum OnScreenTextSettings {
-    static let narrateKey = "onScreenText.narrate"
+    /// Whether AI Narration is offered in the players at all. Off until the
+    /// viewer turns it on; turning it on only adds the menu, it never starts
+    /// narrating a video by itself.
+    static let availableKey = "onScreenText.available"
     static let voiceKey = "onScreenText.voice"
     static let rateKey = "onScreenText.rate"
     static let areaKey = "onScreenText.area"
@@ -35,9 +38,12 @@ enum OnScreenTextSettings {
         }
     }
 
-    static var narrates: Bool {
-        HypnosDefaults.store.object(forKey: narrateKey) as? Bool ?? true
+    static var isAvailable: Bool {
+        HypnosDefaults.store.object(forKey: availableKey) as? Bool ?? false
     }
+
+    /// AI Narration speaks what it reads; there is no reading without it.
+    static var narrates: Bool { true }
 
     static var area: Area {
         HypnosDefaults.store.string(forKey: areaKey).flatMap(Area.init) ?? .bottom

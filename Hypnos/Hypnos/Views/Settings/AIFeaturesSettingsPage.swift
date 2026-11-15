@@ -94,7 +94,7 @@ struct AIFeaturesSettingsPage: View {
                     Label("AI Captions", systemImage: "captions.bubble")
                 }
                 NavigationLink(value: SettingsTabView.Page.onScreenText) {
-                    Label("On-Screen Text", systemImage: "text.viewfinder")
+                    Label("AI Narration", systemImage: "waveform.badge.mic")
                 }
                 #if os(visionOS)
                 NavigationLink(value: SettingsTabView.Page.compute) {

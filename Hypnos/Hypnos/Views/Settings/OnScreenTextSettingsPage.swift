@@ -13,7 +13,6 @@ import OnScreenText
 import SwiftUI
 
 struct OnScreenTextSettingsPage: View {
-    @AppStorage(OnScreenTextSettings.narrateKey, store: HypnosDefaults.store) private var narrates = true
     @AppStorage(OnScreenTextSettings.voiceKey, store: HypnosDefaults.store) private var voiceID = ""
     @AppStorage(OnScreenTextSettings.rateKey, store: HypnosDefaults.store) private var rate = 1.0
     @AppStorage(OnScreenTextSettings.areaKey, store: HypnosDefaults.store) private var area = OnScreenTextSettings.Area.bottom.rawValue
@@ -26,14 +25,21 @@ struct OnScreenTextSettingsPage: View {
     @State private var kokoroBusy = false
     @State private var kokoroError: String?
     @State private var kokoroSize: Int64 = 0
+    @AppStorage(OnScreenTextSettings.availableKey, store: HypnosDefaults.store) private var available = false
     @State private var kokoroSample = KokoroSamplePlayer()
 
     var body: some View {
-        SettingsPage("On-Screen Text") {
+        SettingsPage("AI Narration") {
             Section {
-                Toggle("Narrate", isOn: $narrates)
+                Toggle("Offer AI Narration", isOn: $available)
+            } header: {
+                Text("Availability")
             } footer: {
-                Text("Choose On-Screen Text in a video's subtitle menu for videos whose words are written on the picture instead of spoken. Text is read on this device, a few seconds ahead of the picture, and with Narrate on it is spoken in the voice below while the video's sound is lowered.")
+                Text("""
+                Some videos, such as narration-free YouTube channels and game footage with a creator's captions, write                 their words on the picture instead of saying them. AI Narration reads that text off the picture on this                 device, a few seconds ahead of the video, and speaks it aloud in the voice chosen below, lowering the                 video's own sound while it talks. The picture is never sent anywhere, and no subtitle track is made or                 changed. It works with the system voices and, if you download them, Kokoro's natural-sounding ones.
+
+                This switch only adds an AI Narration button to a video's controls.                 It never starts by itself: you turn it on, per video, from that menu. Reading ahead costs some battery                 and heat, and the video waits briefly at the start while the first words are read.
+                """)
             }
 
             Section("Speed") {

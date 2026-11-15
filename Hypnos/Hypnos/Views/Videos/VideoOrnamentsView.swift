@@ -30,6 +30,8 @@ private let videoOrnamentGlyphSize: CGFloat = 22
 
 struct VideoOrnamentsView: View {
     @Bindable var windowModel: VideoWindowModel
+    /// Settings → AI Features → AI Narration: whether the menu is offered.
+    @AppStorage(OnScreenTextSettings.availableKey, store: HypnosDefaults.store) private var aiNarrationAvailable = false
     @Environment(AppModel.self) private var appModel
     @OpenWindowProxy private var openWindow
     @DismissWindowProxy private var dismissWindow
@@ -113,6 +115,7 @@ struct VideoOrnamentsView: View {
         if room >= 1 {
             subtitleMenu
             audioMenu
+            aiNarrationMenu
             speedMenu
             audioEQMenu
             sleepTimerMenu
@@ -150,6 +153,7 @@ struct VideoOrnamentsView: View {
             if room < 1 {
                 subtitleMenu
                 audioMenu
+                aiNarrationMenu
                 speedMenu
                 audioEQMenu
                 sleepTimerMenu
@@ -307,6 +311,14 @@ struct VideoOrnamentsView: View {
     private var subtitleMenu: some View {
         if windowModel.subtitles.offersMenu {
             SubtitleMenu(controller: windowModel.subtitles, onOpenChanged: { chromeMenu("Subtitles", opened: $0) })
+        }
+    }
+
+    /// AI Narration, for a player whose picture can be read (not tvOS's AVKit).
+    @ViewBuilder
+    private var aiNarrationMenu: some View {
+        if windowModel.subtitles.canReadScreen, aiNarrationAvailable {
+            AINarrationMenu(controller: windowModel.subtitles, onOpenChanged: { chromeMenu("AI Narration", opened: $0) })
         }
     }
 

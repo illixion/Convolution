@@ -42,6 +42,12 @@ public final class OnScreenTextNarrator {
     }
     /// The video's sound level to apply: 1 normally, `duckLevel` while speaking.
     public var onDuck: ((Float) -> Void)?
+    /// The voice turns with the head instead of staying in the room (visionOS;
+    /// the player's Head-Locked Sound). The host sets it from the same rule it
+    /// applies to the video's own sound.
+    public var headLocked = false {
+        didSet { if headLocked != oldValue, let engine { applySpatialExperience(to: engine) } }
+    }
     /// Code-defined diagnostics; never the text spoken.
     public var onDiagnostic: ((String) -> Void)?
     /// The narration's own level (0...1): the host passes the player's volume
@@ -206,8 +212,21 @@ public final class OnScreenTextNarrator {
             return nil
         }
         engine.mainMixerNode.outputVolume = volume
+        applySpatialExperience(to: engine)
         self.engine = engine; playerNode = node; timePitch = pitch; engineFormat = format
         return node
+    }
+
+    /// An `AVAudioEngine`'s output is placed in the room like any app sound;
+    /// head-locked sound plays it unspatialized instead.
+    private func applySpatialExperience(to engine: AVAudioEngine) {
+        #if os(visionOS)
+        if headLocked {
+            engine.outputNode.intendedSpatialExperience = .bypassed
+        } else {
+            engine.outputNode.intendedSpatialExperience = .automatic
+        }
+        #endif
     }
 
     // MARK: Synthesis

@@ -268,31 +268,32 @@ final class SubtitleController {
     @ObservationIgnored let narrator = OnScreenTextNarrator()
     /// A player whose picture can be read (any AVPlayer-backed one).
     private(set) var canReadScreen = false
-    static let onScreenTrack = LibrarySubtitleTrack(id: -10001, sourceId: "onscreen", language: nil, name: "On-Screen Text")
     @ObservationIgnored private weak var analysisPlayer: AVPlayer?
     /// The player's volume before narration lowered it, while it is lowered.
     @ObservationIgnored private var duckedFrom: Float?
     @ObservationIgnored private var duckTarget: Float?
+    /// The volume the app last set while fading, and where a restore is heading.
+    @ObservationIgnored private var duckWritten: Float?
+    @ObservationIgnored private var restoringTo: Float?
     @ObservationIgnored private var duckTask: Task<Void, Never>?
 
-    func selectOnScreenText() {
+    /// AI Narration: reads the burned-in subtitles off the picture and speaks
+    /// them. An effect on the sound, independent of the subtitle track (which
+    /// it never shows or replaces).
+    var isNarrationOn: Bool { onScreen.enabled }
+    /// The bound player is muted, which silences narration too.
+    var isMutedForNarration: Bool { analysisPlayer?.isMuted == true }
+
+    func toggleAINarration() {
         guard canReadScreen else { return }
-        if selected == Self.onScreenTrack, onScreen.enabled {
-            select(nil)
-            return
-        }
-        translator.stop()
-        generated.stop()
-        fetchTask?.cancel()
-        selectionMadeForSource = true
-        selected = Self.onScreenTrack
-        cues = nil; error = nil; isFetching = false
+        if onScreen.enabled { stopOnScreenText(); return }
+        guard OnScreenTextSettings.isAvailable else { return }
         onScreen.region = OnScreenTextSettings.region
         narrator.settings = OnScreenTextSettings.narratorSettings
         // Kokoro's Core ML load waits for Vision's model: loaded together they
         // left the reader on "Preparing text recognition" for ever (headset).
         onScreen.onRecognizerReady = { [weak self] in
-            if OnScreenTextSettings.narrates { self?.narrator.preload() }
+            self?.narrator.preload()
         }
         onScreen.start()
     }
@@ -306,48 +307,76 @@ final class SubtitleController {
         setDuck(1)
     }
 
-    /// Called by the reader's loop (~20 Hz): narration follows the player's
-    /// clock, shifted by the subtitle offset like the cues on screen.
+    /// Called by the reader's loop (~20 Hz): narration follows the player's clock.
     private func narrationTick(playhead: Double, playing: Bool, speed: Double) {
+        // Switched off in Settings while it ran: stop reading too.
+        if !OnScreenTextSettings.isAvailable { stopOnScreenText(); return }
         guard OnScreenTextSettings.narrates, let player = analysisPlayer else {
             narrator.stop()
             setDuck(1)
             return
         }
         narrator.settings = OnScreenTextSettings.narratorSettings
+        #if os(visionOS)
+        narrator.headLocked = Cinema.shared.headLocked(for: player)
+        #endif
         narrator.volume = duckedFrom ?? player.volume
-        narrator.update(playhead: cueTime(forFilmTime: playhead), playing: playing && !player.isMuted,
+        narrator.update(playhead: playhead, playing: playing && !player.isMuted,
                         speed: speed, cues: onScreen.cues)
     }
 
     /// Lowers the bound player's volume to `level` of what it was (1
-    /// restores it), over a quarter of a second. Never persisted: a volume
-    /// the viewer sets meanwhile becomes the one restored.
+    /// restores it), over a quarter of a second. Never persisted. The volume
+    /// the app last wrote (`duckWritten`) tells a viewer's own change from a
+    /// fade still on its way: comparing against the duck's end point read a
+    /// fade cut short as the viewer's choice and kept the half-faded volume.
     private func setDuck(_ level: Float) {
-        guard let player = analysisPlayer else { duckedFrom = nil; return }
+        guard let player = analysisPlayer else { duckedFrom = nil; duckWritten = nil; restoringTo = nil; return }
+        let touched = viewerChangedVolume(player)
         if level >= 1 {
             guard let base = duckedFrom else { return }
-            // Someone set the volume while it was lowered: keep theirs.
-            let restoreTo = duckTarget.map { abs(player.volume - $0) > 0.01 } == true ? player.volume : base
+            let restoreTo = touched ? player.volume : base
             duckedFrom = nil; duckTarget = nil
+            restoringTo = restoreTo
             ramp(player, to: restoreTo)
         } else {
-            let base = duckedFrom ?? player.volume
+            // The volume to come back to: the one before the duck, or where a
+            // restore still fading was heading (never its half-way volume).
+            if duckedFrom != nil, touched { duckedFrom = player.volume }
+            let base = duckedFrom ?? (touched ? nil : restoringTo) ?? player.volume
             duckedFrom = base
             duckTarget = base * level
+            restoringTo = nil
             ramp(player, to: base * level)
         }
+    }
+
+    /// The volume is not where the last fade left it: the viewer moved it.
+    private func viewerChangedVolume(_ player: AVPlayer) -> Bool {
+        guard let written = duckWritten else { return false }
+        return abs(player.volume - written) > 0.01
     }
 
     private func ramp(_ player: AVPlayer, to target: Float) {
         duckTask?.cancel()
         let from = player.volume
-        duckTask = Task { @MainActor [weak player] in
+        duckWritten = from
+        duckTask = Task { @MainActor [weak self, weak player] in
             for step in 1...8 {
                 try? await Task.sleep(for: .milliseconds(30))
-                guard !Task.isCancelled, let player else { return }
-                player.volume = from + (target - from) * Float(step) / 8
+                guard !Task.isCancelled, let self, let player else { return }
+                // The viewer took the slider mid-fade: their volume stands.
+                if self.viewerChangedVolume(player) {
+                    self.duckedFrom = nil; self.duckTarget = nil; self.duckWritten = nil; self.restoringTo = nil
+                    return
+                }
+                let value = from + (target - from) * Float(step) / 8
+                player.volume = value
+                self.duckWritten = value
             }
+            // A finished restore needs no more watching.
+            guard let self else { return }
+            if self.duckedFrom == nil { self.duckWritten = nil; self.restoringTo = nil }
         }
     }
 
@@ -364,12 +393,6 @@ final class SubtitleController {
         narrator.onDuck = { [weak self] level in self?.setDuck(level) }
         onScreen.onTick = { [weak self] playhead, playing, speed in
             self?.narrationTick(playhead: playhead, playing: playing, speed: speed)
-        }
-        onScreen.onChange = { [weak self] in
-            guard let self, self.selected == Self.onScreenTrack else { return }
-            self.cues = RAVESubtitleTrack(cues: self.onScreen.cues.map { cue in
-                RAVESubtitleCue(start: cue.start, end: cue.end, text: AttributedString(cue.text))
-            })
         }
         generated.onChange = { [weak self] in
             #if os(iOS) || os(macOS)
@@ -566,7 +589,6 @@ final class SubtitleController {
         selectionMadeForSource = true
         translator.stop()
         generated.stop()
-        stopOnScreenText()
         fetchTask?.cancel()
         selected = track
         cues = pickedCues[track.id]
@@ -583,7 +605,6 @@ final class SubtitleController {
         selectionMadeForSource = true
         translator.stop()
         generated.stop()
-        stopOnScreenText()
         // A translation is the viewer's choice for this video, not their language.
         if track?.isTranslated != true { SubtitlePreference.remember(track) }
         guard let track else {
@@ -644,7 +665,6 @@ final class SubtitleController {
         fetchTask?.cancel()
         selectionMadeForSource = true
         generated.stop()
-        stopOnScreenText()
         selected = track
         cues = nil
         error = nil
