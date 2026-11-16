@@ -15,7 +15,13 @@
 
  FluidAudio warns that on iOS/visionOS 27 a long session can still crash in
  libBNNS (FluidAudio #889); the system voices have no such risk, so Kokoro is
- an opt-in choice in Settings, never the default.
+ an opt-in choice in Settings, never the default. A Vision Pro on 27.2 did
+ crash that way 22 minutes into a narrated video (2026-11-16), and two things
+ here could have run predictions side by side: a line cancelled by a stop or
+ a seek kept running while the next one started (the manager is an actor,
+ re-entered at every stage's `await`), and an unload could free the models
+ under it. So every line, load and unload takes `OnScreenCoreMLTurn`, which
+ also keeps Vision's reading from running beside them.
  */
 
 import AVFoundation
@@ -104,6 +110,9 @@ public actor OnScreenTextKokoro {
 
     private var manager: KokoroAneManager?
     private var loading: Task<KokoroAneManager, Error>?
+    /// Moves on with each unload, so a load that finishes after one is not
+    /// adopted (the unload has freed it).
+    private var loadGeneration = 0
 
     /// Downloads (the first time) and loads the models.
     public func prepare() async throws {
@@ -113,7 +122,10 @@ public actor OnScreenTextKokoro {
     /// `text` spoken in `voice` (a pack name), at `speed` (1 normal): 24 kHz mono.
     public func synthesize(_ text: String, voice: String, speed: Float) async throws -> sending AVAudioPCMBuffer {
         let manager = try await loaded()
-        let result = try await manager.synthesizeDetailed(text: text, voice: voice, speed: min(1.5, max(0.5, speed)))
+        let speed = min(1.5, max(0.5, speed))
+        let result = try await OnScreenCoreMLTurn.shared.run {
+            try await manager.synthesizeDetailed(text: text, voice: voice, speed: speed)
+        }
         guard !result.samples.isEmpty,
               let format = AVAudioFormat(standardFormatWithSampleRate: Double(result.sampleRate), channels: 1),
               let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(result.samples.count)),
@@ -127,10 +139,17 @@ public actor OnScreenTextKokoro {
     /// Releases the loaded models (they stay on disk). Prefer `release()`,
     /// which leaves them loaded while anything else is using them.
     func unload() async {
-        loading?.cancel()
+        // A load can't be stopped part way; let it finish, then free it too.
+        let pending = loading
         loading = nil
-        if let manager { await manager.cleanup() }
+        let current = manager
         manager = nil
+        loadGeneration += 1
+        let loadedMeanwhile = try? await pending?.value
+        await OnScreenCoreMLTurn.shared.run {
+            if let current { await current.cleanup() }
+            if let loadedMeanwhile, loadedMeanwhile !== current { await loadedMeanwhile.cleanup() }
+        }
     }
 
     /// Deletes the downloaded models.
@@ -151,18 +170,20 @@ public actor OnScreenTextKokoro {
             values.isExcludedFromBackup = true
             try? excluded.setResourceValues(values)
             let manager = KokoroAneManager(directory: Self.directory)
-            try await manager.initialize()
+            try await OnScreenCoreMLTurn.shared.run { try await manager.initialize() }
             FileManager.default.createFile(atPath: Self.readyMarker.path, contents: Data())
             return manager
         }
         loading = task
+        let generation = loadGeneration
         do {
             let manager = try await task.value
+            guard generation == loadGeneration else { throw CancellationError() }
             self.manager = manager
             loading = nil
             return manager
         } catch {
-            loading = nil
+            if generation == loadGeneration { loading = nil }
             throw error
         }
     }

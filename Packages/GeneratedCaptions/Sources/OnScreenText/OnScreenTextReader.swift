@@ -116,7 +116,9 @@ public final class OnScreenTextReader {
             // that comes back empty is retried at `.fast`.
             let recognizer = analysis.recognizer
             // The accurate model loads on the side (minutes the first time on
-            // a Vision Pro); frames are read at `.fast` until it has.
+            // a Vision Pro); frames are read at `.fast` until it has. It
+            // doesn't take the Core ML turn: holding it for minutes would
+            // silence the narration, and it runs once.
             Task.detached(priority: .utility) { recognizer.warmUpAccurate() }
             let finished = await Self.warmUp(recognizer, timeout: 20)
             guard let self, self.generation == token else { return }
@@ -131,7 +133,7 @@ public final class OnScreenTextReader {
         await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             let once = OnceFlag()
             Task.detached {
-                recognizer.warmUpFast()
+                await OnScreenCoreMLTurn.shared.run { recognizer.warmUpFast() }
                 if once.take() { continuation.resume(returning: true) }
             }
             Task.detached {
@@ -436,10 +438,14 @@ actor OnScreenTextAnalysis {
         builder.restart(at: time)
     }
 
-    func read(_ frame: OnScreenPixelBuffer, at time: Double, force: Bool) -> Result {
+    func read(_ frame: OnScreenPixelBuffer, at time: Double, force: Bool) async -> Result {
         var failure: Int?
         do {
-            let lines = try recognizer.read(frame.buffer, region: region, force: force)
+            // Never beside a Kokoro line (`OnScreenCoreMLTurn`).
+            let recognizer = recognizer, region = region
+            let lines = try await OnScreenCoreMLTurn.shared.run {
+                try recognizer.read(frame.buffer, region: region, force: force)
+            }
             builder.add(OnScreenTextFrame(time: time, lines: lines))
         } catch {
             failure = (error as NSError).code
