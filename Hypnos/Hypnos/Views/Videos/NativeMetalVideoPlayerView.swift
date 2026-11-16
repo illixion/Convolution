@@ -318,6 +318,9 @@ struct NativeMetalVideoPlayerView {
                 })
                 playbackModel?.noteNativePlayer(player)
             }
+            coordinator.onPlayerReleased = { [weak playbackModel] player in
+                playbackModel?.releaseNativePlayer(player)
+            }
             coordinator.onAudioEQResult = { [weak playbackModel] result in
                 playbackModel?.noteAudioEQ(result)
             }
@@ -489,6 +492,8 @@ struct NativeMetalVideoPlayerView {
         var onPlaybackUpdate: ((PlaybackState) -> Void)?
         /// The AVPlayer, as each load makes one and teardown drops it.
         var onPlayerChanged: ((AVPlayer?) -> Void)?
+        /// This renderer let its player go (its teardown, a reload).
+        var onPlayerReleased: ((AVPlayer) -> Void)?
         /// What the equalizer found on the item just opened (nil while it loads).
         var onAudioEQResult: (@MainActor (EQAttachResult?) -> Void)?
         #if os(iOS) || os(macOS)
@@ -679,6 +684,17 @@ struct NativeMetalVideoPlayerView {
                     guard self.loops else {
                         // AVPlayer pauses at the end by itself.
                         self.reportPlaybackState()
+                        return
+                    }
+                    // A server's progressive file is looped with a fresh item:
+                    // after the seek back from its end, visionOS's player
+                    // sometimes never fetches the start again (about one loop
+                    // in four on a 30 MB clip, 2026-11-16), and a new item
+                    // never failed to start. HLS and local files seek.
+                    if let url = self.loadedURL, let identity = self.loadedIdentity, !url.isFileURL,
+                       url.scheme == "http" || url.scheme == "https",
+                       self.playerItem?.accessLog()?.events.last?.playbackType == "FILE" {
+                        self.load(url: url, identity: identity, startPaused: !self.isRoomActive)
                         return
                     }
                     self.seek(to: 0)
@@ -985,7 +1001,7 @@ struct NativeMetalVideoPlayerView {
             lastPixelBuffer = nil
             needsPictureRedraw = true
             intendsToPlay = false
-            if player != nil { onPlayerChanged?(nil) }
+            if let player { onPlayerReleased?(player) }
             if let timeObserver, let player {
                 player.removeTimeObserver(timeObserver)
             }

@@ -389,6 +389,22 @@ final class VideoWindowModel {
         audioEQResult = result
     }
 
+    /// A renderer let `player` go: forgotten only if it is still this
+    /// window's (a rebuilt renderer registers its new player first, and the
+    /// old one's teardown used to clear it: the stuck-player watch, the audio
+    /// menu and the captions then saw no player for the rest of the video).
+    func releaseNativePlayer(_ player: AVPlayer) {
+        subtitles.releaseAnalysisPlayer(player)
+        guard nativePlayer === player else { return }
+        noteNativePlayer(nil)
+    }
+
+    func releaseStereoAudioPlayer(_ player: AVPlayer?) {
+        if let player { subtitles.releaseAnalysisPlayer(player) }
+        guard stereoAudioPlayer == nil || stereoAudioPlayer === player else { return }
+        noteStereoAudioPlayer(nil)
+    }
+
     func noteStereoAudioPlayer(_ player: AVPlayer?) {
         guard stereoAudioPlayer !== player else { return }
         stereoAudioPlayer = player

@@ -405,6 +405,14 @@ final class SubtitleController {
             })
         }
     }
+    /// A renderer let `player` go. Unbinds only if it is still the player
+    /// bound: a rebuilt or switched renderer binds its new player before the
+    /// old one is torn down, and the old one's teardown must not unbind it.
+    func releaseAnalysisPlayer(_ player: AVPlayer) {
+        guard analysisPlayer === player else { return }
+        bindAnalysisPlayer(nil)
+    }
+
     func bindAnalysisPlayer(_ player: AVPlayer?, buffering: ((Bool) -> Void)? = nil) {
         // Release the previous transport before handing the hold callback to
         // the new renderer. A late teardown must not hold its replacement.

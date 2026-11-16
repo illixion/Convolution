@@ -364,7 +364,15 @@ extension Pseudo3DStereoEngine {
             loopController.setLoopBounds = { [weak self] a, b in self?.setLoopBounds(a: a, b: b) }
         }
         if let playbackModel {
+            // The engine reports its player going as nil; remember which it
+            // was, so a newer renderer's player isn't forgotten with it.
+            let last = LastStereoPlayer()
             onAnalysisPlayerChanged = { [weak playbackModel, weak self] player in
+                guard let player else {
+                    playbackModel?.releaseStereoAudioPlayer(last.player)
+                    return
+                }
+                last.player = player
                 playbackModel?.subtitles.bindAnalysisPlayer(player, buffering: { [weak self] held in
                     self?.setAnalysisBuffering(held)
                 })
@@ -471,4 +479,10 @@ struct StereoWorkerAnalysis {
     var depthTrack: AnalysisDepthTrack?
     var depthTrackID = 0
     var gainGrids: GainGridPlayback?
+}
+
+/// The stereo engine's last player, for telling its release from a newer one's.
+@MainActor
+private final class LastStereoPlayer {
+    weak var player: AVPlayer?
 }
