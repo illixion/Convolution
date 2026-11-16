@@ -721,6 +721,16 @@ struct PhotoDisplayView: View {
                     let forwardZ: Float = windowModel.isRawSplatMode && windowModel.isUIHidden
                         ? Float(windowModel.rawSplatForwardOffset) : 0
                     placeSpatialPicture(atZ: experimentalZ + forwardZ)
+                    // Pulled forward, the splat sits in front of the input
+                    // plane; let a tap on the picture itself count too.
+                    let entity = windowModel.contentEntity
+                    if windowModel.isRawSplatMode {
+                        if entity.components[InputTargetComponent.self] == nil {
+                            entity.components.set(InputTargetComponent())
+                        }
+                    } else if entity.components[InputTargetComponent.self] != nil {
+                        entity.components.remove(InputTargetComponent.self)
+                    }
                     if windowModel.contentEntity.parent == nil {
                         content.add(windowModel.contentEntity)
                     }

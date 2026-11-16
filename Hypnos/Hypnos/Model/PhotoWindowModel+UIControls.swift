@@ -74,6 +74,11 @@ extension PhotoWindowModel {
 
     func scheduleWindowControlsHiding() {
         windowControlsHideTask?.cancel()
+        // Raw Splat pulled forward (Bring Closer) covers the window's tap
+        // target, and content in front of a window gets no input, so a tap
+        // may not bring the controls back: keep the system window bar, the
+        // way out that doesn't depend on that tap.
+        guard !(isRawSplatMode && rawSplatForwardOffset > 0) else { return }
         windowControlsHideTask = Task {
             try? await Task.sleep(for: .seconds(1.5))
             if !Task.isCancelled {
