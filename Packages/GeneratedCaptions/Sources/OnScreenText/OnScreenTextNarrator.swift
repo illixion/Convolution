@@ -70,6 +70,9 @@ public final class OnScreenTextNarrator {
     private var preparing: Int?
     private var spoken: Set<Int> = []
     private var speaking: Int?
+    /// What was spoken lately and when (media time), so one subtitle listed
+    /// twice under two ids is not spoken twice.
+    var recentLines: [(text: String, at: Double)] = []
     private var lastPlayhead: Double?
     private var paused = false
     private var reportedUnready: Int?
@@ -92,6 +95,7 @@ public final class OnScreenTextNarrator {
         if let last = lastPlayhead, playhead < last - 0.3 || playhead > last + 1.5 {
             stopSpeaking()
             spoken = Set(cues.filter { $0.start < playhead - 0.1 }.map(\.id))
+            recentLines = []
         }
         lastPlayhead = playhead
 
@@ -126,6 +130,10 @@ public final class OnScreenTextNarrator {
             spoken.insert(cues[index].id)
             onDiagnostic?("Narration: skipped a line that came too late to speak")
         }
+        for index in due where !spoken.contains(cues[index].id) && repeatsRecentLine(cues[index].text, at: playhead) {
+            spoken.insert(cues[index].id)
+            onDiagnostic?("Narration: skipped a repeat of a line just spoken")
+        }
         guard let index = due.first(where: { !spoken.contains(cues[$0].id) }) else { return }
         let cue = cues[index]
         guard let ready = prepared[cue.id], ready.text == cue.text else {
@@ -159,11 +167,19 @@ public final class OnScreenTextNarrator {
         Task { try? await OnScreenTextKokoro.shared.prepare() }
     }
 
+    /// A long line the same as one spoken in the last 15 s of the video (a
+    /// reading of the same subtitle that the cues didn't join).
+    func repeatsRecentLine(_ text: String, at playhead: Double) -> Bool {
+        guard text.count >= OnScreenCueBuilder.longText else { return false }
+        return recentLines.contains { playhead - $0.at >= 0 && playhead - $0.at < 15
+            && OnScreenCueBuilder.similarity($0.text, text) > 0.9 }
+    }
+
     /// Silences everything and forgets what was prepared and spoken.
     public func stop() {
         stopSpeaking()
         synthesizer.stopSpeaking(at: .immediate)
-        prepared = [:]; preparing = nil; spoken = []; lastPlayhead = nil
+        prepared = [:]; preparing = nil; spoken = []; lastPlayhead = nil; recentLines = []
         kokoroTask?.cancel(); kokoroTask = nil; kokoroFailed = false
         if usedKokoro {
             usedKokoro = false
@@ -184,6 +200,8 @@ public final class OnScreenTextNarrator {
     private func speak(_ cue: OnScreenTextCue, _ ready: Prepared, slot: Double, speed: Double) {
         guard let format = ready.buffers.first?.format, let node = node(for: format) else { return }
         spoken.insert(cue.id)
+        recentLines.append((text: cue.text, at: lastPlayhead ?? 0))
+        if recentLines.count > 6 { recentLines.removeFirst() }
         speaking = cue.id
         paused = false
         currentStretch = min(Self.maxStretch, max(1, ready.duration / slot))

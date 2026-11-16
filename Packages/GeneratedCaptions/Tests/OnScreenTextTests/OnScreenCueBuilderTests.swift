@@ -110,6 +110,34 @@ import Testing
         #expect(abs((closed?.end ?? 0) - t + 0.2) < 0.4)
     }
 
+    /// Seen on a headset: a 102-character subtitle read as two cues 2.8 s
+    /// apart (the reading had a hole), listed under two ids and spoken twice.
+    @Test func aHoleInTheReadingDoesNotSplitALongSubtitle() {
+        let long = "AND SOMEHOW THE TRACKS GOT BENT UPWARDS (OBIOUSLY FOR THE JUMP BUT THEY COULD JUST PLACE THEM FLAT)"
+        func run(emptyFramesInHole: Bool) -> [OnScreenTextCue] {
+            var builder = OnScreenCueBuilder(configuration: .init(region: .top))
+            var t = 0.0
+            for text in ["THIS IS NOT A GOOD PLACE FOR A CONTAINER CRANE", "THERE IS NO ROOM FOR CONTAINER SHIPS AND NO SPACE",
+                         "AND IT ALMOST RUBS AGAINST THE OVERPASS"] {
+                for _ in 0..<25 { builder.add(subtitle(text, at: t)); t += 0.2 }
+            }
+            var seen: [Int] = []
+            for _ in 0..<25 { builder.add(subtitle(long, at: t)); t += 0.2; if let id = builder.cues.last(where: { $0.text == long })?.id { seen.append(id) } }
+            // 2.8 s with nothing read (or only empty frames), the subtitle still up.
+            if emptyFramesInHole {
+                for _ in 0..<14 { builder.add(OnScreenTextFrame(time: t, lines: [])); t += 0.2 }
+            } else { t += 2.8 }
+            for _ in 0..<10 { builder.add(subtitle(long, at: t)); t += 0.2; if let id = builder.cues.last(where: { $0.text == long })?.id { seen.append(id) } }
+            #expect(Set(seen).count == 1, "ids \(Set(seen))")
+            builder.finish()
+            return builder.cues
+        }
+        for empty in [false, true] {
+            let cues = run(emptyFramesInHole: empty)
+            #expect(cues.filter { $0.text == long }.count == 1, "empty frames: \(empty), \(cues.map(\.text.count))")
+        }
+    }
+
     @Test func aFadeInIsNotListedUntilItsWordsSettle() {
         var builder = OnScreenCueBuilder(configuration: .init(region: .top))
         var t = 0.0
@@ -213,6 +241,17 @@ import Testing
     @Test func shortVowellessTokensStayAcronyms() {
         #expect(OnScreenTextNarrator.spokenForm("POOR NPCS DRIVE AROUND NYC") == "poor NPCS drive around NYC")
         #expect(OnScreenTextNarrator.spokenForm("THE TV IS ON") == "the TV is on")
+    }
+
+    @Test func aLongLineJustSpokenIsNotSpokenAgain() {
+        let narrator = OnScreenTextNarrator()
+        narrator.recentLines = [(text: "AND SOMEHOW THE TRACKS GOT BENT UPWARDS (OBIOUSLY FOR THE JUMP)", at: 320.5)]
+        #expect(narrator.repeatsRecentLine("AND SOMEHOW THE TRACKS GOT BENT UPWARDS (OBVIOUSLY FOR THE JUMP)", at: 328.1))
+        // Not a short line, not another line, not long after, not before (a seek back).
+        #expect(!narrator.repeatsRecentLine("OLD TRAIN TRACKS", at: 328.1))
+        #expect(!narrator.repeatsRecentLine("THESE DOORS DON'T ALIGN WITH THE TRACKS AT ALL", at: 328.1))
+        #expect(!narrator.repeatsRecentLine("AND SOMEHOW THE TRACKS GOT BENT UPWARDS (OBIOUSLY FOR THE JUMP)", at: 340))
+        #expect(!narrator.repeatsRecentLine("AND SOMEHOW THE TRACKS GOT BENT UPWARDS (OBIOUSLY FOR THE JUMP)", at: 300))
     }
 
     @Test func aLineWithLowercaseKeepsItsCapitals() {

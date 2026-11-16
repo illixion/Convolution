@@ -83,6 +83,10 @@ public struct OnScreenCueBuilder: Sendable {
     /// How long a subtitle has been seen before it is listed while still on
     /// screen: past the fade-in, when its words have settled.
     private static let settleSeconds = 0.8
+    /// A text this long is told apart by its words: the same one twice within
+    /// `holeLimit` seconds is one subtitle.
+    static let longText = 20
+    static let holeLimit = 4.0
     private static let recentFrames = 75
 
     public init(configuration: Configuration = .init()) {
@@ -200,7 +204,12 @@ public struct OnScreenCueBuilder: Sendable {
         let text = kept.map { $0.text.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
         let maxGap = configuration.sampleInterval * 2.5
         if var current = open {
-            let continues = !text.isEmpty && frame.time - current.lastTime <= maxGap
+            // A hole in the reading (the scout stalled, a read ran long) is not the
+            // subtitle going away: the same long text on both sides of it is
+            // one cue. (Seen on a headset: a 102-character subtitle read as two
+            // cues 2.8 s apart, and narrated twice.)
+            let sameText = text.count >= Self.longText && Self.similarity(text, current.texts.last ?? "") > 0.9
+            let continues = !text.isEmpty && frame.time - current.lastTime <= (sameText ? Self.holeLimit : maxGap)
                 && current.texts.suffix(3).contains { Self.similarity(text, $0) > 0.6 }
             if continues {
                 current.texts.append(text)
@@ -252,10 +261,12 @@ public struct OnScreenCueBuilder: Sendable {
     /// One cue for two that are the same subtitle, else nil.
     static func joined(_ first: OnScreenTextCue, _ second: OnScreenTextCue) -> OnScreenTextCue? {
         let gap = second.start - first.end
-        guard gap < 2.5 else { return nil }
         // Nearly the same words this soon again: the same subtitle, read
-        // through something drawn over it for a moment.
+        // through something drawn over it for a moment. A long text that is
+        // the same is the same subtitle across a longer gap too.
         let alike = similarity(first.text, second.text)
+        let sameLongText = alike > 0.9 && min(first.text.count, second.text.count) >= longText
+        guard gap < (sameLongText ? holeLimit + 2 : 2.5) else { return nil }
         guard gap < 1.5 || alike > 0.9 else { return nil }
         var result = first
         result.end = max(first.end, second.end)
