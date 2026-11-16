@@ -220,7 +220,14 @@ class PhotoWindowModel {
     /// off) instead of the stock composited presentation. Only a build with
     /// `HYPNOS_PRIVATE_API` ever sets it (`PrivateSpatial3DTuning.swift`);
     /// everywhere else it stays false and nothing reads it.
-    var isRawSplatMode: Bool = false
+    var isRawSplatMode: Bool = false {
+        didSet {
+            #if HYPNOS_PRIVATE_API && os(visionOS)
+            guard isRawSplatMode != oldValue else { return }
+            PrivateSpatial3DTuningStore.shared.setRawSplat(isRawSplatMode, owner: self)
+            #endif
+        }
+    }
 
     /// Raw Splat 3D only: how far (metres) the splat is pulled toward the
     /// viewer from where RealityKit puts it, behind the window glass. The raw

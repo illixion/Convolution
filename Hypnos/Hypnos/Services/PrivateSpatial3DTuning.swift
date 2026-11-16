@@ -416,6 +416,40 @@ final class PrivateSpatial3DTuningStore {
 
     private var installTask: Task<Void, Never>?
 
+    /// Windows showing Raw Splat 3D. While any is, the renderer gets
+    /// `rawSplatEdgeDefaults` (process-wide: normal 3D windows open alongside
+    /// get them too).
+    private var rawSplatOwners: Set<ObjectIdentifier> = []
+
+    /// What makes the single-pass (Raw Splat) mesh blend its depth edges
+    /// instead of drawing them as hard triangles stretched across the gap.
+    /// Found in CoreRE 27.2 (`MXIManager::createMXIEntityForSplit`):
+    /// single-pass uses `mxiSinglePassWithTreatmentsMaterial` when the MXI
+    /// component's treatments flag is set, else plain `mxiMaterial`. The
+    /// plain one has no edge alpha, so the triangles spanning a foreground
+    /// edge show smeared pieces of the picture. Disocclusion mode (two-pass's
+    /// way of handling those edges) clears the treatments flag in
+    /// `MXIManager::update` ("Both disocclusion and treatments enabled,
+    /// disabling treatments"), and that clear is permanent for the component,
+    /// so it is forced off before the component exists. `mxi.enableTreatments`
+    /// is read in the MXIComponent initializer: next 3D entry. A user override
+    /// of either key in Spatial 3D Tuning wins.
+    static let rawSplatEdgeDefaults: [String: Double] = [
+        "mxi.forceDisocclusionMode": 0,
+        "mxi.enableTreatments": 1,
+    ]
+
+    /// Report whether `owner` is showing Raw Splat 3D. Installs at once, not
+    /// debounced: the keys must be in place before the component is built.
+    func setRawSplat(_ on: Bool, owner: AnyObject) {
+        let id = ObjectIdentifier(owner)
+        let before = rawSplatOwners.isEmpty
+        if on { rawSplatOwners.insert(id) } else { rawSplatOwners.remove(id) }
+        guard before != rawSplatOwners.isEmpty else { return }
+        installTask?.cancel()
+        installRendererDefaults()
+    }
+
     private init() {
         let store = HypnosDefaults.store
         isEnabled = store.bool(forKey: Self.enabledKey)
@@ -476,7 +510,10 @@ final class PrivateSpatial3DTuningStore {
         let name = UserDefaults.registrationDomain
         var domain = defaults.volatileDomain(forName: name).filter { !$0.key.hasPrefix(Self.defaultsPrefix) }
 
-        let overrides = activeRendererOverrides
+        var overrides = activeRendererOverrides
+        if !rawSplatOwners.isEmpty {
+            overrides.merge(Self.rawSplatEdgeDefaults) { user, _ in user }
+        }
         for (key, value) in overrides {
             guard let knob = RendererKnobCatalog.byKey[key] else { continue }
             let object: Any = switch knob.kind {
@@ -491,10 +528,10 @@ final class PrivateSpatial3DTuningStore {
             domain[Self.defaultsPrefix + "ipc.mxi.enableOverrides"] = 1
         }
         // Makes MXIManager re-read its overrides every update, which is what
-        // lets the live knobs live. Only while there is something to read.
-        if !overrides.isEmpty {
-            domain[Self.defaultsPrefix + "MXIDefaultsUpdateEveryFrame"] = true
-        }
+        // lets the live knobs live. Always: MXIManager only honours it if it
+        // was there when the manager was created (at launch), and Raw Splat
+        // adds keys later in a run that started with none.
+        domain[Self.defaultsPrefix + "MXIDefaultsUpdateEveryFrame"] = true
         defaults.setVolatileDomain(domain, forName: name)
         AppLogger.photoWindow.debug("Private spatial-3D renderer overrides installed: \(overrides.count, privacy: .public)"
         )
@@ -583,6 +620,7 @@ extension PhotoWindowModel {
 
     func releaseRawSplatNudgeSuppression() {
         WindowSizeNudge.setSuppressed(false, reason: rawSplatNudgeReason)
+        PrivateSpatial3DTuningStore.shared.setRawSplat(false, owner: self)
     }
 
     /// Raw Splat 3D: RealityKit 3D with two-pass rendering off, so the scene is
@@ -596,7 +634,12 @@ extension PhotoWindowModel {
             applyPrivateSpatial3DTuning()
             return
         }
+        // Already in RealityKit 3D: the renderer's MXI component was built
+        // without the edge treatments (and two-pass's disocclusion mode has
+        // switched them off for good), so rebuild it through 2D.
+        let rebuild = is3DMode && !isRawSplatMode
         isRawSplatMode = true
+        if rebuild { await switchToViewingMode(.mono) }
         if desiredViewingMode == mode, is3DMode {
             applyPrivateSpatial3DTuning()
         } else {
