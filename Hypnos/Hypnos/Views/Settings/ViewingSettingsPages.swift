@@ -108,7 +108,7 @@ struct PhotoSettingsPage: View {
             if PlatformCapabilities.supportsSpatial3D {
                 Section {
                     Picker("Default Viewing Mode", selection: $appModel.defaultImageViewingMode) {
-                        ForEach(DefaultImageViewingMode.allCases) { mode in
+                        ForEach(DefaultImageViewingMode.selectable) { mode in
                             Text(mode.label).tag(mode)
                         }
                     }

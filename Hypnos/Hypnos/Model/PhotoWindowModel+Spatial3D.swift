@@ -58,8 +58,7 @@ extension PhotoWindowModel {
         if await ImageEnhancementTracker.shared.lastViewingMode(url: imageURL) == .mono {
             return
         }
-        let defaultIs3D = appModel.defaultImageViewingMode == .spatial3D
-            || appModel.defaultImageViewingMode == .spatial3DImmersive
+        let defaultIs3D = appModel.defaultImageViewingMode.is3D
         var offer = defaultIs3D
         if !offer, appModel.rememberImageEnhancements, appModel.autoRestoreSpatial3D {
             let lastMode = await ImageEnhancementTracker.shared.lastViewingMode(url: imageURL)
@@ -68,7 +67,7 @@ extension PhotoWindowModel {
         }
         guard offer else { return }
         autoRestoreForAnimated = true
-        presentAutoRestorePrompt(immersive: appModel.defaultImageViewingMode == .spatial3DImmersive)
+        presentAutoRestorePrompt(immersive: appModel.defaultImageViewingMode.isImmersive3D)
     }
 
     // MARK: - Generation Settling
@@ -788,8 +787,7 @@ extension PhotoWindowModel {
         // Respect the user's last-used mode for this image — unless the user's
         // default viewing mode is 3D, in which case a remembered `.mono` is
         // ignored so the default still wins for previously-toggled images.
-        let defaultIs3D = appModel.defaultImageViewingMode == .spatial3D
-            || appModel.defaultImageViewingMode == .spatial3DImmersive
+        let defaultIs3D = appModel.defaultImageViewingMode.is3D
         if !defaultIs3D,
            let lastMode = await ImageEnhancementTracker.shared.lastViewingMode(url: imageURL),
            lastMode == .mono {

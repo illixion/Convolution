@@ -537,7 +537,7 @@ class PhotoWindowModel {
         isApplyingDefaultViewingMode = true
         defer { isApplyingDefaultViewingMode = false }
 
-        switch appModel.defaultImageViewingMode {
+        switch appModel.defaultImageViewingMode.resolvedForBuild {
         case .mono, .diorama, .aiDepth:
             return
         case .spatial3D:
@@ -546,6 +546,11 @@ class PhotoWindowModel {
         case .spatial3DImmersive:
             await switchToViewingMode(.spatial3DImmersive)
             await waitForSpatial3DGeneration()
+        case .rawSplat3D, .rawSplat3DImmersive:
+            #if HYPNOS_PRIVATE_API && os(visionOS)
+            await toggleRawSplat(immersive: appModel.defaultImageViewingMode == .rawSplat3DImmersive)
+            await waitForSpatial3DGeneration()
+            #endif
         }
     }
 
@@ -1074,7 +1079,7 @@ class PhotoWindowModel {
             if appModel.rememberImageEnhancements {
                 let lastMode = await ImageEnhancementTracker.shared.lastViewingMode(url: imageURL)
                 let wasConverted = await ImageEnhancementTracker.shared.wasConverted(url: imageURL)
-                let defaultIs3D = appModel.defaultImageViewingMode == .spatial3D || appModel.defaultImageViewingMode == .spatial3DImmersive
+                let defaultIs3D = appModel.defaultImageViewingMode.is3D
                 let shouldOfferRestore = appModel.autoRestoreSpatial3D && wasConverted && (lastMode == .spatial3D || lastMode == .spatial3DImmersive)
                 if shouldOfferRestore && !defaultIs3D {
                     presentAutoRestorePrompt(immersive: lastMode == .spatial3DImmersive)
@@ -1095,7 +1100,7 @@ class PhotoWindowModel {
             // Skip the prompt when the user's default mode is already 3D /
             // immersive 3D — applyDefaultViewingModeIfNeeded will switch into
             // that mode anyway, so the offer would be redundant.
-            let defaultIs3D = appModel.defaultImageViewingMode == .spatial3D || appModel.defaultImageViewingMode == .spatial3DImmersive
+            let defaultIs3D = appModel.defaultImageViewingMode.is3D
             if !defaultIs3D {
                 presentAutoRestorePrompt(immersive: lastMode == .spatial3DImmersive)
             }
