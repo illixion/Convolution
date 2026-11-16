@@ -137,7 +137,10 @@ public final class OnScreenTextNarrator {
         }
         // The time it has: until the next cue, or a second past its own end;
         // less as lines queue behind it, so a backlog is spoken faster.
-        let nextStart = index + 1 < cues.count ? cues[index + 1].start : cue.end + 1.0
+        var nextStart = index + 1 < cues.count ? cues[index + 1].start : cue.end + 1.0
+        // A subtitle still on screen has no end yet (its `end` is how far it
+        // has been seen): nothing says it won't stay as long as it takes.
+        if index + 1 >= cues.count, cue.isOpen { nextStart = max(nextStart, playhead + ready.duration + 0.15) }
         let queued = due.filter { $0 > index && !spoken.contains(cues[$0].id) }.count
         var slot = max(0.5, nextStart - 0.15 - playhead)
         if queued > 0 { slot = max(0.5, min(slot, ready.duration / (1 + 0.25 * Double(queued)))) }

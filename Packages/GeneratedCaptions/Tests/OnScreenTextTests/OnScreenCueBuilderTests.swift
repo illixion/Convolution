@@ -72,6 +72,122 @@ import Testing
         #expect(builder.cues.allSatisfy { $0.end <= 25 })
     }
 
+    // MARK: Long subtitles and a title card (the "Locations in Liberty City" video)
+
+    /// White all-caps subtitles in a band at the top; a subtitle there can
+    /// stay up for ten seconds and more.
+    private func subtitle(_ text: String, at time: Double, white: Double = 1, height: Double = 0.054) -> OnScreenTextFrame {
+        OnScreenTextFrame(time: time, lines: [
+            OnScreenTextLine(text: text, confidence: 1, box: CGRect(x: 0.2, y: 0.055, width: 0.6, height: height),
+                             red: white, green: white, blue: white),
+        ])
+    }
+
+    @Test func listsALongSubtitleWhileItIsStillOnScreen() {
+        var builder = OnScreenCueBuilder(configuration: .init(region: .top))
+        // Warm-up: a few short subtitles so the style is known.
+        var t = 0.0
+        for text in ["THIS IS NOT A GOOD PLACE FOR A CONTAINER CRANE", "THERE IS NO ROOM FOR CONTAINER SHIPS AND NO SPACE",
+                     "AND IT ALMOST RUBS AGAINST THE OVERPASS"] {
+            for _ in 0..<25 { builder.add(subtitle(text, at: t)); t += 0.2 }
+        }
+        let started = t
+        // 14 s subtitle: after 1.5 s of it the cue is already listed, open.
+        let long = "EVEN IF IT HAD TRACKS THIS LIGHT POLE WOULD PREVENT IT FROM GETTING TO THESE CONTAINERS"
+        for _ in 0..<8 { builder.add(subtitle(long, at: t)); t += 0.2 }
+        let listed = builder.cues.last
+        #expect(listed?.text == long)
+        #expect(listed?.isOpen == true)
+        #expect(abs((listed?.start ?? 0) - started) < 0.01)
+        let id = listed?.id
+        // It keeps its id as it grows and when it closes.
+        for _ in 0..<62 { builder.add(subtitle(long, at: t)); t += 0.2 }
+        #expect(builder.cues.last?.id == id)
+        #expect((builder.cues.last?.end ?? 0) > started + 12)
+        builder.add(subtitle("ALL THE OTHER CONTAINER CRANES HAVE TRACKS", at: t)); t += 0.2
+        let closed = builder.cues.first { $0.id == id }
+        #expect(closed?.isOpen == false)
+        #expect(abs((closed?.end ?? 0) - t + 0.2) < 0.4)
+    }
+
+    @Test func aFadeInIsNotListedUntilItsWordsSettle() {
+        var builder = OnScreenCueBuilder(configuration: .init(region: .top))
+        var t = 0.0
+        for text in ["THIS IS NOT A GOOD PLACE FOR A CONTAINER CRANE", "THERE IS NO ROOM FOR CONTAINER SHIPS AND NO SPACE",
+                     "AND IT ALMOST RUBS AGAINST THE OVERPASS"] {
+            for _ in 0..<25 { builder.add(subtitle(text, at: t)); t += 0.2 }
+        }
+        let full = "IT DOESN'T HAVE ANY TRACKS TO MOVE ON"
+        for partial in ["IT DOESN", "IT DOESN'T HAVE ANY", "IT DOESN'T HAVE ANY TRACKS TO"] {
+            builder.add(subtitle(partial, at: t)); t += 0.2
+            #expect(builder.cues.last?.text != partial)
+        }
+        for _ in 0..<10 { builder.add(subtitle(full, at: t)); t += 0.2 }
+        #expect(builder.cues.last?.text == full)
+    }
+
+    /// An amber title card in the middle of the picture comes first and fixes
+    /// the style (amber, tall) before any white subtitle has been read; the
+    /// subtitles that follow are then thrown away until enough have been
+    /// read to change it. They are judged again when it does.
+    @Test func aTitleCardDoesNotCostTheFirstSubtitles() {
+        var builder = OnScreenCueBuilder(configuration: .init(region: .top))
+        var t = 0.0
+        func card(_ text: String, y: Double) -> OnScreenTextLine {
+            OnScreenTextLine(text: text, confidence: 1, box: CGRect(x: 0.2, y: y, width: 0.6, height: 0.09),
+                             red: 0.96, green: 0.66, blue: 0.1)
+        }
+        for _ in 0..<12 {
+            builder.add(OnScreenTextFrame(time: t, lines: [card("WRONG PLACE FOR A", y: 0.14), card("CONTAINER CRANE", y: 0.24)]))
+            t += 0.2
+        }
+        let first = t
+        // The id each subtitle was first listed under, as a narrator would see it.
+        var listed: [String: Int] = [:]
+        for text in ["THIS IS NOT A GOOD PLACE FOR A CONTAINER CRANE", "THERE IS NO ROOM FOR CONTAINER SHIPS AND NO SPACE",
+                     "AND IT ALMOST RUBS AGAINST THE OVERPASS", "IT DOESN'T HAVE ANY TRACKS TO MOVE ON"] {
+            for _ in 0..<26 {
+                builder.add(subtitle(text, at: t)); t += 0.2
+                for cue in builder.cues where !cue.text.contains("WRONG") && listed[cue.text] == nil { listed[cue.text] = cue.id }
+            }
+        }
+        builder.finish()
+        let texts = builder.cues.map(\.text)
+        #expect(texts.first == "THIS IS NOT A GOOD PLACE FOR A CONTAINER CRANE", "\(texts)")
+        #expect(abs((builder.cues.first?.start ?? 0) - first) < 0.01)
+        #expect(!texts.contains { $0.contains("WRONG PLACE") })
+        #expect(texts.count == 4)
+        // Each was listed once, and under the id it ends with.
+        #expect(listed.count == 4)
+        for cue in builder.cues { #expect(listed[cue.text] == cue.id) }
+    }
+
+    /// The first 75 s of "Locations in Liberty City that make NO SENSE" as
+    /// Vision read them (480p, the top 45%, 2026-11-16): an amber two-line
+    /// title card, then white all-caps subtitles in a band at the top, some of
+    /// them up for 14 s and one for 35 s.
+    @Test func readsWhiteSubtitlesThatFollowAnAmberTitleCard() throws {
+        var builder = OnScreenCueBuilder(configuration: .init(region: .top))
+        var firstListed: [Int: Double] = [:]
+        for frame in try frames("title-card-then-white") {
+            builder.add(frame)
+            for cue in builder.cues where firstListed[cue.id] == nil { firstListed[cue.id] = frame.time }
+        }
+        // Every cue listed while its subtitle was still on screen (a long one
+        // was listed only when it went, up to 27 s after it had begun).
+        // (The first one waits for the style to be judged again, which takes
+        // until 8.8 s are read; the scout is that far ahead of the playhead.)
+        for cue in builder.cues.dropFirst() {
+            #expect(try #require(firstListed[cue.id]) < cue.start + 1.5, "\(cue.text) listed at \(firstListed[cue.id] ?? -1), starts \(cue.start)")
+        }
+        builder.finish()
+        let texts = builder.cues.map(\.text)
+        #expect(texts.first == "THIS IS NOT A GOOD PLACE FOR A CONTAINER CRANE", "\(texts)")
+        #expect(!texts.contains { $0.contains("WRONG") || $0 == "CONTAINER CRANE" })
+        #expect(texts.contains { $0.hasPrefix("THE STAIRS ARE ALSO BROKEN") })
+        #expect(builder.cues.count >= 8 && builder.cues.count <= 9, "\(texts.count) cues")
+    }
+
     @Test func similarityIsCaseInsensitiveEditDistance() {
         #expect(OnScreenCueBuilder.similarity("Turns out", "turns out") == 1)
         #expect(OnScreenCueBuilder.similarity("abc", "") == 0)

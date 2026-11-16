@@ -50,8 +50,11 @@ public struct OnScreenTextCue: Sendable, Equatable, Identifiable {
     /// Stable while the cue is revised (its end moves, a fuller reading
     /// replaces its text), so a narrator can tell a revision from a new cue.
     public var id: Int
-    public init(start: Double, end: Double, text: String, id: Int) {
-        self.start = start; self.end = end; self.text = text; self.id = id
+    /// The subtitle is still on screen at the end of what has been read: its
+    /// `end` is only how far it has been seen so far, and grows.
+    public var isOpen: Bool
+    public init(start: Double, end: Double, text: String, id: Int, isOpen: Bool = false) {
+        self.start = start; self.end = end; self.text = text; self.id = id; self.isOpen = isOpen
     }
 }
 
