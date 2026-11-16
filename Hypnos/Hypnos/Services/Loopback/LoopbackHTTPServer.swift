@@ -8,13 +8,18 @@
  (RAVEMedia's stereo engine included); a loopback URL works everywhere a URL
  does, unchanged: the native player, the stereo engine, the decode probe.
 
- Two kinds of content:
+ Three kinds of content:
 
  - Text playlists published once and kept for the process
    (`publishPlaylist`), at `/<uuid>.m3u8`. YouTube's composed masters
    (`LoopbackPlaylistServer`, sideload builds only) are these.
  - Routes: everything under `/<prefix>/` answered by a handler, on demand.
    Each Matroska remux session is one (`MatroskaRemuxService`).
+ - Streamed routes: a resource of known length whose byte ranges are
+   written as they are read, a chunk at a time, each sent before the next
+   is asked for, so a player asking for a whole film in one range (as
+   AVFoundation does) never has it in memory. A re-indexed MP4 is one
+   (`MP4ReindexService`).
 
  GET and HEAD, single byte ranges (206, and 416 for a range past the end),
  concurrent connections, one request per connection. Loopback needs no Local
@@ -57,6 +62,17 @@ final class LoopbackHTTPServer: Sendable {
     /// or nil for 404.
     typealias Handler = @Sendable (_ path: String) async -> Response?
 
+    /// A resource served by byte ranges: its length, and a reader that
+    /// writes `range` to `write` in order, chunk by chunk (each `write`
+    /// returns once the chunk is sent; it throws once the player has gone).
+    struct StreamedResource: Sendable {
+        var length: Int64
+        var contentType: String
+        var read: @Sendable (_ range: Range<Int64>, _ write: @escaping @Sendable (Data) async throws -> Void) async throws -> Void
+    }
+
+    typealias StreamedHandler = @Sendable (_ path: String) async -> StreamedResource?
+
     /// Network.framework's callbacks; each request is answered in a Task, so
     /// a slow segment doesn't hold up the others.
     private let queue = DispatchQueue(label: "com.illixion.hypnos.loopback-http")
@@ -67,6 +83,7 @@ final class LoopbackHTTPServer: Sendable {
         var port: UInt16?
         var playlists: [String: String] = [:]
         var routes: [String: Handler] = [:]
+        var streamed: [String: StreamedHandler] = [:]
     }
 
     // MARK: - Content
@@ -94,15 +111,26 @@ final class LoopbackHTTPServer: Sendable {
         return URL(string: "http://127.0.0.1:\(port)/\(prefix)/")
     }
 
+    /// Serves `handler`'s resources under `/<prefix>/`, streamed by range;
+    /// returns that folder's URL.
+    func register(prefix: String, streamed handler: @escaping StreamedHandler) async -> URL? {
+        guard let port = await startIfNeeded() else { return nil }
+        state.withLock { $0.streamed[prefix] = handler }
+        return URL(string: "http://127.0.0.1:\(port)/\(prefix)/")
+    }
+
     func unregister(prefix: String) {
-        _ = state.withLock { $0.routes.removeValue(forKey: prefix) }
+        state.withLock { state in
+            state.routes.removeValue(forKey: prefix)
+            state.streamed.removeValue(forKey: prefix)
+        }
     }
 
     /// The route prefix a URL of this server falls under.
     func routePrefix(of url: URL) -> String? {
         guard url.host == "127.0.0.1", state.withLock({ $0.port }) == UInt16(url.port ?? 0) else { return nil }
         let prefix = url.pathComponents.dropFirst().first
-        return prefix.flatMap { name in state.withLock { $0.routes[name] != nil } ? name : nil }
+        return prefix.flatMap { name in state.withLock { $0.routes[name] != nil || $0.streamed[name] != nil } ? name : nil }
     }
 
     // MARK: - Listening
@@ -255,6 +283,10 @@ final class LoopbackHTTPServer: Sendable {
                 return
             }
             let request = Request(String(decoding: buffer, as: UTF8.self))
+            if let (handler, path) = self.streamedHandler(for: request) {
+                Task { await self.serveStreamed(request, path: path, handler: handler, on: connection) }
+                return
+            }
             Task {
                 let began = ContinuousClock.now
                 let response = await self.respond(to: request)
@@ -296,6 +328,79 @@ final class LoopbackHTTPServer: Sendable {
         let elapsed = began.duration(to: .now)
         let milliseconds = Int(elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
         AppLogger.remux.info("Loopback \(request.method, privacy: .public) \(name, privacy: .public) range \(request.range ?? "-", privacy: .public) → \(String(status), privacy: .public), \(response.count, privacy: .public) bytes, \(milliseconds, privacy: .public) ms")
+    }
+
+    private func streamedHandler(for request: Request) -> (StreamedHandler, String)? {
+        let components = request.path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        guard let prefix = components.first, let handler = state.withLock({ $0.streamed[prefix] }) else { return nil }
+        return (handler, components.dropFirst().joined(separator: "/"))
+    }
+
+    /// Answers a streamed route: the head, then the range's bytes as the
+    /// resource reads them, each chunk sent before the next is read.
+    private func serveStreamed(_ request: Request, path: String, handler: StreamedHandler, on connection: NWConnection) async {
+        let began = ContinuousClock.now
+        func finish(_ head: Data) {
+            Self.log(request, status: String(decoding: head.prefix(12), as: UTF8.self).dropFirst(9).description, bytes: head.count, since: began)
+            connection.send(content: head, completion: .contentProcessed { _ in connection.cancel() })
+        }
+        guard request.method == "GET" || request.method == "HEAD" else {
+            return finish(Self.head(status: 405, reason: "Method Not Allowed", fields: ["Allow": "GET, HEAD", "Content-Length": "0"]))
+        }
+        guard let resource = await handler(path), resource.length > 0 else {
+            return finish(Self.head(status: 404, reason: "Not Found", fields: ["Content-Length": "0"]))
+        }
+        var fields = ["Content-Type": resource.contentType, "Accept-Ranges": "bytes", "Cache-Control": "no-store"]
+        let range: Range<Int64>
+        var status = 200
+        if let header = request.range {
+            guard let found = Self.byteRange(header, total: resource.length) else {
+                fields["Content-Range"] = "bytes */\(resource.length)"
+                fields["Content-Length"] = "0"
+                return finish(Self.head(status: 416, reason: "Range Not Satisfiable", fields: fields))
+            }
+            range = found
+            status = 206
+            fields["Content-Range"] = "bytes \(range.lowerBound)-\(range.upperBound - 1)/\(resource.length)"
+        } else {
+            range = 0 ..< resource.length
+        }
+        fields["Content-Length"] = String(range.upperBound - range.lowerBound)
+        let head = Self.head(status: status, reason: status == 206 ? "Partial Content" : "OK", fields: fields)
+        do {
+            try await Self.send(head, on: connection)
+            var sent: Int64 = 0
+            if request.method == "GET" {
+                try await resource.read(range) { chunk in
+                    try await Self.send(chunk, on: connection)
+                }
+                sent = range.upperBound - range.lowerBound
+            }
+            Self.log(request, status: String(status), bytes: Int(sent), since: began)
+        } catch {
+            // The player went away (a seek, a new range) or the source failed:
+            // either way this response ends here, short.
+            let side = error is NWError ? "player went away" : "source failed: \(error.logCode)"
+            Self.log(request, status: "\(status) cut (\(side))", bytes: 0, since: began)
+        }
+        connection.cancel()
+    }
+
+    /// Sends `data` and returns once it has gone; throws if the connection has.
+    private static func send(_ data: Data, on connection: NWConnection) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            connection.send(content: data, completion: .contentProcessed { error in
+                if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+            })
+        }
+    }
+
+    private static func log(_ request: Request, status: String, bytes: Int, since began: ContinuousClock.Instant) {
+        let last = request.path.split(separator: "/").last.map(String.init) ?? ""
+        let name = last.count > 24 ? "playlist" : last
+        let elapsed = began.duration(to: .now)
+        let milliseconds = Int(elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
+        AppLogger.remux.info("Loopback \(request.method, privacy: .public) \(name, privacy: .public) range \(request.range ?? "-", privacy: .public) → \(status, privacy: .public), \(bytes, privacy: .public) bytes, \(milliseconds, privacy: .public) ms")
     }
 
     private func respond(to request: Request) async -> Data {
@@ -349,6 +454,11 @@ final class LoopbackHTTPServer: Sendable {
         guard let start = Int(bounds[0]), start < total else { return nil }
         let end = bounds[1].isEmpty ? total - 1 : min(total - 1, Int(bounds[1]) ?? -1)
         return end >= start ? start ..< end + 1 : nil
+    }
+
+    /// `byteRange` for a resource whose length may pass `Int`'s 32-bit floor.
+    static func byteRange(_ header: String, total: Int64) -> Range<Int64>? {
+        byteRange(header, total: Int(total)).map { Int64($0.lowerBound) ..< Int64($0.upperBound) }
     }
 
     private static func head(status: Int, reason: String, fields: [String: String]) -> Data {

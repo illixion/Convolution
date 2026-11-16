@@ -616,6 +616,14 @@ final class VideoWindowModel {
     /// The native player failed on this video's remux: the original goes to
     /// WebKit (or the transcode) instead, as before the remux existed.
     @ObservationIgnored private var remuxRefused = false
+    /// A server's MP4 whose chunks are too big for the native player to
+    /// stream reliably, played re-indexed from loopback (`MP4ReindexService`);
+    /// resolved once per video, never identity, like `remuxedStreamURL`.
+    @ObservationIgnored private(set) var reindexedStreamURL: URL?
+    /// The native player failed on the re-indexed file: the original plays.
+    @ObservationIgnored private var reindexRefused = false
+    /// Rebuilds a native player that waits for data it has stopped fetching.
+    @ObservationIgnored var stuckPlayerWatch = StuckPlayerWatch()
     @ObservationIgnored private var playbackRendererTask: Task<Void, Never>?
     #if HYPNOS_YOUTUBE
     /// The YouTube rendition chosen for this window, by its size class (1080
@@ -1050,6 +1058,8 @@ final class VideoWindowModel {
         pseudo3DEnabled = false
         remuxedStreamURL = nil
         remuxRefused = false
+        reindexedStreamURL = nil
+        reindexRefused = false
         #if HYPNOS_YOUTUBE
         // YouTube's stream URLs die without warning (a sleep, a long pause):
         // retrying the same one fails the same way, so ask for a new one.
@@ -1231,6 +1241,8 @@ final class VideoWindowModel {
         resolvedPhotosStreamURL = nil
         remuxedStreamURL = nil
         remuxRefused = false
+        reindexedStreamURL = nil
+        reindexRefused = false
         isFlipped = false
         currentAdjustments = VisualAdjustments()
         loopController.reset()
@@ -1739,9 +1751,23 @@ final class VideoWindowModel {
         }
         if ai3DUsesStashTier, let tier = video.ai3DStreamURL { return tier }
         guard usingTranscodedStream, let transcode = video.transcodeStreamURL else {
-            return remuxedStreamURL ?? video.streamURL
+            return remuxedStreamURL ?? reindexedStreamURL ?? video.streamURL
         }
         return transcode
+    }
+
+    /// Whether this video's original may be played re-indexed when its MP4
+    /// chunks are too big to stream: a server's file played as it is (not a
+    /// Photos asset, a YouTube or Library stream, a transcode or AI 3D tier).
+    private var canTryReindex: Bool {
+        guard !reindexRefused, reindexedStreamURL == nil, remuxedStreamURL == nil,
+              !usingTranscodedStream, !ai3DUsesStashTier,
+              !PhotosAssetURL.isPhotosAsset(video.streamURL),
+              libraryItemId == nil || JellyfinLibrary.isFileStream(video.streamURL) else { return false }
+        #if HYPNOS_YOUTUBE
+        if youTubeID != nil { return false }
+        #endif
+        return MP4ReindexService.isCandidate(video.streamURL, fileName: video.fileName)
     }
 
     /// Whether this video's original may be remuxed when the native player
@@ -1794,6 +1820,16 @@ final class VideoWindowModel {
 
     func forceWebKitPlayback() {
         playbackRendererTask?.cancel()
+        if reindexedStreamURL != nil {
+            // The re-indexed file opened but didn't play: try the original as
+            // it is, natively, before anything else.
+            AppLogger.remux.error("[\(self.videoDisplayName, privacy: .private(mask: .hash))] the native player failed on the re-indexed MP4; playing the original")
+            reindexedStreamURL = nil
+            reindexRefused = true
+            carryPositionToNextRenderer(reason: "re-indexed MP4 refused")
+            resolvePlaybackRenderer()
+            return
+        }
         if remuxedStreamURL != nil,
            MatroskaRemuxService.shared.hasRecentNetworkFailure(for: authenticatedURL(video.streamURL)) {
             // AVPlayer eventually exhausts its HLS retries. A failed network
@@ -1894,10 +1930,21 @@ final class VideoWindowModel {
         // being lossless and on the device.
         let remuxSource = canTryRemux ? url : nil
         let remuxFileName = video.fileName
+        let reindexSource = canTryReindex ? url : nil
         pictureFrameRange = nil
         let onTranscode = usingTranscodedStream || ai3DUsesStashTier
         playbackRendererTask = Task { [weak self] in
+            // Checked beside the probe: it reads the file's index too.
+            async let reindexing: URL? = {
+                guard let reindexSource else { return nil }
+                return await MP4ReindexService.shared.playURL(for: reindexSource, fileName: remuxFileName)
+            }()
             var isPlayable = await Self.canPlayNatively(url: url)
+            var reindexed = await reindexing
+            if let candidate = reindexed {
+                // The re-indexed file must open too; else the original plays.
+                if await Self.canPlayNatively(url: candidate) { isPlayable = true } else { reindexed = nil }
+            }
             let opensNatively = isPlayable
             var remuxed: URL?
             if !isPlayable, let remuxSource {
@@ -1917,6 +1964,10 @@ final class VideoWindowModel {
                             ? "the native player can't open the server's stream"
                             : "the native player can't open this file")
                     }
+                }
+                if let reindexed, remuxed == nil {
+                    AppLogger.videoWindow.info("[\(self.videoDisplayName, privacy: .private(mask: .hash))] playing the original re-indexed (its chunks are too big to stream)")
+                    self.reindexedStreamURL = reindexed
                 }
                 if let remuxed {
                     AppLogger.videoWindow.info("[\(self.videoDisplayName, privacy: .private(mask: .hash))] playing the original remuxed to HLS")
@@ -2158,6 +2209,24 @@ final class VideoWindowModel {
     /// playhead must survive that, both on screen and in what progress
     /// reporting sends to the server.
     @ObservationIgnored private var carriedPosition: (time: Double, requested: Bool)?
+
+    /// Called each second while the window buffers: a native player waiting
+    /// on a server's progressive file with no new bytes for a while is
+    /// stuck, not slow (`StuckPlayerWatch`), and is rebuilt at the playhead.
+    func checkForStuckPlayer() {
+        guard isBuffering, let player = audioPlayer, let item = player.currentItem,
+              player.timeControlStatus == .waitingToPlayAtSpecifiedRate,
+              let events = item.accessLog()?.events, events.last?.playbackType == "FILE",
+              (item.asset as? AVURLAsset)?.url.isFileURL == false else {
+            stuckPlayerWatch.reset()
+            return
+        }
+        let bytes = events.reduce(Int64(0)) { $0 + max(0, $1.numberOfBytesTransferred) }
+        guard stuckPlayerWatch.update(bytesTransferred: bytes, at: .now) else { return }
+        AppLogger.videoWindow.error("[\(self.videoDisplayName, privacy: .private(mask: .hash))] the player waits with nothing being fetched at \(self.currentTime, format: .fixed(precision: 2))s; rebuilding it there")
+        carryPositionToNextRenderer(reason: "the player stopped fetching")
+        playbackAttempt += 1
+    }
 
     func carryPositionToNextRenderer(reason: String) {
         guard currentTime > 1 else { return }

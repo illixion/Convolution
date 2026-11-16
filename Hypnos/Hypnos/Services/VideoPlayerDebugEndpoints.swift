@@ -101,6 +101,8 @@ enum VideoPlayerDebugEndpoints {
         guard !registered else { return }
         registered = true
         registerNetworkTests()
+        VideoStreamProbe.register()
+        VideoStreamIndex.register()
         DebugSurface.shared.register([
             .query("videoAudio", "Each video window's native player: item status, the audio track as decoded "
                    + "(codec, channels), the audible option selected, and the spatial-audio experience in force. "

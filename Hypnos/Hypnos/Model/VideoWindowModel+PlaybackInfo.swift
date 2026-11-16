@@ -37,7 +37,10 @@ extension VideoWindowModel {
         var server: String?
 
         switch route {
-        case .opening, .direct, .youTube:
+        case .direct:
+            // The same bytes, with its chunk index split on this device.
+            if reindexedStreamURL != nil { reasons.append("its index was rearranged on this device so it streams smoothly") }
+        case .opening, .youTube:
             break
         case .deviceRemux:
             if let note = remuxDolbyVisionNote { reasons.append(note) }

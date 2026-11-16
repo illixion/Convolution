@@ -106,12 +106,14 @@ extension VideoWindowModel {
         isBuffering = waiting
         evaluateStall()
         stallPollTask?.cancel()
+        stuckPlayerWatch.reset()
         guard waiting else { return }
         stallPollTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 guard !Task.isCancelled, let self, self.isBuffering else { return }
                 self.evaluateStall()
+                self.checkForStuckPlayer()
             }
         }
     }
