@@ -38,6 +38,16 @@ extension PhotoWindowModel {
             isInActiveRoom = false
             backgroundedSince = Date()
 
+            // Raw Splat pulled forward by Bring Closer blocks taps to the
+            // window, so a tap can't bring the controls back. Opening the Home
+            // View (a Digital Crown press) makes the scene inactive: show the
+            // controls, which slides the splat back behind the glass, and keep
+            // them up (no auto-hide) until the user taps the picture again.
+            if isRawSplatMode && rawSplatForwardOffset > 0 && isUIHidden {
+                cancelAutoHideTimer()
+                isUIHidden = false
+            }
+
             // Window moved to another room — start inactivity timer
             scheduleScenePhaseIdleDownscale()
         }
