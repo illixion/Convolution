@@ -532,6 +532,19 @@ struct NativeMetalVideoPlayerView {
             }
         }
         private var videoOutput: AVPlayerItemVideoOutput?
+        /// A looping file plays through `AVPlayerLooper`: copies of the item
+        /// queued back to back, so each pass starts on a fresh item with no
+        /// seek and no gap, however short the clip (the looper queues as
+        /// many copies as it needs). Each copy has its own frame output,
+        /// attached before it plays, so the first frame of a pass is ready
+        /// when it is due. HLS (the remux, a transcode) seeks back instead:
+        /// the equalizer's stream path follows one item.
+        private var looper: AVPlayerLooper?
+        private var loopOutputs: [ObjectIdentifier: AVPlayerItemVideoOutput] = [:]
+        private var loopObservations: [NSKeyValueObservation] = []
+        private var preparedLoopCopies: Set<ObjectIdentifier> = []
+        /// The presenter's source while looping: follows the current copy.
+        private var loopSource: LoopCopyFrameSource?
 #if HYPNOS_YOUTUBE
         private var flashbackFrames: [YouTubeFlashbackFrame] = []
         private var lastFlashbackCaptureTime = -Double.infinity
@@ -622,31 +635,52 @@ struct NativeMetalVideoPlayerView {
             configureMetalView(for: .sdr)
 
             let asset = MediaAuthorization.shared.asset(for: url)
-            let item = AVPlayerItem(asset: asset)
+            var item = AVPlayerItem(asset: asset)
             item.applySpatialAudioPolicy(sceneIdentifier: spatialAudioSceneIdentifier)
             onAudioEQResult?(nil)
-            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-                kCVPixelBufferMetalCompatibilityKey as String: true
-            ])
-            item.add(output)
+            outputPixelFormat = kCVPixelFormatType_32BGRA
 
-            let player = AVPlayer(playerItem: item)
+            let player: AVPlayer
+            var items = [item]
+            if loops, url.pathExtension.lowercased() != "m3u8" {
+                // The looper makes its copies once the asset has loaded;
+                // `prepareLoopCopies` dresses each as it appears.
+                let queue = AVQueuePlayer()
+                self.looper = AVPlayerLooper(player: queue, templateItem: item)
+                items = []
+                player = queue
+            } else {
+                player = AVPlayer(playerItem: item)
+            }
             player.applySpatialAudioPolicy(for: asset, sceneIdentifier: spatialAudioSceneIdentifier)
             player.isMuted = startMuted
             player.volume = startVolume
             player.defaultRate = speed
-            // The equalizer, now the item has its player: an HLS item's sound is played in its place.
-            item.attachAudioEQ(player: player) { [weak self, weak item] result in
-                // A result for an item this player has since dropped says nothing about the current one.
-                guard let self, let item, self.playerItem === item else { return }
-                self.onAudioEQResult?(result)
+            for copy in items {
+                // The equalizer, now the item has its player: an HLS item's sound is played in its place.
+                copy.attachAudioEQ(player: player) { [weak self, weak copy] result in
+                    // A result for an item this player has since dropped says nothing about the current one.
+                    guard let self, let copy, self.playerItem === copy else { return }
+                    self.onAudioEQResult?(result)
+                }
             }
             updateDrawRate()
 
             self.player = player
-            self.playerItem = item
-            self.videoOutput = output
+            self.playerItem = looper == nil ? item : player.currentItem
+            attachOutputs(to: items, pixelFormat: kCVPixelFormatType_32BGRA)
+            if let looper {
+                loopObservations.append(looper.observe(\.loopingPlayerItems, options: [.initial, .new]) { [weak self] _, _ in
+                    Task { @MainActor [weak self] in self?.prepareLoopCopies() }
+                })
+                // Each pass is the next copy: follow it.
+                loopObservations.append(player.observe(\.currentItem, options: [.new]) { [weak self] observed, _ in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.player === observed else { return }
+                        self.followCurrentLoopCopy()
+                    }
+                })
+            }
 #if HYPNOS_YOUTUBE
             flashbackFrames.removeAll(keepingCapacity: true)
             lastFlashbackCaptureTime = -Double.infinity
@@ -654,7 +688,6 @@ struct NativeMetalVideoPlayerView {
             #if os(iOS) || os(macOS)
             host?.pipView.playerLayer.player = player
             #endif
-            outputPixelFormat = kCVPixelFormatType_32BGRA
             onPlayerChanged?(player)
             usesSystemLayer = false
             showSystemLayer(false)
@@ -662,7 +695,7 @@ struct NativeMetalVideoPlayerView {
 
             // The Metal path learns the size from the frames it pulls; while
             // the system layer shows, nothing is pulled.
-            measureFrameRate(of: item, player: player)
+            if looper == nil { measureFrameRate(of: item, player: player) }
 
             presentationSizeObservation = item.observe(\.presentationSize, options: [.new]) { [weak self] observed, _ in
                 let size = observed.presentationSize
@@ -686,17 +719,11 @@ struct NativeMetalVideoPlayerView {
                         self.reportPlaybackState()
                         return
                     }
-                    // A server's progressive file is looped with a fresh item:
-                    // after the seek back from its end, visionOS's player
-                    // sometimes never fetches the start again (about one loop
-                    // in four on a 30 MB clip, 2026-11-16), and a new item
-                    // never failed to start. HLS and local files seek.
-                    if let url = self.loadedURL, let identity = self.loadedIdentity, !url.isFileURL,
-                       url.scheme == "http" || url.scheme == "https",
-                       self.playerItem?.accessLog()?.events.last?.playbackType == "FILE" {
-                        self.load(url: url, identity: identity, startPaused: !self.isRoomActive)
-                        return
-                    }
+                    // The looper starts the next copy itself; only HLS seeks
+                    // back. (Seeking back from the end of a server's file left
+                    // visionOS's player waiting for good about one loop in
+                    // four, 2026-11-16; a fresh item never failed to start.)
+                    guard self.looper == nil else { return }
                     self.seek(to: 0)
                     if self.isRoomActive {
                         self.play()
@@ -704,13 +731,17 @@ struct NativeMetalVideoPlayerView {
                 }
             }
 
+            // Any copy of a looping item can fail mid-play.
             failureObserver = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemFailedToPlayToEndTime,
-                object: item,
+                object: looper == nil ? item : nil,
                 queue: .main
-            ) { [weak self] _ in
+            ) { [weak self] note in
+                guard let failed = (note.object as? AVPlayerItem).map(ObjectIdentifier.init) else { return }
                 MainActor.assumeIsolated {
-                    self?.onPlaybackError?()
+                    guard let self, failed == self.playerItem.map(ObjectIdentifier.init)
+                            || self.loopOutputs[failed] != nil else { return }
+                    self.onPlaybackError?()
                 }
             }
 
@@ -1034,9 +1065,12 @@ struct NativeMetalVideoPlayerView {
             timeControlObservation?.invalidate()
             timeControlObservation = nil
             player?.pause()
-            if let videoOutput {
-                playerItem?.remove(videoOutput)
-            }
+            removeOutputs()
+            looper?.disableLooping()
+            looper = nil
+            loopObservations.forEach { $0.invalidate() }
+            loopObservations = []
+            preparedLoopCopies = []
             timeObserver = nil
             endObserver = nil
             failureObserver = nil
@@ -1357,8 +1391,7 @@ struct NativeMetalVideoPlayerView {
             if system {
                 // Nothing pulls frames while the system layer shows; an
                 // attached output would still convert every one.
-                if let videoOutput { playerItem?.remove(videoOutput) }
-                videoOutput = nil
+                removeOutputs()
             } else {
                 useOutput(pixelFormat: dynamicRange.isHDR ? kCVPixelFormatType_64RGBAHalf : kCVPixelFormatType_32BGRA)
             }
@@ -1481,17 +1514,95 @@ struct NativeMetalVideoPlayerView {
             )
         }
 
-        /// Swaps the frame output for one in another pixel format.
+        /// Swaps the frame output for one in another pixel format (on every
+        /// copy of a looping item).
         private func useOutput(pixelFormat: OSType) {
             guard let playerItem else { return }
-            if let videoOutput { playerItem.remove(videoOutput) }
-            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: pixelFormat,
-                kCVPixelBufferMetalCompatibilityKey as String: true
-            ])
-            playerItem.add(output)
-            videoOutput = output
+            attachOutputs(to: looper?.loopingPlayerItems ?? [playerItem], pixelFormat: pixelFormat)
+        }
+
+        /// Gives each of `items` a frame output in `pixelFormat`, replacing
+        /// any it had; the current item's becomes `videoOutput`.
+        private func attachOutputs(to items: [AVPlayerItem], pixelFormat: OSType) {
+            removeOutputs()
+            for item in items {
+                let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+                    kCVPixelBufferPixelFormatTypeKey as String: pixelFormat,
+                    kCVPixelBufferMetalCompatibilityKey as String: true
+                ])
+                item.add(output)
+                loopOutputs[ObjectIdentifier(item)] = output
+                if item === playerItem { videoOutput = output }
+            }
             outputPixelFormat = pixelFormat
+        }
+
+        /// Gives each copy the looper has made its spatial-audio policy, the
+        /// equalizer, a failure watch and (unless the system layer shows) a
+        /// frame output, before it plays.
+        private func prepareLoopCopies() {
+            guard let looper, let player else { return }
+            for copy in looper.loopingPlayerItems where !preparedLoopCopies.contains(ObjectIdentifier(copy)) {
+                preparedLoopCopies.insert(ObjectIdentifier(copy))
+                copy.applySpatialAudioPolicy(sceneIdentifier: spatialAudioSceneIdentifier)
+                copy.preferredMaximumResolution = maximumResolution
+                copy.attachAudioEQ(player: player) { [weak self, weak copy] result in
+                    guard let self, let copy, self.playerItem === copy else { return }
+                    self.onAudioEQResult?(result)
+                }
+                loopObservations.append(copy.observe(\.status, options: [.new]) { [weak self] observed, _ in
+                    guard observed.status == .failed else { return }
+                    let code = observed.error?.logCode ?? "-"
+                    Task { @MainActor [weak self] in
+                        guard let self, self.preparedLoopCopies.contains(ObjectIdentifier(observed)) else { return }
+                        AppLogger.videoWindow.error("Native player loop item failed [\(code, privacy: .public)]")
+                        self.onPlaybackError?()
+                    }
+                })
+                if !usesSystemLayer, loopOutputs[ObjectIdentifier(copy)] == nil {
+                    let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+                        kCVPixelBufferPixelFormatTypeKey as String: outputPixelFormat,
+                        kCVPixelBufferMetalCompatibilityKey as String: true
+                    ])
+                    copy.add(output)
+                    loopOutputs[ObjectIdentifier(copy)] = output
+                }
+            }
+            followCurrentLoopCopy()
+        }
+
+        /// The frame output and item follow the copy that plays now.
+        private func followCurrentLoopCopy() {
+            guard looper != nil, let current = player?.currentItem else { return }
+            let changedItem = current !== playerItem
+            if changedItem { playerItem = current }
+            let output = loopOutputs[ObjectIdentifier(current)]
+            if output !== videoOutput {
+                videoOutput = output
+                if let loopSource, let output, framePresenter != nil, !usesSystemLayer {
+                    // The presenter and interpolator stay; they take the new
+                    // pass as they take a seek.
+                    loopSource.follow(AVPlayerFrameSource(output: output, item: current))
+                } else if !usesSystemLayer {
+                    rebuildFramePresenter()
+                }
+            }
+            if changedItem {
+                // The template the looper copies never plays: measure the rate
+                // on the first copy that does.
+                if measuredFrameRate == nil, let player { measureFrameRate(of: current, player: player) }
+                reportPlaybackState()
+            }
+        }
+
+        /// Takes every frame output off its item.
+        private func removeOutputs() {
+            for item in looper?.loopingPlayerItems ?? [] {
+                if let output = loopOutputs[ObjectIdentifier(item)] { item.remove(output) }
+            }
+            if let videoOutput, let playerItem, playerItem.outputs.contains(videoOutput) { playerItem.remove(videoOutput) }
+            loopOutputs = [:]
+            videoOutput = nil
         }
 
         // MARK: Smooth Motion
@@ -1537,9 +1648,15 @@ struct NativeMetalVideoPlayerView {
             framePresenter = nil
             upscalingSource = nil
             upscalingGateOpen = nil
+            loopSource = nil
             if !usesSystemLayer, FramePixelFormat.isSupported(outputPixelFormat),
                let videoOutput, let playerItem {
                 var source: LookaheadFrameSource = AVPlayerFrameSource(output: videoOutput, item: playerItem)
+                if looper != nil {
+                    let loop = LoopCopyFrameSource(source)
+                    loopSource = loop
+                    source = loop
+                }
                 // Half-float (HDR) frames would band through its 8-bit 4:2:0.
                 if upscalesPicture, outputPixelFormat == kCVPixelFormatType_32BGRA,
                    let upscaling = UpscalingFrameSource.wrappingIfSupported(source) as? UpscalingFrameSource {
@@ -1698,4 +1815,41 @@ struct NativeMetalVideoPlayerView {
             return texture
         }
     }
+}
+
+/// The frame source of a looping item (`AVPlayerLooper`): the current copy's,
+/// swapped at each pass under whatever reads it. The interpolator keeps its
+/// session and the presenter its timing; a new `sequence` makes them drop
+/// what they held, as after a seek. Rebuilding them instead restarted the
+/// interpolator every pass: 50 ms of each 0.6 s pass undoubled, and the
+/// display criteria stated again (2026-11-16).
+final class LoopCopyFrameSource: LookaheadFrameSource, @unchecked Sendable {
+    private let lock = NSLock()
+    private var inner: any LookaheadFrameSource
+    private var passes = 0
+
+    init(_ inner: any LookaheadFrameSource) { self.inner = inner }
+
+    /// The next pass's copy.
+    func follow(_ next: any LookaheadFrameSource) {
+        lock.withLock {
+            inner = next
+            passes += 1
+        }
+    }
+
+    private var current: any LookaheadFrameSource { lock.withLock { inner } }
+
+    let decodesAheadWhilePaused = false
+    var endTime: Double? { current.endTime }
+    var sequence: Int { lock.withLock { passes &* 1_000_003 &+ inner.sequence } }
+    var isFinished: Bool { current.isFinished }
+    func nextFrame(hostTime: CFTimeInterval) -> PumpFrame? { current.nextFrame(hostTime: hostTime) }
+    func playbackRate(hostTime: CFTimeInterval) -> Double? { current.playbackRate(hostTime: hostTime) }
+    func itemTime(forHostTime hostTime: CFTimeInterval) -> CMTime { current.itemTime(forHostTime: hostTime) }
+    func frame(atItemTime itemTime: CMTime) -> PumpFrame? { current.frame(atItemTime: itemTime) }
+    func dueHostTime(forItemTime itemTime: CMTime, at hostTime: CFTimeInterval) -> CFTimeInterval? {
+        current.dueHostTime(forItemTime: itemTime, at: hostTime)
+    }
+    func invalidate() { current.invalidate() }
 }
