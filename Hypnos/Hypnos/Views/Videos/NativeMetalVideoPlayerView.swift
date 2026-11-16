@@ -743,7 +743,10 @@ struct NativeMetalVideoPlayerView {
                         self.involuntaryResumeCount = 0
                     } else if status == .paused, self.intendsToPlay, self.isRoomActive, self.resumesAfterInterruptions {
                         self.resumeAfterInvoluntaryPause()
-                    } else if status == .paused, !self.resumesAfterInterruptions, !self.analysisBuffering {
+                    } else if status == .paused, !self.resumesAfterInterruptions, !self.analysisBuffering,
+                              observed.timeControlStatus == .paused {
+                        // Still paused, and not by a hold: see the same check
+                        // in RAVEMedia's Pseudo3DStereoEngine.
                         self.intendsToPlay = false
                     }
                 }
