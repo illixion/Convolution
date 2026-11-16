@@ -267,10 +267,10 @@ public final class OnScreenTextNarrator {
 
     private func prepareWithKokoro(_ cue: OnScreenTextCue, voice: OnScreenTextKokoro.Voice) {
         preload()
-        let id = cue.id, text = cue.text, speed = settings.rate
+        let id = cue.id, text = cue.text, spoken = Self.spokenForm(cue.text), speed = settings.rate
         kokoroTask = Task { [weak self] in
             do {
-                let buffer = try await OnScreenTextKokoro.shared.synthesize(text, voice: voice.id, speed: speed)
+                let buffer = try await OnScreenTextKokoro.shared.synthesize(spoken, voice: voice.id, speed: speed)
                 guard !Task.isCancelled else { return }
                 self?.finishedPreparing(id, text: text, buffers: [buffer])
             } catch {
@@ -283,7 +283,7 @@ public final class OnScreenTextNarrator {
     }
 
     private func prepareWithSystemVoice(_ cue: OnScreenTextCue) {
-        let utterance = AVSpeechUtterance(string: cue.text)
+        let utterance = AVSpeechUtterance(string: Self.spokenForm(cue.text))
         if let id = settings.voiceIdentifier, !id.hasPrefix(OnScreenTextKokoro.identifierPrefix),
            let voice = AVSpeechSynthesisVoice(identifier: id) {
             utterance.voice = voice
@@ -304,6 +304,22 @@ public final class OnScreenTextNarrator {
             let finished = VoiceBuffers(buffers: collector.take())
             Task { @MainActor in self?.finishedPreparing(id, text: text, buffers: finished.buffers) }
         }
+    }
+
+    /// What is handed to the voice. A line written in capitals (a channel
+    /// that subtitles in all caps) has its words spelled out letter by letter
+    /// by voices that take an unknown capitalised word for an acronym
+    /// ("MAKES" said "em ay kay ee ess"), so it is lowercased, keeping short
+    /// vowelless tokens (NYC, NPCS, TV) that are acronyms. A line with any
+    /// lowercase letter is left as it is: its capitals mean something.
+    static func spokenForm(_ text: String) -> String {
+        guard !text.contains(where: \.isLowercase), text.contains(where: \.isUppercase) else { return text }
+        let vowels = Set("AEIOUaeiou")
+        return text.split(separator: " ", omittingEmptySubsequences: false).map { token in
+            let letters = token.filter(\.isLetter)
+            if letters.count >= 2, letters.count <= 4, !letters.contains(where: { vowels.contains($0) }) { return String(token) }
+            return token.lowercased()
+        }.joined(separator: " ")
     }
 
     private func finishedPreparing(_ id: Int, text: String, buffers: [AVAudioPCMBuffer]) {

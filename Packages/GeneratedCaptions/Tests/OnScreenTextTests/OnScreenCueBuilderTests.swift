@@ -200,3 +200,23 @@ import Testing
         #expect(OnScreenCueBuilder.medoid(readings) == "it wasn't there in v2.31")
     }
 }
+
+@MainActor
+@Suite struct OnScreenTextSpokenFormTests {
+    @Test func aLineInCapitalsIsSpokenAsWordsNotSpelledOut() {
+        #expect(OnScreenTextNarrator.spokenForm("SO FAR EVERYTHING MAKES SENSE") == "so far everything makes sense")
+        #expect(OnScreenTextNarrator.spokenForm("THIS IS NOT A GOOD PLACE FOR A CONTAINER CRANE") == "this is not a good place for a container crane")
+        #expect(OnScreenTextNarrator.spokenForm("OLD TRAIN TRACKS #1") == "old train tracks #1")
+        #expect(OnScreenTextNarrator.spokenForm("DO YOU THINK THIS SHIP SANK?") == "do you think this ship sank?")
+    }
+
+    @Test func shortVowellessTokensStayAcronyms() {
+        #expect(OnScreenTextNarrator.spokenForm("POOR NPCS DRIVE AROUND NYC") == "poor NPCS drive around NYC")
+        #expect(OnScreenTextNarrator.spokenForm("THE TV IS ON") == "the TV is on")
+    }
+
+    @Test func aLineWithLowercaseKeepsItsCapitals() {
+        #expect(OnScreenTextNarrator.spokenForm("Rockstar made the NPC drive") == "Rockstar made the NPC drive")
+        #expect(OnScreenTextNarrator.spokenForm("12 34") == "12 34")
+    }
+}
