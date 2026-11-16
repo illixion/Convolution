@@ -292,7 +292,10 @@ For direct headset A/Bs, the `stereoEdges` debug command accepts `separated` and
 `holes`; both default to false. The experimental renderer is not yet the default.
 Its Movie A headset check showed noisy railing outlines. The original renderer's
 background edge-fill heuristic also defaults to off after it damaged jacket
-outlines; use `fill=true` only for comparison.
+outlines; use `fill=true` only for comparison. `crop=false` brings back the old
+edge fade (depth faded to nothing over the outer 5 % of the width) in place of
+the default crop of the picture's sides; captured eyes include that crop's
+slight enlargement, which the offline replay scripts don't reproduce.
 
 For normal use, download one of Apple's pre-made models in the app. The custom
 aspect-matched packages below are a **developer experiment**, not a setup step

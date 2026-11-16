@@ -252,11 +252,18 @@ struct VisualAdjustmentsPopover: View {
 
             if let pseudo3DSettings {
                 Divider()
-                // (No Stereo Separation control: strength is fixed at the
-                // Subtle level — see Pseudo3DSettings.depthStrength. No Auto
-                // Convergence either: it tracked the pre-processed median, which
+                // Depth is a multiple of the shipped strength, 0.5…1.5 (see
+                // Pseudo3DSettings.depthAmount for why it stops there). No Auto
+                // Convergence: it tracked the pre-processed median, which
                 // a fixed convergence against the per-frame-normalized map
-                // already does more stably.)
+                // already does more stably.
+                adjustmentSlider(
+                    label: "Depth",
+                    value: pseudo3DSettings.depthAmount,
+                    range: Pseudo3DSettings.depthAmountRange,
+                    defaultValue: Pseudo3DSettings.default.depthAmount,
+                    linear: true
+                )
                 adjustmentSlider(
                     label: "Convergence",
                     value: pseudo3DSettings.convergence,
@@ -350,6 +357,13 @@ struct VisualAdjustmentsPopover: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                adjustmentSlider(
+                    label: "Depth",
+                    value: globalPseudo3DSettings.depthAmount,
+                    range: Pseudo3DSettings.depthAmountRange,
+                    defaultValue: Pseudo3DSettings.default.depthAmount,
+                    linear: true
+                )
                 adjustmentSlider(
                     label: "Convergence",
                     value: globalPseudo3DSettings.convergence,

@@ -251,6 +251,14 @@ final class Cinema {
                              stabilization: hudStabilization)
     }
 
+    /// Motion parallax for a video window's AI 3D on the Big Screen: what is
+    /// behind the screen follows the wearer's head, as a scene behind a
+    /// window does (`updateParallax`). Off by default until the headset says
+    /// it is comfortable; persisted.
+    var motionParallax = false {
+        didSet { if motionParallax != oldValue { save() } }
+    }
+
     /// How much of the follow's range of motion the HUD keeps, 0 ... 1. Less
     /// holds the picture closer to the head (0 locks it); persisted.
     var hudStabilization: Float = 1 {
@@ -384,6 +392,8 @@ final class Cinema {
         /// Optional: where the wearer left the HUD; before, it opened at home.
         var hudOffset: [Float]?
         var hudWidth: Float?
+        /// Optional: settings saved before it existed decode as off.
+        var motionParallax: Bool?
     }
 
     private init() {
@@ -398,6 +408,7 @@ final class Cinema {
             headLockedMode = settings.headLockedMode.flatMap(RAVEHeadLockedSound.init(rawValue:))
                 ?? ((settings.headLocked ?? false) ? .always : .off)
             hudStabilization = min(1, max(0, settings.hudStabilization ?? 1))
+            motionParallax = settings.motionParallax ?? false
             if let offset = settings.hudOffset, offset.count == 3,
                let width = settings.hudWidth, width.isFinite {
                 hudWidth = min(4, max(0.25, width))
@@ -415,7 +426,8 @@ final class Cinema {
                                 passthroughTint: passthroughTint, headLocked: headLocked,
                                 headLockedMode: headLockedMode.rawValue,
                                 hudStabilization: hudStabilization,
-                                hudOffset: [hudOffset.x, hudOffset.y, hudOffset.z], hudWidth: hudWidth)
+                                hudOffset: [hudOffset.x, hudOffset.y, hudOffset.z], hudWidth: hudWidth,
+                                motionParallax: motionParallax)
         if let data = try? JSONEncoder().encode(settings) {
             HypnosDefaults.store.set(data, forKey: Self.defaultsKey)
         }
@@ -771,6 +783,7 @@ final class Cinema {
         headPose = head
         if mode == .bigScreen, screenPose == nil { placeScreen(facing: head) }
         easeScreen(dt: dt)
+        updateParallax(head: head, dt: dt)
 
         if headLocked {
             // The head's own pose: −z where it looks, so the room turns with it.
@@ -793,6 +806,75 @@ final class Cinema {
         let fallback = -head.columns.2.xyz
         roomPose = Self.pose(at: centre, forward: target.map { $0 - centre } ?? fallback, fallback: fallback)
     }
+
+    // MARK: Motion parallax
+
+    /// Tells the Big Screen's AI 3D picture where the head is, sideways, so
+    /// each eye is drawn from where it now is: the background follows the
+    /// head by its disparity over the eye spacing, which is what a scene
+    /// behind a window does. Without it a baked stereo picture turns with the
+    /// wearer (measured 2026-11-16: 24 % of a head movement at the shipped
+    /// strength, 35 % at 1.5×).
+    ///
+    /// Sideways only: the warp shifts along rows, and so do its outline
+    /// layers. The offset is taken from where the head has lately been, not
+    /// from the screen's centre line, so someone sitting off to one side gets
+    /// the same range as someone in the middle, and a settled head always
+    /// comes back to the picture as it was made; and it is limited
+    /// (`Pseudo3DStereoEngine.viewerOffsetReach`), since the strip a near
+    /// outline uncovers grows with it. A frame is drawn up to 40 ms before it
+    /// shows, so the head is taken a little ahead of where it is.
+    private func updateParallax(head: simd_float4x4, dt: Float) {
+        guard motionParallax, mode == .bigScreen, screenAttached, let engine = screenStereo, let screenPose,
+              dt > 0, dt < 0.5 else {
+            endParallax()
+            return
+        }
+        if parallaxEngine !== engine { endParallax() }
+        parallaxEngine = engine
+        // The screen's +x is the wearer's right (its z faces them).
+        let lateral = simd_dot(head.columns.3.xyz - screenPose.columns.3.xyz, screenPose.columns.0.xyz)
+        guard let last = parallaxLateral, let rest = parallaxRest else {
+            parallaxLateral = lateral
+            parallaxRest = lateral
+            parallaxVelocity = 0
+            return
+        }
+        let settle = DebugTunables.number("cinema.parallax.settleSeconds", Float(4), range: 0.5...30, step: 0.5,
+                                          label: "Parallax: seconds for a moved head to become the new rest")
+        let lead = DebugTunables.number("cinema.parallax.leadSeconds", Float(0.05), range: 0...0.2, step: 0.01,
+                                        label: "Parallax: how far ahead the head is predicted")
+        let gain = DebugTunables.number("cinema.parallax.gain", Float(1), range: 0...2, step: 0.05,
+                                        label: "Parallax: gain (1 = what a real window would show)")
+        let velocity = parallaxVelocity + ((lateral - last) / dt - parallaxVelocity) * (1 - expf(-dt / 0.08))
+        let newRest = rest + (lateral - rest) * (1 - expf(-dt / max(settle, 0.1)))
+        parallaxLateral = lateral
+        parallaxVelocity = velocity
+        parallaxRest = newRest
+        let halfEyeSpacing: Float = 0.0315
+        let raw = (lateral + velocity * lead - newRest) / halfEyeSpacing * gain
+        // Eases into the limit instead of stopping dead at it.
+        let reach = Pseudo3DStereoEngine.viewerOffsetReach
+        let offset = reach * tanhf(raw / reach)
+        parallaxOffset = offset
+        engine.setViewerOffset(offset)
+    }
+
+    private func endParallax() {
+        parallaxEngine?.setViewerOffset(nil)
+        parallaxEngine = nil
+        parallaxLateral = nil
+        parallaxRest = nil
+        parallaxVelocity = 0
+        parallaxOffset = nil
+    }
+
+    /// For the debug readout: the offset last sent, in half eye spacings.
+    @ObservationIgnored private(set) var parallaxOffset: Float?
+    @ObservationIgnored private weak var parallaxEngine: Pseudo3DStereoEngine?
+    @ObservationIgnored private var parallaxLateral: Float?
+    @ObservationIgnored private var parallaxRest: Float?
+    @ObservationIgnored private var parallaxVelocity: Float = 0
 
     private func placeScreen(facing head: simd_float4x4) {
         let position = head.columns.3.xyz
@@ -1139,6 +1221,12 @@ struct CinemaMenuSections: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
         }
+        if mode == .bigScreen {
+            Divider()
+            CinemaParallaxControl()
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+        }
     }
 }
 
@@ -1171,6 +1259,24 @@ struct CinemaPassthroughControl: View {
             if selected == .custom {
                 RAVEPassthroughTintSliders(tint: $cinema.passthroughTint)
             }
+        }
+    }
+}
+
+/// The Big Screen's Motion Parallax switch, in the Cinema menu while the
+/// screen is up. It acts on a video's AI 3D picture only: a real 3D video's
+/// two eyes are fixed, and the film player's picture isn't drawn by the warp.
+struct CinemaParallaxControl: View {
+    @Bindable private var cinema = Cinema.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle("Motion Parallax", isOn: $cinema.motionParallax)
+                .accessibilityIdentifier("player.cinema.motionParallax")
+            Text("AI 3D videos: the background moves with your head, like a view through a window.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

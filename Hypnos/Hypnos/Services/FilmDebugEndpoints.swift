@@ -100,6 +100,8 @@ enum FilmDebugEndpoints {
                      + "the mesh folding it in one eye and stretching it in the other (opt-in; the mesh stays wherever "
                      + "the split isn't well founded). "
                      + "directional: continue observed background texture along image structures (requires layered). "
+                     + "crop: hide the strip each eye lacks at a side by cropping (on by default) instead of fading "
+                     + "the depth to nothing over the outer 5 % of the width, which bends the picture's sides. "
                      + "omitted ones keep their state. Not saved.",
                      parameters: [.boolean("snap", "snap soft depth outlines to the picture"),
                                   .boolean("fill", "fill uncovered strips with background"),
@@ -108,6 +110,7 @@ enum FilmDebugEndpoints {
                                   .boolean("holes", "highlight uncovered pixels in the prototype"),
                                   .boolean("layered", "draw outlines from near and far layers over the mesh"),
                                   .boolean("directional", "continue background texture along image structures (requires layered)"),
+                                  .boolean("crop", "crop the picture's sides instead of fading the depth there"),
                                   .number("gapFloor", "share of an empty range's depth kept (0…1)", range: 0 ... 1),
                                   .number("gapEmpty", "density (of an even spread) at or below which a range is empty", range: 0 ... 2),
                                   .number("gapFull", "density at or above which a range is occupied", range: 0 ... 4)]) { args in
@@ -119,6 +122,7 @@ enum FilmDebugEndpoints {
                 if let v = args.bool("holes") { DepthRefinement.showsBoundaryHoles = v }
                 if let v = args.bool("layered") { DepthRefinement.layersSilhouettes = v }
                 if let v = args.bool("directional") { DepthRefinement.continuesBackgroundTexture = v }
+                if let v = args.bool("crop") { DepthRefinement.cropsPictureEdges = v }
                 if let v = args.double("gapFloor") { DepthGapCompressor.tuning.floorSlope = Float(v) }
                 if let v = args.double("gapEmpty") { DepthGapCompressor.tuning.emptyDensity = Float(v) }
                 if let v = args.double("gapFull") { DepthGapCompressor.tuning.fullDensity = Float(v) }
@@ -128,7 +132,8 @@ enum FilmDebugEndpoints {
                         "separated": DepthRefinement.separatesBoundaries ? 1 : 0,
                         "holes": DepthRefinement.showsBoundaryHoles ? 1 : 0,
                         "layered": DepthRefinement.layersSilhouettes ? 1 : 0,
-                        "directional": DepthRefinement.continuesBackgroundTexture ? 1 : 0, "gapFloor": Double(t.floorSlope),
+                        "directional": DepthRefinement.continuesBackgroundTexture ? 1 : 0,
+                        "crop": DepthRefinement.cropsPictureEdges ? 1 : 0, "gapFloor": Double(t.floorSlope),
                         "gapEmpty": Double(t.emptyDensity), "gapFull": Double(t.fullDensity)] as [String: Double]
                 #else
                 return ["snap": 0.0, "fill": 0.0, "gaps": 0.0]
@@ -200,7 +205,8 @@ enum FilmDebugEndpoints {
             .query("stereoDepth", "How AI 3D's realtime depth is spread over the picture (0 far … 1 near, after the "
                    + "depth budget): the last frame, the shot playing and the last 40 shots (split at cuts), each with the "
                    + "strength multiplier the shot-adaptive policy would choose (measured only, not applied). Also the "
-                   + "plane width, strength and convergence in force, and the stereoStrength debug multiplier.") { _ in
+                   + "plane width, strength and convergence in force, the stereoStrength debug multiplier and the "
+                   + "Big Screen's motion parallax offset.") { _ in
                 #if os(visionOS)
                 let configured = Pseudo3DStereoEngine.lastConfigured
                 return StereoDepthReply(
@@ -209,6 +215,7 @@ enum FilmDebugEndpoints {
                     depthStrength: configured?.depthStrength,
                     convergence: configured?.convergence,
                     debugStrengthScale: Pseudo3DStereoEngine.strengthScale,
+                    viewerOffset: Cinema.shared.parallaxOffset,
                     targetMeanShift: StereoStrengthPolicy.targetMeanShift
                 )
                 #else
@@ -331,6 +338,9 @@ enum FilmDebugEndpoints {
         var depthStrength: Float?
         var convergence: Float?
         var debugStrengthScale: Float
+        /// Motion parallax on the Big Screen: the head's offset last sent, in
+        /// half eye spacings; nil while it is off.
+        var viewerOffset: Float?
         var targetMeanShift: Float
     }
     #endif
