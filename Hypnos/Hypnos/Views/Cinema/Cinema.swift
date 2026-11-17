@@ -308,7 +308,20 @@ final class Cinema {
     @ObservationIgnored private var screenUp = SIMD3<Float>(0, 1, 0)
     /// How much of the view the screen's width takes, in degrees.
     var screenWidthDegrees: Float = 55 {
-        didSet { save() }
+        didSet { if !resizingScreen { save() } }
+    }
+    /// True while the screen's side edges are being dragged: saved when they let go.
+    @ObservationIgnored private var resizingScreen = false
+
+    /// Resizes the Big Screen from its edges, keeping its distance. Not saved
+    /// per step (a defaults write mid-playback stalls the main thread);
+    /// `hudPlacementSettled` saves once the wearer lets go.
+    func resizeScreen(toWidth width: Float) {
+        guard width.isFinite, screenDistance > 0.1 else { return }
+        let degrees = 2 * atanf(width / 2 / screenDistance) * 180 / .pi
+        resizingScreen = true
+        screenWidthDegrees = min(120, max(15, degrees))
+        resizingScreen = false
     }
     /// The passthrough filter around the Big Screen (dark by default, as Apple's players
     /// dim the room) and around the HUD (none), from RAVE's catalog, the same list

@@ -189,7 +189,15 @@ final class CinemaSpace {
             if resizeStart == nil { resizeStart = cinema.pictureWidth }
             let movement = value.convert(value.translation3D, from: .local, to: screen)
             let sign: Float = value.entity === rightEdge ? 1 : -1
-            if let resizeStart { cinema.hudWidth = min(4, max(0.25, resizeStart + sign * 2 * movement.x)) }
+            if let resizeStart {
+                let width = resizeStart + sign * 2 * movement.x
+                if cinema.mode == .bigScreen {
+                    // The edges are scaled with the screen's distance, and so is the drag's reach.
+                    cinema.resizeScreen(toWidth: max(0.1, width))
+                } else {
+                    cinema.hudWidth = min(4, max(0.25, width))
+                }
+            }
         }
     }
 
@@ -273,8 +281,9 @@ final class CinemaSpace {
             presentationEntity.removeFromParent()
             presentation.dismiss()
             chromeOpacity = 0
-            leftEdge.removeFromParent()
-            rightEdge.removeFromParent()
+            // The side edges stay too: they resize the screen.
+            if leftEdge.parent !== screen { screen.addChild(leftEdge) }
+            if rightEdge.parent !== screen { screen.addChild(rightEdge) }
             screen.setTransformMatrix(pose, relativeTo: nil)
         }
 
@@ -386,10 +395,12 @@ final class CinemaSpace {
             }
         }
         if cinema.mode == .hud { placeHUDPrompt(pictureHeight: height) }
-        leftEdge.position = SIMD3(-cinema.pictureWidth / 2, 0, 0.02)
-        rightEdge.position = SIMD3(cinema.pictureWidth / 2, 0, 0.02)
-        leftEdge.scale.y = max(height / 0.6, 0.2)
-        rightEdge.scale.y = leftEdge.scale.y
+        // Big Screen edges grow with the distance, like its grab bar, to stay as easy to hit.
+        let edgeChrome = cinema.mode == .bigScreen ? cinema.screenDistance / 2 : 1
+        leftEdge.position = SIMD3(-cinema.pictureWidth / 2, 0, 0.02 * edgeChrome)
+        rightEdge.position = SIMD3(cinema.pictureWidth / 2, 0, 0.02 * edgeChrome)
+        leftEdge.scale = SIMD3(edgeChrome, max(height / 0.6, 0.2), 1)
+        rightEdge.scale = leftEdge.scale
         for entity in [hudControls, hudClose, hudUtilities, hudHandle] {
             entity.components.set(OpacityComponent(opacity: chromeOpacity))
             entity.isEnabled = chromeOpacity > 0
