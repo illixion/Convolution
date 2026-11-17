@@ -84,9 +84,6 @@ final class FilmSession {
     /// playback info panel (the video window's, `PlaybackInfoPanel`). Nil for
     /// a download or before a film is loaded.
     private(set) var playbackInfo: PlaybackInfo?
-    /// The loaded film's chapters; empty until the server answers, or without any.
-    private(set) var chapters: [FilmChapter] = []
-    @ObservationIgnored private var chaptersTask: Task<Void, Never>?
     private(set) var loadedItem: FilmLibraryItem? {
         didSet {
             guard loadedItem?.id != oldValue?.id else { return }
@@ -278,13 +275,6 @@ final class FilmSession {
         stereoFormatTask?.cancel()
         stereoFormat = nil
         playbackInfo = nil
-        chapters = []
-        chaptersTask?.cancel()
-        chaptersTask = Task { [weak self] in
-            let loaded = await LibraryService.current()?.chapters(itemId: item.id) ?? []
-            guard !Task.isCancelled, let self else { return }
-            self.chapters = loaded
-        }
         var ownSoundUsed = false
         var disc: MVCPictureSource?
         if let picture {

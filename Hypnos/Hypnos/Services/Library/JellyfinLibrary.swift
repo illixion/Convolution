@@ -1266,17 +1266,6 @@ actor JellyfinLibrary: MediaServerLibrary {
         return fromChapters
     }
 
-    /// The title's chapters, in order, for the film player's chapter label.
-    /// Empty when the server lists none (or can't be reached).
-    func chapters(itemId: String) async -> [FilmChapter] {
-        guard let userId = try? await resolveUserId(),
-              let dto: JFItem = try? await get("Users/\(userId)/Items/\(itemId)") else { return [] }
-        return (dto.Chapters ?? []).compactMap { chapter -> FilmChapter? in
-            guard let start = chapter.StartPositionTicks else { return nil }
-            return FilmChapter(name: chapter.Name, startSeconds: Double(start) / 10_000_000)
-        }.sorted { $0.startSeconds < $1.startSeconds }
-    }
-
     private static func segmentKind(_ type: String?) -> LibraryMediaSegment.Kind? {
         LibraryMediaSegment.Kind.serverType(type)
     }

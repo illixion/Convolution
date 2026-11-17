@@ -496,6 +496,14 @@ struct FilmPlayerView: View {
                               takesInput: stereoSource == nil && (!chromeOpen || pictureTakesInputWithChrome),
                               showsPicture: !cinema.showsScreen(for: .film),
                               onTap: { toggleChrome() })
+                    // Under the stereo picture it takes no depth. A visionOS
+                    // ZStack shares the window's depth between children that
+                    // claim it, as a VStack shares height: with both planes
+                    // claiming, the stereo picture got the front half and sat
+                    // ~10 cm in front of the controls, where the video
+                    // window's (the slot's only child) is flush (plane z 112
+                    // against 12 mm in the placement logs, device 2026-10-12).
+                    .frame(depth: stereoSource != nil ? 0 : nil)
                     // The audio stage contributes no window depth. It remains
                     // mounted when only the picture changes to stereo, and
                     // moves into the cinema space while that is open.
@@ -521,11 +529,6 @@ struct FilmPlayerView: View {
                         subtitles: stereoSubtitles,
                         interpolatesFrames: smoothMotion,
                         speed: player.speed,
-                        // How far the 3D picture sits behind the front of the window's depth, in
-                        // points: tuned by feel (Debug > Panels) when it floats off the controls.
-                        recess: CGFloat(DebugTunables.number("film.stereoRecess", Float(RAVEVideoPlane.viewRecess),
-                                                             range: -300...100, step: 5,
-                                                             label: "Film 3D picture depth (pt)")),
                         // A 2D film in AI 3D gets its 2D track (pairs it doesn't cover: the device's own).
                         sharedFields: stereoLayout != nil ? session.sharedFields : session.monoSharedFields,
                         onUnavailable: { failure in
@@ -567,40 +570,30 @@ struct FilmPlayerView: View {
         .raveSystemOverlays(chromeVisible && !cinema.windowVanishes(for: .film) ? .visible : .hidden)
         // Nothing of an invisible window may take a look or a pinch.
         .allowsHitTesting(!cinema.windowVanishes(for: .film))
-        // The strip rises into place and sinks away (`playerChromeOrnament`).
-        .playerChromeOrnament(
+        // The video window's chrome (`playerWindowChrome`), with the film's strip.
+        .playerWindowChrome(
             isPresented: chromeVisible && cinema.mode(for: .film) != .hud,
-            keepsMounted: PlayerOrnamentStack<EmptyView>.keepsMounted(
-                subtitles: bandSubtitles, hasPrompt: !hudPromptKey.inHUD && prompt(controlsVisible: chromeVisible) != nil),
-            attachmentAnchor: .scene(.bottom), contentAlignment: .top
-        ) { shown in
-            PlayerOrnamentStack(
-                subtitles: bandSubtitles, controlsVisible: shown,
-                prompt: hudPromptKey.inHUD ? nil : prompt(controlsVisible: chromeVisible),
-                gap: stereoSource == nil ? 12 : VideoWindowView.stereoControlsGap,
-                filmTime: { player.currentTime }
-            ) {
-            FilmTransport(player: player, stereoEnabled: stereoSource != nil,
-                          onToggle3D: cinema.mode(for: .film).showsPicture ? nil : { stereoSource == nil ? startStereo() : stopStereo() },
-                          smoothMotion: stereoSource != nil && smoothMotionApplies ? smoothMotion : nil,
-                          onToggleSmoothMotion: { smoothMotionOverride = !smoothMotion },
-                          markedRanges: skipper.markedRanges,
-                          width: windowWidth > 0
-                              ? min(max(windowWidth, VideoWindowView.minimumStripWidth), 1180) : nil,
-                          onModalChanged: { name, open in holdChrome(name, open) },
-                          menuDismissal: menuDismissals,
-                          onInteraction: { revealChrome() },
-                          onHold: { holdChrome(Self.scrubHold, $0) })
-            .environment(\.playerChoiceDismissal, menuDismissals)
-            }
-        }
-        // The title over the window's top-left corner, with the controls.
-        .playerChromeOrnament(isPresented: chromeVisible && cinema.mode(for: .film) != .hud,
-                              attachmentAnchor: .scene(.topLeading), contentAlignment: .topLeading) { shown in
-            titleButton.padding(20)
-                .modifier(PlayerChromeReveal(shown: shown, edge: .top))
-                .offset(z: stereoSource != nil ? PlayerChromeAnimation.stereoTitleLift : 0)
-        }
+            showsInfo: showsPlaybackInfo,
+            stereo: stereoSource != nil,
+            subtitles: bandSubtitles,
+            prompt: hudPromptKey.inHUD ? nil : prompt(controlsVisible: chromeVisible),
+            filmTime: { player.currentTime },
+            strip: {
+                FilmTransport(player: player, stereoEnabled: stereoSource != nil,
+                              onToggle3D: cinema.mode(for: .film).showsPicture ? nil : { stereoSource == nil ? startStereo() : stopStereo() },
+                              smoothMotion: stereoSource != nil && smoothMotionApplies ? smoothMotion : nil,
+                              onToggleSmoothMotion: { smoothMotionOverride = !smoothMotion },
+                              markedRanges: skipper.markedRanges,
+                              width: PlayerWindowChromeMetrics.stripWidth(forWindowWidth: windowWidth),
+                              onModalChanged: { name, open in holdChrome(name, open) },
+                              menuDismissal: menuDismissals,
+                              onInteraction: { revealChrome() },
+                              onHold: { holdChrome(Self.scrubHold, $0) })
+                .environment(\.playerChoiceDismissal, menuDismissals)
+            },
+            title: { titleButton },
+            info: { playbackInfoPanel }
+        )
         .onAppear { revealChrome() }
         .onChange(of: player.isPlaying) { _, playing in
             if playing { scheduleChromeHide() } else { revealChrome() }
@@ -663,6 +656,12 @@ struct FilmPlayerView: View {
         .overlay(alignment: .topLeading) {
             titleButton.padding(16)
         }
+        // How the film gets here, in the other top corner, as in the video window.
+        .overlay(alignment: .topTrailing) {
+            if showsPlaybackInfo {
+                playbackInfoPanel.padding(16)
+            }
+        }
         .onAppear { if session.headTracking { HeadphoneHeadTracker.shared.start() } }
         .onDisappear { HeadphoneHeadTracker.shared.stop() }
         .onChange(of: session.headTracking) { _, enabled in
@@ -697,19 +696,15 @@ struct FilmPlayerView: View {
         session.playbackInfo?.isShown(playbackInfoVisibility) ?? false
     }
 
-    /// The chapter the playhead is in, under the title ("Chapter 3 · Name"); nothing for a film with one chapter or none.
-    @ViewBuilder private var chapterCaption: some View {
-        if session.chapters.count > 1 {
-            TimelineView(.periodic(from: .now, by: 1)) { _ in
-                if let label = session.chapters.label(at: player.currentTime) {
-                    Label(label, systemImage: "list.bullet")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 12).padding(.vertical, 6)
-                        .glassBackgroundEffect(in: .capsule)
-                        .accessibilityIdentifier("film.chapter")
-                }
-            }
+    /// How the film gets here, the video window's panel (`PlaybackInfoPanel`).
+    @ViewBuilder private var playbackInfoPanel: some View {
+        if let info = session.playbackInfo {
+            #if os(visionOS)
+            PlaybackInfoPanel(info: info, dismissal: menuDismissals,
+                              onOpenChanged: { holdChrome(Self.playbackInfoHold, $0) })
+            #else
+            PlaybackInfoPanel(info: info)
+            #endif
         }
     }
 
@@ -784,11 +779,12 @@ struct FilmPlayerView: View {
 
     private static let scrubHold = "Scrub"
     private static let detailsHold = "Details"
-    /// The holds that are popovers (More, with the volume popover, Cinema
-    /// and the title's details): they keep the gaze with the picture still
-    /// tappable.
+    private static let playbackInfoHold = "Playback Info"
+    /// The holds that are popovers (More, with the volume popover, Cinema,
+    /// the title's details and the playback info): they keep the gaze with
+    /// the picture still tappable.
     private static let popoverHolds: Set<String> = [
-        "More", "Cinema", detailsHold, "View Mode", "Picture Quality", "Audio", "Audio Quality", "Subtitles", "Speed", "Equalizer",
+        "More", "Cinema", detailsHold, playbackInfoHold, "View Mode", "Picture Quality", "Audio", "Audio Quality", "Subtitles", "Speed", "Equalizer",
     ]
 
     /// A menu, popover or sheet is open over the picture, which dims for it.
@@ -1098,6 +1094,13 @@ struct FilmTransport: View {
                 }
                 #endif
                 soundAndPictureButton
+                #if os(visionOS)
+                if room < 3 {
+                    Divider()
+                    PlayerPopoverSectionHeader("Window")
+                    homeButton
+                }
+                #endif
             }
         }
         .frame(width: width)
@@ -1217,20 +1220,26 @@ struct FilmTransport: View {
             recenterButton
         }
         #if os(visionOS)
-        if shows(3) {
-            PlayerHomeButton(title: "Videos", help: "Show the app's home screen", action: { appModel.showMainWindow(openWindow: openWindow) })
+        // The video window's Gallery button, at its priority (3): on the strip
+        // with room to spare, otherwise under More's Window header.
+        if onBar, shows(3) {
+            homeButton
         }
         #endif
     }
 
+    #if os(visionOS)
+    private var homeButton: some View {
+        PlayerHomeButton(title: "Videos", help: "Show the app's home screen") {
+            appModel.showMainWindow(openWindow: openWindow)
+        }
+    }
+    #endif
+
     /// Whether More has any playback choice the strip had no room for.
     private func hasPlaybackItems(above room: Int) -> Bool {
-        // Speed (1) is always there; Recenter (2) only while tracking; Videos (3) on visionOS.
-        #if os(visionOS)
-        return room < 3
-        #else
-        return room < 1 || (room < 2 && canRecenter)
-        #endif
+        // Speed (1) is always there; Recenter (2) only while tracking.
+        room < 1 || (room < 2 && canRecenter)
     }
 
     private var canRecenter: Bool {

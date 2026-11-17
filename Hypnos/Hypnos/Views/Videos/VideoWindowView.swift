@@ -81,23 +81,16 @@ struct VideoWindowView: View {
         #endif
     }
 
-    /// Gap between the window's bottom edge and the controls under a stereo
-    /// picture, which reads as nearer than its edge and crowded the bar at
-    /// the 12 pt the flat picture uses (device, 2026-10-07).
-    static let stereoControlsGap: CGFloat = 44
-
     /// The control strip as wide as the window, within the strip's limits:
     /// no narrower than its essentials, no wider than RAVEUI's cap. visionOS
     /// only; iOS lays it over the foot of the screen at the screen's width.
     private var stripWidth: CGFloat? {
         #if os(visionOS)
-        windowWidth > 0 ? min(max(windowWidth, Self.minimumStripWidth), 1180) : nil
+        PlayerWindowChromeMetrics.stripWidth(forWindowWidth: windowWidth)
         #else
         nil
         #endif
     }
-
-    static let minimumStripWidth: CGFloat = 760
 
     // MARK: Vertical footprint (visionOS)
     //
@@ -590,49 +583,24 @@ struct VideoWindowView: View {
         .allowsHitTesting(!vanishesForHUD)
         .hidesStatusBar(windowModel.isUIHidden)
         #if os(visionOS)
-        // Hung under the window, outside it: the window holds only the
-        // picture, and the system moves the window bar below the ornament.
-        // Both auto-hide together (`isUIHidden` / `isWindowControlsHidden`);
-        // the strip rises into place and sinks away (`playerChromeOrnament`).
-        .playerChromeOrnament(
-            isPresented: !windowModel.isUIHidden && !appModel.allWindowsHidden && Cinema.shared.mode(for: .video(ObjectIdentifier(windowModel))) != .hud,
-            keepsMounted: !appModel.allWindowsHidden && PlayerOrnamentStack<EmptyView>.keepsMounted(
-                subtitles: bandSubtitles, hasPrompt: ornamentPrompt != nil && !hudPromptKey.inHUD),
-            attachmentAnchor: .scene(.bottom),
-            contentAlignment: .top
-        ) { shown in
-            PlayerOrnamentStack(
-                subtitles: bandSubtitles, controlsVisible: shown,
-                prompt: hudPromptKey.inHUD ? nil : ornamentPrompt,
-                gap: windowModel.showsStereoPicture ? Self.stereoControlsGap : 12,
-                filmTime: { windowModel.currentTime }
-            ) { videoOrnament }
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { noteChromeBelow($0) }
-        }
+        // The same chrome as the film player's (`playerWindowChrome`). It
+        // auto-hides with the window bar (`isUIHidden` / `isWindowControlsHidden`).
+        .playerWindowChrome(
+            isPresented: !windowModel.isUIHidden && Cinema.shared.mode(for: .video(ObjectIdentifier(windowModel))) != .hud,
+            canMount: !appModel.allWindowsHidden,
+            showsInfo: showsPlaybackInfo,
+            stereo: windowModel.showsStereoPicture,
+            subtitles: bandSubtitles,
+            prompt: hudPromptKey.inHUD ? nil : ornamentPrompt,
+            filmTime: { windowModel.currentTime },
+            onStripHeight: { noteChromeBelow($0) },
+            strip: { videoOrnament },
+            title: { titleButton },
+            info: { playbackInfoPanel }
+        )
         .onChange(of: appModel.aiHDRVideos) { _, _ in windowModel.loadAIHDR() }
         .onChange(of: ornamentBottomPadding) { old, new in
             resizeWindowHeight(by: new - old)
-        }
-        // The title over the window's top-left corner, with the controls.
-        .playerChromeOrnament(
-            isPresented: !windowModel.isUIHidden && !appModel.allWindowsHidden && Cinema.shared.mode(for: .video(ObjectIdentifier(windowModel))) != .hud,
-            attachmentAnchor: .scene(.topLeading),
-            contentAlignment: .topLeading
-        ) { shown in
-            titleButton.padding(20)
-                .modifier(PlayerChromeReveal(shown: shown, edge: .top))
-                .offset(z: windowModel.showsStereoPicture ? PlayerChromeAnimation.stereoTitleLift : 0)
-        }
-        // How the picture gets here, over the other top corner.
-        .playerChromeOrnament(
-            isPresented: !windowModel.isUIHidden && !appModel.allWindowsHidden && showsPlaybackInfo
-                && Cinema.shared.mode(for: .video(ObjectIdentifier(windowModel))) != .hud,
-            attachmentAnchor: .scene(.topTrailing),
-            contentAlignment: .topTrailing
-        ) { shown in
-            playbackInfoPanel.padding(20)
-                .modifier(PlayerChromeReveal(shown: shown, edge: .top))
-                .offset(z: windowModel.showsStereoPicture ? PlayerChromeAnimation.stereoTitleLift : 0)
         }
         #else
         .ornament(

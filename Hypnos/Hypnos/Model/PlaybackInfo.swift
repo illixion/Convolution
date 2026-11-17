@@ -29,8 +29,8 @@ struct PlaybackInfo: Equatable {
         case webPlayer
         /// YouTube's own streams.
         case youTube
-        /// The film player's 3D picture, decoded on this device from the raw
-        /// file (a Blu-ray remux's MVC); the server sends the bytes only.
+        /// The film player's picture decoded on this device from the raw file
+        /// (a Blu-ray remux, its MVC 3D included); the server sends the bytes only.
         case deviceDecode
 
         var title: String {
@@ -68,7 +68,7 @@ struct PlaybackInfo: Equatable {
             case .serverTranscode: "The server re-encodes the video before sending it."
             case .webPlayer: "The web view plays the original. It can't show HDR or play in 3D, and AI 3D needs a server transcode."
             case .youTube: "YouTube's own streams, played natively."
-            case .deviceDecode: "Both eyes are decoded on this device from the original file; the server only sends its bytes."
+            case .deviceDecode: "The original file's picture (both eyes of a 3D one) is decoded on this device; the server only sends its bytes."
             }
         }
 
