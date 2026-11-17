@@ -503,6 +503,11 @@ final class Cinema {
         case fixed
         /// Head-locked stereo or mono: not spatialized at all, as in the window.
         case bypassed
+        /// A stereo picture (AI 3D, live 3D) is drawn from a plane, not a
+        /// `VideoPlayerComponent`, so `.automatic` has nothing to follow and
+        /// the sound stays anchored to the window's scene (whose picture is
+        /// hidden). Head-tracked with an automatic anchor leaves that scene.
+        case headTracked
     }
 
     /// Head-locked stereo and mono play unspatialized, exactly as they do in
@@ -512,7 +517,7 @@ final class Cinema {
     /// the user has asked to spatialize, goes `.fixed`. Audio not probed yet
     /// counts as stereo, as the policy does.
     func hudSound(for player: AVPlayer) -> HUDSound {
-        guard headLocked(for: player) else { return .automatic }
+        guard headLocked(for: player) else { return screenStereo != nil ? .headTracked : .automatic }
         return player.spatialAudioIsMultichannel == true || RAVEMediaPolicy.spatializeStereo ? .fixed : .bypassed
     }
 
@@ -523,6 +528,7 @@ final class Cinema {
         case .automatic: return experience is AutomaticSpatialAudio
         case .fixed: return experience is FixedSpatialAudio
         case .bypassed: return experience is BypassedSpatialAudio
+        case .headTracked: return experience is HeadTrackedSpatialAudio
         }
     }
 
@@ -543,6 +549,7 @@ final class Cinema {
         case .automatic: player.intendedSpatialAudioExperience = AutomaticSpatialAudio.automatic
         case .fixed: player.intendedSpatialAudioExperience = .fixed(soundStageSize: .automatic)
         case .bypassed: player.intendedSpatialAudioExperience = .bypassed
+        case .headTracked: player.intendedSpatialAudioExperience = .headTracked(.automatic, soundStageSize: .automatic)
         }
         logger.info("Cinema: HUD sound \(sound.rawValue, privacy: .public)")
     }
@@ -1333,7 +1340,7 @@ struct CinemaVideoWindowHook: ViewModifier {
             .onChange(of: windowModel.nativePlayerGeneration) { lendPlayer(); routeAudio() }
             .onChange(of: cinema.mode(for: owner), initial: true) { _, _ in routeAudio() }
             // AI 3D and live 3D lend their plane to the screen.
-            .onChange(of: windowModel.showsStereoPicture) { if onBigScreen { lendPlayer() } }
+            .onChange(of: windowModel.showsStereoPicture) { if onBigScreen { lendPlayer() }; routeAudio() }
             .onChange(of: windowModel.stereoEngine.map(ObjectIdentifier.init)) { if onBigScreen { lendPlayer() } }
             .onChange(of: cinema.screenTaps) {
                 if cinema.owner == owner { windowModel.toggleUIVisibility() }

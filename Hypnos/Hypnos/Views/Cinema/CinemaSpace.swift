@@ -240,7 +240,7 @@ final class CinemaSpace {
         if cinema.mode == .hud {
             // Re-asserted every tick: the window's own policy (applied when its
             // player was made or its scene changed) overwrites the HUD's sound.
-            if let player = cinema.screenPlayer { cinema.applyHUDSound(to: player) }
+            if let player = cinema.screenPlayer ?? cinema.hudVideoModel?.nativePlayer { cinema.applyHUDSound(to: player) }
             // Until the follow has its first pose, the head anchor holds the screen.
             let follow = CinemaHUDFollow.shared
             follow.attach(to: sceneRoot, keeping: screen)
