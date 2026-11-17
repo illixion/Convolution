@@ -546,6 +546,13 @@ public sealed partial class AtmosSceneService
                 await feeder.ConfigureAwait(false);
             }
         }
+        catch (NoObjectsException) when (!ct.IsCancellationRequested)
+        {
+            TryKill(ffmpeg);
+            TryKill(truehdd);
+            MarkUnsupported(itemId, $"The {tool.Format} track has no object presentation.");
+            return;
+        }
         catch (Exception) when (!ct.IsCancellationRequested)
         {
             TryKill(ffmpeg);
@@ -713,6 +720,11 @@ public sealed partial class AtmosSceneService
         return Math.Max(count, 1);
     }
 
+    /// <summary>The decoder produced plenty of audio but never an object header.</summary>
+    private sealed class NoObjectsException : Exception
+    {
+    }
+
     private enum AudioOutcome
     {
         /// <summary>truehdd's output ended after audio was placed.</summary>
@@ -771,7 +783,16 @@ public sealed partial class AtmosSceneService
                     }
 
                     await startTask.ConfigureAwait(false); // surfaces the solver's error
-                    throw new InvalidDataException("Decoder output could not be placed.");
+                    if (File.Exists(basePath + ".atmos"))
+                    {
+                        throw new InvalidDataException("Decoder output could not be placed.");
+                    }
+
+                    // A long stretch of decoded audio and still no DAMF header: an Atmos
+                    // track names its objects from its first access units, so this is a
+                    // plain surround track (a Blu-ray's 7.1 TrueHD). Say so instead of
+                    // failing: a failure is retried, and decodes hundreds of MB each time.
+                    throw new NoObjectsException();
                 }
 
                 if (read == 0)
