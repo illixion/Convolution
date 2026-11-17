@@ -80,6 +80,13 @@ final class FilmSession {
     }
 
     private(set) var searchResults: [FilmLibraryItem] = []
+    /// How the loaded film's picture and sound get to the player, for the
+    /// playback info panel (the video window's, `PlaybackInfoPanel`). Nil for
+    /// a download or before a film is loaded.
+    private(set) var playbackInfo: PlaybackInfo?
+    /// The loaded film's chapters; empty until the server answers, or without any.
+    private(set) var chapters: [FilmChapter] = []
+    @ObservationIgnored private var chaptersTask: Task<Void, Never>?
     private(set) var loadedItem: FilmLibraryItem? {
         didSet {
             guard loadedItem?.id != oldValue?.id else { return }
@@ -270,6 +277,15 @@ final class FilmSession {
         defer { isLoading = false }
         stereoFormatTask?.cancel()
         stereoFormat = nil
+        playbackInfo = nil
+        chapters = []
+        chaptersTask?.cancel()
+        chaptersTask = Task { [weak self] in
+            let loaded = await LibraryService.current()?.chapters(itemId: item.id) ?? []
+            guard !Task.isCancelled, let self else { return }
+            self.chapters = loaded
+        }
+        var ownSoundUsed = false
         var disc: MVCPictureSource?
         if let picture {
             let url = serverURL.appending(path: "Videos/\(item.id)/stream").appending(queryItems: [.init(name: "static", value: "true")])
@@ -295,7 +311,8 @@ final class FilmSession {
             // The remux's reader authenticates by query, as the video
             // window's on-device remux of a Library file does.
             await Self.load(player, client: client, decoded: disc, pictureHeight: FilmPictureQuality.preferred.height) {
-                disc.isDisc
+                ownSoundUsed = true
+                return disc.isDisc
                     ? (try? disc.audioSource(itemID: item.id))
                     : await MatroskaFilmAudioSource.open(
                         itemID: item.id, url: disc.sourceURL.appending(queryItems: [.init(name: "ApiKey", value: token)]),
@@ -316,9 +333,22 @@ final class FilmSession {
         if let disc {
             // The eyes come top and bottom out of MVCPictureSource's stereo frames.
             stereoFormat = disc.isStereo ? .overUnder : nil
+            playbackInfo = PlaybackInfo(
+                route: .deviceDecode, severity: .normal, server: "Jellyfin",
+                reasons: ownSoundUsed ? ["the server has no object audio for this film, so its own sound plays, decoded on this device"] : [],
+                picture: "\(disc.isStereo ? "3D" : "2D") · \(String(format: "%.3f", disc.frameRate)) fps",
+                range: nil, rangeFromFrames: false, transcode: nil,
+                source: "\(disc.summary) · \(ownSoundUsed ? "the file's own sound" : "object audio from the plugin")")
             AppLogger.filmPlayer.info("Loaded \(item.name): \(disc.summary, privacy: .public); audio \(self.player.audioStatus, privacy: .public)")
             return true
         }
+        let pictureHeight = FilmPictureQuality.preferred.height
+        playbackInfo = PlaybackInfo(
+            route: pictureHeight == nil ? .serverRemux : .serverTranscode,
+            severity: pictureHeight == nil ? .normal : .chosen, server: "Jellyfin",
+            reasons: pictureHeight.map { ["picture quality set to \($0)p"] } ?? [],
+            picture: player.video.formatSummary.isEmpty ? nil : player.video.formatSummary, range: nil, rangeFromFrames: false, transcode: nil,
+            source: "\(player.hasAudioScene ? "object audio" : "no object audio")")
         stereoFormatTask = Task { [weak self] in
             let format = try? await LibraryService.current()?.item(id: item.id).stereoFormat
             guard !Task.isCancelled, let self, self.loadedItem?.id == item.id else { return }

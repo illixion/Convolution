@@ -521,6 +521,11 @@ struct FilmPlayerView: View {
                         subtitles: stereoSubtitles,
                         interpolatesFrames: smoothMotion,
                         speed: player.speed,
+                        // How far the 3D picture sits behind the front of the window's depth, in
+                        // points: tuned by feel (Debug > Panels) when it floats off the controls.
+                        recess: CGFloat(DebugTunables.number("film.stereoRecess", Float(RAVEVideoPlane.viewRecess),
+                                                             range: -300...100, step: 5,
+                                                             label: "Film 3D picture depth (pt)")),
                         // A 2D film in AI 3D gets its 2D track (pairs it doesn't cover: the device's own).
                         sharedFields: stereoLayout != nil ? session.sharedFields : session.monoSharedFields,
                         onUnavailable: { failure in
@@ -683,6 +688,29 @@ struct FilmPlayerView: View {
         #else
         return PlayerTitleButton(source: source, fallback: fallback)
         #endif
+    }
+
+    /// Settings → Videos → Playback Info, the same switch as the video window's panel.
+    @AppStorage(PlaybackInfoVisibility.key, store: HypnosDefaults.store) private var playbackInfoVisibility = PlaybackInfoVisibility.always
+
+    private var showsPlaybackInfo: Bool {
+        session.playbackInfo?.isShown(playbackInfoVisibility) ?? false
+    }
+
+    /// The chapter the playhead is in, under the title ("Chapter 3 · Name"); nothing for a film with one chapter or none.
+    @ViewBuilder private var chapterCaption: some View {
+        if session.chapters.count > 1 {
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                if let label = session.chapters.label(at: player.currentTime) {
+                    Label(label, systemImage: "list.bullet")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .glassBackgroundEffect(in: .capsule)
+                        .accessibilityIdentifier("film.chapter")
+                }
+            }
+        }
     }
 
     #if os(visionOS)
@@ -1012,6 +1040,7 @@ struct FilmTransport: View {
     /// A scrub holding the controls up (true) or done.
     var onHold: (Bool) -> Void = { _ in }
     @Bindable private var session = FilmSession.shared
+    @Environment(AppModel.self) private var appModel
     /// The playhead while a menu is open (`menuOpen`); otherwise the strip's
     /// timeline reads the film's clock itself, four times a second, and the
     /// rest of the bar doesn't re-render with it (`RAVEPlayerClock`).
@@ -1187,12 +1216,21 @@ struct FilmTransport: View {
         if shows(2) {
             recenterButton
         }
+        #if os(visionOS)
+        if shows(3) {
+            PlayerHomeButton(title: "Videos", help: "Show the app's home screen", action: { appModel.showMainWindow(openWindow: openWindow) })
+        }
+        #endif
     }
 
     /// Whether More has any playback choice the strip had no room for.
     private func hasPlaybackItems(above room: Int) -> Bool {
-        // Speed (1) is always there; Recenter (2) only while tracking.
-        room < 1 || (room < 2 && canRecenter)
+        // Speed (1) is always there; Recenter (2) only while tracking; Videos (3) on visionOS.
+        #if os(visionOS)
+        return room < 3
+        #else
+        return room < 1 || (room < 2 && canRecenter)
+        #endif
     }
 
     private var canRecenter: Bool {

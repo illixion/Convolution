@@ -299,11 +299,8 @@ struct VideoOrnamentsView: View {
 #endif
 
     private var galleryButton: some View {
-        Button(action: onGalleryButtonTap) {
-            OrnamentGlyph(title: windowModel.isStacked ? "Videos" : "Gallery", systemImage: "square.grid.2x2")
-        }
-        .modifier(OrnamentButtonStyle())
-        .help(windowModel.isStacked ? "Videos" : "Show Gallery")
+        PlayerHomeButton(title: windowModel.isStacked ? "Videos" : "Gallery",
+                         help: windowModel.isStacked ? "Videos" : "Show Gallery", action: onGalleryButtonTap)
     }
 
     @ViewBuilder
@@ -874,7 +871,7 @@ private struct ConversionMenuStatus: View {
 /// strip's "More" popover.
 /// The bar's chrome button style; none inside More, whose popover styles its
 /// rows as a menu's.
-private struct OrnamentButtonStyle: ViewModifier {
+struct OrnamentButtonStyle: ViewModifier {
     @Environment(\.ravePlayerControlsInMenu) private var inMenu
 
     func body(content: Content) -> some View {
@@ -882,7 +879,7 @@ private struct OrnamentButtonStyle: ViewModifier {
     }
 }
 
-private struct OrnamentGlyph: View {
+struct OrnamentGlyph: View {
     let title: String
     let systemImage: String
     @Environment(\.ravePlayerControlsInMenu) private var inMenu
@@ -893,5 +890,23 @@ private struct OrnamentGlyph: View {
         } else {
             Image(systemName: systemImage).font(.title3)
         }
+    }
+}
+
+
+/// The strip's button that brings the app's home screen back (Videos, Gallery),
+/// the same one in the video window and the film player.
+struct PlayerHomeButton: View {
+    let title: String
+    let help: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            OrnamentGlyph(title: title, systemImage: "square.grid.2x2")
+        }
+        .modifier(OrnamentButtonStyle())
+        .help(help)
+        .accessibilityIdentifier("player.home")
     }
 }

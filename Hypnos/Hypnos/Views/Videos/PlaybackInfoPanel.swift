@@ -117,7 +117,7 @@ struct PlaybackInfoPanel: View {
         case .chosen: AnyShapeStyle(.secondary)
         case .normal:
             switch info.route {
-            case .direct, .deviceRemux: AnyShapeStyle(.green)
+            case .direct, .deviceRemux, .deviceDecode: AnyShapeStyle(.green)
             default: AnyShapeStyle(.secondary)
             }
         }
