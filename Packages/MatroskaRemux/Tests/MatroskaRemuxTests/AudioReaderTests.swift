@@ -93,3 +93,16 @@ struct AudioReaderTests {
     }
 }
 #endif
+
+import Testing
+@testable import MatroskaRemux
+
+@Suite("Audio reader fetch size")
+struct AudioReaderChunkTests {
+    @Test func highBitrateFilesAreReadInSmallPieces() {
+        // A 42 Mbit/s Blu-ray remux skips its picture blocks instead of fetching them.
+        #expect(MatroskaAudioReader.chunkSize(bytesPerSecond: 5_200_000) == 48 << 10)
+        #expect(MatroskaAudioReader.chunkSize(bytesPerSecond: 400_000) == 1 << 20)
+        #expect(MatroskaAudioReader.chunkSize(bytesPerSecond: nil) == 1 << 20)
+    }
+}

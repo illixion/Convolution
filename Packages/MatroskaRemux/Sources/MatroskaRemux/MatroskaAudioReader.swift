@@ -78,6 +78,27 @@ public final class MatroskaAudioReader: Sendable {
         }
     }
 
+    /// How much to fetch at a time. A track's frames are interleaved with the
+    /// picture's, and the reader skips the picture's blocks, but only a skip
+    /// past the fetched chunk saves any bytes: with 1 MiB chunks a high-bitrate
+    /// file (a Blu-ray remux's blocks are ~200 KB) was fetched nearly whole for
+    /// a window of its sound, as much again as the picture's own reads, and on
+    /// a Wi-Fi link a 4 s window took 8 s. A file that fast is read in small
+    /// pieces, where a skip does jump; a slow one in large, for fewer requests.
+    static func chunkSize(bytesPerSecond: Double?) -> Int {
+        guard let bytesPerSecond, bytesPerSecond > highBitrateBytesPerSecond else { return 1 << 20 }
+        return 48 << 10
+    }
+
+    /// About 10 Mbit/s: a picture block above this is bigger than a small chunk.
+    static let highBitrateBytesPerSecond = 1_250_000.0
+
+    private func chunkSize(from start: Int64) -> Int {
+        guard let duration = durationSeconds, duration > 1, let end = header.contentEnd,
+              let first = header.firstClusterPosition else { return 1 << 20 }
+        return Self.chunkSize(bytesPerSecond: Double(end - first) / duration)
+    }
+
     /// `frames` samples of `track` from `start` seconds of the file's time.
     /// What the track doesn't cover (before it starts, past its end, a frame
     /// that didn't decode) is silence; a window that decodes nothing throws.
@@ -95,8 +116,10 @@ public final class MatroskaAudioReader: Sendable {
         // The Cue at or before where reading starts (Cues name the video
         // track's clusters, which hold the audio stored with them).
         let cue = header.cues.last { $0.time <= ticks(from) }
-        var reader = ClusterReader(source: source, start: cue?.clusterPosition ?? header.firstClusterPosition ?? header.segmentDataStart,
+        let clusterStart = cue?.clusterPosition ?? header.firstClusterPosition ?? header.segmentDataStart
+        var reader = ClusterReader(source: source, start: clusterStart,
                                    limit: header.contentEnd ?? Int64.max,
+                                   chunkSize: chunkSize(from: clusterStart),
                                    modes: [number: .frames], strippedHeaders: [number: track.strippedHeader])
         var first: Double?
         var spanEnd: Double?
