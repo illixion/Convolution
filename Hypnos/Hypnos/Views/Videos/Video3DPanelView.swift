@@ -25,9 +25,13 @@ struct Video3DPanelView: View {
                 Video3DPanelContent(windowModel: target)
                     .navigationTitle(target.videoDisplayName)
             } else {
-                // Its video window closed.
-                Color.clear.onAppear { dismissWindow() }
+                Color.clear
             }
+        }
+        // Its video window closed and no other is open (one that is takes
+        // it over, `VideoWindowModel.cleanup`): an empty pane would stay.
+        .onChange(of: appModel.video3DPanelTarget == nil, initial: true) { _, gone in
+            if gone { dismissWindow(id: HypnosSceneID.video3DPanel) }
         }
         .onDisappear { appModel.video3DPanelTarget = nil }
     }
@@ -130,6 +134,8 @@ private struct Video3DPanelContent: View {
         }
         .frame(minWidth: 360, idealWidth: 400, minHeight: 520)
         .onAppear { windowModel.refreshFormatPreview() }
+        // Prev/next: the frame shown was the last video's.
+        .onChange(of: windowModel.video.identity) { windowModel.refreshFormatPreview() }
     }
 
     // MARK: - Controls

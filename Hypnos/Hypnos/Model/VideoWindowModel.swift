@@ -445,7 +445,12 @@ final class VideoWindowModel {
         nativePlayer = player
         nativePlayerGeneration += 1
         Self.withNativePlayers.add(self)
-        if player != nil { analyzeFormatIfNeeded() }
+        if player != nil {
+            analyzeFormatIfNeeded()
+            // The 3D panel shows this window: a frame of what plays now (the
+            // next video's analysis may come from the cache, with no frame).
+            if appModel.video3DPanelTarget === self { refreshFormatPreview() }
+        }
         // A restored window can be disconnected before its player exists.
         if sceneDisconnected { Self.silence(player) }
         refreshAudioTracks()
@@ -1265,7 +1270,12 @@ final class VideoWindowModel {
             appModel.videoAdjustmentsTarget = nil
         }
         if appModel.video3DPanelTarget === self {
-            appModel.video3DPanelTarget = nil
+            // The 3D panel moves to another open video window (a VR one
+            // first), and closes only when none is left.
+            let others = appModel.liveVideoWindowModels.filter { $0 !== self }
+            let next = others.first(where: \.isVRVideo) ?? others.first
+            appModel.video3DPanelTarget = next
+            next?.refreshFormatPreview()
         }
     }
 

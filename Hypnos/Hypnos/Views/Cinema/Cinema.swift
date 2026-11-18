@@ -186,6 +186,27 @@ final class Cinema {
     private(set) var vrPose: simd_float4x4?
     /// Each open video window's VR format, so its Cinema menu offers VR.
     private(set) var vrFormats: [ObjectIdentifier: VRFormat] = [:]
+    /// Windows whose VR video is seen in VR (their View Mode is VR): for
+    /// them HUD keeps the sphere, turned with the head, and Big Screen shows
+    /// a square panel looking into it, panned by dragging.
+    private(set) var vrViewers: Set<ObjectIdentifier> = []
+
+    func setViewsVR(_ views: Bool, for window: ObjectIdentifier) {
+        if views { vrViewers.insert(window) } else { vrViewers.remove(window) }
+        if owner == .video(window) { logVRPresentation() }
+    }
+
+    private func logVRPresentation() {
+        guard case .video(let window) = owner else { return }
+        logger.info("Cinema: VR presentation \(self.presentsVR, privacy: .public) (format \(self.screenVRFormat != nil, privacy: .public), viewer \(self.vrViewers.contains(window), privacy: .public), mode \(self.mode.rawValue, privacy: .public))")
+    }
+
+    /// The owner's VR video is shown as VR now: around the viewer, in the
+    /// HUD or on the Big Screen's panel.
+    var presentsVR: Bool {
+        guard case .video(let window) = owner, screenVRFormat != nil else { return false }
+        return mode == .vr || (vrViewers.contains(window) && (mode == .hud || mode == .bigScreen))
+    }
     /// A video window's stereo picture (live 3D or AI 3D), whose plane the
     /// screen borrows from the engine; preferred over `screenPlayer`.
     private(set) var screenStereo: Pseudo3DStereoEngine?
@@ -474,7 +495,11 @@ final class Cinema {
     /// whose Place in Front of Me did nothing to the HUD; Recenter and Window
     /// are on the HUD and on the forearm remote instead (user, 2026-11-14).
     /// Big Screen keeps the window: its controls are there.
-    func windowVanishes(for owner: CinemaOwner) -> Bool { mode(for: owner) == .hud }
+    func windowVanishes(for owner: CinemaOwner) -> Bool {
+        // A VR video's HUD turns the sphere with the head; the window keeps
+        // the controls, as in VR.
+        mode(for: owner) == .hud && !(self.owner == owner && presentsVR)
+    }
 
     /// The owner's picture is on the big screen, so its window shows the card.
     func showsScreen(for owner: CinemaOwner) -> Bool { self.owner == owner && screenAttached }
@@ -510,7 +535,9 @@ final class Cinema {
         if !newMode.showsPicture { screenAttached = false }
         mode = newMode
         if newMode == .bigScreen, let headPose { placeScreen(facing: headPose) }
-        if newMode == .vr { screenVRFormat = vrFormat(for: owner); vrPose = nil; placeVRInFront() }
+        screenVRFormat = vrFormat(for: owner)
+        if newMode == .vr { vrPose = nil; placeVRInFront() }
+        logVRPresentation()
         await sync(open: open, dismiss: dismiss)
     }
 
@@ -522,7 +549,8 @@ final class Cinema {
         if !newMode.showsPicture { screenAttached = false }
         mode = newMode
         if newMode == .bigScreen, let headPose { placeScreen(facing: headPose) }
-        if newMode == .vr { screenVRFormat = vrFormat(for: owner); vrPose = nil; placeVRInFront() }
+        screenVRFormat = vrFormat(for: owner)
+        if newMode == .vr { vrPose = nil; placeVRInFront() }
         await sync(open: nil, dismiss: nil)
     }
 
@@ -1238,6 +1266,12 @@ struct CinemaMenuSections: View {
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
 
+    /// The owner's VR video is seen in VR (its View Mode is VR).
+    private var viewsVR: Bool {
+        guard case .video(let window) = owner else { return false }
+        return cinema.vrViewers.contains(window)
+    }
+
     /// What the menu's icon shows for the cinema: the mode, else "Head" for head-locked sound.
     static func badge(owner: CinemaOwner) -> String? {
         let cinema = Cinema.shared
@@ -1248,8 +1282,9 @@ struct CinemaMenuSections: View {
     }
 
     var body: some View {
-        // VR isn't offered here: a VR video's View Mode is VR (`wantsVR`).
-        ForEach(owner.modes.filter { $0 != .vr }) { mode in
+        // VR is a VR video's View Mode (`wantsVR`); while it is on, this
+        // menu moves it between around you, the HUD and the Big Screen.
+        ForEach(owner.modes.filter { $0 != .vr || viewsVR }) { mode in
             Button {
                 close()
                 Task { await cinema.setMode(mode, for: owner, open: openImmersiveSpace, dismiss: dismissImmersiveSpace) }
@@ -1435,18 +1470,22 @@ struct CinemaVideoWindowHook: ViewModifier {
             }
             // A VR video's 3D is the sphere: View Mode's VR (or opening one,
             // below) asks for it, 2D or another video gives it back.
-            .onChange(of: windowModel.wantsVR) { _, wants in
+            .onChange(of: windowModel.wantsVR, initial: true) { _, wants in
+                cinema.setViewsVR(wants, for: ObjectIdentifier(windowModel))
                 let mode = cinema.mode(for: owner)
-                guard wants != (mode == .vr) else { return }
+                // VR around the viewer, unless the HUD or the Big Screen
+                // already show it as VR; 2D leaves only VR itself (the HUD
+                // and the Big Screen go back to the flat picture).
+                let target: CinemaMode? = wants ? (mode == .window ? .vr : nil) : (mode == .vr ? .window : nil)
+                guard let target else { return }
                 Task {
-                    await cinema.setMode(wants ? .vr : .window, for: owner,
-                                         open: openImmersiveSpace, dismiss: dismissImmersiveSpace)
+                    await cinema.setMode(target, for: owner, open: openImmersiveSpace, dismiss: dismissImmersiveSpace)
                 }
             }
             .onChange(of: cinema.mode(for: owner)) { _, mode in
-                // Left another way (the space closed, Big Screen picked).
-                if mode != .vr, windowModel.wantsVR { windowModel.wantsVR = false }
-                if mode != .vr { windowModel.endFormatCompare() }
+                // Back in the window (the space closed, or Window picked).
+                if mode == .window, windowModel.wantsVR { windowModel.wantsVR = false }
+                if mode == .window { windowModel.endFormatCompare() }
             }
             .onChange(of: windowModel.isVRVideo) { _, isVR in
                 if !isVR, windowModel.wantsVR { windowModel.wantsVR = false }
@@ -1462,6 +1501,7 @@ struct CinemaVideoWindowHook: ViewModifier {
             }
             .onDisappear {
                 cinema.setVRFormat(nil, for: ObjectIdentifier(windowModel))
+                cinema.setViewsVR(false, for: ObjectIdentifier(windowModel))
                 windowModel.holdsBigScreen = false
                 let owner = owner
                 Task { await Cinema.shared.release(owner, dismiss: dismissImmersiveSpace) }

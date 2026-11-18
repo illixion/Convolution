@@ -195,12 +195,23 @@ picture ellipse is fitted from the first frame (`FisheyeEllipseFit`) unless set 
   what the sphere borrows. (Lending the stereo engine's player gave the sphere no frames: purple stripes, device
   2026-11-18; the sphere now starts black and logs why no frame came.)
 - **The 3D panel** (`Views/Videos/Video3DPanelView.swift`, window `video-3d-panel`, from View Mode → 3D Settings…,
-  `AppModel.video3DPanelTarget`) replaced the apply-on-close 3D sheet (whose Field of View and Depth sliders were
+  `AppModel.video3DPanelTarget`; when its window closes it moves to another open video window, a VR one first,
+  and closes itself when none is left; its preview is retaken for each new video) replaced the apply-on-close 3D sheet (whose Field of View and Depth sliders were
   read by nothing). It shows a frame with each eye's part outlined and labelled L/R (and a fisheye's lens circle),
   what was detected and why, and Show As 2D / 3D / VR with packing, half resolution, swap eyes, projection and lens
   field of view. Every change applies at once: live 3D takes a new layout on the next frame
   (`Pseudo3DStereoEngine.setPackedStereo` → `StereoPump.setPackedLayout`, no rebuild; the stereo view's identity no
   longer includes the layout) and the sphere its new format. A choice equal to the detection is stored as automatic.
+- **HUD and Big Screen keep a VR video in VR** (2026-11-18, the user's ask). While the window's View Mode is VR
+  (`Cinema.vrViewers`, from `wantsVR`), `Cinema.presentsVR` holds in `.hud` and `.bigScreen` too: HUD hangs the
+  sphere from the smoothed head (`CinemaHUDFollow`), so the picture stays where the eyes are, like the photo HUD;
+  Big Screen shows a square panel at the screen's place looking into the sphere (`RAVEVRSphere.Presentation.panel`,
+  Vergence's `VRViewport` and `VRSphereMesh.viewport`: each grid point samples the eye picture along a virtual
+  camera's ray), as wide as the screen and seeing as much as it spans (`screenWidthDegrees`). Dragging the panel
+  pans it (`cinema.vrPanDegreesPerMetre` tunable, 150° per metre of hand travel; panning by the panel's own units
+  was far too slow on a 15 m screen), the grab bar moves it and the edges resize it. The window keeps its controls
+  in all three (`windowVanishes` is false for a VR HUD). The Cinema menu lists VR (around you) beside them while
+  the View Mode is VR; Window or 2D leaves VR. Log: `Cinema: VR presentation …` at each change.
 - **Cinema VR mode** (`CinemaMode.vr`, entered through `wantsVR`): the window lends its native `AVPlayer` as for
   Big Screen (never a stereo plane), the sphere sits at the head's position and level heading when VR started
   (`Cinema.vrPose`, Place in Front of Me recentres), the window keeps its controls. Passthrough uses Big Screen's

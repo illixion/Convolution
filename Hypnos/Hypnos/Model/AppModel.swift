@@ -599,6 +599,9 @@ class AppModel {
         activeVideoWindowModels.remove(model)
     }
 
+    /// The video windows open now.
+    var liveVideoWindowModels: [VideoWindowModel] { activeVideoWindowModels.allObjects }
+
     // MARK: - Remote Viewer Window Open Queue
 
     struct RemoteViewerOpenRequest: Identifiable {

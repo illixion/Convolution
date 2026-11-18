@@ -14,6 +14,7 @@
 
 import AVFoundation
 import DebugLog
+import DebugTrace
 import RAVEFilm
 import RAVEMedia
 import RAVESharedSpace
@@ -64,6 +65,10 @@ final class CinemaSpace {
     let vrSphere = RAVEVRSphere()
     /// The format the sphere was last given.
     private var vrSphereFormat: VRFormat?
+    /// Where the Big Screen's VR panel looks; kept between visits.
+    var vrViewport = VRViewport()
+    /// The view when a pan on the panel began.
+    var vrPanStart: VRViewport?
     /// The subtitles over the picture, a view attachment.
     var subtitles = Entity()
     var subtitlesSource: ObjectIdentifier?
@@ -168,6 +173,7 @@ final class CinemaSpace {
     // MARK: Gestures (forwarded by the space's view, or by Nexus's host)
 
     func tapped(_ value: EntityTargetValue<SpatialTapGesture.Value>) {
+        if value.entity === vrSphere.entity { cinema.noteScreenTap(); return }
         if value.entity === playerPicture || value.entity === session.player.video.videoEntity
             || (stereoPictureEngine != nil && value.entity === stereoPictureEngine?.videoEntity) {
             cinema.noteScreenTap()
@@ -175,6 +181,23 @@ final class CinemaSpace {
     }
 
     func dragChanged(_ value: EntityTargetValue<DragGesture.Value>) {
+        if value.entity === vrSphere.entity, case .panel = vrSphere.presentation {
+            // The picture follows the hand: dragging right looks left. By how
+            // far the hand moves (the screen's own units are metres across a
+            // 15 m screen, which turned a swipe into a degree or two).
+            if vrPanStart == nil { vrPanStart = vrViewport }
+            let movement = value.convert(value.translation3D, from: .local, to: screen)
+            let degreesPerMetre = DebugTunables.number("cinema.vrPanDegreesPerMetre", 150, range: 30 ... 400,
+                                                       label: "VR panel pan (° per metre of hand)")
+            if var view = vrPanStart {
+                view.yawDegrees -= Double(movement.x) * degreesPerMetre
+                view.pitchDegrees -= Double(movement.y) * degreesPerMetre
+                if let projection = cinema.screenVRFormat?.projection { view = view.clamped(to: projection) }
+                vrViewport = view
+                vrSphere.setPresentation(.panel(view))
+            }
+            return
+        }
         if value.entity === hudHandle {
             if cinema.mode == .bigScreen {
                 if screenDragStart == nil { screenDragStart = cinema.screenPose?.columns.3.xyz }
@@ -207,16 +230,22 @@ final class CinemaSpace {
 
     func dragEnded(_ value: EntityTargetValue<DragGesture.Value>) {
         if dragStart != nil || resizeStart != nil { cinema.hudPlacementSettled() }
-        dragStart = nil; screenDragStart = nil; resizeStart = nil
+        dragStart = nil; screenDragStart = nil; resizeStart = nil; vrPanStart = nil
     }
 
     // MARK: VR
 
-    /// VR mode: the owner's player on the sphere, centred where the head was
-    /// when VR started (`Cinema.vrPose`). The screen and the HUD's controls
-    /// stay away; the window keeps its controls, as with Big Screen.
+    /// A VR video seen as VR, three ways (`Cinema.presentsVR`):
+    /// - VR: the sphere around the head where VR started (`Cinema.vrPose`).
+    /// - HUD: the same sphere hung from the smoothed head (`CinemaHUDFollow`),
+    ///   so the picture stays where the eyes are, like the photo HUD.
+    /// - Big Screen: a square panel at the screen's place looking into the
+    ///   sphere (`RAVEVRSphere.Presentation.panel`), as wide as the screen and
+    ///   seeing as much of the picture as it spans; a drag on it pans, the
+    ///   grab bar moves it and the edges resize it as for any picture.
+    /// The window keeps its controls in all three.
     private func placeVR() {
-        for entity in [hudHandle, hudControls, hudClose, hudUtilities, hudPrompt, leftEdge, rightEdge] {
+        for entity in [hudControls, hudClose, hudUtilities, hudPrompt] {
             entity.removeFromParent()
         }
         presentationEntity.components.remove(ViewAttachmentComponent.self)
@@ -225,8 +254,6 @@ final class CinemaSpace {
         chromeOpacity = 0
         releasePlayerPicture()
         releaseSubtitles()
-        if vrSphere.entity.parent !== sceneRoot { sceneRoot.addChild(vrSphere.entity) }
-        if let pose = cinema.vrPose { vrSphere.entity.setTransformMatrix(pose, relativeTo: nil) }
         let format = cinema.screenVRFormat
         if format != vrSphereFormat {
             vrSphereFormat = format
@@ -238,11 +265,71 @@ final class CinemaSpace {
             AppLogger.videoWindow.error("Cinema: VR has no player to draw from")
         }
         vrSphere.show(player: cinema.screenPlayer)
-        cinema.noteScreenAttached(cinema.screenPlayer != nil && cinema.vrPose != nil)
+        let sphereEntity = vrSphere.entity
+        switch cinema.mode {
+        case .bigScreen:
+            guard let pose = cinema.screenPose else { cinema.noteScreenAttached(false); return }
+            if screen.parent !== sceneRoot {
+                screen.removeFromParent()
+                sceneRoot.addChild(screen)
+            }
+            screen.setTransformMatrix(pose, relativeTo: nil)
+            vrViewport.fieldOfViewDegrees = Double(cinema.screenWidthDegrees)
+            vrSphere.setPresentation(.panel(vrViewport))
+            if sphereEntity.parent !== screen { screen.addChild(sphereEntity) }
+            let width = cinema.pictureWidth
+            let transform = Transform(scale: SIMD3(width, width, 1))
+            if sphereEntity.transform != transform { sphereEntity.transform = transform }
+            if sphereEntity.components[CollisionComponent.self] == nil {
+                sphereEntity.components.set(CollisionComponent(
+                    shapes: [ShapeResource.generateBox(width: 1, height: 1, depth: 0.001)], isStatic: true))
+                sphereEntity.components.set(InputTargetComponent())
+            }
+            // The grab bar under it and the side edges, sized with the distance.
+            let chrome = cinema.screenDistance / 2
+            if hudHandle.parent !== screen { screen.addChild(hudHandle) }
+            hudHandle.scale = SIMD3(repeating: chrome)
+            hudHandle.position = SIMD3(0, -width / 2 - 0.06 * chrome, 0.02 * chrome)
+            hudHandle.components.set(OpacityComponent(opacity: 1))
+            hudHandle.isEnabled = true
+            for edge in [leftEdge, rightEdge] where edge.parent !== screen { screen.addChild(edge) }
+            leftEdge.position = SIMD3(-width / 2, 0, 0.02 * chrome)
+            rightEdge.position = SIMD3(width / 2, 0, 0.02 * chrome)
+            leftEdge.scale = SIMD3(chrome, max(width / 0.6, 0.2), 1)
+            rightEdge.scale = leftEdge.scale
+            leftEdge.isEnabled = true
+            rightEdge.isEnabled = true
+            cinema.noteScreenAttached(cinema.screenPlayer != nil)
+        case .hud:
+            removeVRChrome()
+            if let player = cinema.screenPlayer { cinema.applyHUDSound(to: player) }
+            vrSphere.setPresentation(.sphere)
+            let follow = CinemaHUDFollow.shared
+            follow.attach(to: sceneRoot, keeping: sphereEntity)
+            let parent = follow.hasPose ? follow.head : headAnchor
+            if sphereEntity.parent !== parent { parent.addChild(sphereEntity) }
+            if sphereEntity.transform != .identity { sphereEntity.transform = .identity }
+            cinema.noteScreenAttached(cinema.screenPlayer != nil)
+        default:
+            removeVRChrome()
+            vrSphere.setPresentation(.sphere)
+            if sphereEntity.parent !== sceneRoot { sceneRoot.addChild(sphereEntity) }
+            if let pose = cinema.vrPose { sphereEntity.setTransformMatrix(pose, relativeTo: nil) }
+            cinema.noteScreenAttached(cinema.screenPlayer != nil && cinema.vrPose != nil)
+        }
+    }
+
+    /// Around the viewer the sphere has no grab bar, edges or hit box.
+    private func removeVRChrome() {
+        for entity in [hudHandle, leftEdge, rightEdge] { entity.removeFromParent() }
+        vrSphere.entity.components.remove(CollisionComponent.self)
+        vrSphere.entity.components.remove(InputTargetComponent.self)
     }
 
     private func releaseVR() {
         guard vrSphere.entity.parent != nil else { return }
+        vrSphere.entity.components.remove(CollisionComponent.self)
+        vrSphere.entity.components.remove(InputTargetComponent.self)
         vrSphere.stop()
         vrSphere.entity.removeFromParent()
         vrSphereFormat = nil
@@ -271,7 +358,7 @@ final class CinemaSpace {
             || cinema.screenStereo !== stereoPictureEngine {
             releaseStereoPicture()
         }
-        if cinema.mode == .vr, case .video = cinema.owner {
+        if cinema.presentsVR {
             placeVR()
             return
         }
