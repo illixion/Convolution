@@ -109,15 +109,30 @@ struct RemoteViewerOrnamentView: View {
                 currentAdjustments: $model.currentAdjustments,
                 globalAdjustments: $appModel.globalVisualAdjustments,
                 showAutoEnhance: false,
+                scale3D: distanceBinding,
                 remoteViewerModel: model
             )
         }
     }
 
+    /// The Distance slider for the RealityKit modes, kept on the model so it
+    /// stays the same from one picture to the next (windowed and immersive
+    /// remembered apart, as in the photo viewer).
+    private var distanceBinding: Binding<Double>? {
+        let mode = model.slideshow3DMode
+        guard mode.usesRealityKit else { return nil }
+        return Binding(
+            get: { mode.isImmersive ? model.currentAdjustments.immersiveScale : model.currentAdjustments.scale },
+            set: {
+                if mode.isImmersive { model.currentAdjustments.immersiveScale = $0 }
+                else { model.currentAdjustments.scale = $0 }
+            })
+    }
+
     private var slideshow3DMenu: some View {
         Menu {
             Group {
-                ForEach(Slideshow3DMode.allCases) { mode in
+                ForEach(Slideshow3DMode.selectable) { mode in
                     Button {
                         applySlideshow3DMode(mode)
                     } label: {

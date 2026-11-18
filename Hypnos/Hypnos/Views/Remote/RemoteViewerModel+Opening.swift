@@ -31,7 +31,7 @@ extension RemoteViewerModel {
         let resolved3D = allows3D
             ? min(config.maxImageResolution3D ?? appModel.slideshowMaxImageResolution3D, resolutionCap)
             : resolved2D
-        let mode3D: Slideshow3DMode = allows3D ? config.slideshow3DMode : .off
+        let mode3D: Slideshow3DMode = allows3D ? config.slideshow3DMode.resolvedForBuild : .off
         model.maxImageResolution = resolved2D
         model.maxImageResolution3D = resolved3D
         model.slideshow3DMode = mode3D

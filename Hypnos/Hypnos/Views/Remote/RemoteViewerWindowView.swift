@@ -192,10 +192,10 @@ struct RemoteViewerWindowView: View {
             // point (both slots at ~0.5 opacity). No-op unless
             // slideshow 3D is active.
             guard isTransitioning == true,
-                  viewerModel?.isSlideshowRealityKitActive == true else { return }
+                  viewerModel?.isSlideshowNudgeActive == true else { return }
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(500))
-                guard viewerModel?.isSlideshowRealityKitActive == true else { return }
+                guard viewerModel?.isSlideshowNudgeActive == true else { return }
                 nudgeWindowSizeForCalibration()
             }
         }
@@ -204,7 +204,7 @@ struct RemoteViewerWindowView: View {
         }
         .onChange(of: scenePhase) { oldPhase, newPhase in
             viewerModel?.handleScenePhaseChange(from: oldPhase, to: newPhase)
-            if newPhase == .active && oldPhase != .active, viewerModel?.isSlideshowRealityKitActive == true {
+            if newPhase == .active && oldPhase != .active, viewerModel?.isSlideshowNudgeActive == true {
                 nudgeWindowSizeForCalibration()
             }
             // Restart Ken Burns animation on return to foreground — the SwiftUI
@@ -251,7 +251,7 @@ struct RemoteViewerWindowView: View {
             // viewer's tap behaviour. The per-crossfade nudge already
             // covers steady-state, but a stray tap is the user's
             // expected escape hatch when calibration has drifted.
-            if viewerModel?.isSlideshowRealityKitActive == true {
+            if viewerModel?.isSlideshowNudgeActive == true {
                 nudgeWindowSizeForCalibration()
             }
         }

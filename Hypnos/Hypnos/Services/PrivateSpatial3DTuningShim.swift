@@ -15,9 +15,9 @@ extension ImagePresentationComponent {
     /// Apply the sideload-only private spatial-3D settings if this build has
     /// them. No-op in an App Store build. Call right before `components.set(_:)`.
     @MainActor
-    mutating func applyPrivateSpatial3DTuningIfAvailable() {
+    mutating func applyPrivateSpatial3DTuningIfAvailable(rawSplat: Bool = false) {
         #if HYPNOS_PRIVATE_API && os(visionOS)
-        PrivateSpatial3DTuningStore.shared.apply(to: &self, rawSplat: false)
+        PrivateSpatial3DTuningStore.shared.apply(to: &self, rawSplat: rawSplat)
         #endif
         // iOS, tvOS, macOS: `ImagePresentationComponent` is the null object from
         // PlatformShims.swift there, so this compiles with nothing to tune.

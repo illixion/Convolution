@@ -21,6 +21,11 @@ enum Slideshow3DMode: String, Codable, CaseIterable, Identifiable {
     /// Pictures as a depth-displaced mesh from the real-time depth model
     /// (`RAVEAIDepthPhotoView`). Videos convert in real time in every 3D mode.
     case aiDepth
+    /// RealityKit 3D drawn as the raw splat scene (two-pass rendering off),
+    /// as the photo viewer's Raw Splat 3D. Sideload builds only
+    /// (`isRawSplatAvailable`).
+    case rawSplat3D
+    case rawSplat3DImmersive
 
     var id: String { rawValue }
     /// Menu names. The raw values predate them and stay: they're persisted.
@@ -30,6 +35,8 @@ enum Slideshow3DMode: String, Codable, CaseIterable, Identifiable {
         case .spatial3D: return "RealityKit 3D"
         case .immersive3D: return "RealityKit 3D (Immersive)"
         case .aiDepth: return "AI 3D"
+        case .rawSplat3D: return "Raw Splat 3D"
+        case .rawSplat3DImmersive: return "Raw Splat 3D (Immersive)"
         }
     }
     /// The short form, for the ornament button's tooltip.
@@ -39,17 +46,33 @@ enum Slideshow3DMode: String, Codable, CaseIterable, Identifiable {
         case .spatial3D: return "RK 3D"
         case .immersive3D: return "RK 3D (Immersive)"
         case .aiDepth: return "AI 3D"
+        case .rawSplat3D: return "Raw Splat"
+        case .rawSplat3DImmersive: return "Raw Splat (Immersive)"
         }
     }
     /// Pictures go through RealityKit's `ImagePresentationComponent`.
-    var usesRealityKit: Bool { self == .spatial3D || self == .immersive3D }
+    var usesRealityKit: Bool { self != .off && self != .aiDepth }
+    var isRawSplat: Bool { self == .rawSplat3D || self == .rawSplat3DImmersive }
+    var isImmersive: Bool { self == .immersive3D || self == .rawSplat3DImmersive }
+    /// Whether this build can show Raw Splat (a build without the sideload
+    /// flag never offers it, and reads a saved one as the stock mode).
+    @MainActor static var isRawSplatAvailable: Bool { DefaultImageViewingMode.isRawSplatAvailable }
+    /// The modes the ornament offers.
+    @MainActor static var selectable: [Slideshow3DMode] {
+        allCases.filter { !$0.isRawSplat || isRawSplatAvailable }
+    }
+    /// This mode as this build can show it.
+    @MainActor var resolvedForBuild: Slideshow3DMode {
+        guard isRawSplat, !Self.isRawSplatAvailable else { return self }
+        return self == .rawSplat3D ? .spatial3D : .immersive3D
+    }
     /// What the shared slideshow engine is told: AI 3D textures a mesh from
     /// the 2D-sized picture, so it takes the 2D resolution cap.
     var raveMode: RAVESlideshow3DMode {
         switch self {
         case .off, .aiDepth: return .off
-        case .spatial3D: return .spatial3D
-        case .immersive3D: return .immersive3D
+        case .spatial3D, .rawSplat3D: return .spatial3D
+        case .immersive3D, .rawSplat3DImmersive: return .immersive3D
         }
     }
     var systemImage: String {
@@ -57,8 +80,8 @@ enum Slideshow3DMode: String, Codable, CaseIterable, Identifiable {
         // the slideshow ornament is visually consistent.
         switch self {
         case .off: return "view.3d"
-        case .spatial3D: return "spatial.capture.fill"
-        case .immersive3D: return "inset.filled.pano"
+        case .spatial3D, .rawSplat3D: return "spatial.capture.fill"
+        case .immersive3D, .rawSplat3DImmersive: return "inset.filled.pano"
         case .aiDepth: return "wand.and.sparkles"
         }
     }

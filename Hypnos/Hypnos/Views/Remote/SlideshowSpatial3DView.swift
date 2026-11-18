@@ -65,7 +65,10 @@ struct SlideshowSpatial3DLayer: View {
     @State private var lastCommittedImage: ObjectIdentifier?
 
     var body: some View {
-        let immersive = model.slideshow3DMode == .immersive3D
+        let immersive = model.slideshow3DMode.isImmersive
+        let rawSplat = model.slideshow3DMode.isRawSplat
+        // "Distance", the same for every picture (it lives on the model).
+        let userScale = immersive ? model.currentAdjustments.immersiveScale : model.currentAdjustments.scale
         let res = model.maxImageResolution3D
         let transitioning = model.isTransitioning
         // RealityKit on visionOS doesn't honor SwiftUI compositing
@@ -82,6 +85,8 @@ struct SlideshowSpatial3DLayer: View {
             SlideshowSpatial3DSlotView(
                 image: slotA,
                 immersive: immersive,
+                rawSplat: rawSplat,
+                userScale: userScale,
                 maxResolution: res,
                 brightness: brightness,
                 contrast: contrast,
@@ -95,6 +100,8 @@ struct SlideshowSpatial3DLayer: View {
             SlideshowSpatial3DSlotView(
                 image: slotB,
                 immersive: immersive,
+                rawSplat: rawSplat,
+                userScale: userScale,
                 maxResolution: res,
                 brightness: brightness,
                 contrast: contrast,
@@ -249,6 +256,10 @@ struct SlideshowSpatial3DLayer: View {
 struct SlideshowSpatial3DSlotView: View {
     let image: UIImage?
     let immersive: Bool
+    /// Raw Splat 3D: two-pass rendering off, as the photo viewer's.
+    var rawSplat = false
+    /// The Distance setting: scales the picture, and a raw splat's depth.
+    var userScale: Double = 1
     let maxResolution: Int
     /// Visual adjustments to bake into the Spatial3DImage source via
     /// CIFilter. Photo-viewer-style runtime regeneration (see
@@ -301,8 +312,13 @@ struct SlideshowSpatial3DSlotView: View {
             // generated for this slot stays valid across the toggle.
             guard var ipc = entity.components[ImagePresentationComponent.self] else { return }
             ipc.desiredViewingMode = newValue ? .spatial3DImmersive : .spatial3D
-            ipc.applyPrivateSpatial3DTuningIfAvailable()
+            ipc.applyPrivateSpatial3DTuningIfAvailable(rawSplat: rawSplat)
             entity.components.set(ipc)
+        }
+        .onDisappear {
+            #if HYPNOS_PRIVATE_API && os(visionOS)
+            PrivateSpatial3DTuningStore.shared.setRawSplat(false, owner: entity)
+            #endif
         }
     }
 
@@ -328,7 +344,8 @@ struct SlideshowSpatial3DSlotView: View {
 
     private func scaleEntityToFit(content: RealityViewContent, geometry: GeometryProxy3D) {
         guard !immersive else {
-            entity.scale = SIMD3<Float>(1, 1, 1)
+            let s = Float(userScale)
+            entity.scale = SIMD3<Float>(s, s, s)
             return
         }
         guard let ipc = entity.components[ImagePresentationComponent.self] else { return }
@@ -339,7 +356,9 @@ struct SlideshowSpatial3DSlotView: View {
             bounds.extents.x / presentationScreenSize.x,
             bounds.extents.y / presentationScreenSize.y
         )
-        entity.scale = SIMD3<Float>(scale, scale, 1.0)
+        let user = Float(userScale)
+        // A raw splat is a volume: its depth follows Distance too.
+        entity.scale = SIMD3<Float>(scale * user, scale * user, rawSplat ? user : 1.0)
     }
 
     /// Cache key intentionally excludes the immersive flag — that's a
@@ -350,9 +369,10 @@ struct SlideshowSpatial3DSlotView: View {
     private var cacheKey: String {
         guard let image else { return "nil" }
         return String(
-            format: "%d:%d:%.3f:%.3f:%.3f",
+            format: "%d:%d:%d:%.3f:%.3f:%.3f",
             ObjectIdentifier(image).hashValue,
             maxResolution,
+            rawSplat ? 1 : 0,
             brightness, contrast, saturation
         )
     }
@@ -371,6 +391,14 @@ struct SlideshowSpatial3DSlotView: View {
         }
         let key = cacheKey
         if loadedKey == key { return }
+        // The renderer's edge settings must be in place before the component
+        // is built, and a stock component can't become a raw one (see
+        // `toggleRawSplat`), which is why the key holds the flag: a mode
+        // change rebuilds the slot, and every later picture is built the
+        // same way, so the slideshow keeps converting.
+        #if HYPNOS_PRIVATE_API && os(visionOS)
+        PrivateSpatial3DTuningStore.shared.setRawSplat(rawSplat, owner: entity)
+        #endif
 
         // A different image is replacing this slot's content. Drop the old
         // IPC up front so the slot renders empty (then the generation
@@ -409,7 +437,7 @@ struct SlideshowSpatial3DSlotView: View {
             let spatial = try await Self.makeSpatial3DImage(from: sourceData)
             var ipc = ImagePresentationComponent(spatial3DImage: spatial)
             ipc.desiredViewingMode = immersive ? .spatial3DImmersive : .spatial3D
-            ipc.applyPrivateSpatial3DTuningIfAvailable()
+            ipc.applyPrivateSpatial3DTuningIfAvailable(rawSplat: rawSplat)
             entity.components.set(ipc)
             loadedKey = key
             loadedImageId = imageId

@@ -237,6 +237,9 @@ class SlideshowEngine {
 
     /// Pictures render through RealityKit's `ImagePresentationComponent`.
     var isSlideshowRealityKitActive: Bool { slideshow3DMode.usesRealityKit }
+    /// RealityKit's two-pass rendering is what the window-size calibration
+    /// nudge exists for; the raw splat has none and the nudge glitches it.
+    var isSlideshowNudgeActive: Bool { slideshow3DMode.usesRealityKit && !slideshow3DMode.isRawSplat }
 
     /// Pictures get an AI 3D depth mesh over the 2D image.
     var isSlideshowAIDepthActive: Bool { slideshow3DMode == .aiDepth }

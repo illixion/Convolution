@@ -1517,7 +1517,11 @@ struct PhotoDisplayView: View {
     /// the picture's own component didn't dim it (user, 2026-11-18), so the
     /// component goes on each part. Removed again at full opacity.
     static func applyOpacity(_ opacity: Float, to entity: Entity) {
+        var touched = 0
+        var withModel = 0
         func apply(_ e: Entity) {
+            touched += 1
+            if e.components[ModelComponent.self] != nil { withModel += 1 }
             if opacity >= 0.999 {
                 if e.components[OpacityComponent.self] != nil { e.components.remove(OpacityComponent.self) }
             } else if e.components[OpacityComponent.self]?.opacity != opacity {
@@ -1526,7 +1530,15 @@ struct PhotoDisplayView: View {
             for child in e.children { apply(child) }
         }
         apply(entity)
+        // What the renderer's mesh looks like from here, for working out why a
+        // splat doesn't dim: how many entities there are under the picture and
+        // how many carry a mesh. Logged once per change of opacity.
+        if opacity != lastLoggedOpacity {
+            lastLoggedOpacity = opacity
+            AppLogger.photoWindow.debug("Picture opacity \(opacity, privacy: .public): \(touched, privacy: .public) entities, \(withModel, privacy: .public) with a mesh")
+        }
     }
+    nonisolated(unsafe) private static var lastLoggedOpacity: Float = 1
 
     /// How far behind the HUD's attachment the RealityKit picture sits, in
     /// metres. A tunable until the right depth is seen on the headset.
