@@ -33,7 +33,15 @@
 		     hostnames and private address ranges — without the blanket
 		     NSAllowsArbitraryLoads exception, which App Review questions and
 		     which would also have relaxed ATS for the public internet. Servers
-		     reached over a public hostname still need HTTPS. -->
+		     reached over a public hostname still need HTTPS.
+
+		     Deliberately global: NSAllowsArbitraryLoads allows cleartext to
+		     any host, including raw Tailscale addresses (100.64.0.0/10), which
+		     ATS domain exceptions cannot express. Chosen by the user for the
+		     Vision Pro deployment; this relaxes ATS for the public internet too,
+		     which App Review may question for a store build. -->
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
