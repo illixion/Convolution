@@ -1280,6 +1280,7 @@ class PhotoWindowModel {
             return
         }
 
+        AppLogger.windowState.info("[Photo] display texture \(texture.width, privacy: .public)x\(texture.height, privacy: .public) fmt=\(texture.pixelFormat.rawValue, privacy: .public) target=\(Int(targetDimension), privacy: .public) res=\(effectiveRes, privacy: .public)")
         displayTexture = texture
         imageAspectRatio = CGFloat(texture.width) / CGFloat(texture.height)
         currentDisplayMaxDimension = targetDimension

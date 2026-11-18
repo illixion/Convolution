@@ -34,8 +34,11 @@ struct Gen3DVolumeView: View {
     let value: Gen3DWindowValue
 
     @State private var generator = Gen3DGenerator()
-    @State private var size = RAVEModelSize.life
-    @State private var fit: RAVEVolumeFit?
+    @State private var size = Gen3DSize.life
+    @State private var fit: Gen3DFit?
+    @State private var engine = Gen3DConfig.engine
+    @State private var engines: [String] = []
+    @State private var loadedURL: URL?
     @State private var model: Entity?
     @State private var loadFailure: String?
     @State private var yaw: Float = 0
@@ -66,27 +69,46 @@ struct Gen3DVolumeView: View {
                 HStack(spacing: 14) {
                     RAVEModelTurnControls(yaw: $yaw)
                     Divider().frame(height: 28)
-                    RAVEModelSizePicker(size: $size, fit: fit)
+                    Gen3DSizePicker(size: $size, fit: fit)
+                    if engines.count > 1 {
+                        Divider().frame(height: 28)
+                        Picker("Engine", selection: $engine) {
+                            ForEach(engines, id: \.self) { Text($0).tag($0) }
+                        }
+                        .pickerStyle(.menu)
+                        .fixedSize()
+                    }
+                    if generator.isWorking {
+                        ProgressView().controlSize(.small)
+                    }
                 }
                 .padding(12)
                 .glassBackgroundEffect()
             }
         }
-        .task { await generator.run(for: value.image) }
+        .task(id: engine) { await generator.run(for: value.image, engine: engine) }
+        .task { engines = (try? await Gen3DClient().engines()) ?? [] }
         .task(id: generator.phase) {
-            guard case .ready(let url) = generator.phase, model == nil else { return }
+            guard case .ready(let url) = generator.phase, url != loadedURL else { return }
             do {
                 let entity = try await Entity(contentsOf: url)
                 RAVEModelTurn.makeTurnable(entity)
+                // Swap, not stack: the previous engine's model leaves the scene.
+                model?.removeFromParent()
                 model = entity
+                loadedURL = url
+                loadFailure = nil
+            } catch is CancellationError {
+                // The phase changed under it; the next run of this task loads it.
             } catch {
+                guard !Task.isCancelled else { return }
                 loadFailure = error.localizedDescription
             }
         }
     }
 
     @ViewBuilder private var statusOverlay: some View {
-        if let loadFailure {
+        if model == nil, let loadFailure {
             ContentUnavailableView("RealityKit Couldn't Open It", systemImage: "exclamationmark.triangle",
                                    description: Text(loadFailure))
         } else if model == nil {
@@ -135,8 +157,94 @@ struct Gen3DVolumeView: View {
     /// Turns the model, then sizes it and stands it on the volume's floor.
     private func place(_ entity: Entity, in content: RealityViewContent, proxy: GeometryProxy3D) {
         let volume = content.convert(proxy.frame(in: .local), from: .local, to: .scene)
-        let result = RAVEVolumeFit.apply(to: entity, in: volume, size: size, anchor: .footprintCenter, yaw: yaw)
+        let result = Gen3DFit.apply(to: entity, in: volume, size: size, yaw: yaw)
         if result != fit { Task { fit = result } }
+    }
+}
+
+/// How big to draw the model. Multiples of its real size, up to what the volume
+/// holds: make the window bigger to unlock the larger ones.
+enum Gen3DSize: String, CaseIterable, Identifiable {
+    case half, life, double, triple, quadruple, fit
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .half: return "50%"
+        case .life: return "Life size"
+        case .double: return "2×"
+        case .triple: return "3×"
+        case .quadruple: return "4×"
+        case .fit: return "Fill window"
+        }
+    }
+
+    /// `nil` fills the volume.
+    var scale: Float? {
+        switch self {
+        case .half: return 0.5
+        case .life: return 1
+        case .double: return 2
+        case .triple: return 3
+        case .quadruple: return 4
+        case .fit: return nil
+        }
+    }
+}
+
+struct Gen3DFit: Equatable {
+    var scale: Float
+    var clamped: Bool
+    var drawnHeight: Float
+
+    /// Fits each axis to its own side of the volume. (RAVEVolumeFit compares the
+    /// model's larger footprint side with the volume's smaller one, which leaves
+    /// a wide model in a wide, shallow volume small, with empty space around it.)
+    @MainActor
+    static func apply(to entity: Entity, in volume: BoundingBox, size: Gen3DSize, yaw: Float) -> Gen3DFit {
+        entity.orientation = simd_quatf(angle: yaw, axis: [0, 1, 0])
+        entity.scale = .one
+        entity.position = .zero
+        var space = volume
+        if let parent = entity.parent {
+            let a = parent.convert(position: volume.min, from: nil)
+            let b = parent.convert(position: volume.max, from: nil)
+            space = BoundingBox(min: min(a, b), max: max(a, b))
+        }
+        let model = entity.visualBounds(relativeTo: entity.parent)
+        let e = model.extents, v = space.extents
+        let fitting = min(v.y / max(e.y, 0.01), v.x / max(e.x, 0.01), v.z / max(e.z, 0.01))
+        let wanted = size.scale ?? fitting
+        let scale = min(wanted, fitting)
+        let center = (model.min + model.max) / 2
+        entity.scale = SIMD3(repeating: scale)
+        entity.position = SIMD3(
+            (space.min.x + space.max.x) / 2 - center.x * scale,
+            space.min.y - model.min.y * scale,
+            (space.min.z + space.max.z) / 2 - center.z * scale)
+        return Gen3DFit(scale: scale, clamped: wanted > fitting * 1.01, drawnHeight: e.y * scale)
+    }
+}
+
+struct Gen3DSizePicker: View {
+    @Binding var size: Gen3DSize
+    var fit: Gen3DFit?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Picker("Size", selection: $size) {
+                ForEach(Gen3DSize.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.menu)
+            .fixedSize()
+            if let fit {
+                Text(fit.drawnHeight >= 1 ? String(format: "%.2f m", fit.drawnHeight) : String(format: "%.0f cm", fit.drawnHeight * 100))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(fit.clamped ? Color.orange : Color.secondary)
+                    .help(fit.clamped ? "The window is too small for this size: make it bigger." : "How tall the model is being drawn.")
+            }
+        }
     }
 }
 

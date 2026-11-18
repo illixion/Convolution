@@ -34,14 +34,22 @@ final class Gen3DGenerator {
 
     private(set) var phase: Phase = .idle
 
+    /// A job is in flight (not idle, finished or failed).
+    var isWorking: Bool {
+        switch phase {
+        case .idle, .ready, .failed: return false
+        default: return true
+        }
+    }
+
     private static let pendingKey = "gen3dPendingJobs"
     private let log = AppLogger.gen3d
 
     /// Runs to completion (or failure); cancel the calling task to stop polling.
     /// A job already on the server is not cancelled with it — it finishes there
     /// and is picked up on the next open.
-    func run(for image: GalleryImage) async {
-        let engine = Gen3DConfig.engine
+    func run(for image: GalleryImage, engine requested: String? = nil) async {
+        let engine = requested ?? Gen3DConfig.engine
         let options = Gen3DConfig.optionsJSON
         let key = Gen3DAssetCache.key(source: image.fullSizeURL, engine: engine, optionsJSON: options)
         if let cached = Gen3DAssetCache.shared.cached(forKey: key) {

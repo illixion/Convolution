@@ -178,6 +178,9 @@ struct MetalImageView {
                 mtkView.colorPixelFormat = requiredFormat
             }
             Self.configureDynamicRange(mtkView, for: texture)
+            AppLogger.windowState.info(
+                "[Metal] texture swap \(texture.map { "\($0.width)x\($0.height) fmt=\($0.pixelFormat.rawValue)" } ?? "nil", privacy: .public) view fmt=\(mtkView.colorPixelFormat.rawValue, privacy: .public) bounds=\(Int(mtkView.bounds.width), privacy: .public)x\(Int(mtkView.bounds.height), privacy: .public) paused=\(mtkView.isPaused, privacy: .public)"
+            )
             coordinator.texture = texture
             needsRedraw = true
         }
@@ -509,6 +512,14 @@ struct MetalImageView {
             pass2Encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
             pass2Encoder.endEncoding()
 
+            let tag = "\(diagnosticID) \(texture.width)x\(texture.height)"
+            commandBuffer.addCompletedHandler { buffer in
+                if buffer.status == .error || buffer.error != nil {
+                    AppLogger.windowState.error(
+                        "[Metal \(tag, privacy: .public)] command buffer failed status=\(buffer.status.rawValue, privacy: .public) error=\((buffer.error as NSError?)?.code ?? 0, privacy: .public) \(buffer.error?.localizedDescription ?? "", privacy: .public)"
+                    )
+                }
+            }
             commandBuffer.present(drawable)
             commandBuffer.commit()
             markFramePresented()

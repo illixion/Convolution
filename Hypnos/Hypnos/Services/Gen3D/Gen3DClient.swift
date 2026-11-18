@@ -118,6 +118,13 @@ struct Gen3DClient: Sendable {
         return try JSONDecoder().decode(Gen3DJobStatus.self, from: data).id
     }
 
+    /// The engines the server offers, sorted.
+    func engines() async throws -> [String] {
+        let (data, response) = try await URLSession.shared.data(for: request("engines"))
+        try check(response, data)
+        return ((try? JSONSerialization.jsonObject(with: data) as? [String: Any])?.keys.sorted()) ?? []
+    }
+
     func status(of id: String) async throws -> Gen3DJobStatus {
         let (data, response) = try await URLSession.shared.data(for: request("jobs/\(id)"))
         try check(response, data)
