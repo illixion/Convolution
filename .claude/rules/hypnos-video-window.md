@@ -153,3 +153,30 @@ Two parts, both every platform the video window runs on:
 - **Watchdog** (`Model/StuckPlayerWatch.swift`, `VideoWindowModel.checkForStuckPlayer`, from the 1 s buffering poll): a native player (flat or AI 3D, through `audioPlayer`) waiting on a server's progressive file (`accessLog` playbackType `FILE`) with no new bytes for 3 s is rebuilt at the playhead (`carryPositionToNextRenderer` + `playbackAttempt`), at most 3 times a minute. HLS isn't watched (a server making a segment moves no bytes for a while either). Seen on the headset: stuck at 0.00 s on a third loop, rebuilt, playing again. **A renderer's release only counts if its player is still current** (`releaseNativePlayer`, `releaseStereoAudioPlayer`, `SubtitleController.releaseAnalysisPlayer`): a rebuilt renderer registers its new player before the old one is torn down, and the old teardown used to clear it, so after one rescue the watchdog, the audio menu and AI captions saw no player (a second loop stall sat 15 min). **The flat player loops a file through `AVPlayerLooper`** (an `AVQueuePlayer` playing copies of the item back to back, as many as a sub-second clip needs): no seek back from the end, so nothing for visionOS to stick on, and no gap. HLS (the remux, a transcode) still seeks back, since the equalizer's stream path follows one item. The looper makes its copies once the asset has loaded (`loopingPlayerItems` is empty at first: attaching outputs then left the picture transparent), so `prepareLoopCopies` dresses each as it appears (frame output in the current pixel format, spatial audio, the equalizer, a failure watch) and `followCurrentLoopCopy` moves `playerItem`/`videoOutput` to the copy that plays. The presenter is kept across passes: its source is Vergence's `LoopCopyFrameSource`, which swaps the copy underneath and bumps `sequence`, which the interpolator and presenter take as a seek (rebuilding the presenter per pass restarted the interpolator, 50 ms of every 0.6 s pass undoubled, and restated the display criteria). One in-between frame is skipped at each seam, as at a cut. Seen on the headset: the Stash clip seamless with Smooth Motion on and off (user), a 0.6 s 1080p clip looping with the interpolator kept. AI 3D (RAVEMedia's engine) still loops by seeking and leans on the watchdog.
 
 Debug: `videoStreamProbe` (player state, access/error logs, top-level boxes, a timed download in Mbit/s) and `videoStreamIndex` (the `moov`'s tables in summary, samples around the playhead); both report no titles, URLs, credentials or pixels. **Not done:** tvOS's own player (`TVVideoPlayerView.resolve`) doesn't re-index; a loop still isn't seamless (the end-of-file stop and seek, a separate issue); the watchdog's cost on a really slow server isn't measured.
+
+## VR videos (180°, 360°, fisheye) and the Cinema's VR mode (2026-11-18)
+
+Our own renderer, not Apple's projected-media profile (the user's decision, 2026-11-18). Vergence's
+`VRProjection`/`VRFormat` describe one eye (equirectangular 180/360, equidistant fisheye as an ellipse in the
+eye, so OU circles and FSBS tall ovals are one model) plus the packing; `VRSphereMesh` puts each eye's picture
+coordinate on the sphere's vertices, so a fisheye needs no remap pass. RAVEMedia's `RAVEVRSphere` draws it: one
+hand-written Shader Graph material (written as USDA at runtime, like `StereoStillMaterial`) samples the packed
+frame per eye through a Camera Index Switch; video frames come from an `AVPlayerItemVideoOutput` (BGRA) on a
+display link, blitted into a `LowLevelTexture` (sRGB 8-bit: HDR is tone mapped by the decoder). A fisheye's
+picture ellipse is fitted from the first frame (`FisheyeEllipseFit`) unless set by hand.
+
+- **Detection** (`VRFormatDetector`): Stash tags, the file name (DeoVR/HereSphere: `_180_LR`, `_360_TB`,
+  `_FISHEYE190`, `MKX200`/`MKX220`/`VRCA220`/`RF52`, `3dh`/`3dv`), and the frame's shape for the packing when
+  nothing names it. `GalleryVideo.vrFormat`; the window refines the packing from `pictureSize`
+  (`VideoWindowModel.vrFormat`). Not read yet: Matroska `StereoMode`/`Projection`, MP4 `st3d`/`sv3d`.
+- **Override**: the 3D settings sheet's VR section, kept per video in `VRFormatOverrides` (a JSON file written
+  off the main actor, never `HypnosDefaults`); "Not VR" switches a mis-tagged video off.
+- **Cinema VR mode** (`CinemaMode.vr`, offered only when the window's video is VR): the window lends its
+  `AVPlayer` as for Big Screen (never a stereo plane), the sphere sits at the head's position and level heading
+  when VR started (`Cinema.vrPose`, Place in Front of Me recentres), the window keeps its controls and shows the
+  card. Passthrough uses Big Screen's filter. No subtitles on the sphere and no tap-to-toggle yet.
+- Simulator: the visionOS simulator draws the left (mono) eye only; the test clips give the right eye a hue shift
+  so a swap would show. `-UITestDefault debugVideoCinemaMode=vr` (DEBUG) puts the first video window in VR.
+- Photos: `PhotoWindowModel+StereoVR` (packed stereo in the window via `RAVEPackedStereoPhotoView`, auto when the
+  name says SBS/OU; VR photos in the `VRPhotoSpace` immersive space); `-UITestDefault debugPhotoVR=1`.
+
