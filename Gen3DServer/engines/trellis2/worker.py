@@ -34,7 +34,26 @@ def load():
     t = time.time()
     pipeline = Trellis2ImageTo3DPipeline.from_pretrained(MODEL_DIR)
     pipeline.cuda()
+    _release_cache_before_cumesh()
     return pipeline, time.time() - t
+
+
+def _release_cache_before_cumesh():
+    """CuMesh allocates with cudaMalloc, outside torch's caching allocator, so the
+    blocks torch holds after decoding the latents (most of a 24 GB card on a
+    detailed model) are invisible to it and its first allocation in fill_holes
+    fails with `out of memory`. Hand them back just before."""
+    import gc
+    import torch
+    from trellis2.representations.mesh.base import Mesh
+    original = Mesh.fill_holes
+
+    def fill_holes(self, *args, **kwargs):
+        gc.collect()
+        torch.cuda.empty_cache()
+        return original(self, *args, **kwargs)
+
+    Mesh.fill_holes = fill_holes
 
 
 def render_preview(mesh, path):
