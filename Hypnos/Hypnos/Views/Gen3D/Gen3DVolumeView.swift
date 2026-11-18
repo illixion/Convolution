@@ -73,7 +73,11 @@ struct Gen3DVolumeView: View {
                 applyLighting(to: current)
                 applyHoverEffect(to: current)
             }
-            .raveModelTurnGesture(yaw: $yaw)
+            .raveModelTurnGesture(yaw: Binding(
+                get: { yaw },
+                // Decor: a stray touch must not turn the model.
+                set: { if !decor { yaw = $0 } }
+            ))
             .gesture(TapGesture(count: 2).targetedToAnyEntity().onEnded { _ in decor.toggle() })
         }
         .overlay { statusOverlay }
