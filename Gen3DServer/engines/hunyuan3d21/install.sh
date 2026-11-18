@@ -40,6 +40,7 @@ has torch || pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
 grep -v -E '^(--extra-index-url|#|$)|^(gradio|deepspeed|cupy|open3d|tb_nightly|pythreejs|bpy)' \
   "$SRC/requirements.txt" > "$ROOT/build/hunyuan3d21-requirements.txt"
 pip install -r "$ROOT/build/hunyuan3d21-requirements.txt"
+pip install 'kornia<0.8'  # BiRefNet's remote code imports it
 pip install 'fastapi' 'uvicorn[standard]' python-multipart 'setuptools<81'  # pytorch-lightning 1.9 imports pkg_resources
 
 # Upstream converts the painted OBJ to GLB with bpy 4.0, which has no wheel for

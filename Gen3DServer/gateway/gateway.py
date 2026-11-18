@@ -144,6 +144,24 @@ async def free_ollama():
         pass  # Ollama down or absent: nothing to free.
 
 
+async def wait_gpu_free(limit_mb: int = 3000, timeout: float = 45) -> None:
+    """Waits for the GPU's memory to drain after an engine stops: the driver
+    releases it a moment after the process is gone, and an engine that starts
+    loading into the gap runs out of memory (seen switching engines)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            out, _ = await proc.communicate()
+            if int(out.decode().split()[0]) <= limit_mb:
+                return
+        except Exception:
+            return  # No nvidia-smi: nothing to wait on.
+        await asyncio.sleep(1)
+
+
 async def engine_for(name: str) -> Engine:
     global resident
     if resident and resident.name == name and resident.alive:
@@ -151,6 +169,7 @@ async def engine_for(name: str) -> Engine:
     if resident:
         await resident.stop()
         resident = None
+        await wait_gpu_free()
     spec = engines().get(name)
     if not spec:
         raise RuntimeError(f"unknown engine {name}")
@@ -161,6 +180,7 @@ async def engine_for(name: str) -> Engine:
 
 
 async def worker_loop():
+    global resident
     while True:
         job_id = await queue.get()
         job = jobs[job_id]
@@ -170,6 +190,15 @@ async def worker_loop():
             await free_ollama()
             engine = await engine_for(job["engine"])
             result = await engine.run(job)
+            if result["event"] != "done" and "out of memory" in str(result.get("message", "")).lower():
+                # Something else held the GPU (a chat reloading a model, a slow
+                # release): free it, start the engine afresh and try once more.
+                await engine.stop()
+                resident = None
+                await free_ollama()
+                await wait_gpu_free()
+                engine = await engine_for(job["engine"])
+                result = await engine.run(job)
             if result["event"] == "done":
                 result.pop("event"); result.pop("id", None)
                 job.update(status="done", result=result, progress={"stage": "done", "fraction": 1.0})
