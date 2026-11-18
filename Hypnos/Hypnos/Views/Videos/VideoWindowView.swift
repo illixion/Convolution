@@ -615,7 +615,17 @@ struct VideoWindowView: View {
         #endif
         .sheet(isPresented: $windowModel.showVideo3DSettingsSheet) {
             Video3DSettingsSheet(
-                initialSettings: windowModel.video3DSettings,
+                initialSettings: windowModel.video3DSettings
+                    ?? windowModel.vrFormat.flatMap { format in
+                        format.layout.map { layout in
+                            Video3DSettings(format: layout.arrangement == .sideBySide
+                                                ? (layout.isHalfResolution ? .halfSideBySide : .sideBySide)
+                                                : (layout.isHalfResolution ? .halfOverUnder : .overUnder),
+                                            eyesReversed: layout.eyesReversed, horizontalFieldOfView: 90,
+                                            horizontalDisparityAdjustment: 200)
+                        }
+                    },
+                initialVR: windowModel.vrFormat,
                 onApply: { settings in
                     Task {
                         await Video3DSettingsTracker.shared.saveSettings(
@@ -626,6 +636,7 @@ struct VideoWindowView: View {
                     windowModel.video3DSettings = settings
                     windowModel.stereoscopicOverride = true
                 },
+                onApplyVR: { format in windowModel.vrOverride = format },
                 onCancel: nil
             )
         }

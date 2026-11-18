@@ -19,6 +19,30 @@ struct Video3DSettingsSheet: View {
     /// Callback when cancelled
     let onCancel: (() -> Void)?
 
+    /// The video's VR format as detected or set before (nil: not VR).
+    let initialVR: VRFormat?
+    /// The VR format chosen, when it differs from `initialVR`: a flat
+    /// projection means "not VR". Nil callback: no VR section.
+    let onApplyVR: ((VRFormat) -> Void)?
+
+    /// What the VR section offers.
+    enum VRChoice: String, CaseIterable, Identifiable {
+        case none, vr180, vr360, fisheye
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .none: "Not VR"
+            case .vr180: "180°"
+            case .vr360: "360°"
+            case .fisheye: "Fisheye"
+            }
+        }
+    }
+
+    @State private var vrChoice: VRChoice
+    @State private var vrMono: Bool
+    @State private var fisheyeFieldOfView: Double
+
     @State private var selectedFormat: StereoscopicFormat
     @State private var eyesReversed: Bool
     @State private var fieldOfView: Float
@@ -26,12 +50,28 @@ struct Video3DSettingsSheet: View {
 
     init(
         initialSettings: Video3DSettings? = nil,
+        initialVR: VRFormat? = nil,
         onApply: @escaping (Video3DSettings) -> Void,
+        onApplyVR: ((VRFormat) -> Void)? = nil,
         onCancel: (() -> Void)? = nil
     ) {
         self.initialSettings = initialSettings
+        self.initialVR = initialVR
         self.onApply = onApply
+        self.onApplyVR = onApplyVR
         self.onCancel = onCancel
+        switch initialVR?.projection {
+        case .equirectangular(let degrees)?:
+            _vrChoice = State(initialValue: degrees > 270 ? .vr360 : .vr180)
+            _fisheyeFieldOfView = State(initialValue: 190)
+        case .fisheye(let fieldOfView, _)?:
+            _vrChoice = State(initialValue: .fisheye)
+            _fisheyeFieldOfView = State(initialValue: fieldOfView)
+        default:
+            _vrChoice = State(initialValue: .none)
+            _fisheyeFieldOfView = State(initialValue: 190)
+        }
+        _vrMono = State(initialValue: initialVR != nil && initialVR?.layout == nil)
 
         // Initialize state from initial settings or defaults
         let settings = initialSettings ?? Video3DSettings.defaults(for: .sideBySide)
@@ -46,6 +86,7 @@ struct Video3DSettingsSheet: View {
             Form {
                 formatSection
                 eyesSection
+                if onApplyVR != nil { vrSection }
                 advancedSection
             }
             .navigationTitle("3D Video Settings")
@@ -68,6 +109,10 @@ struct Video3DSettingsSheet: View {
                             horizontalDisparityAdjustment: disparityAdjustment
                         )
                         onApply(settings)
+                        if let onApplyVR {
+                            let chosen = chosenVR(layout: settings.packedLayout)
+                            if chosen != initialVR ?? VRFormat(layout: nil, projection: .flat) { onApplyVR(chosen) }
+                        }
                         dismiss()
                     }
                     .fontWeight(.semibold)
@@ -101,6 +146,47 @@ struct Video3DSettingsSheet: View {
             Text(formatDescription)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var vrSection: some View {
+        Section {
+            Picker("Projection", selection: $vrChoice) {
+                ForEach(VRChoice.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            if vrChoice != .none {
+                Toggle("One Picture (Mono)", isOn: $vrMono)
+            }
+            if vrChoice == .fisheye {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Lens Field of View")
+                        Spacer()
+                        Text("\(Int(fisheyeFieldOfView))°").foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    #if !os(tvOS)
+                    Slider(value: $fisheyeFieldOfView, in: 160 ... 240, step: 5)
+                    #endif
+                }
+            }
+        } header: {
+            Text("VR")
+        } footer: {
+            Text(vrChoice == .none
+                 ? "A VR video plays around you in the Cinema's VR mode."
+                 : "Plays around you in the Cinema's VR mode, packed as chosen under Format unless Mono. A fisheye's picture circle is found on its own; MKX200 is 200°, MKX220 and VRCA220 220°, RF52 190°.")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func chosenVR(layout: PackedStereoLayout) -> VRFormat {
+        let projection: VRProjection = switch vrChoice {
+        case .none: .flat
+        case .vr180: .vr180
+        case .vr360: .vr360
+        case .fisheye: .fisheye(fisheyeFieldOfView)
+        }
+        return VRFormat(layout: vrChoice == .none || vrMono ? nil : layout, projection: projection)
     }
 
     private var formatDescription: String {
