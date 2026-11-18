@@ -1242,7 +1242,8 @@ struct CinemaMenuSections: View {
     static func badge(owner: CinemaOwner) -> String? {
         let cinema = Cinema.shared
         let mode = cinema.mode(for: owner)
-        if mode != .window { return mode.title }
+        // VR is the View Mode's badge already.
+        if mode != .window, mode != .vr { return mode.title }
         return cinema.headLocked ? "Head" : nil
     }
 

@@ -99,8 +99,10 @@ extension VideoWindowModel {
     /// metadata said it): worth offering the alternatives.
     var formatIsGuessed: Bool {
         guard isVRVideo, vrOverride == nil, let analysis = formatAnalysis else { return false }
-        return analysis.projectionSource != .name && analysis.projectionSource != .container
-            && video.vrFormat == nil
+        // A name or tag that only says "180" or "VR" leaves the lens open too.
+        if analysis.projectionSource == .name || analysis.projectionSource == .container { return false }
+        // A tag or name that says fisheye (MKX200, FISHEYE190) names the lens.
+        return !(video.vrFormat?.projection.isFisheye ?? false)
     }
 
     /// The likely readings of this VR video, in a fixed order so a button
@@ -165,6 +167,10 @@ enum VROpening {
     static var automatically: Bool {
         HypnosDefaults.store.object(forKey: key) as? Bool ?? true
     }
+}
+
+extension VRProjection {
+    var isFisheye: Bool { if case .fisheye = self { true } else { false } }
 }
 
 extension VideoFormatAnalysis {

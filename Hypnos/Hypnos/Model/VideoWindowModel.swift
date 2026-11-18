@@ -186,14 +186,22 @@ final class VideoWindowModel {
         // is 180° by default; the picture can't measure the lens, so a
         // fisheye it found gets that rather than a camera lens's 190°.
         if analysis.projectionSource != .name, analysis.projectionSource != .container,
+           !(video.vrFormat?.projection.isFisheye ?? false),
            case .fisheye(_, let ellipse) = format.projection {
             format.projection = .fisheye(fieldOfView: Self.renderedFisheyeFieldOfView, ellipse: ellipse)
         }
-        // Stash tags are chosen by people: their projection stands over one
-        // the picture only guessed at.
+        // Tags and names are chosen by people: their projection stands over
+        // one the picture only guessed from its shape. Not over lens circles
+        // the picture saw (a generic "180" tag on a fisheye render), nor a
+        // named fisheye's lens angle over the picture's ellipse.
         if let tagged = video.vrFormat, tagged.projection.isImmersive,
-           analysis.projectionSource == .picture || analysis.projectionSource == .shape || analysis.projectionSource == .none {
-            if case .fisheye = tagged.projection, case .fisheye = format.projection {} else {
+           analysis.projectionSource != .container {
+            switch (tagged.projection, format.projection) {
+            case (.fisheye(let fieldOfView, _), .fisheye(_, let ellipse)):
+                format.projection = .fisheye(fieldOfView: fieldOfView, ellipse: ellipse)
+            case (_, .fisheye) where analysis.projectionSource == .picture:
+                break
+            default:
                 format.projection = tagged.projection
             }
             if format.layout == nil { format.layout = named.layout }

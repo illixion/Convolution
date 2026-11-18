@@ -18,6 +18,7 @@ import CoreMedia
 import DebugTrace
 import Foundation
 import Synchronization
+import VergenceApple
 
 @MainActor
 enum VideoPlayerDebugEndpoints {
@@ -92,6 +93,24 @@ enum VideoPlayerDebugEndpoints {
         var scenes: [DolbyVisionSceneLog.Entry]
     }
 
+    struct FormatReply: Encodable {
+        struct Analysis: Encodable {
+            var summary: String
+            var confidence: Double
+            var projection: String
+            var layout: String
+            var eyes: String
+            var reasons: [String]
+        }
+        var inForce: String
+        var saved: String?
+        var detected: String
+        var named: String?
+        var analysis: Analysis?
+        var wantsVR: Bool
+        var compare: [String]?
+    }
+
     struct CompareReply: Encodable {
         var status: String
         var driftSeconds: Double?
@@ -125,6 +144,21 @@ enum VideoPlayerDebugEndpoints {
                         serverVideo: info.transcode.map(PlaybackInfoDetailsView.videoText),
                         serverAudio: info.transcode.map(PlaybackInfoDetailsView.audioText),
                         serverReasons: info.transcode?.reasons, source: info.source)
+                }
+            },
+            .query("videoFormat", "Each video window's 2D/3D/VR format: what is in force, the viewer's saved "
+                   + "choice, what was detected, what the tags/name said, the picture analysis (confidence, "
+                   + "sources, reasons), whether VR is on and the compare bar's readings. No pixels.") { _ in
+                VideoWindowModel.withNativePlayers.allObjects.map { model in
+                    FormatReply(inForce: model.videoFormat.summary, saved: model.vrOverride?.summary,
+                                detected: model.detectedFormat.summary, named: model.video.vrFormat?.summary,
+                                analysis: model.formatAnalysis.map {
+                                    FormatReply.Analysis(summary: $0.summary, confidence: $0.confidence,
+                                                         projection: $0.projectionSource.rawValue,
+                                                         layout: $0.layoutSource.rawValue,
+                                                         eyes: $0.eyeOrderSource.rawValue, reasons: $0.reasons)
+                                },
+                                wantsVR: model.wantsVR, compare: model.formatCompare?.map(\.title))
                 }
             },
             .query("videoDolbyVision", "The Dolby Vision 8.x scene the flat Metal player is showing and the last "
