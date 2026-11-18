@@ -866,14 +866,33 @@ final class VideoWindowModel {
         LibraryPlaybackCoordinator.jellyfinItemId(fromVideoIdentity: video.identity)
     }
 
+    /// The viewer's choice from the Repeat button, for as long as the window
+    /// is open; nil keeps `loopsByDefault`.
+    var loopChoice: Bool?
+
+    /// Whether the video starts over at its end: the viewer's Repeat choice,
+    /// else `loopsByDefault`.
+    var loopsAtEnd: Bool { loopChoice ?? loopsByDefault }
+
     /// A clip loops; a Library title plays once. The window was built for
     /// gallery clips and looped everything, so an episode restarted at its
     /// end and the progress reporter told Jellyfin it was back at 0:10.
-    var loopsAtEnd: Bool {
+    var loopsByDefault: Bool {
         #if HYPNOS_YOUTUBE
         if youTubeID != nil { return false }
         #endif
         return libraryItemId == nil
+    }
+
+    /// The Repeat button: flips whether the video starts over at its end.
+    func toggleLoop() {
+        loopChoice = !loopsAtEnd
+        if loopsAtEnd {
+            // Ended and parked before Repeat went on: an autoplay waiting to
+            // start is called off, and the end can be seen again later.
+            endHandled = false
+            nextEpisodeTask?.cancel()
+        }
     }
 
     /// The current title has reached its end and been handled.

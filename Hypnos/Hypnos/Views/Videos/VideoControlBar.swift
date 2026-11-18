@@ -111,12 +111,24 @@ struct VideoControlBar<Accessories: View>: View {
     }
 }
 
-/// The A-B loop: set A, set B (engages), clear. One of the window's
+/// Repeat (start over at the end) and the A-B loop: set A, set B
+/// (engages), clear. One of the window's
 /// accessories, so the More popover can group it with playback.
 struct LoopControls: View {
     @Bindable var windowModel: VideoWindowModel
 
     var body: some View {
+        Button {
+            windowModel.toggleLoop()
+            windowModel.startAutoHideTimer()
+        } label: {
+            Label(windowModel.loopsAtEnd ? "Repeat: On" : "Repeat: Off",
+                  systemImage: windowModel.loopsAtEnd ? "repeat.circle.fill" : "repeat")
+                .ravePlayerAccessoryLabel()
+                .foregroundStyle(windowModel.loopsAtEnd ? Color.accentColor : .primary)
+        }
+        .help(windowModel.loopsAtEnd ? "Starts over at the end. Tap to play once." : "Plays once. Tap to start over at the end.")
+        .accessibilityIdentifier("video.repeat")
         Button {
             windowModel.startAutoHideTimer()
             Task { await windowModel.loopController.handleButtonTap() }
