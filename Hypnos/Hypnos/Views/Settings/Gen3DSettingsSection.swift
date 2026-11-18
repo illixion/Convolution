@@ -14,6 +14,8 @@ struct Gen3DSettingsSection: View {
     @AppStorage(Gen3DConfig.urlKey, store: HypnosDefaults.store) private var address = ""
     @AppStorage(Gen3DConfig.engineKey, store: HypnosDefaults.store) private var engine = ""
     @State private var token = KeychainStore.string(for: .gen3dToken) ?? ""
+    @AppStorage(Gen3DConfig.decorKey, store: HypnosDefaults.store) private var decor = false
+    @State private var engines: [String] = []
     @State private var message: String?
     @State private var checking = false
 
@@ -32,12 +34,13 @@ struct Gen3DSettingsSection: View {
                 .onChange(of: token) { _, value in
                     KeychainStore.set(value.trimmingCharacters(in: .whitespacesAndNewlines), for: .gen3dToken)
                 }
-            TextField("Engine (default \(Gen3DConfig.defaultEngine))", text: $engine)
-                .textFieldTapTarget()
-                .autocorrectionDisabled()
-                #if !os(macOS)
-                .textInputAutocapitalization(.never)
-                #endif
+            Picker("Engine", selection: $engine) {
+                Text("Default (\(Gen3DConfig.defaultEngine))").tag("")
+                ForEach(engines, id: \.self) { Text($0).tag($0) }
+                // A stored engine the server no longer lists stays selectable.
+                if !engine.isEmpty, !engines.contains(engine) { Text(engine).tag(engine) }
+            }
+            Toggle("Hide Controls in the Volume", isOn: $decor)
             Button(checking ? "Checking…" : "Check Connection") { check() }
                 .disabled(checking || address.isEmpty)
             Button("Clear Generated Models", role: .destructive) { Gen3DAssetCache.shared.clear() }
@@ -49,6 +52,18 @@ struct Gen3DSettingsSection: View {
         } footer: {
             Text("A private server that turns a picture into a model you can walk around (the photo viewer's 3D menu, on a headset). Experimental and not part of any submission build.")
         }
+        .task(id: address) { await loadEngines() }
+    }
+
+    private func loadEngines() async {
+        guard let client = try? Gen3DClient() else { return }
+        var request = URLRequest(url: client.base.appendingPathComponent("v1/engines"))
+        request.setValue("Bearer " + client.token, forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 10
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let keys = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?.keys else { return }
+        engines = keys.sorted()
     }
 
     private func check() {
@@ -65,6 +80,7 @@ struct Gen3DSettingsSection: View {
                 guard let http = response as? HTTPURLResponse else { message = "No response."; return }
                 if http.statusCode == 200 {
                     let names = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?.keys.sorted() ?? []
+                    engines = names
                     message = "Connected. Engines: \(names.joined(separator: ", "))."
                 } else {
                     message = Gen3DError.http(http.statusCode, "").localizedDescription

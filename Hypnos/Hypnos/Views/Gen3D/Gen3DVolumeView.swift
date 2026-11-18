@@ -39,6 +39,9 @@ struct Gen3DVolumeView: View {
     @State private var model: Entity?
     @State private var loadFailure: String?
     @State private var yaw: Float = 0
+    /// Decor mode: no control panel, baseplate or system overlays. Double-tap the
+    /// model to bring them back (or switch them on again in Settings).
+    @AppStorage(Gen3DConfig.decorKey, store: HypnosDefaults.store) private var decor = false
 
     var body: some View {
         // Read here, not only in `update`, so a model that `make` loaded causes
@@ -53,10 +56,13 @@ struct Gen3DVolumeView: View {
                 place(current, in: content, proxy: proxy)
             }
             .raveModelTurnGesture(yaw: $yaw)
+            .gesture(TapGesture(count: 2).targetedToAnyEntity().onEnded { _ in decor.toggle() })
         }
         .overlay { statusOverlay }
+        .volumeBaseplateVisibility(decor ? .hidden : .automatic)
+        .persistentSystemOverlays(decor ? .hidden : .automatic)
         .ornament(attachmentAnchor: .scene(.bottomFront), contentAlignment: .top) {
-            if model != nil {
+            if model != nil, !decor {
                 HStack(spacing: 14) {
                     RAVEModelTurnControls(yaw: $yaw)
                     Divider().frame(height: 28)
