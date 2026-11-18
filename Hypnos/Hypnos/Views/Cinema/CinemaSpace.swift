@@ -46,6 +46,14 @@ final class CinemaSpace {
     var chromeLastUpdate = CACurrentMediaTime()
     var leftEdge = Entity()
     var rightEdge = Entity()
+    /// The Big Screen's bottom corners: grips that resize it, like a window's.
+    var leftCorner = Entity()
+    var rightCorner = Entity()
+    /// The Big Screen's picture shape, for a corner's diagonal drag.
+    var screenAspect: Float = 16 / 9
+    /// The corner grips fade with the window's controls.
+    var cornerOpacity: Float = 0
+    var cornerLastUpdate = CACurrentMediaTime()
     var dragStart: SIMD3<Float>?
     /// The Big Screen's centre when its grab bar's drag began.
     var screenDragStart: SIMD3<Float>?
@@ -95,6 +103,25 @@ final class CinemaSpace {
             edge.components.set(CollisionComponent(shapes: [.generateBox(width: 0.08, height: 0.6, depth: 0.05)]))
             edge.components.set(InputTargetComponent())
             edge.components.set(HoverEffectComponent())
+        }
+        // An L at each bottom corner, its bend on the corner, its arms along
+        // the bottom and up the side; sized for 2 m and scaled with the distance.
+        for (corner, side) in [(leftCorner, Float(-1)), (rightCorner, Float(1))] {
+            corner.name = side < 0 ? "cinema-corner-left" : "cinema-corner-right"
+            let material = UnlitMaterial(color: .white)
+            let along = ModelEntity(mesh: .generateBox(width: 0.07, height: 0.012, depth: 0.006, cornerRadius: 0.006),
+                                    materials: [material])
+            along.position = SIMD3(-side * 0.029, 0, 0)
+            let up = ModelEntity(mesh: .generateBox(width: 0.012, height: 0.07, depth: 0.006, cornerRadius: 0.006),
+                                 materials: [material])
+            up.position = SIMD3(0, 0.029, 0)
+            corner.addChild(along)
+            corner.addChild(up)
+            corner.components.set(OpacityComponent(opacity: 0.85))
+            corner.components.set(CollisionComponent(shapes: [ShapeResource.generateBox(width: 0.13, height: 0.13, depth: 0.05)
+                .offsetBy(translation: SIMD3(-side * 0.025, 0.025, 0))]))
+            corner.components.set(InputTargetComponent())
+            corner.components.set(HoverEffectComponent())
         }
         hudControls.components.set(ViewAttachmentComponent(rootView: CinemaHUDControls(presentation: presentation)))
         hudPrompt.components.set(ViewAttachmentComponent(rootView: CinemaHUDPrompt().environment(appModel)))
@@ -211,6 +238,21 @@ final class CinemaSpace {
                 let candidate = dragStart + movement
                 cinema.moveHUD(to: candidate)
             }
+        } else if value.entity === leftCorner || value.entity === rightCorner {
+            // Out or down grows it, in or up shrinks it. The corner sits half
+            // the width (or height) from the centre, so the size changes by
+            // twice the hand's movement, along whichever way it moved more.
+            if resizeStart == nil { resizeStart = cinema.pictureWidth }
+            let movement = value.convert(value.translation3D, from: .local, to: screen)
+            let sign: Float = value.entity === rightCorner ? 1 : -1
+            let gain = DebugTunables.number("cinema.cornerResizeGain", Float(1), range: 0.25 ... 4, step: 0.05,
+                                            label: "Big Screen corner resize speed")
+            let across = 2 * sign * movement.x
+            let down = -2 * movement.y * screenAspect
+            if let resizeStart {
+                let width = resizeStart + gain * (abs(across) >= abs(down) ? across : down)
+                cinema.resizeScreen(toWidth: max(0.1, width))
+            }
         } else if value.entity === leftEdge || value.entity === rightEdge {
             // From the width drawn, which a close picture holds below the one asked for.
             if resizeStart == nil { resizeStart = cinema.pictureWidth }
@@ -299,6 +341,7 @@ final class CinemaSpace {
             rightEdge.scale = leftEdge.scale
             leftEdge.isEnabled = true
             rightEdge.isEnabled = true
+            placeCorners(width: width, height: width, chrome: chrome)
             cinema.noteScreenAttached(cinema.screenPlayer != nil)
         case .hud:
             removeVRChrome()
@@ -319,9 +362,33 @@ final class CinemaSpace {
         }
     }
 
+    /// The Big Screen's corner grips at its bottom corners, as easy to hit
+    /// from any distance (`chrome` is the distance over 2 m). They show and
+    /// hide with the window's controls (the user's ask), but stay hittable
+    /// while they fade and while one is held.
+    private func placeCorners(width: Float, height: Float, chrome: Float) {
+        screenAspect = max(width / max(height, 0.01), 0.1)
+        // Shown with the window's controls (a tap on the screen brings them
+        // back), fading as they do; held while one is being dragged.
+        let owner = cinema.owner
+        let visible = resizeStart != nil
+            || (owner == .film ? cinema.hudFilmChromeVisible : !(cinema.hudVideoModel?.isUIHidden ?? false))
+        let now = CACurrentMediaTime()
+        let step = Float(min(max(now - cornerLastUpdate, 0), 0.1)) / 0.22
+        cornerLastUpdate = now
+        cornerOpacity = visible ? min(1, cornerOpacity + step) : max(0, cornerOpacity - step)
+        for (corner, side) in [(leftCorner, Float(-1)), (rightCorner, Float(1))] {
+            if corner.parent !== screen { screen.addChild(corner) }
+            corner.scale = SIMD3(repeating: chrome)
+            corner.position = SIMD3(side * (width / 2 + 0.012 * chrome), -height / 2 - 0.012 * chrome, 0.02 * chrome)
+            corner.components.set(OpacityComponent(opacity: 0.85 * cornerOpacity))
+            corner.isEnabled = cornerOpacity > 0
+        }
+    }
+
     /// Around the viewer the sphere has no grab bar, edges or hit box.
     private func removeVRChrome() {
-        for entity in [hudHandle, leftEdge, rightEdge] { entity.removeFromParent() }
+        for entity in [hudHandle, leftEdge, rightEdge, leftCorner, rightCorner] { entity.removeFromParent() }
         vrSphere.entity.components.remove(CollisionComponent.self)
         vrSphere.entity.components.remove(InputTargetComponent.self)
     }
@@ -375,6 +442,8 @@ final class CinemaSpace {
             chromeOpacity = 0
             leftEdge.removeFromParent()
             rightEdge.removeFromParent()
+            leftCorner.removeFromParent()
+            rightCorner.removeFromParent()
             releaseSubtitles()
             cinema.noteScreenAttached(false)
             return
@@ -541,6 +610,12 @@ final class CinemaSpace {
         }
         leftEdge.isEnabled = controlsVisible
         rightEdge.isEnabled = controlsVisible
+        if cinema.mode == .bigScreen {
+            placeCorners(width: cinema.pictureWidth, height: height, chrome: edgeChrome)
+        } else {
+            leftCorner.removeFromParent()
+            rightCorner.removeFromParent()
+        }
         let transform = Transform(scale: SIMD3(repeating: height))
         if picture.transform != transform { picture.transform = transform }
         if picture.components[OpacityComponent.self]?.opacity != 1 {
