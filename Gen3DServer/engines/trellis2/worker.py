@@ -41,19 +41,37 @@ def load():
 def _release_cache_before_cumesh():
     """CuMesh allocates with cudaMalloc, outside torch's caching allocator, so the
     blocks torch holds after decoding the latents (most of a 24 GB card on a
-    detailed model) are invisible to it and its first allocation in fill_holes
-    fails with `out of memory`. Hand them back just before."""
+    detailed model) are invisible to it and its first allocation fails with
+    `out of memory`. Hand them back before each CuMesh step (hole filling,
+    BVH, remeshing, simplification), and retry once if one still fails."""
+    import functools
     import gc
     import torch
+    import cumesh
     from trellis2.representations.mesh.base import Mesh
-    original = Mesh.fill_holes
 
-    def fill_holes(self, *args, **kwargs):
+    def release():
         gc.collect()
         torch.cuda.empty_cache()
-        return original(self, *args, **kwargs)
 
-    Mesh.fill_holes = fill_holes
+    def guarded(original):
+        @functools.wraps(original)
+        def call(*args, **kwargs):
+            release()
+            try:
+                return original(*args, **kwargs)
+            except RuntimeError as e:
+                if "out of memory" not in str(e):
+                    raise
+                release()
+                return original(*args, **kwargs)
+        return call
+
+    Mesh.fill_holes = guarded(Mesh.fill_holes)
+    cumesh.CuMesh.simplify = guarded(cumesh.CuMesh.simplify)
+    cumesh.CuMesh.init = guarded(cumesh.CuMesh.init)
+    cumesh.remeshing.remesh_narrow_band_dc = guarded(cumesh.remeshing.remesh_narrow_band_dc)
+    cumesh.cuBVH.__init__ = guarded(cumesh.cuBVH.__init__)
 
 
 def render_preview(mesh, path):
