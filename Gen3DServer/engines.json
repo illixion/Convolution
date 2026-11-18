@@ -1,0 +1,18 @@
+{
+  "trellis2": {
+    "title": "TRELLIS.2 4B",
+    "licence": "MIT (code and weights); nvdiffrast/nvdiffrec NVIDIA non-commercial",
+    "inputs": {"image": true, "mask": true, "views": false},
+    "outputs": ["model.glb", "preview.mp4"],
+    "options": {
+      "pipeline_type": ["512", "1024", "1024_cascade", "1536_cascade"],
+      "seed": "int",
+      "decimation_target": "int, default 500000",
+      "texture_size": "int, default 2048",
+      "preview": "bool, renders a turntable mp4"
+    },
+    "command": ["/opt/gen3d/envs/trellis2/bin/python", "/opt/gen3d/src/engines/trellis2/worker.py"],
+    "cwd": "/opt/gen3d/engines/trellis2",
+    "env": {"HF_HOME": "/opt/gen3d/hf", "CUDA_HOME": "/opt/gen3d/envs/trellis2"}
+  }
+}
