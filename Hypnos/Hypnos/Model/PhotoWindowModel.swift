@@ -1157,6 +1157,9 @@ class PhotoWindowModel {
     /// Load a downsampled display image sized appropriately for the given window size.
     /// Uses CGImageSource for memory-efficient downsampling without loading
     /// the full image into memory. No temp files are written to disk.
+    /// What a picture falls back to when its full-size texture can't be rendered.
+    static let fallbackTextureDimension: CGFloat = 4096
+
     func loadDisplayImage(for windowSize: CGSize) async {
         guard !showsDebugPattern else { return }
         guard !isAnimatedImage else { return }
@@ -1254,18 +1257,27 @@ class PhotoWindowModel {
         let useLossy = appModel.useLossyTextureCompression
         let fullDecode = effectiveRes == 0
         let aiHDRData = aiHDRKey != nil ? currentImageData : nil
-        let sendable = await Task.detached { [sourceURL, targetDimension, useLossy, fullDecode, aiHDRKey, aiHDRData] () -> SendableTexture? in
-            if let aiHDRKey, let aiHDRData,
-               let decoded = MetalImageRenderer.downsampledImage(from: aiHDRData, maxDimension: targetDimension)?.cgImage {
-                // A photo that is HDR already, or that the model can't help,
-                // uploads as it decoded.
-                let generated = Self.aiHDRImage(from: decoded, key: aiHDRKey)
-                guard let tex = MetalImageRenderer.shared?.createTexture(from: generated ?? decoded, useLossyCompression: useLossy) else { return nil }
+        func makeTexture(_ dimension: CGFloat, fullDecode: Bool) async -> SendableTexture? {
+            await Task.detached { [sourceURL, useLossy, aiHDRKey, aiHDRData] () -> SendableTexture? in
+                if let aiHDRKey, let aiHDRData,
+                   let decoded = MetalImageRenderer.downsampledImage(from: aiHDRData, maxDimension: dimension)?.cgImage {
+                    // A photo that is HDR already, or that the model can't help,
+                    // uploads as it decoded.
+                    let generated = Self.aiHDRImage(from: decoded, key: aiHDRKey)
+                    guard let tex = MetalImageRenderer.shared?.createTexture(from: generated ?? decoded, useLossyCompression: useLossy) else { return nil }
+                    return SendableTexture(texture: tex)
+                }
+                guard let tex = MetalImageRenderer.shared?.createTexture(from: sourceURL, maxDimension: dimension, useLossyCompression: useLossy, forceFullDecode: fullDecode) else { return nil }
                 return SendableTexture(texture: tex)
-            }
-            guard let tex = MetalImageRenderer.shared?.createTexture(from: sourceURL, maxDimension: targetDimension, useLossyCompression: useLossy, forceFullDecode: fullDecode) else { return nil }
-            return SendableTexture(texture: tex)
-        }.value
+            }.value
+        }
+        var sendable = await makeTexture(targetDimension, fullDecode: fullDecode)
+        if sendable == nil, targetDimension > Self.fallbackTextureDimension {
+            // The full-size texture couldn't be rendered (Off on a very large
+            // picture): show it at a size the GPU can do rather than nothing.
+            AppLogger.windowState.warning("[Photo] full-size texture failed at \(Int(targetDimension), privacy: .public); retrying at \(Int(Self.fallbackTextureDimension), privacy: .public)")
+            sendable = await makeTexture(Self.fallbackTextureDimension, fullDecode: false)
+        }
 
         guard let texture = sendable?.texture else {
             let error = ImageLoaderError.decodeFailed

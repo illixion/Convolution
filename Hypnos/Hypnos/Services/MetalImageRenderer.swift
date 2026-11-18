@@ -12,6 +12,7 @@
  */
 
 import CoreImage
+import DebugTrace
 import Metal
 import MetalKit
 import ImageIO
@@ -289,13 +290,28 @@ final class MetalImageRenderer: Sendable {
 
             cmdBuf.commit()
             cmdBuf.waitUntilCompleted()
+            guard Self.completed(cmdBuf, width: width, height: height) else { return nil }
             return lossyTexture
         }
 
         cmdBuf.commit()
         cmdBuf.waitUntilCompleted()
+        // A render the GPU refused (a very large deep-colour texture can run out
+        // of memory or time) leaves an empty texture: transparent on screen and
+        // silent. Say so, so the caller can ask for a smaller one.
+        guard Self.completed(cmdBuf, width: width, height: height) else { return nil }
         if let hdr { Self.setHeadroom(hdr.headroom, of: stagingTexture) }
         return stagingTexture
+    }
+
+    private static func completed(_ buffer: MTLCommandBuffer, width: Int, height: Int) -> Bool {
+        guard buffer.status == .completed, buffer.error == nil else {
+            AppLogger.windowState.error(
+                "[Metal] texture render failed \(width, privacy: .public)x\(height, privacy: .public) status=\(buffer.status.rawValue, privacy: .public) \(buffer.error?.localizedDescription ?? "", privacy: .public)"
+            )
+            return false
+        }
+        return true
     }
 
     /// Create a GPU-private texture from a UIImage.
