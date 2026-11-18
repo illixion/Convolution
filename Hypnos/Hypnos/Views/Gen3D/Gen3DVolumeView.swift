@@ -39,6 +39,9 @@ struct Gen3DVolumeView: View {
     @State private var engine = Gen3DConfig.engine
     @State private var engines: [String] = []
     @State private var loadedURL: URL?
+    @State private var lightEntity: Entity?
+    @AppStorage(Gen3DConfig.lightingKey, store: HypnosDefaults.store) private var lightingRaw = Gen3DLighting.natural.rawValue
+    private var lighting: Gen3DLighting { Gen3DLighting(rawValue: lightingRaw) ?? .natural }
     @State private var model: Entity?
     @State private var loadFailure: String?
     @State private var yaw: Float = 0
@@ -53,10 +56,18 @@ struct Gen3DVolumeView: View {
         return GeometryReader3D { proxy in
             RealityView { content in
                 // The model arrives later; `update` adds it once the generator is ready.
+                // One light source, an even sky, that the model is lit by when asked.
+                if let environment = try? await EnvironmentResource(equirectangular: Gen3DLighting.sky) {
+                    let light = Entity()
+                    light.components.set(ImageBasedLightComponent(source: .single(environment), intensityExponent: 0))
+                    content.add(light)
+                    lightEntity = light
+                }
             } update: { content in
                 guard let current else { return }
                 if current.parent == nil { content.add(current) }
                 place(current, in: content, proxy: proxy)
+                applyLighting(to: current)
             }
             .raveModelTurnGesture(yaw: $yaw)
             .gesture(TapGesture(count: 2).targetedToAnyEntity().onEnded { _ in decor.toggle() })
@@ -64,12 +75,18 @@ struct Gen3DVolumeView: View {
         .overlay { statusOverlay }
         .volumeBaseplateVisibility(decor ? .hidden : .automatic)
         .persistentSystemOverlays(decor ? .hidden : .automatic)
-        .ornament(attachmentAnchor: .scene(.bottomFront), contentAlignment: .top) {
+        .ornament(attachmentAnchor: .scene(.topFront), contentAlignment: .bottom) {
             if model != nil, !decor {
                 HStack(spacing: 14) {
                     RAVEModelTurnControls(yaw: $yaw)
                     Divider().frame(height: 28)
                     Gen3DSizePicker(size: $size, fit: fit)
+                    Divider().frame(height: 28)
+                    Picker("Lighting", selection: $lightingRaw) {
+                        ForEach(Gen3DLighting.allCases) { Text($0.label).tag($0.rawValue) }
+                    }
+                    .pickerStyle(.menu)
+                    .fixedSize()
                     if engines.count > 1 {
                         Divider().frame(height: 28)
                         Picker("Engine", selection: $engine) {
@@ -154,12 +171,66 @@ struct Gen3DVolumeView: View {
         }
     }
 
+    /// Lights the model from the even sky, or leaves it to the volume's own light.
+    private func applyLighting(to entity: Entity) {
+        guard let light = lightEntity else { return }
+        if let exponent = lighting.exponent {
+            light.components.set(ImageBasedLightComponent(
+                source: light.components[ImageBasedLightComponent.self]?.source ?? .none,
+                intensityExponent: exponent))
+            if entity.components[ImageBasedLightReceiverComponent.self] == nil {
+                entity.components.set(ImageBasedLightReceiverComponent(imageBasedLight: light))
+            }
+        } else if entity.components[ImageBasedLightReceiverComponent.self] != nil {
+            entity.components.remove(ImageBasedLightReceiverComponent.self)
+        }
+    }
+
     /// Turns the model, then sizes it and stands it on the volume's floor.
     private func place(_ entity: Entity, in content: RealityViewContent, proxy: GeometryProxy3D) {
         let volume = content.convert(proxy.frame(in: .local), from: .local, to: .scene)
         let result = Gen3DFit.apply(to: entity, in: volume, size: size, yaw: yaw)
         if result != fit { Task { fit = result } }
     }
+}
+
+/// How the model is lit. A generated model is often dark under the volume's own
+/// light; the others light it from an even sky, brighter each step.
+enum Gen3DLighting: String, CaseIterable, Identifiable {
+    case natural, bright, brighter, brightest
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .natural: return "Natural light"
+        case .bright: return "Bright"
+        case .brighter: return "Brighter"
+        case .brightest: return "Brightest"
+        }
+    }
+
+    /// `nil` leaves the volume's light alone.
+    var exponent: Float? {
+        switch self {
+        case .natural: return nil
+        case .bright: return 0.8
+        case .brighter: return 1.6
+        case .brightest: return 2.4
+        }
+    }
+
+    /// A soft grey sky, lighter overhead, as an equirectangular picture.
+    static let sky: CGImage = {
+        let size = CGSize(width: 512, height: 256)
+        let space = CGColorSpaceCreateDeviceRGB()
+        let context = CGContext(data: nil, width: Int(size.width), height: Int(size.height), bitsPerComponent: 8,
+                                bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let colors = [CGColor(gray: 0.55, alpha: 1), CGColor(gray: 0.85, alpha: 1), CGColor(gray: 1, alpha: 1)] as CFArray
+        let gradient = CGGradient(colorsSpace: space, colors: colors, locations: [0, 0.5, 1])!
+        context.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 0, y: size.height), options: [])
+        return context.makeImage()!
+    }()
 }
 
 /// How big to draw the model. Multiples of its real size, up to what the volume

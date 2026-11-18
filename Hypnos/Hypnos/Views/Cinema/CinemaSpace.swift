@@ -618,8 +618,12 @@ final class CinemaSpace {
         }
         let transform = Transform(scale: SIMD3(repeating: height))
         if picture.transform != transform { picture.transform = transform }
-        if picture.components[OpacityComponent.self]?.opacity != 1 {
-            picture.components.set(OpacityComponent(opacity: 1))
+        // The window's Opacity adjustment, which the window applies in SwiftUI
+        // and the screen's picture would otherwise ignore.
+        let pictureOpacity: Float = owner == .film ? 1
+            : Float(min(max(cinema.hudVideoModel?.effectiveVideoAdjustments.opacity ?? 1, 0.01), 1))
+        if picture.components[OpacityComponent.self]?.opacity != pictureOpacity {
+            picture.components.set(OpacityComponent(opacity: pictureOpacity))
         }
         if picture.components[CollisionComponent.self] == nil {
             let box = ShapeResource.generateBox(width: aspect, height: 1, depth: 0.001)

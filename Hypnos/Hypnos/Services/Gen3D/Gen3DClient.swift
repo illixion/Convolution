@@ -19,6 +19,7 @@ enum Gen3DConfig {
     static let engineKey = "gen3dEngine"
     static let defaultEngine = "trellis2"
     static let decorKey = "gen3dDecorMode"
+    static let lightingKey = "gen3dLighting"
 
     static var baseURL: URL? {
         let text = (HypnosDefaults.store.string(forKey: urlKey) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
