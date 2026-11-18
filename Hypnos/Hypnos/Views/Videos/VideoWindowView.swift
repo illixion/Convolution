@@ -319,6 +319,7 @@ struct VideoWindowView: View {
                                 upscalesPicture: windowModel.aiUpscaling,
                                 sharedFields: windowModel.monoSharedFields,
                                 aiHDR: windowModel.aiHDR,
+                                pictureLent: cinemaShowsScreen,
                                 onPlaybackError: {
                                     windowModel.forceWebKitPlayback()
                                 }
