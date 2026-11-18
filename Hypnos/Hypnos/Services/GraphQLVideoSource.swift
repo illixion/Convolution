@@ -145,7 +145,10 @@ final class GraphQLVideoSource: VideoSource, @unchecked Sendable {
             oCounter: scene.o_counter,
             fileName: fileName,
             captions: (scene.captions ?? []).map { GalleryCaption(languageCode: $0.language_code, type: $0.caption_type) },
-            captionsURL: scene.paths.caption.flatMap { URL(string: $0) }
+            captionsURL: scene.paths.caption.flatMap { URL(string: $0) },
+            vrFormat: VRFormatDetector.detect(tags: tagNames, fileName: fileName,
+                                              frameWidth: sourceWidth, frameHeight: sourceHeight)
+                .flatMap { $0.projection.isImmersive ? $0 : nil }
         )
     }
 

@@ -60,6 +60,10 @@ final class CinemaSpace {
     var hudPrompt = Entity()
     /// The stereo engine whose plane is on the screen, given back when it isn't.
     var stereoPictureEngine: Pseudo3DStereoEngine?
+    /// A VR video's sphere (Cinema's VR mode), fed by the owner's player.
+    let vrSphere = RAVEVRSphere()
+    /// The format the sphere was last given.
+    private var vrSphereFormat: VRFormat?
     /// The subtitles over the picture, a view attachment.
     var subtitles = Entity()
     var subtitlesSource: ObjectIdentifier?
@@ -206,6 +210,41 @@ final class CinemaSpace {
         dragStart = nil; screenDragStart = nil; resizeStart = nil
     }
 
+    // MARK: VR
+
+    /// VR mode: the owner's player on the sphere, centred where the head was
+    /// when VR started (`Cinema.vrPose`). The screen and the HUD's controls
+    /// stay away; the window keeps its controls, as with Big Screen.
+    private func placeVR() {
+        for entity in [hudHandle, hudControls, hudClose, hudUtilities, hudPrompt, leftEdge, rightEdge] {
+            entity.removeFromParent()
+        }
+        presentationEntity.components.remove(ViewAttachmentComponent.self)
+        presentationEntity.removeFromParent()
+        presentation.dismiss()
+        chromeOpacity = 0
+        releasePlayerPicture()
+        releaseSubtitles()
+        if vrSphere.entity.parent !== sceneRoot { sceneRoot.addChild(vrSphere.entity) }
+        if let pose = cinema.vrPose { vrSphere.entity.setTransformMatrix(pose, relativeTo: nil) }
+        let format = cinema.screenVRFormat
+        if format != vrSphereFormat {
+            vrSphereFormat = format
+            let sphere = vrSphere
+            Task { await sphere.setFormat(format) }
+            AppLogger.videoWindow.info("Cinema: VR \(format?.projection.label ?? "none", privacy: .public), \(format?.layout.map { $0.arrangement.rawValue } ?? "mono", privacy: .public)")
+        }
+        vrSphere.show(player: cinema.screenPlayer)
+        cinema.noteScreenAttached(cinema.screenPlayer != nil && cinema.vrPose != nil)
+    }
+
+    private func releaseVR() {
+        guard vrSphere.entity.parent != nil else { return }
+        vrSphere.stop()
+        vrSphere.entity.removeFromParent()
+        vrSphereFormat = nil
+    }
+
     // MARK: Per-frame placement
 
     private func placeScreen() {
@@ -229,6 +268,11 @@ final class CinemaSpace {
             || cinema.screenStereo !== stereoPictureEngine {
             releaseStereoPicture()
         }
+        if cinema.mode == .vr, case .video = cinema.owner {
+            placeVR()
+            return
+        }
+        releaseVR()
         guard cinema.mode.showsPicture, let owner = cinema.owner else {
             hudHandle.removeFromParent()
             hudControls.removeFromParent()

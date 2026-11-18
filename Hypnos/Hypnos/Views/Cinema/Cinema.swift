@@ -76,8 +76,11 @@ enum CinemaMode: String, CaseIterable, Identifiable {
     /// The picture on a screen in the space.
     case bigScreen
     case hud
+    /// A VR video (180°, 360°, fisheye) around the wearer, on our own
+    /// sphere (`RAVEVRSphere`), centred where the head was when it started.
+    case vr
 
-    var showsPicture: Bool { self == .bigScreen || self == .hud }
+    var showsPicture: Bool { self == .bigScreen || self == .hud || self == .vr }
 
     var id: String { rawValue }
 
@@ -87,6 +90,7 @@ enum CinemaMode: String, CaseIterable, Identifiable {
         case .roomSound: "Room Sound"
         case .bigScreen: "Big Screen"
         case .hud: "HUD"
+        case .vr: "VR"
         }
     }
 }
@@ -134,7 +138,7 @@ enum CinemaOwner: Equatable {
     var modes: [CinemaMode] {
         switch self {
         case .film: CinemaMode.allCases
-        case .video: [.window, .bigScreen, .hud]
+        case .video: [.window, .bigScreen, .hud, .vr]
         }
     }
 }
@@ -175,6 +179,13 @@ final class Cinema {
     private(set) var screenPose: simd_float4x4?
     /// A video window's player, shown on the screen through a `VideoPlayerComponent`.
     private(set) var screenPlayer: AVPlayer?
+    /// What VR the owner's video is (projection and packing), for VR mode.
+    private(set) var screenVRFormat: VRFormat?
+    /// Where the VR sphere is centred and which way its middle faces: the
+    /// head's position and level heading when VR started or was recentred.
+    private(set) var vrPose: simd_float4x4?
+    /// Each open video window's VR format, so its Cinema menu offers VR.
+    private(set) var vrFormats: [ObjectIdentifier: VRFormat] = [:]
     /// A video window's stereo picture (live 3D or AI 3D), whose plane the
     /// screen borrows from the engine; preferred over `screenPlayer`.
     private(set) var screenStereo: Pseudo3DStereoEngine?
@@ -230,7 +241,11 @@ final class Cinema {
     /// The picture in front of the wearer: the HUD recentred, the Big Screen
     /// placed ahead.
     func placeInFront() {
-        if mode == .hud { recenterHUD() } else { placeScreenInFront() }
+        switch mode {
+        case .hud: recenterHUD()
+        case .vr: placeVRInFront()
+        default: placeScreenInFront()
+        }
     }
 
     /// The wearer let go of the HUD after moving or resizing it: it opens there next time.
@@ -351,7 +366,8 @@ final class Cinema {
     /// The filter a mode shows; the window has none (the space, if open, is only for sound).
     func passthroughFilter(for mode: CinemaMode) -> RAVEPassthroughFilter {
         switch mode {
-        case .bigScreen: bigScreenFilter
+        // VR uses the Big Screen's: past a 180° picture's edge is the room.
+        case .bigScreen, .vr: bigScreenFilter
         case .hud: hudFilter
         default: .none
         }
@@ -359,7 +375,7 @@ final class Cinema {
 
     func setPassthroughFilter(_ filter: RAVEPassthroughFilter, for mode: CinemaMode) {
         switch mode {
-        case .bigScreen: bigScreenFilter = filter
+        case .bigScreen, .vr: bigScreenFilter = filter
         case .hud: hudFilter = filter
         default: break
         }
@@ -494,6 +510,7 @@ final class Cinema {
         if !newMode.showsPicture { screenAttached = false }
         mode = newMode
         if newMode == .bigScreen, let headPose { placeScreen(facing: headPose) }
+        if newMode == .vr { screenVRFormat = vrFormat(for: owner); vrPose = nil; placeVRInFront() }
         await sync(open: open, dismiss: dismiss)
     }
 
@@ -505,6 +522,7 @@ final class Cinema {
         if !newMode.showsPicture { screenAttached = false }
         mode = newMode
         if newMode == .bigScreen, let headPose { placeScreen(facing: headPose) }
+        if newMode == .vr { screenVRFormat = vrFormat(for: owner); vrPose = nil; placeVRInFront() }
         await sync(open: nil, dismiss: nil)
     }
 
@@ -597,6 +615,32 @@ final class Cinema {
     func setScreenPlayer(_ player: AVPlayer?, for owner: CinemaOwner) {
         guard self.owner == owner, screenPlayer !== player else { return }
         screenPlayer = player
+    }
+
+    /// A video window says what VR its video is (nil when it isn't), so its
+    /// menu offers VR and the sphere knows how to draw it.
+    func setVRFormat(_ format: VRFormat?, for window: ObjectIdentifier) {
+        if vrFormats[window] != format { vrFormats[window] = format }
+        if owner == .video(window), screenVRFormat != format { screenVRFormat = format }
+    }
+
+    func vrFormat(for owner: CinemaOwner) -> VRFormat? {
+        guard case .video(let window) = owner else { return nil }
+        return vrFormats[window]
+    }
+
+    /// Centres the VR sphere on the head, its middle straight ahead.
+    func placeVRInFront() {
+        guard let headPose else { return }
+        let position = headPose.columns.3.xyz
+        let look = -headPose.columns.2.xyz
+        let forward = Self.horizontal(look) ?? SIMD3(0, 0, -1)
+        // The sphere's middle is its -Z.
+        let back = -forward
+        let right = simd_normalize(simd_cross(SIMD3<Float>(0, 1, 0), back))
+        let up = simd_cross(back, right)
+        vrPose = simd_float4x4(SIMD4(right, 0), SIMD4(up, 0), SIMD4(back, 0), SIMD4(position, 1))
+        logger.info("Cinema: VR sphere centred on the head")
     }
 
     /// A video window lends its stereo engine's picture (nil to go back to
@@ -802,6 +846,7 @@ final class Cinema {
         if headPose == nil { status = "Tracking" }
         headPose = head
         if mode == .bigScreen, screenPose == nil { placeScreen(facing: head) }
+        if mode == .vr, vrPose == nil { placeVRInFront() }
         easeScreen(dt: dt)
         updateParallax(head: head, dt: dt)
 
@@ -1202,7 +1247,7 @@ struct CinemaMenuSections: View {
     }
 
     var body: some View {
-        ForEach(owner.modes) { mode in
+        ForEach(owner.modes.filter { $0 != .vr || cinema.vrFormat(for: owner) != nil }) { mode in
             Button {
                 close()
                 Task { await cinema.setMode(mode, for: owner, open: openImmersiveSpace, dismiss: dismissImmersiveSpace) }
@@ -1355,10 +1400,31 @@ struct CinemaVideoWindowHook: ViewModifier {
             // AI 3D and live 3D lend their plane to the screen.
             .onChange(of: windowModel.showsStereoPicture) { if onBigScreen { lendPlayer() }; routeAudio() }
             .onChange(of: windowModel.stereoEngine.map(ObjectIdentifier.init)) { if onBigScreen { lendPlayer() } }
+            #if DEBUG
+            // `-UITestDefault debugVideoCinemaMode=vr`: the first video window
+            // goes into that mode once its player is up, for simulator runs.
+            .task {
+                guard let raw = HypnosDefaults.store.string(forKey: "debugVideoCinemaMode"),
+                      let mode = CinemaMode(rawValue: raw), cinema.owner == nil else { return }
+                for _ in 0 ..< 100 where windowModel.nativePlayer == nil {
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+                try? await Task.sleep(for: .seconds(1))
+                await cinema.setMode(mode, for: owner, open: openImmersiveSpace, dismiss: dismissImmersiveSpace)
+            }
+            #endif
+            .onChange(of: windowModel.vrFormat, initial: true) { _, format in
+                cinema.setVRFormat(format, for: ObjectIdentifier(windowModel))
+            }
+            .onChange(of: cinema.mode(for: owner)) { _, mode in
+                // Into VR from a stereo picture: the sphere takes the player.
+                if mode == .vr || mode == .bigScreen || mode == .hud { lendPlayer() }
+            }
             .onChange(of: cinema.screenTaps) {
                 if cinema.owner == owner { windowModel.toggleUIVisibility() }
             }
             .onDisappear {
+                cinema.setVRFormat(nil, for: ObjectIdentifier(windowModel))
                 windowModel.holdsBigScreen = false
                 let owner = owner
                 Task { await Cinema.shared.release(owner, dismiss: dismissImmersiveSpace) }
@@ -1385,7 +1451,8 @@ struct CinemaVideoWindowHook: ViewModifier {
 
     private func lendPlayer() {
         guard cinema.owner == owner else { return }
-        let stereo = windowModel.showsStereoPicture ? windowModel.stereoEngine : nil
+        // VR draws the decoded frames itself, so it takes the player, never a stereo plane.
+        let stereo = windowModel.showsStereoPicture && cinema.mode != .vr ? windowModel.stereoEngine : nil
         cinema.setScreenStereo(stereo, for: owner)
         if stereo == nil {
             cinema.setScreenPlayer(windowModel.playbackRenderer == .nativeMetal ? windowModel.nativePlayer : nil, for: owner)

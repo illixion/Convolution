@@ -148,6 +148,27 @@ final class VideoWindowModel {
     /// draws it, for the control strip's readout. Written only on a change
     /// (the strip reads them); cleared with each new video.
     private(set) var pictureSize: CGSize?
+    /// The VR format chosen in the 3D sheet for this video, over what was
+    /// detected (`VRFormatOverrides`); a flat projection there means "not VR".
+    var vrOverride: VRFormat? {
+        didSet {
+            guard vrOverride != oldValue else { return }
+            VRFormatOverrides.shared.set(vrOverride, for: video.identity)
+        }
+    }
+    /// The video's VR format for the Cinema's VR mode: the override, else
+    /// what its tags and name say, the packing settled by the decoded frame's
+    /// shape when neither named it (`Clip_180.mp4` at 2:1 is side by side).
+    /// Nil for an ordinary video.
+    var vrFormat: VRFormat? {
+        if let vrOverride { return vrOverride.projection.isImmersive ? vrOverride : nil }
+        guard var format = video.vrFormat else { return nil }
+        if format.layout == nil, let size = pictureSize {
+            format.layout = VRFormatDetector.packing(for: format.projection,
+                                                     width: Int(size.width), height: Int(size.height))
+        }
+        return format
+    }
     private(set) var pictureFrameRate: Double?
     /// Smooth Motion doubles what is shown (`noteSmoothMotionDoubling`).
     private(set) var smoothMotionDoubling = false
@@ -682,6 +703,7 @@ final class VideoWindowModel {
         self.appModel = appModel
         self.stereoscopicOverride = windowValue.stereoscopicOverride
         self.video3DSettings = windowValue.video3DSettings
+        self.vrOverride = VRFormatOverrides.shared.format(for: windowValue.video.identity)
         self.pseudo3DEnabled = windowValue.pseudo3DEnabled
         self.pseudo3DSettings = windowValue.pseudo3DSettings ?? .default
         self.isMuted = Self.startsMuted(windowValue.video, appModel: appModel)
@@ -1212,6 +1234,7 @@ final class VideoWindowModel {
             )
         }
         video = newVideo
+        vrOverride = VRFormatOverrides.shared.format(for: newVideo.identity)
         subtitles.load(SubtitleSource.forVideo(newVideo))
         loadSharedFields()
         endHandled = false

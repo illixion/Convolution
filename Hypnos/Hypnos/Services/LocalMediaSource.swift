@@ -8,6 +8,7 @@
 import DebugTrace
 import Foundation
 import UniformTypeIdentifiers
+import VergenceApple
 
 /// Represents a local media file
 struct LocalMediaFile: Identifiable {
@@ -351,7 +352,10 @@ final class LocalVideoSource: VideoSource, @unchecked Sendable {
                 stereoscopicFormat: nil,
                 sourceWidth: nil,
                 sourceHeight: nil,
-                eyesReversed: false
+                eyesReversed: false,
+                // The name only: the frame's size isn't read for a listing.
+                vrFormat: VRFormatDetector.detect(fileName: file.name)
+                    .flatMap { $0.projection.isImmersive ? $0 : nil }
             )
         }
 

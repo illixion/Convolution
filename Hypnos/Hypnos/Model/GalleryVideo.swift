@@ -70,6 +70,9 @@ struct GalleryVideo: Identifiable, Equatable, Hashable, Codable {
 
     /// Whether the left/right eyes are swapped in the source video (detected via "stereo_eyes_reversed" tag)
     let eyesReversed: Bool
+    /// A VR video's projection and packing (180°/360°, fisheye), from its
+    /// tags, name and size (`VRFormatDetector`); nil for an ordinary video.
+    let vrFormat: VRFormat?
 
     // Stash metadata
     var rating100: Int?
@@ -103,7 +106,8 @@ struct GalleryVideo: Identifiable, Equatable, Hashable, Codable {
         oCounter: Int? = nil,
         fileName: String? = nil,
         captions: [GalleryCaption] = [],
-        captionsURL: URL? = nil
+        captionsURL: URL? = nil,
+        vrFormat: VRFormat? = nil
     ) {
         self.identity = identity
         self.stashId = stashId
@@ -124,6 +128,7 @@ struct GalleryVideo: Identifiable, Equatable, Hashable, Codable {
         self.fileName = fileName
         self.captions = captions
         self.captionsURL = captionsURL
+        self.vrFormat = vrFormat
     }
 
     // MARK: - Codable
@@ -169,6 +174,7 @@ struct GalleryVideo: Identifiable, Equatable, Hashable, Codable {
         self.fileName = try c.decodeIfPresent(String.self, forKey: .fileName)
         self.captions = try c.decodeIfPresent([GalleryCaption].self, forKey: .captions) ?? []
         self.captionsURL = try c.decodeIfPresent(URL.self, forKey: .captionsURL)
+        self.vrFormat = try? c.decodeIfPresent(VRFormat.self, forKey: .vrFormat)
     }
 
     /// A URL suitable for downloading the full video to disk for AVAssetReader
@@ -268,7 +274,8 @@ extension GalleryVideo {
             oCounter: oCounter,
             fileName: fileName,
             captions: captions,
-            captionsURL: captionsURL
+            captionsURL: captionsURL,
+            vrFormat: vrFormat
         )
     }
 
