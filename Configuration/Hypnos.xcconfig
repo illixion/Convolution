@@ -69,7 +69,16 @@ NC_MODELS_CONDITION =
 // gitignored scripts/build-signing.conf / LocalSigning.xcconfig.
 DTSX_CONDITION =
 
-SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(PRIVATE_API_CONDITION) $(YOUTUBE_CONDITION) $(FFMPEG_CONDITION) $(DOVI_CONDITION) $(NC_MODELS_CONDITION) $(DTSX_CONDITION)
+// Generated 3D, a private research spike: a picture to a wrap-around model
+// through Gen3DServer (Gen3DServer/README.md), on visionOS. Empty here, so no
+// submission build compiles it. Opt in with
+// `~/bin/build-and-sign --set GEN3D_CONDITION=HYPNOS_GEN3D`, or in the
+// gitignored scripts/build-signing.conf / LocalSigning.xcconfig. (It links
+// AnythingUSDZKit in every build, as SwiftPM can't link per flag; the code that
+// calls it is compiled out.)
+GEN3D_CONDITION =
+
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(PRIVATE_API_CONDITION) $(YOUTUBE_CONDITION) $(FFMPEG_CONDITION) $(DOVI_CONDITION) $(NC_MODELS_CONDITION) $(DTSX_CONDITION) $(GEN3D_CONDITION)
 
 // HomeKit for the sleep timer's accessory actions, on iOS and visionOS. Empty
 // here: the shared sideload wildcard profile has no HomeKit capability, and an

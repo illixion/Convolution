@@ -63,11 +63,19 @@ enum CacheBudget {
         case gifHEVC
         case thumbnails
         case thumbnailDioramas
+        #if HYPNOS_GEN3D
+        case gen3d
+        #endif
 
         var share: Double {
             switch self {
             case .images: return 0.40
+            #if HYPNOS_GEN3D
+            case .depth: return 0.35
+            case .gen3d: return 0.05
+            #else
             case .depth: return 0.40
+            #endif
             case .autoEnhance: return 0.07
             case .backgroundRemoval: return 0.07
             case .gifHEVC: return 0.04
@@ -86,6 +94,9 @@ enum CacheBudget {
             case .gifHEVC: return "Animated GIF / JPEG XL"
             case .thumbnails: return "Thumbnails"
             case .thumbnailDioramas: return "Thumbnail Dioramas"
+            #if HYPNOS_GEN3D
+            case .gen3d: return "Generated 3D Models"
+            #endif
             }
         }
     }

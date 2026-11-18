@@ -44,6 +44,10 @@ enum KeychainStore {
         case analysisCoordinatorPairingToken
         /// The sleep timer's Home Assistant long-lived access token (`SleepHome`).
         case homeAssistantToken
+        #if HYPNOS_GEN3D
+        /// The bearer token of Gen3DServer, the private image-to-3D gateway.
+        case gen3dToken
+        #endif
         #if HYPNOS_YOUTUBE
         /// The optional YouTube backend's (web-yt-dlp) token.
         case youtubeBackendToken

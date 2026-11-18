@@ -131,6 +131,20 @@ struct HypnosApp: App {
     private var visionOSScenes: some Scene {
         HypnosWindows(appModel: appModel)
 
+        #if HYPNOS_GEN3D
+        // A picture turned into a model by Gen3DServer, in a volume of its own.
+        WindowGroup("Generated 3D", id: HypnosSceneID.gen3d, for: Gen3DWindowValue.self) { $value in
+            if let value {
+                Gen3DVolumeView(value: value)
+            } else {
+                Color.clear
+            }
+        }
+        .windowStyle(.volumetric)
+        .defaultSize(width: 0.6, height: 0.6, depth: 0.6, in: .meters)
+        .handlesExternalEvents(matching: [])
+        #endif
+
         // Every immersive space leaves a system environment (Mount Hood and
         // the rest) as it is rather than closing it (visionOS 26): mixed
         // spaces show around it, and the wearer is back in it after a full one.

@@ -22,10 +22,16 @@ struct CacheSettingsSection: View {
     @State private var freeSpace: Int64 = 0
 
     /// Display order — biggest budget shares first.
-    private static let domains: [CacheBudget.Domain] = [
-        .images, .depth, .autoEnhance, .backgroundRemoval,
-        .gifHEVC, .thumbnails, .thumbnailDioramas
-    ]
+    private static let domains: [CacheBudget.Domain] = {
+        var domains: [CacheBudget.Domain] = [
+            .images, .depth, .autoEnhance, .backgroundRemoval,
+            .gifHEVC, .thumbnails, .thumbnailDioramas
+        ]
+        #if HYPNOS_GEN3D
+        domains.append(.gen3d)
+        #endif
+        return domains
+    }()
 
     var body: some View {
         #if os(tvOS)
@@ -204,6 +210,10 @@ struct CacheSettingsSection: View {
             ThumbnailDioramaCache.shared.clearCache()
         case .depth:
             DepthCacheStore.deleteAll()
+        #if HYPNOS_GEN3D
+        case .gen3d:
+            Gen3DAssetCache.shared.clear()
+        #endif
         }
     }
 

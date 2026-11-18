@@ -39,6 +39,9 @@ enum AppLogger {
     /// Disk image cache operations
     static let diskCache = DebugLogger(subsystem: subsystem, category: "DiskCache")
 
+    /// Generated 3D (Gen3DServer client), sideload-only.
+    static let gen3d = DebugLogger(subsystem: subsystem, category: "Gen3D")
+
     /// Image enhancement tracking (3D conversion, background removal)
     static let enhancementTracker = DebugLogger(subsystem: subsystem, category: "EnhancementTracker")
 

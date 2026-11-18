@@ -314,6 +314,19 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
                     }
                 }
 
+                #if HYPNOS_GEN3D && os(visionOS)
+                // A model to walk around, made by the private Gen3DServer; it
+                // opens in a volume of its own (Services/Gen3D).
+                nativeMenuButton(
+                    title: "Generated 3D (experimental)",
+                    icon: "cube.transparent",
+                    isChecked: false,
+                    isDisabled: windowModel.isAnimatedImage
+                ) {
+                    openWindow(id: HypnosSceneID.gen3d, value: Gen3DWindowValue(image: windowModel.image))
+                }
+                #endif
+
                 #if os(visionOS)
                 stereoAndVRItems
                 #endif
