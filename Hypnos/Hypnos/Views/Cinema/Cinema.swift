@@ -1247,7 +1247,8 @@ struct CinemaMenuSections: View {
     }
 
     var body: some View {
-        ForEach(owner.modes.filter { $0 != .vr || cinema.vrFormat(for: owner) != nil }) { mode in
+        // VR isn't offered here: a VR video's View Mode is VR (`wantsVR`).
+        ForEach(owner.modes.filter { $0 != .vr }) { mode in
             Button {
                 close()
                 Task { await cinema.setMode(mode, for: owner, open: openImmersiveSpace, dismiss: dismissImmersiveSpace) }
@@ -1386,6 +1387,14 @@ struct CinemaVideoWindowHook: ViewModifier {
 
     private var onBigScreen: Bool { cinema.mode(for: owner).showsPicture }
 
+    /// A VR video whose native player is up, in a window nothing else holds
+    /// the cinema for.
+    private var startsVRNow: Bool {
+        windowModel.isVRVideo && windowModel.playbackRenderer == .nativeMetal
+            && windowModel.nativePlayerGeneration > 0 && VROpening.automatically
+            && (cinema.owner == nil || cinema.owner == owner || cinema.mode == .window)
+    }
+
     func body(content: Content) -> some View {
         content
             .onChange(of: onBigScreen, initial: true) { _, on in
@@ -1422,6 +1431,33 @@ struct CinemaVideoWindowHook: ViewModifier {
             }
             .onChange(of: cinema.screenTaps) {
                 if cinema.owner == owner { windowModel.toggleUIVisibility() }
+            }
+            // A VR video's 3D is the sphere: View Mode's VR (or opening one,
+            // below) asks for it, 2D or another video gives it back.
+            .onChange(of: windowModel.wantsVR) { _, wants in
+                let mode = cinema.mode(for: owner)
+                guard wants != (mode == .vr) else { return }
+                Task {
+                    await cinema.setMode(wants ? .vr : .window, for: owner,
+                                         open: openImmersiveSpace, dismiss: dismissImmersiveSpace)
+                }
+            }
+            .onChange(of: cinema.mode(for: owner)) { _, mode in
+                // Left another way (the space closed, Big Screen picked).
+                if mode != .vr, windowModel.wantsVR { windowModel.wantsVR = false }
+                if mode != .vr { windowModel.endFormatCompare() }
+            }
+            .onChange(of: windowModel.isVRVideo) { _, isVR in
+                if !isVR, windowModel.wantsVR { windowModel.wantsVR = false }
+            }
+            .onChange(of: startsVRNow, initial: true) { _, start in
+                // A VR video opens around the viewer once its player is up,
+                // once per video: leaving VR keeps it left.
+                guard start, !windowModel.startedVRAutomatically else { return }
+                windowModel.startedVRAutomatically = true
+                windowModel.wantsVR = true
+                // The picture guessed the lens: offer the other readings.
+                if windowModel.formatIsGuessed { windowModel.startFormatCompare() }
             }
             .onDisappear {
                 cinema.setVRFormat(nil, for: ObjectIdentifier(windowModel))

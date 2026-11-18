@@ -485,6 +485,14 @@ struct VideoOrnamentsView: View {
 
     /// Opens the standalone Adjustments window (repositionable, never
     /// overlaps the video). showAdjustments pauses auto-hide.
+    /// The 3D panel: its own window, like Adjustments, so the picture stays
+    /// in view while it changes.
+    private func open3DPanel() {
+        appModel.video3DPanelTarget = windowModel
+        windowModel.refreshFormatPreview()
+        openWindow(id: HypnosSceneID.video3DPanel)
+    }
+
     private func adjustmentsButton(close: @escaping () -> Void) -> some View {
         Button {
             close()
@@ -557,7 +565,7 @@ struct VideoOrnamentsView: View {
                          // A badge naming the mode in force ("2D", "AI 3D"),
                          // filled while a 3D mode is on.
                          badge: currentViewMode.badge,
-                         badgeIsActive: windowModel.shouldUse3DMode || windowModel.shouldUsePseudo3D,
+                         badgeIsActive: windowModel.shouldUse3DMode || windowModel.shouldUsePseudo3D || windowModel.wantsVR,
                          help: "View Mode",
                          onOpenChanged: { chromeMenu("View Mode", opened: $0) }) { close in
             // The three modes behave like a radio group: exactly one carries
@@ -565,26 +573,32 @@ struct VideoOrnamentsView: View {
             // path turns the other modes off), and re-selecting the active
             // one is a no-op — leaving a mode means picking a different one.
             modeButton("2D", mode: .flat, close: close) {
+                windowModel.wantsVR = false
                 windowModel.set2DMode()
             }
 
             if PlatformCapabilities.supportsStereoVideo {
                 Divider()
 
-                // A stereo video plays live in the window.
-                modeButton(ViewMode.stereoscopic.title, mode: .stereoscopic, close: close) {
-                    Task { await windowModel.enable3DMode() }
+                if windowModel.isVRVideo {
+                    // A VR video's 3D is around the viewer, on the sphere.
+                    modeButton(ViewMode.vr.title, subtitle: "Around you", mode: .vr, close: close) {
+                        windowModel.wantsVR = true
+                    }
+                } else {
+                    // A stereo video plays live in the window.
+                    modeButton(ViewMode.stereoscopic.title, mode: .stereoscopic, close: close) {
+                        Task { await windowModel.enable3DMode() }
+                    }
                 }
 
-                if windowModel.shouldUse3DMode {
-                    Divider()
-
-                    Button {
-                        close()
-                        windowModel.showVideo3DSettingsSheet = true
-                    } label: {
-                        Label("Edit 3D Settings", systemImage: "slider.horizontal.3")
-                    }
+                // What the video was found to be, and changing it, with the
+                // picture following each change.
+                Button {
+                    close()
+                    open3DPanel()
+                } label: {
+                    Label("3D Settings…", systemImage: "slider.horizontal.3")
                 }
             }
 
@@ -685,7 +699,7 @@ struct VideoOrnamentsView: View {
     /// The window viewing modes, mutually exclusive by construction
     /// (shouldUsePseudo3D already excludes shouldUse3DMode).
     private enum ViewMode {
-        case flat, stereoscopic, ai3DRealtime, ai3DPreprocessed
+        case flat, stereoscopic, vr, ai3DRealtime, ai3DPreprocessed
 
         /// The menu item's name. Variants go in parentheses after the
         /// mode, as in "AI 3D (Real-Time)".
@@ -693,6 +707,7 @@ struct VideoOrnamentsView: View {
             switch self {
             case .flat: "2D"
             case .stereoscopic: "3D"
+            case .vr: "VR"
             case .ai3DRealtime: "AI 3D (Real-Time)"
             case .ai3DPreprocessed: "AI 3D (Pre-Processed)"
             }
@@ -701,7 +716,7 @@ struct VideoOrnamentsView: View {
         /// The bar's badge: short enough for the bar.
         var badge: String {
             switch self {
-            case .flat, .stereoscopic: title
+            case .flat, .stereoscopic, .vr: title
             case .ai3DRealtime, .ai3DPreprocessed: "AI 3D"
             }
         }
@@ -710,12 +725,14 @@ struct VideoOrnamentsView: View {
             switch self {
             case .flat: "rectangle"
             case .stereoscopic: "view.3d"
+            case .vr: "visionpro"
             case .ai3DRealtime, .ai3DPreprocessed: "wand.and.sparkles"
             }
         }
     }
 
     private var currentViewMode: ViewMode {
+        if windowModel.wantsVR { return .vr }
         if windowModel.shouldUse3DMode { return .stereoscopic }
         if windowModel.shouldUsePseudo3D {
             if case .cached = windowModel.pseudo3DDepthMode { return .ai3DPreprocessed }

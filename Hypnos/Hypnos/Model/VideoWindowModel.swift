@@ -109,8 +109,6 @@ final class VideoWindowModel {
     private(set) var live3DUnavailable = false
     /// Chosen stereoscopic settings for this window's video.
     var video3DSettings: Video3DSettings?
-    /// Drives the per-window Video3DSettingsSheet.
-    var showVideo3DSettingsSheet: Bool = false
 
     /// Real-time fake-3D conversion of a mono video (windowed, no precompute).
     /// Distinct from `stereoscopicOverride`, which presents a genuinely
@@ -148,27 +146,70 @@ final class VideoWindowModel {
     /// draws it, for the control strip's readout. Written only on a change
     /// (the strip reads them); cleared with each new video.
     private(set) var pictureSize: CGSize?
-    /// The VR format chosen in the 3D sheet for this video, over what was
-    /// detected (`VRFormatOverrides`); a flat projection there means "not VR".
+    /// The format chosen in the 3D panel for this video, over what was
+    /// detected (`VRFormatOverrides`): a flat projection without a layout is
+    /// 2D, with one packed 3D, an immersive one VR. Nil: automatic.
     var vrOverride: VRFormat? {
         didSet {
             guard vrOverride != oldValue else { return }
             VRFormatOverrides.shared.set(vrOverride, for: video.identity)
         }
     }
-    /// The video's VR format for the Cinema's VR mode: the override, else
-    /// what its tags and name say, the packing settled by the decoded frame's
-    /// shape when neither named it (`Clip_180.mp4` at 2:1 is side by side).
-    /// Nil for an ordinary video.
-    var vrFormat: VRFormat? {
-        if let vrOverride { return vrOverride.projection.isImmersive ? vrOverride : nil }
-        guard var format = video.vrFormat else { return nil }
-        if format.layout == nil, let size = pictureSize {
-            format.layout = VRFormatDetector.packing(for: format.projection,
-                                                     width: Int(size.width), height: Int(size.height))
+    /// What the picture was found to be (`VideoFormatAnalyzer`, cached per
+    /// video in `VideoFormatAnalysisStore`); nil until it has been looked at.
+    var formatAnalysis: VideoFormatAnalysis?
+    /// A frame of the video, small, for the 3D panel's preview.
+    var formatPreview: CGImage?
+    @ObservationIgnored var formatAnalysisTask: Task<Void, Never>?
+    /// The viewer has this VR video around them (View Mode → VR, or on its
+    /// own when it opened: `Cinema`'s window host follows it).
+    var wantsVR = false
+    /// VR started on its own for this video already; leaving VR keeps it left.
+    @ObservationIgnored var startedVRAutomatically = false
+    /// The guesses offered side by side under the window (Fisheye 180° /
+    /// 190° / flat 180°…), each tap showing that one; nil when not comparing.
+    var formatCompare: [FormatCandidate]?
+
+    /// What the video is without the viewer's say: the picture's analysis
+    /// when it is sure, else what the tags and name say (the packing then
+    /// settled by the frame's shape: `Clip_180.mp4` at 2:1 is side by side).
+    var detectedFormat: VRFormat {
+        var named = video.vrFormat
+            ?? Video3DSettings.from(video: video).map { VRFormat(layout: $0.packedLayout, projection: .flat) }
+            ?? VRFormat(layout: nil, projection: .flat)
+        if named.projection.isImmersive, named.layout == nil, let size = pictureSize {
+            named.layout = VRFormatDetector.packing(for: named.projection, width: Int(size.width), height: Int(size.height))
+        }
+        guard let analysis = formatAnalysis, analysis.confidence >= Self.formatConfidence else { return named }
+        var format = analysis.format
+        // Most of this library is rendered (Blender), whose fisheye camera
+        // is 180° by default; the picture can't measure the lens, so a
+        // fisheye it found gets that rather than a camera lens's 190°.
+        if analysis.projectionSource != .name, analysis.projectionSource != .container,
+           case .fisheye(_, let ellipse) = format.projection {
+            format.projection = .fisheye(fieldOfView: Self.renderedFisheyeFieldOfView, ellipse: ellipse)
+        }
+        // Stash tags are chosen by people: their projection stands over one
+        // the picture only guessed at.
+        if let tagged = video.vrFormat, tagged.projection.isImmersive,
+           analysis.projectionSource == .picture || analysis.projectionSource == .shape || analysis.projectionSource == .none {
+            if case .fisheye = tagged.projection, case .fisheye = format.projection {} else {
+                format.projection = tagged.projection
+            }
+            if format.layout == nil { format.layout = named.layout }
         }
         return format
     }
+
+    /// How sure the analysis must be to be used without asking.
+    static let formatConfidence = VideoFormatAnalysisStore.confidenceToApply
+
+    /// The format in force: the viewer's choice, else what was detected.
+    var videoFormat: VRFormat { vrOverride ?? detectedFormat }
+    var isVRVideo: Bool { videoFormat.projection.isImmersive }
+
+    /// The video's VR format for the sphere; nil for a video that isn't VR.
+    var vrFormat: VRFormat? { isVRVideo ? videoFormat : nil }
     private(set) var pictureFrameRate: Double?
     /// Smooth Motion doubles what is shown (`noteSmoothMotionDoubling`).
     private(set) var smoothMotionDoubling = false
@@ -396,6 +437,7 @@ final class VideoWindowModel {
         nativePlayer = player
         nativePlayerGeneration += 1
         Self.withNativePlayers.add(self)
+        if player != nil { analyzeFormatIfNeeded() }
         // A restored window can be disconnected before its player exists.
         if sceneDisconnected { Self.silence(player) }
         refreshAudioTracks()
@@ -609,7 +651,7 @@ final class VideoWindowModel {
     /// adjustments panel is a side ornament that doesn't overlap the video, so
     /// the video should stay fully visible while editing.
     var isChromeModalOpen: Bool {
-        showMediaInfo || showShareSheet || showVideo3DSettingsSheet || openOrnamentMenuCount > 0
+        showMediaInfo || showShareSheet || openOrnamentMenuCount > 0
             || showPseudo3DModePrompt || showDepthModelSetup
     }
 
@@ -623,7 +665,7 @@ final class VideoWindowModel {
     /// opened from them takes the picture's input away again.
     var pictureTakesInputWithChrome: Bool {
         !openOrnamentMenus.isEmpty && openOrnamentMenus.isSubset(of: Self.popoverMenuNames)
-            && !showMediaInfo && !showShareSheet && !showVideo3DSettingsSheet
+            && !showMediaInfo && !showShareSheet
     }
 
     /// Bumped to close the control bar's More popover from outside it.
@@ -704,6 +746,7 @@ final class VideoWindowModel {
         self.stereoscopicOverride = windowValue.stereoscopicOverride
         self.video3DSettings = windowValue.video3DSettings
         self.vrOverride = VRFormatOverrides.shared.format(for: windowValue.video.identity)
+        self.formatAnalysis = VideoFormatAnalysisStore.shared.analysis(for: windowValue.video.identity)
         self.pseudo3DEnabled = windowValue.pseudo3DEnabled
         self.pseudo3DSettings = windowValue.pseudo3DSettings ?? .default
         self.isMuted = Self.startsMuted(windowValue.video, appModel: appModel)
@@ -1213,6 +1256,9 @@ final class VideoWindowModel {
         if appModel.videoAdjustmentsTarget === self {
             appModel.videoAdjustmentsTarget = nil
         }
+        if appModel.video3DPanelTarget === self {
+            appModel.video3DPanelTarget = nil
+        }
     }
 
     // MARK: - Navigation
@@ -1254,6 +1300,12 @@ final class VideoWindowModel {
         }
         video = newVideo
         vrOverride = VRFormatOverrides.shared.format(for: newVideo.identity)
+        formatAnalysisTask?.cancel()
+        formatAnalysisTask = nil
+        formatAnalysis = VideoFormatAnalysisStore.shared.analysis(for: newVideo.identity)
+        formatPreview = nil
+        startedVRAutomatically = false
+        formatCompare = nil
         subtitles.load(SubtitleSource.forVideo(newVideo))
         loadSharedFields()
         endHandled = false
@@ -1350,9 +1402,14 @@ final class VideoWindowModel {
         // The stereo pump needs a stereoscopic display; elsewhere a
         // stereoscopic file plays flat (one eye), whatever it is tagged as.
         guard PlatformCapabilities.supportsStereoVideo, !live3DUnavailable else { return false }
+        // A VR video's 3D is the sphere around the viewer (`wantsVR`); its
+        // window plays it flat, which is also the player the sphere borrows.
+        if isVRVideo { return false }
         if stereoscopicOverride == false { return false }
         if stereoscopicOverride == true || video3DSettings != nil { return true }
-        return video.isStereoscopic
+        if let vrOverride { return vrOverride.layout != nil }
+        // Found to be packed 3D (named, tagged or by its picture): in 3D.
+        return video.isStereoscopic || detectedFormat.layout != nil
     }
 
     /// A stereo video playing live in the window: the stereo pump crops each
@@ -1362,7 +1419,11 @@ final class VideoWindowModel {
     /// transcode, or plays flat when there is none (`live3DUnavailable`).
     var liveStereoLayout: PackedStereoLayout? {
         guard wantsLiveStereo, playbackRenderer == .nativeMetal else { return nil }
-        return (video3DSettings ?? Video3DSettings.from(video: video) ?? .defaults(for: .sideBySide)).packedLayout
+        // The 3D panel's choice, the sheet's older one, what was detected.
+        if let vrOverride, !vrOverride.projection.isImmersive, let layout = vrOverride.layout { return layout }
+        if let video3DSettings { return video3DSettings.packedLayout }
+        if !detectedFormat.projection.isImmersive, let layout = detectedFormat.layout { return layout }
+        return (Video3DSettings.from(video: video) ?? .defaults(for: .sideBySide)).packedLayout
     }
 
     /// Everything `liveStereoLayout` asks for but the renderer: a stereo
@@ -1760,8 +1821,9 @@ final class VideoWindowModel {
         }
     }
 
-    /// Resolve the best 3D settings for the current video and engage 3D, or
-    /// open the settings sheet when none can be inferred.
+    /// Engage 3D with the best settings known: a choice saved by the old 3D
+    /// sheet, else the tags, else what was detected (`liveStereoLayout`),
+    /// side by side when nothing says. The 3D panel corrects it live.
     func enable3DMode() async {
         // Live 3D needs AVFoundation; a WebKit-only source (WebM) gets there
         // through the server transcode, as fake-3D does. With no transcode
@@ -1781,7 +1843,7 @@ final class VideoWindowModel {
             stereoscopicOverride = true
             return
         }
-        showVideo3DSettingsSheet = true
+        stereoscopicOverride = true
     }
 
     // MARK: - Visual Adjustments

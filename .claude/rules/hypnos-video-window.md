@@ -85,7 +85,7 @@ Moved out of `CLAUDE.md`. The fake-3D / depth pipeline is in `hypnos-ai-3d-video
 
 - **StereoscopicFormat** - Side-by-side/over-under format and its tag detection live in Vergence (`VergenceCore`); Hypnos keeps the Jellyfin `Video3DFormat` mapping (`StereoscopicFormat.swift`).
 
-- **Video3DSettingsSheet** - Manual override for stereoscopic format detection
+- **Video3DPanelView** - the 3D panel (2D / 3D / VR, live), see "VR videos" below
 
 The immersive MV-HEVC player was removed 2026-11-01 because live 3D and Big Screen replaced it.
 
@@ -165,16 +165,46 @@ frame per eye through a Camera Index Switch; video frames come from an `AVPlayer
 display link, blitted into a `LowLevelTexture` (sRGB 8-bit: HDR is tone mapped by the decoder). A fisheye's
 picture ellipse is fitted from the first frame (`FisheyeEllipseFit`) unless set by hand.
 
-- **Detection** (`VRFormatDetector`): Stash tags, the file name (DeoVR/HereSphere: `_180_LR`, `_360_TB`,
-  `_FISHEYE190`, `MKX200`/`MKX220`/`VRCA220`/`RF52`, `3dh`/`3dv`), and the frame's shape for the packing when
-  nothing names it. `GalleryVideo.vrFormat`; the window refines the packing from `pictureSize`
-  (`VideoWindowModel.vrFormat`). Not read yet: Matroska `StereoMode`/`Projection`, MP4 `st3d`/`sv3d`.
-- **Override**: the 3D settings sheet's VR section, kept per video in `VRFormatOverrides` (a JSON file written
-  off the main actor, never `HypnosDefaults`); "Not VR" switches a mis-tagged video off.
-- **Cinema VR mode** (`CinemaMode.vr`, offered only when the window's video is VR): the window lends its
-  `AVPlayer` as for Big Screen (never a stereo plane), the sphere sits at the head's position and level heading
-  when VR started (`Cinema.vrPose`, Place in Front of Me recentres), the window keeps its controls and shows the
-  card. Passthrough uses Big Screen's filter. No subtitles on the sphere and no tap-to-toggle yet.
+- **Detection is automatic and reads the picture** (2026-11-18, the user: "intelligently figure out correct settings,
+  as seamless as possible"). Once the window's native player has frames, `VideoFormatSampler` takes a few (its own
+  `AVPlayerItemVideoOutput`, 512 px greyscale, black frames skipped, plus one small colour frame for the panel) and
+  Vergence's `VideoFormatAnalyzer` reads them with the file name: packing from the halves' similarity, **eye order
+  from the disparity's sign** (a parallel VR rig puts near things further right in the left eye; a converged flat
+  film puts most of the scene behind the screen, the other way), 180°/360°/fisheye from each eye's shape, dark lens
+  corners and 360° wrap-around. The answer is cached per video (`VideoFormatAnalysisStore`, keyed with its
+  `version`: bump it when the analyzer changes). `VideoWindowModel.detectedFormat` uses it at
+  `formatConfidence` (0.7) and above, Stash tags keeping the projection over one the picture only guessed, else the
+  tags and name (`VRFormatDetector`, the packing settled by the frame's shape). `videoFormat` = the viewer's
+  choice (`vrOverride`, `VRFormatOverrides`) ?? `detectedFormat`; one `VRFormat` says it all: flat without a layout
+  is 2D, flat with one packed 3D (live 3D engages on its own), immersive is VR.
+- **Most of this library is rendered (Blender), so the guesses lean that way**: a fisheye the picture found gets
+  180° (Blender's Equidistant fisheye default; the picture can't measure the lens), not a camera's 190°. Where
+  the picture guessed the projection (no name, tag or metadata), VR starts with a **compare bar** in the prompt
+  slot under the window (`FormatCompareBar`, `VideoWindowModel.formatCompare`, styled like Skip): Fisheye 180° /
+  Fisheye 190° / Flat 180° (360° / 180° for a 360°), Swap Eyes and Keep, each tap showing that reading on the
+  sphere at once, like an A/B test. The panel's Compare Guesses opens it too. On the user's 1920×3840 90 fps
+  fisheye OU WebM (no hints in its name) the analyzer read fisheye, over-under, eyes in order at 0.85, and the
+  same file with its halves exchanged as eyes swapped; in the simulator it opened in VR by itself (2026-11-18).
+- **The sampler follows the player's items**: the flat player loops through `AVPlayerLooper`, whose queue player
+  has no item when it is handed over and a new one at every seam, so the output moves to whichever item plays.
+- **VR is the View Mode, not a Cinema mode.** A VR video's View Mode menu says **VR** where others say 3D, and
+  `wantsVR` drives the Cinema's `.vr` (`CinemaVideoWindowHook`); the Cinema menu no longer lists VR. A VR video
+  opens around the viewer once its native player is up, once per video (Settings key `video.opensVRAroundYou`,
+  default on, a toggle in the panel); leaving VR keeps it left, another video that isn't VR leaves it. The window
+  of a VR video never runs the stereo engine (`shouldUse3DMode` is false for it): it plays flat, and that player is
+  what the sphere borrows. (Lending the stereo engine's player gave the sphere no frames: purple stripes, device
+  2026-11-18; the sphere now starts black and logs why no frame came.)
+- **The 3D panel** (`Views/Videos/Video3DPanelView.swift`, window `video-3d-panel`, from View Mode → 3D Settings…,
+  `AppModel.video3DPanelTarget`) replaced the apply-on-close 3D sheet (whose Field of View and Depth sliders were
+  read by nothing). It shows a frame with each eye's part outlined and labelled L/R (and a fisheye's lens circle),
+  what was detected and why, and Show As 2D / 3D / VR with packing, half resolution, swap eyes, projection and lens
+  field of view. Every change applies at once: live 3D takes a new layout on the next frame
+  (`Pseudo3DStereoEngine.setPackedStereo` → `StereoPump.setPackedLayout`, no rebuild; the stereo view's identity no
+  longer includes the layout) and the sphere its new format. A choice equal to the detection is stored as automatic.
+- **Cinema VR mode** (`CinemaMode.vr`, entered through `wantsVR`): the window lends its native `AVPlayer` as for
+  Big Screen (never a stereo plane), the sphere sits at the head's position and level heading when VR started
+  (`Cinema.vrPose`, Place in Front of Me recentres), the window keeps its controls. Passthrough uses Big Screen's
+  filter. No subtitles on the sphere and no tap-to-toggle yet.
 - Simulator: the visionOS simulator draws the left (mono) eye only; the test clips give the right eye a hue shift
   so a swap would show. `-UITestDefault debugVideoCinemaMode=vr` (DEBUG) puts the first video window in VR.
 - Photos: `PhotoWindowModel+StereoVR` (packed stereo in the window via `RAVEPackedStereoPhotoView`, auto when the

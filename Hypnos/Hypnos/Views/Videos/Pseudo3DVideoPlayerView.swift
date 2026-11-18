@@ -209,6 +209,11 @@ struct Pseudo3DVideoPlayerView: View {
         // The 3D picture's criteria, stated to the window while it is in it.
         .raveDisplayCriteria(engine.displayCriteria)
         .onChange(of: subtitleFrame) { _, frame in engine.setSubtitles(frame) }
+        // A packed video's layout or eye order changed (the 3D panel): the
+        // next frame shows it, no reload.
+        .onChange(of: packedStereo) { _, layout in
+            if let layout { engine.setPackedStereo(layout) }
+        }
         .onChange(of: playbackModel?.maximumPictureResolution ?? .zero) { _, cap in
             engine.preferredMaximumResolution = cap
         }

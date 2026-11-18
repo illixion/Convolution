@@ -147,6 +147,19 @@ struct HypnosWindows: Scene {
     .windowResizability(.contentSize)
     .defaultLaunchBehavior(.suppressed)
 
+    // The 3D panel: what a video was found to be (2D, 3D, VR) and changing
+    // it, the video following each change; beside the window like Adjustments.
+    Window("3D Settings", id: HypnosSceneID.video3DPanel) {
+        Video3DPanelView()
+            .environment(appModel)
+            .captureOpenWindowAction()
+            .handleIncomingMediaURLs(appModel: appModel)
+            .manageWindow(ManagedWindows.video3DPanel())
+    }
+    .defaultSize(width: 420, height: 720)
+    .windowResizability(.contentSize)
+    .defaultLaunchBehavior(.suppressed)
+
     // Slideshow of the app's own pictures or videos. The scene id keeps its
     // original spelling: visionOS restores open windows by it.
     WindowGroup(id: HypnosSceneID.remoteViewer, for: RemoteViewerWindowValue.self) { $windowValue in

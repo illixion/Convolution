@@ -141,6 +141,14 @@ enum ManagedWindows {
     }
 
     @MainActor
+    static func video3DPanel() -> RAVEManagedWindow {
+        .singleton(
+            id: HypnosSceneID.video3DPanel,
+            label: RAVEWindowLabel(title: "3D Settings", systemImage: "view.3d")
+        )
+    }
+
+    @MainActor
     static func videoAdjustments() -> RAVEManagedWindow {
         .singleton(
             id: HypnosSceneID.videoAdjustments,

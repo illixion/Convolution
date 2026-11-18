@@ -228,9 +228,14 @@ struct VideoThumbnailView: View {
         cropTo16x9(stereo.map { leftEye(of: image, layout: $0) } ?? image)
     }
 
-    /// How `video` packs its eyes: its tags (Stash), else its file name
-    /// (`clip_180_sbs.webm`, `Film.3D.HSBS.mkv`), else nil for a flat video.
+    /// How `video` packs its eyes: what its picture was found to be once it
+    /// played (`VideoFormatAnalysisStore`), its tags (Stash), else its file
+    /// name (`clip_180_sbs.webm`, `Film.3D.HSBS.mkv`), else nil for a flat video.
     nonisolated static func stereoLayout(of video: GalleryVideo) -> PackedStereoLayout? {
+        if let analysis = VideoFormatAnalysisStore.shared.analysis(for: video.identity),
+           analysis.confidence >= VideoFormatAnalysisStore.confidenceToApply {
+            return analysis.format.layout
+        }
         if let format = video.stereoscopicFormat {
             return format.packedLayout(eyesReversed: video.eyesReversed)
         }

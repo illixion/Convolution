@@ -154,6 +154,9 @@ class AppModel {
     /// cleared when it (or the owning video window) closes. Strong ref, so it
     /// must be cleared to avoid keeping a closed window's model alive.
     var videoAdjustmentsTarget: VideoWindowModel?
+    /// The video window the "video-3d-panel" window (`Video3DPanelView`)
+    /// edits; set when it opens, cleared when either closes.
+    var video3DPanelTarget: VideoWindowModel?
     var hasMoreVideoPages: Bool = true
     /// Incremented on each loadInitialVideos; stale loadNextVideoPage results are discarded
     private var videoLoadGeneration: Int = 0

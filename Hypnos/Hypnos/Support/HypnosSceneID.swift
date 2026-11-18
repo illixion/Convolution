@@ -30,5 +30,6 @@ enum HypnosSceneID {
     static let console = id("console")
     static let gpuMemory = id("gpu-memory")
     static let videoAdjustments = id("video-adjustments")
+    static let video3DPanel = id("video-3d-panel")
     static let remoteViewer = id("remote-viewer")
 }

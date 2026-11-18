@@ -209,7 +209,9 @@ struct VideoWindowView: View {
     /// A new stereo player per video, attempt and mode: the engine takes its
     /// packed layout when it loads.
     private func stereoPlayerID(live layout: PackedStereoLayout?) -> String {
-        let mode = layout.map { "live3d_\($0.arrangement.rawValue)_\($0.isHalfResolution)_\($0.eyesReversed)" } ?? "pseudo3d"
+        // Not the layout itself: the player takes a new one in place
+        // (`Pseudo3DStereoEngine.setPackedStereo`), so the 3D panel previews live.
+        let mode = layout == nil ? "pseudo3d" : "live3d"
         return "\(video.id)_\(mode)_\(windowModel.playbackAttempt)"
     }
 
@@ -613,33 +615,6 @@ struct VideoWindowView: View {
             }
         )
         #endif
-        .sheet(isPresented: $windowModel.showVideo3DSettingsSheet) {
-            Video3DSettingsSheet(
-                initialSettings: windowModel.video3DSettings
-                    ?? windowModel.vrFormat.flatMap { format in
-                        format.layout.map { layout in
-                            Video3DSettings(format: layout.arrangement == .sideBySide
-                                                ? (layout.isHalfResolution ? .halfSideBySide : .sideBySide)
-                                                : (layout.isHalfResolution ? .halfOverUnder : .overUnder),
-                                            eyesReversed: layout.eyesReversed, horizontalFieldOfView: 90,
-                                            horizontalDisparityAdjustment: 200)
-                        }
-                    },
-                initialVR: windowModel.vrFormat,
-                onApply: { settings in
-                    Task {
-                        await Video3DSettingsTracker.shared.saveSettings(
-                            videoId: video.identity,
-                            settings: settings
-                        )
-                    }
-                    windowModel.video3DSettings = settings
-                    windowModel.stereoscopicOverride = true
-                },
-                onApplyVR: { format in windowModel.vrOverride = format },
-                onCancel: nil
-            )
-        }
         .sheet(isPresented: $windowModel.showDepthModelSetup) {
             // First-run fake-3D: no depth model installed. Pick/download one,
             // then re-enter the engage flow (which now asks realtime vs
@@ -814,11 +789,21 @@ struct VideoWindowView: View {
         let skip = skipSegmentButton
         let undo = undoSkipButton
         let feedback = skipFeedbackBar
-        guard notice != nil || skip != nil || undo != nil || feedback != nil else { return nil }
+        let compare = formatCompareBar
+        guard notice != nil || skip != nil || undo != nil || feedback != nil || compare != nil else { return nil }
         return AnyView(HStack(spacing: 12) {
             notice.map { StreamQualityNotice(text: $0) }
-            if let skip { skip } else if let undo { undo } else { feedback }
+            if let compare { compare } else if let skip { skip } else if let undo { undo } else { feedback }
         })
+    }
+
+    /// The VR guesses side by side (`VideoWindowModel.formatCompare`).
+    private var formatCompareBar: FormatCompareBar? {
+        guard let candidates = windowModel.formatCompare else { return nil }
+        return FormatCompareBar(candidates: candidates, shown: windowModel.videoFormat,
+                                pick: { windowModel.previewFormat($0.format) },
+                                swapEyes: { windowModel.swapEyesInPreview() },
+                                done: { windowModel.endFormatCompare() })
     }
 
     #if os(visionOS)
