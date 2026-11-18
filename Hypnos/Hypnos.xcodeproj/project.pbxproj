@@ -181,6 +181,7 @@
 				077865172D811C5500BCF113 /* Frameworks */,
 				077865182D811C5500BCF113 /* Resources */,
 				AA16000000000000000000A1 /* Embed FFmpeg decoders (sideload only) */,
+				AA16000000000000000000A2 /* Sideload ATS policy */,
 				AA1900000000000000000008 /* Embed App Extensions */,
 			);
 			buildRules = (
@@ -348,6 +349,26 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "# Embeds HypnosFFmpeg.framework (FFmpeg's DTS and TrueHD decoders) in\n# sideload builds only, those with HYPNOS_FFMPEG, and removes one an earlier\n# sideload build left in this build folder. Nothing links the framework: the\n# FFmpegDecoders package dlopens it, so an App Store build carries no FFmpeg\n# code (CLAUDE.md, \"An App Store build never does Dolby processing itself\").\n# Not sandboxed: a sandboxed phase must declare the xcframework as an input,\n# and a declared input that is missing (every checkout that never built it)\n# fails the build.\ndest=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/HypnosFFmpeg.framework\"\ncase \" ${SWIFT_ACTIVE_COMPILATION_CONDITIONS} \" in\n  *\" HYPNOS_FFMPEG \"*) ;;\n  *) rm -rf \"$dest\"; exit 0 ;;\nesac\nxcf=\"${PROJECT_DIR}/../Packages/FFmpegDecoders/HypnosFFmpeg.xcframework\"\ncase \"${PLATFORM_NAME}\" in\n  iphoneos) slice=ios-arm64 ;;\n  iphonesimulator) slice=ios-arm64-simulator ;;\n  xros) slice=xros-arm64 ;;\n  xrsimulator) slice=xros-arm64-simulator ;;\n  appletvos) slice=tvos-arm64 ;;\n  appletvsimulator) slice=tvos-arm64-simulator ;;\n  macosx) slice=macos-arm64_x86_64 ;;\n  *) echo \"error: no HypnosFFmpeg slice for ${PLATFORM_NAME}\"; exit 1 ;;\nesac\nif [ ! -d \"$xcf/$slice/HypnosFFmpeg.framework\" ]; then\n  echo \"error: HYPNOS_FFMPEG is set but $xcf is missing: run scripts/build-ffmpeg-decoders.sh\"\n  exit 1\nfi\nrm -rf \"$dest\"\nmkdir -p \"$(dirname \"$dest\")\"\ncp -R \"$xcf/$slice/HypnosFFmpeg.framework\" \"$dest\"\nif [ \"${CODE_SIGNING_ALLOWED}\" = YES ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY}\" ]; then\n  codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" --timestamp=none \"$dest\"\nfi\n";
+			showEnvVarsInLog = 0;
+		};
+		AA16000000000000000000A2 /* Sideload ATS policy */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Sideload ATS policy";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Cleartext HTTP to any host (NSAllowsArbitraryLoads), sideload builds only: the\n# ARBITRARY_LOADS_CONDITION flag (HYPNOS_ARBITRARY_LOADS) adds it to the built\n# Info.plist, because Info.plist cannot read a Swift flag. Without the flag the\n# plist keeps its strict policy (NSAllowsLocalNetworking), which is what a\n# submission build ships. Runs after the plist is processed, before signing.\ncase \" ${SWIFT_ACTIVE_COMPILATION_CONDITIONS} \" in\n  *\" HYPNOS_ARBITRARY_LOADS \"*) ;;\n  *) exit 0 ;;\nesac\nplist=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\nif [ ! -f \"$plist\" ]; then\n  echo \"error: ${plist} is missing; the Sideload ATS policy phase must run after Info.plist processing\"\n  exit 1\nfi\n/usr/libexec/PlistBuddy -c \"Delete :NSAppTransportSecurity:NSAllowsArbitraryLoads\" \"$plist\" 2>/dev/null || true\n/usr/libexec/PlistBuddy -c \"Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true\" \"$plist\" || exit 1\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */

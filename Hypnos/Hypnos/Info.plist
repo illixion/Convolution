@@ -35,13 +35,10 @@
 		     which would also have relaxed ATS for the public internet. Servers
 		     reached over a public hostname still need HTTPS.
 
-		     Deliberately global: NSAllowsArbitraryLoads allows cleartext to
-		     any host, including raw Tailscale addresses (100.64.0.0/10), which
-		     ATS domain exceptions cannot express. Chosen by the user for the
-		     Vision Pro deployment; this relaxes ATS for the public internet too,
-		     which App Review may question for a store build. -->
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
+		     Raw Tailscale addresses (100.64.0.0/10) aren't covered by either key.
+		     Sideload builds add NSAllowsArbitraryLoads through the "Sideload ATS
+		     policy" build phase when HYPNOS_ARBITRARY_LOADS is set (see
+		     Configuration/Hypnos.xcconfig), so a submission build never has it. -->
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>

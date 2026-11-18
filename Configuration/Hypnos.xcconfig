@@ -78,7 +78,16 @@ DTSX_CONDITION =
 // calls it is compiled out.)
 GEN3D_CONDITION =
 
-SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(PRIVATE_API_CONDITION) $(YOUTUBE_CONDITION) $(FFMPEG_CONDITION) $(DOVI_CONDITION) $(NC_MODELS_CONDITION) $(DTSX_CONDITION) $(GEN3D_CONDITION)
+// Cleartext HTTP to any host (NSAllowsArbitraryLoads), for sideload builds only:
+// Tailscale addresses (100.64.0.0/10) can't be named by an ATS domain exception.
+// Info.plist can't read a Swift flag, so the "Sideload ATS policy" phase adds the
+// key to the built plist when HYPNOS_ARBITRARY_LOADS is set. Empty here, so a
+// submission build keeps the strict policy. Opt in with
+// `~/bin/build-and-sign --set ARBITRARY_LOADS_CONDITION=HYPNOS_ARBITRARY_LOADS`, or
+// in the gitignored scripts/build-signing.conf EXTRA_BUILD_SETTINGS.
+ARBITRARY_LOADS_CONDITION =
+
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(PRIVATE_API_CONDITION) $(YOUTUBE_CONDITION) $(FFMPEG_CONDITION) $(DOVI_CONDITION) $(NC_MODELS_CONDITION) $(DTSX_CONDITION) $(GEN3D_CONDITION) $(ARBITRARY_LOADS_CONDITION)
 
 // HomeKit for the sleep timer's accessory actions, on iOS and visionOS. Empty
 // here: the shared sideload wildcard profile has no HomeKit capability, and an
