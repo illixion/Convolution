@@ -125,6 +125,19 @@ struct CodecTests {
         #expect(VP9Configuration.level(width: 1920, height: 1080, framesPerSecond: 30) == 40)
         #expect(VP9Configuration.level(width: 3840, height: 2160, framesPerSecond: 60) == 51)
         #expect(VP9Configuration.level(width: 320, height: 180, framesPerSecond: 25) == 11)
+        #expect(VP9Configuration.level(width: 1920, height: 3840, framesPerSecond: 90) == 52)
+    }
+
+    @Test func vp9PlaylistLevelIsCappedButVpcCKeepsTheTrueOne() {
+        let bt709 = ColourDescription(primaries: 1, transfer: 1, matrix: 1, fullRange: false)
+        let vr = VP9Configuration(profile: 0, level: 52, bitDepth: 8, chromaSubsampling: 0, fullRange: false, colour: bt709)
+        #expect(vr.codecString == "vp09.00.51.08.00.01.01.01.00")
+        #expect(vr.vpcC[1] == 52)
+        let eightK = VP9Configuration(profile: 0, level: 60, bitDepth: 8, chromaSubsampling: 0, fullRange: false, colour: bt709)
+        #expect(eightK.codecString.hasPrefix("vp09.00.51."))
+        let uhd = VP9Configuration(profile: 2, level: 50, bitDepth: 10, chromaSubsampling: 1, fullRange: false,
+                                   colour: ColourDescription(primaries: 9, transfer: 16, matrix: 9, fullRange: false))
+        #expect(uhd.codecString == "vp09.02.50.10.01.09.16.09.00")
     }
 
     @Test func hevcCodecString() throws {

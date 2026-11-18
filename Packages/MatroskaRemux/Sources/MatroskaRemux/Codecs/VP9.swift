@@ -89,6 +89,15 @@ struct VP9Configuration {
                               subsamplingX: subX, subsamplingY: subY)
     }
 
+    init(profile: Int, level: Int, bitDepth: Int, chromaSubsampling: Int, fullRange: Bool, colour: ColourDescription) {
+        self.profile = profile
+        self.level = level
+        self.bitDepth = bitDepth
+        self.chromaSubsampling = chromaSubsampling
+        self.fullRange = fullRange
+        self.colour = colour
+    }
+
     init?(track: MatroskaTrack, firstKeyframe: [UInt8]?, framesPerSecond: Double?) {
         let header = firstKeyframe.flatMap(Self.keyframeHeader)
         var features: [Int: Int] = [:]
@@ -178,9 +187,19 @@ struct VP9Configuration {
     }
 
     /// The full form vp09.PP.LL.DD.CC.cp.tc.mc.FF, which is what tells a
-    /// player the stream is HDR.
+    /// player the stream is HDR. Its level is at most `playlistLevelCap`.
     var codecString: String {
-        String(format: "vp09.%02d.%02d.%02d.%02d.%02d.%02d.%02d.%02d", profile, level, bitDepth, chromaSubsampling,
-               colour.primaries, colour.transfer, colour.matrix, fullRange ? 1 : 0)
+        String(format: "vp09.%02d.%02d.%02d.%02d.%02d.%02d.%02d.%02d", profile, min(level, Self.playlistLevelCap),
+               bitDepth, chromaSubsampling, colour.primaries, colour.transfer, colour.matrix, fullRange ? 1 : 0)
     }
+
+    /// The highest level the playlist's CODECS names; the vpcC keeps the true
+    /// one. visionOS's player refuses a VP9 HLS variant that declares level
+    /// 5.2 or above (AVFoundation -11848, CoreMedia -15517, as soon as it reads
+    /// the master playlist), although its decoder plays those very streams
+    /// once they are declared 5.1: measured on the Vision Pro 2026-11-18 with
+    /// 1920x3840 at 90 fps (5.2), 3840x1920 at 90 (5.2) and 7680x3840 at 30
+    /// (6.0), each refused as declared and playing at 5.1. That is what 180°
+    /// VR files are: 1920x3840 at 90 fps and 8K are both common.
+    static let playlistLevelCap = 51
 }
