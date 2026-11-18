@@ -71,6 +71,7 @@ struct Gen3DVolumeView: View {
                 if current.parent == nil { content.add(current) }
                 place(current, in: content, proxy: proxy)
                 applyLighting(to: current)
+                applyHoverEffect(to: current)
             }
             .raveModelTurnGesture(yaw: $yaw)
             .gesture(TapGesture(count: 2).targetedToAnyEntity().onEnded { _ in decor.toggle() })
@@ -184,6 +185,17 @@ struct Gen3DVolumeView: View {
         case "export": return "Building the mesh and textures…"
         case .some(let other): return other.capitalized + "…"
         case nil: return "Working…"
+        }
+    }
+
+    /// The gaze highlight is for a model being handled; as decor it stays off.
+    /// (The entity keeps its input target, so a drag still turns it and a
+    /// double-tap still brings the controls back.)
+    private func applyHoverEffect(to entity: Entity) {
+        if decor {
+            if entity.components[HoverEffectComponent.self] != nil { entity.components.remove(HoverEffectComponent.self) }
+        } else if entity.components[HoverEffectComponent.self] == nil {
+            entity.components.set(HoverEffectComponent())
         }
     }
 
