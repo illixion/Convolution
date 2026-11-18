@@ -47,6 +47,7 @@ extension PhotoWindowModel {
             return
         }
         guard !isAIDepthMode, !isAnimatedImage else { return }
+        exitPackedStereo()
         if is3DMode || desiredViewingMode != .mono {
             await switchToViewingMode(.mono, trackChange: false)
         }

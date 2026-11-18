@@ -28,6 +28,7 @@ extension PhotoWindowModel {
 
     /// Set diorama mode explicitly. Engaging diorama exits any 3D mode.
     func setDioramaMode(_ on: Bool) async {
+        if on { exitPackedStereo() }
         if on {
             // Diorama is incompatible with RealityKit 3D — drop out of 3D first.
             if is3DMode || desiredViewingMode != .mono {

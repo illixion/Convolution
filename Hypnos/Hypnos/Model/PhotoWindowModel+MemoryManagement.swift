@@ -122,6 +122,7 @@ extension PhotoWindowModel {
 
         // Stereo eyes and decoded AI source must yield to memory pressure too.
         clearAIDepthState()
+        clearPackedStereoState()
 
         // Clear background removal caches
         clearBackgroundRemovalState()

@@ -158,6 +158,14 @@ struct HypnosApp: App {
         }
         .immersionStyle(selection: .constant(.mixed), in: .mixed)
         .immersiveEnvironmentBehavior(.coexist)
+
+        // VR photos (180°, 360°, fisheye) around the wearer
+        // (Views/Pictures/VRPhotoSpace.swift).
+        ImmersiveSpace(id: VRPhotoPresenter.spaceID) {
+            VRPhotoSpaceView()
+        }
+        .immersionStyle(selection: .constant(.mixed), in: .mixed)
+        .immersiveEnvironmentBehavior(.coexist)
     }
     #endif
 

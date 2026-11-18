@@ -598,6 +598,7 @@ extension PhotoWindowModel {
     /// The 3D menu's 2D item: every 3D mode off.
     func showFlat() async {
         isRawSplatMode = false
+        exitPackedStereo()
         if isDioramaMode { await setDioramaMode(false) }
         if isAIDepthMode { await setAIDepthMode(false) }
         if desiredViewingMode != .mono { await switchToViewingMode(.mono) }
@@ -612,6 +613,7 @@ extension PhotoWindowModel {
     ///   active Fully Immersive session without writing immersive as the
     ///   remembered viewing mode for every image they tap through.
     func switchToViewingMode(_ mode: ImagePresentationComponent.ViewingMode, trackChange: Bool = true) async {
+        if mode != .mono { exitPackedStereo() }
         // Only `.mono` exists off visionOS; every other mode needs the
         // RealityKit conversion this platform doesn't have.
         guard PlatformCapabilities.supportsSpatial3D || mode == .mono else { return }

@@ -73,6 +73,7 @@ extension PhotoWindowModel {
         clearBackgroundRemovalState()
         clearDioramaState()
         clearAIDepthState()
+        clearPackedStereoState()
 
         is3DMode = false
         desiredViewingMode = .mono

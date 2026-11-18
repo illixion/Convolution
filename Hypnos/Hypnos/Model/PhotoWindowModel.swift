@@ -316,6 +316,20 @@ class PhotoWindowModel {
     /// Brightest value in `aiDepthSource` in multiples of SDR white: above 1
     /// for an HDR photo (`HDRStills`), whose stereo frame is then HDR too.
     var aiDepthHeadroom: Float = 1
+    // MARK: - Packed stereo and VR (PhotoWindowModel+StereoVR)
+
+    /// The photo shown as the stereo pair it packs (side by side or over
+    /// under); nil when it isn't.
+    var packedStereoLayout: PackedStereoLayout? = nil
+    /// The decoded picture both eyes are cut from, held while packed stereo is on.
+    var packedStereoImage: CGImage? = nil
+    /// The stereo plane is up, so the flat picture under it can hide.
+    var packedStereoReady = false
+    /// The window's shape before packed stereo gave it one eye's.
+    var aspectBeforePackedStereo: CGFloat? = nil
+    /// This window's photo is in the VR photo space.
+    var isShowingVRPhoto = false
+
     /// A debug test pattern is on screen in place of the photo (`photoHDRTest`); reloads leave it alone.
     var showsDebugPattern = false
     /// `photoHDRTest dotsRK`: the test pattern on a RealityKit unlit plane over the picture.
@@ -476,6 +490,16 @@ class PhotoWindowModel {
         guard !is3DMode, desiredViewingMode == .mono else { return }
         guard !currentAdjustments.isAutoEnhanced else { return }
         guard !isAIDepthMode else { return }
+
+        // A photo that names its packing (`Photo_SBS.jpg`) is shown as the
+        // stereo pair it is; nothing else would make sense of it.
+        #if os(visionOS)
+        if packedStereoLayout == nil, let detected = detectedVRFormat, !detected.projection.isImmersive,
+           let layout = detected.layout {
+            await setPackedStereo(layout)
+            return
+        }
+        #endif
 
         // Diorama default takes precedence over any per-image remembered mode
         // and is not blocked by the 3D auto-restore prompt — the user has
@@ -1457,6 +1481,10 @@ class PhotoWindowModel {
     /// waiting for ARC/deinit which may be delayed by SwiftUI state retention.
     func cleanup() {
         AI3DWarmup.shared.clearIntent(self)
+        #if os(visionOS)
+        // Its VR photo goes with it (the empty space closes with the next one opened).
+        if VRPhotoPresenter.shared.owner === self { VRPhotoPresenter.shared.clear() }
+        #endif
         PhotoStereoDebugEndpoints.windows.remove(self)
         #if HYPNOS_PRIVATE_API && os(visionOS)
         releaseRawSplatNudgeSuppression()
@@ -1519,6 +1547,7 @@ class PhotoWindowModel {
         clearBackgroundRemovalState()
         clearDioramaState()
         clearAIDepthState()
+        clearPackedStereoState()
 
         // Only remove the component if generation is NOT active.
         // If active, the entity retains the component until ARC releases both.

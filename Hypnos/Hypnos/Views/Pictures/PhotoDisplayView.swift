@@ -200,7 +200,8 @@ struct PhotoDisplayView: View {
             #endif
 
             imageContent
-                .opacity(windowModel.isAIDepthMode && windowModel.aiDepthPresentationReady
+                .opacity((windowModel.isAIDepthMode && windowModel.aiDepthPresentationReady)
+                         || (windowModel.isPackedStereoMode && windowModel.packedStereoReady)
                     ? 0 : 1)
                 .animation(appModel.effectiveReduceMotion ? nil : .easeInOut(duration: 0.25),
                            value: windowModel.aiDepthPresentationReady)
@@ -258,6 +259,7 @@ struct PhotoDisplayView: View {
 
             #if os(visionOS)
             aiDepthLayer
+            packedStereoLayer
             if let pattern = windowModel.debugRealityKitPattern {
                 HDRTestPlaneView(image: pattern)
                     .aspectRatio(windowModel.imageAspectRatio, contentMode: .fit)
@@ -427,6 +429,16 @@ struct PhotoDisplayView: View {
                 }
             }
         }
+        #if os(visionOS) && DEBUG
+        // `-UITestDefault debugPhotoVR=1`: a photo that is VR by its name opens
+        // around the wearer once loaded, for simulator runs.
+        .task(id: windowModel.nativeImageDimensions) {
+            guard HypnosDefaults.store.bool(forKey: "debugPhotoVR"), windowModel.nativeImageDimensions != nil,
+                  let format = windowModel.detectedVRFormat, format.projection.isImmersive,
+                  !windowModel.isShowingVRPhoto else { return }
+            await windowModel.showInVR(format, open: openImmersiveSpace)
+        }
+        #endif
         #if os(visionOS)
         .onChange(of: windowModel.hostFullyImmersiveSpace) { _, isOpen in
             // The photo window stays open and doubles as the controls
@@ -960,6 +972,35 @@ struct PhotoDisplayView: View {
                 .onTapGesture {
                     windowModel.toggleUIVisibility()
                 }
+                .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissDragAction))
+                .offset(x: dragOffset)
+                .offset(z: RAVEStereoPhotoView.inputTargetZ)
+        }
+    }
+    #endif
+
+    #if os(visionOS)
+    /// Packed stereo: the photo's own two eyes on a plane the window's shape
+    /// (one eye's), the flat picture under it until it is up; a near-invisible
+    /// layer in front carries the taps and swipes, as for AI 3D.
+    @ViewBuilder
+    private var packedStereoLayer: some View {
+        if let layout = windowModel.packedStereoLayout, let picture = windowModel.packedStereoImage,
+           !windowModel.is3DMode, !windowModel.isAIDepthMode {
+            let expectedURL = windowModel.imageURL
+            RAVEPackedStereoPhotoView(image: picture, layout: layout, cornerRadius: appModel.photoCornerRadius,
+                                      isFlipped: windowModel.isImageFlipped) { ready in
+                guard windowModel.imageURL == expectedURL else { return }
+                windowModel.packedStereoReady = ready
+            }
+            .aspectRatio(windowModel.imageAspectRatio, contentMode: .fit)
+            .offset(x: dragOffset)
+            .id(expectedURL)
+
+            Color.white.opacity(0.001)
+                .aspectRatio(windowModel.imageAspectRatio, contentMode: .fit)
+                .contentShape(.rect)
+                .onTapGesture { windowModel.toggleUIVisibility() }
                 .modifier(SwipeGestureModifier(enabled: isSwipeEnabled, onEnded: handleDragEnded, onDismissDrag: dismissDragAction))
                 .offset(x: dragOffset)
                 .offset(z: RAVEStereoPhotoView.inputTargetZ)

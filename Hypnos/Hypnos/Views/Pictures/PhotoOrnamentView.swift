@@ -15,6 +15,7 @@
 import RealityKit
 import RAVEUI
 import SwiftUI
+import VergenceApple
 
 /// Footprint a spinner is pinned to when it stands in for a glyph or a label
 /// in the ornament bar. A `ProgressView`'s intrinsic height is taller than a
@@ -46,6 +47,14 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
     /// Set while the ornament's horizontal scroller is being dragged; see
     /// `EnvironmentValues.ornamentIsScrolling`.
     @Environment(\.ornamentIsScrolling) private var ornamentIsScrolling
+    #endif
+    #if os(visionOS)
+    // In the viewer HUD a space opens through the HUD (as `PhotoDisplayView` does).
+    @Environment(\.raveViewerHUD) private var viewerHUD
+    @Environment(\.openImmersiveSpace) private var sceneOpenSpace
+    @Environment(\.dismissImmersiveSpace) private var sceneDismissSpace
+    private var openImmersiveSpace: OpenImmersiveSpaceAction { viewerHUD?.openSpace ?? sceneOpenSpace }
+    private var dismissImmersiveSpace: DismissImmersiveSpaceAction { viewerHUD?.dismissSpace ?? sceneDismissSpace }
     #endif
 
     var body: some View {
@@ -305,6 +314,10 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
                     }
                 }
 
+                #if os(visionOS)
+                stereoAndVRItems
+                #endif
+
                 if isAnyAlternateModeActive {
                     Divider()
 
@@ -366,11 +379,89 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
     }
 
     private var isAnyAlternateModeActive: Bool {
-        is3DModeActive || windowModel.isDioramaMode || windowModel.isAIDepthMode
+        is3DModeActive || windowModel.isDioramaMode || windowModel.isAIDepthMode || windowModel.isPackedStereoMode
     }
+
+    #if os(visionOS)
+    /// A photo that is already 3D: its packed eyes in the window, or a VR
+    /// picture around the wearer. What its name and shape say comes first.
+    @ViewBuilder
+    private var stereoAndVRItems: some View {
+        let detected = windowModel.detectedVRFormat
+        Divider()
+        Menu {
+            ForEach(StereoscopicFormat.allCases, id: \.self) { format in
+                let layout = format.packedLayout(eyesReversed: false)
+                nativeMenuButton(
+                    title: format.displayName,
+                    icon: format.isHorizontalSplit ? "rectangle.split.2x1" : "rectangle.split.1x2",
+                    isChecked: windowModel.packedStereoLayout == layout,
+                    isDisabled: windowModel.isAnimatedImage
+                ) {
+                    Task { await windowModel.setPackedStereo(windowModel.packedStereoLayout == layout ? nil : layout) }
+                }
+            }
+        } label: {
+            Label("Stereo Photo", systemImage: "rectangle.split.2x1")
+        }
+        Menu {
+            if windowModel.isShowingVRPhoto {
+                Button {
+                    Task { await windowModel.leaveVR(dismiss: dismissImmersiveSpace) }
+                } label: { Label("Leave VR", systemImage: "xmark.circle") }
+                Button {
+                    VRPhotoPresenter.shared.recenter()
+                } label: { Label("Place in Front of Me", systemImage: "scope") }
+                Divider()
+            }
+            if let detected, detected.projection.isImmersive {
+                vrButton(detected, title: "\(Self.vrTitle(detected)) (from its name)")
+                Divider()
+            }
+            ForEach(Self.vrChoices, id: \.title) { choice in
+                vrButton(choice.format, title: choice.title)
+            }
+        } label: {
+            Label("VR Photo", systemImage: "globe")
+        }
+    }
+
+    private func vrButton(_ format: VRFormat, title: String) -> some View {
+        Button {
+            Task { await windowModel.showInVR(format, open: openImmersiveSpace) }
+        } label: {
+            Label(title, systemImage: format.projection.halfWidthDegrees > 135 ? "globe" : "circle.lefthalf.filled")
+        }
+        .disabled(windowModel.isAnimatedImage)
+    }
+
+    private static func vrTitle(_ format: VRFormat) -> String {
+        let packing = switch format.layout?.arrangement {
+        case .sideBySide?: "Side by Side"
+        case .overUnder?: "Over-Under"
+        case nil: "Mono"
+        }
+        return "\(format.projection.label) \(packing)"
+    }
+
+    private static var vrChoices: [(title: String, format: VRFormat)] {
+        let sbs = PackedStereoLayout(arrangement: .sideBySide, isHalfResolution: false)
+        let ou = PackedStereoLayout(arrangement: .overUnder, isHalfResolution: false)
+        let formats = [
+            VRFormat(layout: sbs, projection: .vr180), VRFormat(layout: ou, projection: .vr180),
+            VRFormat(layout: nil, projection: .vr180),
+            VRFormat(layout: nil, projection: .vr360), VRFormat(layout: ou, projection: .vr360),
+            VRFormat(layout: sbs, projection: .vr360),
+            VRFormat(layout: sbs, projection: .fisheye(190)), VRFormat(layout: ou, projection: .fisheye(190)),
+            VRFormat(layout: nil, projection: .fisheye(190)),
+        ]
+        return formats.map { (vrTitle($0), $0) }
+    }
+    #endif
 
     private var threeDMenuIcon: String {
         if windowModel.isAIDepthMode { return "wand.and.sparkles" }
+        if windowModel.isPackedStereoMode { return "rectangle.split.2x1.fill" }
         if windowModel.isDioramaMode { return "spatial.capture.on.hexagon" }
         if windowModel.isRawSplatMode, is3DModeActive {
             return windowModel.desiredViewingMode == .spatial3DImmersive ? "circle.grid.3x3" : "circle.grid.3x3.fill"
