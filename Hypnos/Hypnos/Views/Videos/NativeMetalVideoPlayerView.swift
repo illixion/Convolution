@@ -214,6 +214,10 @@ struct NativeMetalVideoPlayerView {
     /// AI HDR for an SDR picture: a worker's gain grids (`ai-hdr`), applied
     /// in the final pass into an EDR drawable. Nil plays SDR as it is.
     var aiHDR: GainGridPlayback? = nil
+    /// The player is lent to the cinema (HUD, Big Screen, VR), which draws
+    /// it through RealityKit, and this view is hidden: no frame output stays
+    /// on the item (see the coordinator's `setPictureLent`).
+    var pictureLent: Bool = false
     var onPlaybackError: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
@@ -359,6 +363,7 @@ struct NativeMetalVideoPlayerView {
         }
 
         coordinator.setRoomActive(isRoomActive)
+        coordinator.setPictureLent(pictureLent)
     }
 
     @MainActor
@@ -410,6 +415,13 @@ struct NativeMetalVideoPlayerView {
         /// What the frame output decodes to: BGRA for SDR, half float for HDR
         /// drawn by Metal.
         private var outputPixelFormat: OSType = kCVPixelFormatType_32BGRA
+        /// The player is lent to the cinema: nothing pulls frames here.
+        private var pictureLent = false
+        /// The item whose decoder output was last logged on a lend.
+        private weak var loggedLentItem: AVPlayerItem?
+        /// Frames are pulled through an output: neither the system layer nor
+        /// the cinema shows the picture.
+        private var pullsFrames: Bool { !usesSystemLayer && !pictureLent }
         /// Smooth Motion. Takes effect at once: the presenter is rebuilt over
         /// the same frame output, no reload.
         var interpolatesFrames = false {
@@ -668,7 +680,11 @@ struct NativeMetalVideoPlayerView {
 
             self.player = player
             self.playerItem = looper == nil ? item : player.currentItem
-            attachOutputs(to: items, pixelFormat: kCVPixelFormatType_32BGRA)
+            if pictureLent {
+                outputPixelFormat = kCVPixelFormatType_32BGRA
+            } else {
+                attachOutputs(to: items, pixelFormat: kCVPixelFormatType_32BGRA)
+            }
             if let looper {
                 loopObservations.append(looper.observe(\.loopingPlayerItems, options: [.initial, .new]) { [weak self] _, _ in
                     Task { @MainActor [weak self] in self?.prepareLoopCopies() }
@@ -917,6 +933,75 @@ struct NativeMetalVideoPlayerView {
         func setLoopBounds(a: Double?, b: Double?) {
             loopA = a
             loopB = b
+        }
+
+        /// The cinema draws the player with RealityKit's `VideoPlayerComponent`
+        /// while this view sits hidden, so the frame outputs come off the item
+        /// (as for the system layer) and go back when the picture returns.
+        /// Left on, they kept a BGRA conversion running for a picture nobody
+        /// sees. A VP9 WebM (remuxed, decoded by the supplemental VP9 decoder)
+        /// showed in the HUD as a small scrambled square in the picture's
+        /// top-left corner (device, 2026-11-18). The stream, its geometry and
+        /// the component drawing it are fine on macOS, with or without a BGRA
+        /// output, so the suspect is the device's VP9 decoder writing the
+        /// format our output asked for into the buffers the component draws;
+        /// not yet confirmed on a device. `logLentDecoderOutput` records what
+        /// the decoder gives with no output asking.
+        func setPictureLent(_ lent: Bool) {
+            guard pictureLent != lent else { return }
+            pictureLent = lent
+            if lent {
+                removeOutputs()
+                rebuildFramePresenter()
+                AppLogger.videoWindow.info("Native player: picture lent to the cinema, frame output off")
+                logLentDecoderOutput()
+            } else {
+                if !usesSystemLayer {
+                    useOutput(pixelFormat: outputPixelFormat)
+                    rebuildFramePresenter()
+                }
+                needsPictureRedraw = true
+                AppLogger.videoWindow.info("Native player: picture back in the window, frame output on")
+            }
+        }
+
+        /// Once per item lent to the cinema: the format the decoder itself
+        /// gives (an output asking for nothing), which is what the cinema's
+        /// `VideoPlayerComponent` draws, next to the track's codec. For the
+        /// HUD and Big Screen's picture bugs, which only a device shows.
+        private func logLentDecoderOutput() {
+            guard let item = playerItem, loggedLentItem !== item else { return }
+            loggedLentItem = item
+            let probe = AVPlayerItemVideoOutput(pixelBufferAttributes: nil)
+            item.add(probe)
+            Task { @MainActor [weak item] in
+                defer { item?.remove(probe) }
+                var codec = "-"
+                if let track = item?.tracks.first(where: { $0.assetTrack?.mediaType == .video })?.assetTrack,
+                   let description = try? await track.load(.formatDescriptions).first {
+                    codec = Self.fourCC(CMFormatDescriptionGetMediaSubType(description))
+                }
+                for _ in 0..<100 {
+                    guard let item, item.outputs.contains(probe) else { return }
+                    let time = probe.itemTime(forHostTime: CACurrentMediaTime())
+                    if probe.hasNewPixelBuffer(forItemTime: time),
+                       let buffer = probe.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) {
+                        let planes = CVPixelBufferGetPlaneCount(buffer)
+                        let rowBytes = planes > 0 ? CVPixelBufferGetBytesPerRowOfPlane(buffer, 0) : CVPixelBufferGetBytesPerRow(buffer)
+                        AppLogger.videoWindow.info(
+                            "Native player: lent picture, codec \(codec, privacy: .public), decoder output \(Self.fourCC(CVPixelBufferGetPixelFormatType(buffer)), privacy: .public) \(CVPixelBufferGetWidth(buffer), privacy: .public)x\(CVPixelBufferGetHeight(buffer), privacy: .public), \(planes, privacy: .public) planes, \(rowBytes, privacy: .public) bytes per row, IOSurface \(CVPixelBufferGetIOSurface(buffer) != nil, privacy: .public), presentation \(Int(item.presentationSize.width), privacy: .public)x\(Int(item.presentationSize.height), privacy: .public)"
+                        )
+                        return
+                    }
+                    try? await Task.sleep(for: .milliseconds(30))
+                }
+                AppLogger.videoWindow.info("Native player: lent picture, codec \(codec, privacy: .public), no decoder frame in 3 s (paused?)")
+            }
+        }
+
+        private static func fourCC(_ code: FourCharCode) -> String {
+            let bytes = [24, 16, 8, 0].map { UInt8((code >> UInt32($0)) & 0xFF) }
+            return bytes.allSatisfy({ $0 >= 32 && $0 < 127 }) ? String(decoding: bytes, as: UTF8.self) : String(code)
         }
 
         func setRoomActive(_ active: Bool) {
@@ -1393,7 +1478,8 @@ struct NativeMetalVideoPlayerView {
                 // attached output would still convert every one.
                 removeOutputs()
             } else {
-                useOutput(pixelFormat: dynamicRange.isHDR ? kCVPixelFormatType_64RGBAHalf : kCVPixelFormatType_32BGRA)
+                let format = dynamicRange.isHDR ? kCVPixelFormatType_64RGBAHalf : kCVPixelFormatType_32BGRA
+                if pictureLent { outputPixelFormat = format } else { useOutput(pixelFormat: format) }
             }
             rebuildFramePresenter()
         }
@@ -1559,7 +1645,7 @@ struct NativeMetalVideoPlayerView {
                         self.onPlaybackError?()
                     }
                 })
-                if !usesSystemLayer, loopOutputs[ObjectIdentifier(copy)] == nil {
+                if pullsFrames, loopOutputs[ObjectIdentifier(copy)] == nil {
                     let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
                         kCVPixelBufferPixelFormatTypeKey as String: outputPixelFormat,
                         kCVPixelBufferMetalCompatibilityKey as String: true
@@ -1579,11 +1665,11 @@ struct NativeMetalVideoPlayerView {
             let output = loopOutputs[ObjectIdentifier(current)]
             if output !== videoOutput {
                 videoOutput = output
-                if let loopSource, let output, framePresenter != nil, !usesSystemLayer {
+                if let loopSource, let output, framePresenter != nil, pullsFrames {
                     // The presenter and interpolator stay; they take the new
                     // pass as they take a seek.
                     loopSource.follow(AVPlayerFrameSource(output: output, item: current))
-                } else if !usesSystemLayer {
+                } else if pullsFrames {
                     rebuildFramePresenter()
                 }
             }
@@ -1649,7 +1735,7 @@ struct NativeMetalVideoPlayerView {
             upscalingSource = nil
             upscalingGateOpen = nil
             loopSource = nil
-            if !usesSystemLayer, FramePixelFormat.isSupported(outputPixelFormat),
+            if pullsFrames, FramePixelFormat.isSupported(outputPixelFormat),
                let videoOutput, let playerItem {
                 var source: LookaheadFrameSource = AVPlayerFrameSource(output: videoOutput, item: playerItem)
                 if looper != nil {
