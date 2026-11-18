@@ -136,6 +136,7 @@ struct HypnosApp: App {
         WindowGroup("Generated 3D", id: HypnosSceneID.gen3d, for: Gen3DWindowValue.self) { $value in
             if let value {
                 Gen3DVolumeView(value: value)
+                    .environment(appModel)
             } else {
                 Color.clear
             }

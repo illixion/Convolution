@@ -33,6 +33,9 @@ struct Gen3DWindowValue: Identifiable, Codable, Hashable {
 struct Gen3DVolumeView: View {
     let value: Gen3DWindowValue
 
+    @Environment(AppModel.self) private var appModel
+    @OpenWindowProxy private var openWindow
+
     @State private var generator = Gen3DGenerator()
     @State private var size = Gen3DSize.life
     @State private var fit: Gen3DFit?
@@ -76,27 +79,15 @@ struct Gen3DVolumeView: View {
         .volumeBaseplateVisibility(decor ? .hidden : .automatic)
         .persistentSystemOverlays(decor ? .hidden : .automatic)
         .ornament(attachmentAnchor: .scene(.topFront), contentAlignment: .bottom) {
-            if model != nil, !decor {
+            if !decor {
                 HStack(spacing: 14) {
-                    RAVEModelTurnControls(yaw: $yaw)
-                    Divider().frame(height: 28)
-                    Gen3DSizePicker(size: $size, fit: fit)
-                    Divider().frame(height: 28)
-                    Picker("Lighting", selection: $lightingRaw) {
-                        ForEach(Gen3DLighting.allCases) { Text($0.label).tag($0.rawValue) }
+                    // Every utility window has a way back to the app's main window.
+                    PlayerHomeButton(title: "Gallery", help: "Show the app's home screen") {
+                        appModel.showMainWindow(openWindow: openWindow)
                     }
-                    .pickerStyle(.menu)
-                    .fixedSize()
-                    if engines.count > 1 {
+                    if model != nil {
                         Divider().frame(height: 28)
-                        Picker("Engine", selection: $engine) {
-                            ForEach(engines, id: \.self) { Text($0).tag($0) }
-                        }
-                        .pickerStyle(.menu)
-                        .fixedSize()
-                    }
-                    if generator.isWorking {
-                        ProgressView().controlSize(.small)
+                        controls
                     }
                 }
                 .padding(12)
@@ -120,6 +111,31 @@ struct Gen3DVolumeView: View {
             } catch {
                 guard !Task.isCancelled else { return }
                 loadFailure = error.localizedDescription
+            }
+        }
+    }
+
+    @ViewBuilder private var controls: some View {
+        HStack(spacing: 14) {
+            RAVEModelTurnControls(yaw: $yaw)
+            Divider().frame(height: 28)
+            Gen3DSizePicker(size: $size, fit: fit)
+            Divider().frame(height: 28)
+            Picker("Lighting", selection: $lightingRaw) {
+                ForEach(Gen3DLighting.allCases) { Text($0.label).tag($0.rawValue) }
+            }
+            .pickerStyle(.menu)
+            .fixedSize()
+            if engines.count > 1 {
+                Divider().frame(height: 28)
+                Picker("Engine", selection: $engine) {
+                    ForEach(engines, id: \.self) { Text($0).tag($0) }
+                }
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+            if generator.isWorking {
+                ProgressView().controlSize(.small)
             }
         }
     }
