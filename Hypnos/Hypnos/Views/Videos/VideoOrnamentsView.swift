@@ -37,6 +37,12 @@ struct VideoOrnamentsView: View {
     @DismissWindowProxy private var dismissWindow
     @Environment(\.openURL) private var openURL
     @State private var depthModels = DepthModelManager.shared
+    @State private var showsAdjustmentsPopover = false
+    #if os(visionOS)
+    /// Set when the controls are the HUD's, in the immersive space: a new window
+    /// can't be reached from there, so Adjustments opens over the picture.
+    @Environment(\.raveImmersivePlayerPresentation) private var immersivePresentation
+    #endif
 #if HYPNOS_YOUTUBE && !os(tvOS)
     @State private var showingFlashbacks = false
     @State private var showingSponsorBlockSubmit = false
@@ -493,7 +499,33 @@ struct VideoOrnamentsView: View {
         openWindow(id: HypnosSceneID.video3DPanel)
     }
 
+    @ViewBuilder
     private func adjustmentsButton(close: @escaping () -> Void) -> some View {
+        #if os(visionOS)
+        if immersivePresentation != nil {
+            // In the HUD it pops over in the same space, as the photo viewer's does.
+            Button {
+                appModel.videoAdjustmentsTarget = windowModel
+                windowModel.showAdjustments = true
+                showsAdjustmentsPopover.toggle()
+            } label: {
+                Label("All Adjustments…", systemImage: "slider.horizontal.3")
+            }
+            .ravePlayerPopover(isPresented: $showsAdjustmentsPopover, arrowEdge: .trailing) {
+                VideoAdjustmentsWindowView()
+                    .environment(appModel)
+                    .frame(width: 380)
+            }
+            .onDisappear { showsAdjustmentsPopover = false }
+        } else {
+            adjustmentsWindowButton(close: close)
+        }
+        #else
+        adjustmentsWindowButton(close: close)
+        #endif
+    }
+
+    private func adjustmentsWindowButton(close: @escaping () -> Void) -> some View {
         Button {
             close()
             appModel.videoAdjustmentsTarget = windowModel
