@@ -91,12 +91,43 @@ warm, ~50 s model load on the first job, torch peak reserved ~9.4 GB
 (nvidia-smi ~14.8 GB), a 32 MB GLB that AnythingUSDZ turns into a 69 MB USDZ.
 The optional preview turntable adds 55 s.
 
+### hunyuan3d21 — Tencent Hunyuan3D 2.1 (shape 3.3B + PBR paint 2B)
+
+`engines/hunyuan3d21/install.sh`, then `fetch_models.py` (HF cache) and the
+RealESRGAN weights copied from the Mac into `hy3dpaint/ckpt/` (GitHub release
+assets don't download from this host; sha256 `4fa0d389…82f1`).
+Its licence excludes the EU, UK and South Korea. This is a **private test on a
+US host, decided by the user on 2026-11-18**; nothing from it ships.
+
+- Shape and paint don't fit 24 GB together (~29 GB), so they take turns: both
+  models live in host RAM and move to the GPU only while they run. Peak torch
+  reserved is 15.8 GB (nvidia-smi 16.8 GB), shape stage alone 11.7 GB.
+- Upstream converts the painted OBJ to GLB with `bpy` 4.0, which has no py3.10
+  wheel. The worker stubs `bpy` and builds a PBR GLB itself with trimesh
+  (albedo + roughness/metallic packed as glTF wants).
+- Inputs without alpha get BiRefNet background removal (the upstream `rembg`
+  would download from GitHub). Options: `steps`, `guidance_scale`,
+  `octree_resolution`, `seed`, `paint_views`, `paint_resolution`,
+  `target_faces`, `shape_only`.
+- Single image only; the multi-view variant is a separate model (2mv).
+
+Measured (2026-11-18, same `T.png`, defaults): 50 s shape + 61 s paint + 2 s
+GLB = ~113 s warm, versus TRELLIS.2's ~104 s.
+
+## Comparing engines
+
+`tools/turntable.swift` renders a USDZ (from `anythingusdz model.glb`) from
+eight azimuths into one contact sheet, so results can be compared without a
+headset: `swiftc -O tools/turntable.swift -o /tmp/turntable &&
+/tmp/turntable model.usdz sheet.png 4 320`.
+
 ## Gotchas
 
 - `deploy.sh` uses plain `ssh` (a YubiKey/Touch ID prompt per connection).
   To reuse an open ssh-exec session, set
   `GEN3D_SSH="ssh -o ControlPath=$HOME/.ssh/claude-sessions/ixion_100_70_201_117"`
   (the socket is named `<user>_<host with dots as underscores>`).
+- Hunyuan's pytorch-lightning 1.9 imports `pkg_resources`: keep `setuptools<81`.
 - Upstream TRELLIS.2 needs `transformers<5` (5.x renamed DINOv3's `layer`)
   and `opencv-python-headless<5` (5.x can't read the preview HDRIs' EXR).
 

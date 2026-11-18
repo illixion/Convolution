@@ -2,17 +2,67 @@
   "trellis2": {
     "title": "TRELLIS.2 4B",
     "licence": "MIT (code and weights); nvdiffrast/nvdiffrec NVIDIA non-commercial",
-    "inputs": {"image": true, "mask": true, "views": false},
-    "outputs": ["model.glb", "preview.mp4"],
+    "inputs": {
+      "image": true,
+      "mask": true,
+      "views": false
+    },
+    "outputs": [
+      "model.glb",
+      "preview.mp4"
+    ],
     "options": {
-      "pipeline_type": ["512", "1024", "1024_cascade", "1536_cascade"],
+      "pipeline_type": [
+        "512",
+        "1024",
+        "1024_cascade",
+        "1536_cascade"
+      ],
       "seed": "int",
       "decimation_target": "int, default 500000",
       "texture_size": "int, default 2048",
       "preview": "bool, renders a turntable mp4"
     },
-    "command": ["/opt/gen3d/envs/trellis2/bin/python", "/opt/gen3d/src/engines/trellis2/worker.py"],
+    "command": [
+      "/opt/gen3d/envs/trellis2/bin/python",
+      "/opt/gen3d/src/engines/trellis2/worker.py"
+    ],
     "cwd": "/opt/gen3d/engines/trellis2",
-    "env": {"HF_HOME": "/opt/gen3d/hf", "CUDA_HOME": "/opt/gen3d/envs/trellis2"}
+    "env": {
+      "HF_HOME": "/opt/gen3d/hf",
+      "CUDA_HOME": "/opt/gen3d/envs/trellis2"
+    }
+  },
+  "hunyuan3d21": {
+    "title": "Hunyuan3D 2.1 (shape 3.3B + PBR paint 2B)",
+    "licence": "Tencent Hunyuan 3D 2.1 Community License: excludes the EU, UK and South Korea (private test on a US host, user decision 2026-11-18)",
+    "inputs": {
+      "image": true,
+      "mask": true,
+      "views": false
+    },
+    "outputs": [
+      "model.glb"
+    ],
+    "options": {
+      "steps": "int, default 50",
+      "guidance_scale": "float, default 7.5",
+      "octree_resolution": "int, default 256",
+      "seed": "int",
+      "paint_views": "int 6-9, default 6",
+      "paint_resolution": "512 or 768",
+      "target_faces": "int, default 40000",
+      "shape_only": "bool, skips texturing"
+    },
+    "command": [
+      "/opt/gen3d/envs/hunyuan3d21/bin/python",
+      "/opt/gen3d/src/engines/hunyuan3d21/worker.py"
+    ],
+    "cwd": "/opt/gen3d/engines/hunyuan3d21",
+    "env": {
+      "HF_HOME": "/opt/gen3d/hf",
+      "CUDA_HOME": "/opt/gen3d/envs/hunyuan3d21",
+      "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"
+    }
   }
 }
