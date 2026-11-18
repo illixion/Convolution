@@ -830,6 +830,22 @@ struct VideoWindowView: View {
     /// window replays it long after: a Library title resumes from where the
     /// server says it was left instead, when it says.
     private func applyStartPositionIfNeeded() async {
+        #if HYPNOS_YOUTUBE
+        // A YouTube video resumes from the watch history, never from the
+        // snapshot in the window value: a window restored after a relaunch or
+        // reinstall replays the position from when it was first opened (or
+        // none), long behind where the last 10 s reports left the video.
+        if !appliedStartPosition, windowModel.restoredPlayback == nil,
+           video.identity == windowValue.video.identity,
+           let id = YouTubeVideoID(videoIdentity: video.identity) {
+            appliedStartPosition = true
+            guard let start = await YouTubeWatchHistory.shared.resumePosition(for: id), !Task.isCancelled,
+                  windowModel.video.identity == windowValue.video.identity else { return }
+            AppLogger.youtube.info("Resuming YouTube at \(start, format: .fixed(precision: 1), privacy: .public)s from the watch history")
+            windowModel.resumeAtLibraryPosition(start)
+            return
+        }
+        #endif
         guard !appliedStartPosition, windowModel.restoredPlayback == nil,
               let snapshot = windowValue.startSeconds, snapshot > 0,
               video.identity == windowValue.video.identity
