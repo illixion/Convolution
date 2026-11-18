@@ -437,6 +437,12 @@ final class PrivateSpatial3DTuningStore {
     static let rawSplatEdgeDefaults: [String: Double] = [
         "mxi.forceDisocclusionMode": 0,
         "mxi.enableTreatments": 1,
+        // The depth mesh's grid: its triangles along a depth jump follow the
+        // grid's steps, which read as saw teeth round the splat's edges. The
+        // finest grid the knob takes makes the steps too small to see. A
+        // user override wins; the saw teeth are not yet seen gone on a headset.
+        "MXIWidthSegmentsOverride": 256,
+        "MXIHeightSegmentsOverride": 256,
     ]
 
     /// Report whether `owner` is showing Raw Splat 3D. Installs at once, not

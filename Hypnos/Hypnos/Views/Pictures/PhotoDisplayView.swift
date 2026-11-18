@@ -733,6 +733,14 @@ struct PhotoDisplayView: View {
                     let forwardZ: Float = windowModel.isRawSplatMode && windowModel.isUIHidden
                         ? Float(windowModel.rawSplatForwardOffset) : 0
                     placeSpatialPicture(atZ: experimentalZ + forwardZ)
+                    #if os(visionOS)
+                    // Raw Splat 3D: opacity on the entities (the SwiftUI
+                    // opacity below is left at 1 for it). Read here so a
+                    // change, and a mesh the renderer adds later, refit.
+                    PhotoDisplayView.applyOpacity(
+                        windowModel.isRawSplatMode ? Float(windowModel.effectiveAdjustments.opacity) : 1,
+                        to: windowModel.contentEntity)
+                    #endif
                     // Pulled forward, the splat sits in front of the input
                     // plane; let a tap on the picture itself count too.
                     let entity = windowModel.contentEntity
@@ -818,7 +826,7 @@ struct PhotoDisplayView: View {
             // Immersive space is hosting the IPC — the photo window stays
             // as a controls anchor (ornament + chrome) but doesn't double
             // up the spatial scene.
-            .opacity(windowModel.hostFullyImmersiveSpace ? 0 : windowModel.effectiveAdjustments.opacity)
+            .opacity(windowModel.hostFullyImmersiveSpace ? 0 : (windowModel.isRawSplatMode ? 1 : windowModel.effectiveAdjustments.opacity))
             .clipShape(RoundedRectangle(
                 cornerRadius: windowModel.isViewingSpatial3DImmersive ? 0 : appModel.photoCornerRadius,
                 style: .continuous
@@ -1455,7 +1463,7 @@ struct PhotoDisplayView: View {
         }
         windowModel.contentEntity.removeFromParent()
         // The window applies its opacity itself (`fitSpatialPicture`).
-        windowModel.contentEntity.components.remove(OpacityComponent.self)
+        Self.applyOpacity(1, to: windowModel.contentEntity)
         if !windowModel.is3DMode { windowModel.spatialPictureLentToHUD = false }
     }
 
@@ -1467,7 +1475,8 @@ struct PhotoDisplayView: View {
     /// show (user, 2026-11-14).
     private func installHUDHooks() {
         guard let portal = viewerHUD else { return }
-        portal.barControl = AnyView(PhotoHUDOpacitySlider(model: windowModel))
+        portal.stabilization = Cinema.shared.hudStabilization
+        portal.barControl = AnyView(PhotoHUDBarControls(model: windowModel, portal: portal))
         // The bar hides with the ornaments (user, 2026-11-14).
         portal.chromeFollowsControls = true
         portal.spaceDidOpen = { [weak windowModel, weak portal] root in
@@ -1500,12 +1509,23 @@ struct PhotoDisplayView: View {
         entity.position = SIMD3<Float>(0, 0, -hudSpatialRecess)
         // The window's SwiftUI opacity doesn't reach the picture here. Read
         // here, so a change refits it; taken off again when it goes back.
-        let opacity = Float(model.effectiveAdjustments.opacity)
-        if opacity >= 0.999 {
-            entity.components.remove(OpacityComponent.self)
-        } else if entity.components[OpacityComponent.self]?.opacity != opacity {
-            entity.components.set(OpacityComponent(opacity: opacity))
+        Self.applyOpacity(Float(model.effectiveAdjustments.opacity), to: entity)
+    }
+
+    /// An `OpacityComponent` on `entity` and every entity under it. Raw Splat
+    /// 3D's mesh is made by the renderer beneath the picture's entity, and
+    /// the picture's own component didn't dim it (user, 2026-11-18), so the
+    /// component goes on each part. Removed again at full opacity.
+    static func applyOpacity(_ opacity: Float, to entity: Entity) {
+        func apply(_ e: Entity) {
+            if opacity >= 0.999 {
+                if e.components[OpacityComponent.self] != nil { e.components.remove(OpacityComponent.self) }
+            } else if e.components[OpacityComponent.self]?.opacity != opacity {
+                e.components.set(OpacityComponent(opacity: opacity))
+            }
+            for child in e.children { apply(child) }
         }
+        apply(entity)
     }
 
     /// How far behind the HUD's attachment the RealityKit picture sits, in
@@ -1831,6 +1851,29 @@ private struct EntitySwipeGestureModifier: ViewModifier {
 #endif
 
 #if os(visionOS)
+/// The photo HUD bar: the opacity slider and the HUD's stabilization, the
+/// same persisted setting as the Cinema HUD's (`Cinema.hudStabilization`).
+struct PhotoHUDBarControls: View {
+    let model: PhotoWindowModel
+    let portal: RAVEViewerHUDPortal
+    @Bindable private var cinema = Cinema.shared
+
+    var body: some View {
+        HStack(spacing: 20) {
+            PhotoHUDOpacitySlider(model: model)
+            HStack(spacing: 8) {
+                Image(systemName: "scope")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Slider(value: $cinema.hudStabilization, in: 0 ... 1, step: 0.05)
+                    .frame(width: 140)
+                    .accessibilityLabel("Stabilization")
+            }
+        }
+        .onChange(of: cinema.hudStabilization, initial: true) { _, value in portal.stabilization = value }
+    }
+}
+
 /// The photo HUD bar's slider: the picture's opacity, the same value the
 /// Adjustments popover's Opacity sets (linear, 1-100 %), remembered with the
 /// picture's other adjustments when let go.

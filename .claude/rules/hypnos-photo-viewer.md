@@ -227,3 +227,9 @@ hosting view never left its window and the hosted root was not replaced), and
 the immediate `cleanup()` left the window on its spinner for good. The pending
 teardown is keyed by the window's model or value, not view state, which the pair
 resets. A real close is still torn down at once by `SceneDelegate.onDisconnect`.
+
+**Photo HUD stabilization, Raw Splat opacity and edges** (2026-11-18, user's ask; none of it seen on a headset yet):
+- RAVEUI's viewer HUD used to hang from `AnchorEntity(.head)`, rigid. `RAVEViewerHUDPortal.stabilization` (0 = rigid, the default for other HUD users) makes it hang from `RAVEViewerHUDFollow`, an eased world-space head (ARKit device anchor, same time constants and lag limits as Cinema's `CinemaHUDFollow`/`HUDFraming.lagLimits`, which it duplicates in small). The photo HUD bar's second slider (`PhotoHUDBarControls`) is the Cinema HUD's persisted `Cinema.hudStabilization`, so the two HUDs share one setting.
+- Opacity goes on every entity under the picture (`PhotoDisplayView.applyOpacity`), in the HUD and, for Raw Splat, in the window too (its SwiftUI opacity is then 1): the MXI mesh is made by the renderer below the picture's entity and the entity's own `OpacityComponent` didn't dim it.
+- Saw teeth round Raw Splat's edges: `rawSplatEdgeDefaults` also sets `MXIWidthSegmentsOverride`/`MXIHeightSegmentsOverride` to 256 (finest depth-mesh grid). If the headset shows no change the cause is elsewhere (treatment mask, depth edge threshold).
+
