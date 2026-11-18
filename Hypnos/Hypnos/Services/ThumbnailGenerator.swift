@@ -82,23 +82,27 @@ actor ThumbnailGenerator {
     }
 
     /// Generate a thumbnail from a video file using AVAssetImageGenerator.
-    /// WebM is unreadable by AVFoundation, so it's routed to the WebKit-based
-    /// capture instead. MKV and WebM that fail both get a still from the file
-    /// (`MatroskaThumbnails`); anything else AVFoundation can't open returns
-    /// nil and the UI shows a generic video icon placeholder.
+    /// AVFoundation can't open WebM, so a WebM gets a still from the file
+    /// (`MatroskaThumbnails`: one keyframe remuxed to MP4, decoded natively)
+    /// and only when the remux declines it (VP8) WebKit's offscreen capture.
+    /// MKV that AVAssetImageGenerator refuses gets the same still; anything
+    /// else AVFoundation can't open returns nil and the UI shows a generic
+    /// video icon placeholder.
+    ///
+    /// The still comes first because the WebKit capture never produced a
+    /// frame on visionOS (measured in the simulator 2026-11-18: every WebM
+    /// waited out its 15 s timeout, four at a time, so a folder of them
+    /// stayed empty cells for minutes), while the still takes ~0.1 s.
     private func createVideoThumbnail(for url: URL, maxSize: CGFloat) async -> UIImage? {
-        // AVFoundation can't decode WebM — capture a frame via WebKit (the same
-        // engine that plays it). Skip the AVAssetImageGenerator attempt entirely.
-        // tvOS has no WebKit, so a WebM file there just falls through to the
-        // Matroska still below (AVAssetImageGenerator fails on it the same way).
-        #if canImport(WebKit)
         if url.pathExtension.lowercased() == "webm" {
-            if let image = await WebMThumbnailGenerator.shared.generateThumbnail(for: url, maxSize: maxSize) {
-                return image
-            }
-            return await matroskaStill(url, maxSize: maxSize)
+            if let image = await matroskaStill(url, maxSize: maxSize) { return image }
+            // tvOS has no WebKit: a WebM the remux declines stays a placeholder.
+            #if canImport(WebKit)
+            return await WebMThumbnailGenerator.shared.generateThumbnail(for: url, maxSize: maxSize)
+            #else
+            return nil
+            #endif
         }
-        #endif
 
         let asset = AVURLAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)

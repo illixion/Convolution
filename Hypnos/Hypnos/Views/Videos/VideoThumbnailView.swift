@@ -182,10 +182,14 @@ struct VideoThumbnailView: View {
     }
 
     private func loadThumbnail() async {
+        // A frame-packed 3D video shows one eye, not the seam between two.
+        let stereo = Self.stereoLayout(of: video)
         if video.thumbnailURL.isFileURL {
             // Local files: use efficient downsampling path
-            if let image = await ImageLoader.shared.loadThumbnail(from: video.thumbnailURL) {
-                loadedImage = await displayReady(Self.cropTo16x9(image))
+            // Twice the size for a 3D video, so its one eye is a full cell's worth.
+            let maxSize = ThumbnailGenerator.defaultThumbnailSize * (stereo == nil ? 1 : 2)
+            if let image = await ImageLoader.shared.loadThumbnail(from: video.thumbnailURL, maxSize: maxSize) {
+                loadedImage = await displayReady(Self.fitted(image, stereo: stereo))
             } else {
                 AppLogger.views.warning("Failed to load video thumbnail: \(video.thumbnailURL.lastPathComponent, privacy: .private)")
                 loadFailed = true
@@ -193,16 +197,68 @@ struct VideoThumbnailView: View {
         } else {
             // Remote URLs: downsample + cache (stores cropped result in ThumbnailCache).
             // A server's MKV or WebM without a preview: a still from the file.
-            if let image = await ImageLoader.shared.loadRemoteThumbnailCached(from: video.thumbnailURL, maxSize: Self.thumbnailMaxSize, crop: Self.cropTo16x9) {
-                loadedImage = await displayReady(image)
-            } else if let image = await ImageLoader.shared.loadMatroskaThumbnail(for: video, maxSize: Self.thumbnailMaxSize, crop: Self.cropTo16x9) {
-                loadedImage = await displayReady(image)
+            // A 3D video's is cached uncropped (the cache's cropped entries
+            // are keyed by URL alone) and its eye cut out here, on a small
+            // bitmap, every time.
+            if let image = await remoteThumbnail(stereo: stereo) {
+                loadedImage = await displayReady(stereo == nil ? image : Self.fitted(image, stereo: stereo))
             } else {
                 AppLogger.views.warning("Failed to load video thumbnail: \(video.thumbnailURL.lastPathComponent, privacy: .private)")
                 loadFailed = true
             }
         }
         isLoading = false
+    }
+
+    private func remoteThumbnail(stereo: PackedStereoLayout?) async -> UIImage? {
+        let loader = ImageLoader.shared
+        if stereo == nil {
+            if let image = await loader.loadRemoteThumbnailCached(from: video.thumbnailURL, maxSize: Self.thumbnailMaxSize,
+                                                                  crop: Self.cropTo16x9) { return image }
+            return await loader.loadMatroskaThumbnail(for: video, maxSize: Self.thumbnailMaxSize, crop: Self.cropTo16x9)
+        }
+        if let image = await loader.loadRemoteThumbnailCached(from: video.thumbnailURL, maxSize: Self.thumbnailMaxSize) {
+            return image
+        }
+        return await loader.loadMatroskaThumbnail(for: video, maxSize: Self.thumbnailMaxSize)
+    }
+
+    /// The cell's 16:9 picture: one eye of a 3D video, then the crop.
+    nonisolated static func fitted(_ image: UIImage, stereo: PackedStereoLayout?) -> UIImage {
+        cropTo16x9(stereo.map { leftEye(of: image, layout: $0) } ?? image)
+    }
+
+    /// How `video` packs its eyes: its tags (Stash), else its file name
+    /// (`clip_180_sbs.webm`, `Film.3D.HSBS.mkv`), else nil for a flat video.
+    nonisolated static func stereoLayout(of video: GalleryVideo) -> PackedStereoLayout? {
+        if let format = video.stereoscopicFormat {
+            return format.packedLayout(eyesReversed: video.eyesReversed)
+        }
+        let name = video.fileName ?? video.thumbnailURL.lastPathComponent
+        return StereoLayoutDetector.layout(fromFileName: (name as NSString).deletingPathExtension)?.layout
+    }
+
+    /// The left eye of a frame-packed picture, a half-resolution eye
+    /// stretched back to its display shape. The image unchanged when it
+    /// can't be cut.
+    nonisolated static func leftEye(of image: UIImage, layout: PackedStereoLayout) -> UIImage {
+        guard let cgImage = image.cgImage else { return image }
+        let packed = CGSize(width: cgImage.width, height: cgImage.height)
+        let layout = layout.correctingResolution(forPacked: packed)
+        let region = layout.eyeRegion(.left)
+        let rect = CGRect(x: CGFloat(region.offset.x) * packed.width, y: CGFloat(region.offset.y) * packed.height,
+                          width: CGFloat(region.scale.x) * packed.width, height: CGFloat(region.scale.y) * packed.height)
+            .integral
+        guard let eye = cgImage.cropping(to: rect) else { return image }
+        guard layout.isHalfResolution else { return UIImage(cgImage: eye) }
+        let size = layout.eyeSize(packed: packed)
+        guard let context = CGContext(data: nil, width: Int(size.width), height: Int(size.height), bitsPerComponent: 8,
+                                      bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+                                          | CGBitmapInfo.byteOrder32Little.rawValue) else { return UIImage(cgImage: eye) }
+        context.interpolationQuality = .medium
+        context.draw(eye, in: CGRect(origin: .zero, size: size))
+        return context.makeImage().map { UIImage(cgImage: $0) } ?? UIImage(cgImage: eye)
     }
 
     /// Decode into a display-ready bitmap once, off the main thread, so

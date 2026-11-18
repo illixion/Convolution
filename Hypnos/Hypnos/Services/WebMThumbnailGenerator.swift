@@ -241,7 +241,18 @@ private final class WebMFrameCapture: NSObject, WKScriptMessageHandler {
             var s=Math.min(1, MAX/Math.max(w,h));
             c.width=Math.max(1,Math.round(w*s)); c.height=Math.max(1,Math.round(h*s));
             try{
-              c.getContext('2d').drawImage(v,0,0,c.width,c.height);
+              var g=c.getContext('2d');
+              g.drawImage(v,0,0,c.width,c.height);
+              // A video WebKit decodes but can't read back draws nothing:
+              // a clear canvas, encoded as a black JPEG. Refuse a frame with
+              // no visible pixel or one flat colour, so the cell keeps its
+              // placeholder instead of caching an empty picture.
+              var d=g.getImageData(0,0,c.width,c.height).data, lo=255, hi=0, seen=0;
+              for(var i=0;i<d.length;i+=4*Math.max(1,Math.floor(d.length/4/4096))){
+                if(d[i+3]<16)continue; seen++;
+                var y=(d[i]*3+d[i+1]*6+d[i+2])/10; if(y<lo)lo=y; if(y>hi)hi=y;
+              }
+              if(!seen||hi-lo<4){fail('blank');return;}
               done=true; post({data:c.toDataURL('image/jpeg',0.82)});
             }catch(e){fail('draw:'+e);}
           }
