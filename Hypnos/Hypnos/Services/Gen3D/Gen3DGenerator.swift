@@ -13,7 +13,9 @@
 import AnythingUSDZKit
 import DebugTrace
 import Foundation
+import ImageIO
 import Observation
+import UniformTypeIdentifiers
 
 @MainActor
 @Observable
@@ -92,7 +94,10 @@ final class Gen3DGenerator {
         }
         try Task.checkCancellation()
         phase = .uploading
-        let id = try await client.submit(image: data, engine: engine, optionsJSON: options)
+        guard let png = Self.pngData(from: data, maxPixel: 2048) else {
+            throw Gen3DError.failed("The picture's format couldn't be read.")
+        }
+        let id = try await client.submit(image: png, engine: engine, optionsJSON: options)
         remember(key, jobID: id)
         return id
     }
@@ -142,6 +147,22 @@ final class Gen3DGenerator {
         var all = pending
         guard all.removeValue(forKey: key) != nil else { return }
         HypnosDefaults.store.set(all, forKey: Self.pendingKey)
+    }
+
+    /// Whatever the device can decode (HEIC, JPEG, WebP, …) as PNG, at most
+    /// `maxPixel` on the long side: the server reads PNG only and gains nothing
+    /// from more pixels.
+    nonisolated private static func pngData(from data: Data, maxPixel: Int) -> Data? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+              ] as CFDictionary) else { return nil }
+        let out = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(out, UTType.png.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, image, nil)
+        return CGImageDestinationFinalize(dest) ? out as Data : nil
     }
 
     /// A Python traceback's last line is the error; the rest is frames.
