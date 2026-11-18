@@ -46,6 +46,8 @@ nonisolated final class MusicSongFile: NSObject, URLSessionDataDelegate, @unchec
     private var session: URLSession?
     private var attempts = 0
     private var cancelled = false
+    /// A retried HTTP status cancelled its own task; that task's completion must not count as a second failure.
+    private var retryingStatus = false
 
     init(itemID: String, source: Source, remoteURL: URL, typeHint: AudioFileTypeID, directory: URL) {
         self.itemID = itemID
@@ -127,9 +129,26 @@ nonisolated final class MusicSongFile: NSObject, URLSessionDataDelegate, @unchec
                 state.withLock { $0.expected = received + http.expectedContentLength }
             }
             completionHandler(.allow)
+        case _ where attempts < 3 && (http.statusCode == 408 || http.statusCode == 429 || (500...599).contains(http.statusCode)):
+            // The server tripped over itself (Jellyfin's transcode-folder lock race answers a stream request
+            // with a 500 when songs are skipped quickly) and the next try goes through: try again, don't give up.
+            attempts += 1
+            retryingStatus = true
+            completionHandler(.cancel)
+            scheduleRetry(from: source == .original ? received : 0, after: 0.4 * Double(attempts), on: session.delegateQueue)
         default:
             fail(http.statusCode == 401 || http.statusCode == 403 ? "The server refused this song." : "The server couldn't send this song (HTTP \(http.statusCode)).")
             completionHandler(.cancel)
+        }
+    }
+
+    private func scheduleRetry(from resumeAt: Int64, after delay: Double, on queue: OperationQueue) {
+        if resumeAt == 0 { try? writer?.truncate(atOffset: 0); state.withLock { $0.received = 0 } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
+            queue.addOperation { [self] in
+                guard !cancelled else { return }
+                request(from: resumeAt)
+            }
         }
     }
 
@@ -147,6 +166,7 @@ nonisolated final class MusicSongFile: NSObject, URLSessionDataDelegate, @unchec
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard !cancelled else { return }
+        if retryingStatus { retryingStatus = false; return }
         if state.withLock({ $0.failure != nil }) { return }
         if let error {
             // A dropped connection: carry on from what arrived (the original), or start the transcode over.
@@ -157,13 +177,7 @@ nonisolated final class MusicSongFile: NSObject, URLSessionDataDelegate, @unchec
             }
             let resumeAt = source == .original ? state.withLock { $0.received } : 0
             if resumeAt == 0 { try? writer?.truncate(atOffset: 0); state.withLock { $0.received = 0 } }
-            let queue = session.delegateQueue
-            DispatchQueue.global().asyncAfter(deadline: .now() + Double(attempts)) { [self] in
-                queue.addOperation { [self] in
-                    guard !cancelled else { return }
-                    request(from: resumeAt)
-                }
-            }
+            scheduleRetry(from: resumeAt, after: Double(attempts), on: session.delegateQueue)
             return
         }
         try? writer?.synchronize()
