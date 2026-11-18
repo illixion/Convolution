@@ -23,11 +23,13 @@
  */
 
 import AVFoundation
+import CoreMedia
 import CoreGraphics
 import DebugTrace
 import Foundation
 import MatroskaRemux
 import Synchronization
+import VideoToolbox
 
 enum MatroskaThumbnails {
     /// Worth trying for this file: by its name (a grid asks for hundreds,
@@ -81,9 +83,74 @@ enum MatroskaThumbnails {
                 """)
             return image
         } catch {
+            // visionOS plays VP9 from HLS but finds no track in a VP9 MP4 file
+            // (AVErrorNoSourceTrack, measured 2026-11-18), so every local
+            // VP9 WebM stayed a blank cell: the keyframe through
+            // VideoToolbox instead, the decoder the remux checks for.
+            if let image = decodedKeyframe(still) {
+                AppLogger.imageLoader.debug("Matroska thumbnail decoded at \(still.seconds, format: .fixed(precision: 1), privacy: .public) s with VideoToolbox (\(error.logCode, privacy: .public) from the MP4)")
+                return fitted(image, maxSize: maxSize)
+            }
             AppLogger.imageLoader.warning("Matroska still didn't decode: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             return nil
         }
+    }
+
+    /// The still's keyframe decoded by VideoToolbox from its MP4 sample
+    /// entry, or nil.
+    private static func decodedKeyframe(_ still: VideoStill) -> CGImage? {
+        guard !still.sampleEntry.isEmpty, !still.keyframe.isEmpty else { return nil }
+        var format: CMVideoFormatDescription?
+        let made = still.sampleEntry.withUnsafeBytes { raw -> OSStatus in
+            guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return -1 }
+            return CMVideoFormatDescriptionCreateFromBigEndianImageDescriptionData(
+                allocator: kCFAllocatorDefault, bigEndianImageDescriptionData: base, size: still.sampleEntry.count,
+                stringEncoding: CFStringBuiltInEncodings.UTF8.rawValue, flavor: .isoFamily,
+                formatDescriptionOut: &format)
+        }
+        guard made == noErr, let format else { return nil }
+
+        var block: CMBlockBuffer?
+        let length = still.keyframe.count
+        guard CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: length,
+                                                 blockAllocator: kCFAllocatorDefault, customBlockSource: nil,
+                                                 offsetToData: 0, dataLength: length, flags: 0,
+                                                 blockBufferOut: &block) == noErr, let block else { return nil }
+        let copied = still.keyframe.withUnsafeBytes { raw in
+            CMBlockBufferReplaceDataBytes(with: raw.baseAddress!, blockBuffer: block, offsetIntoDestination: 0,
+                                          dataLength: length)
+        }
+        guard copied == noErr else { return nil }
+        var sample: CMSampleBuffer?
+        var size = length
+        guard CMSampleBufferCreateReady(allocator: kCFAllocatorDefault, dataBuffer: block, formatDescription: format,
+                                        sampleCount: 1, sampleTimingEntryCount: 0, sampleTimingArray: nil,
+                                        sampleSizeEntryCount: 1, sampleSizeArray: &size,
+                                        sampleBufferOut: &sample) == noErr, let sample else { return nil }
+
+        let attributes: [String: Any] = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+        var session: VTDecompressionSession?
+        guard VTDecompressionSessionCreate(allocator: kCFAllocatorDefault, formatDescription: format,
+                                           decoderSpecification: nil,
+                                           imageBufferAttributes: attributes as CFDictionary,
+                                           outputCallback: nil, decompressionSessionOut: &session) == noErr,
+              let session else { return nil }
+        defer { VTDecompressionSessionInvalidate(session) }
+        let result = DecodedFrame()
+        _ = VTDecompressionSessionDecodeFrame(session, sampleBuffer: sample, flags: [], infoFlagsOut: nil) {
+            status, _, buffer, _, _ in
+            guard status == noErr, let buffer else { return }
+            var decoded: CGImage?
+            VTCreateCGImageFromCVPixelBuffer(buffer, options: nil, imageOut: &decoded)
+            result.image.withLock { $0 = decoded }
+        }
+        VTDecompressionSessionWaitForAsynchronousFrames(session)
+        return result.image.withLock { $0 }
+    }
+
+    /// The decoder's output, handed from its callback.
+    private final class DecodedFrame: @unchecked Sendable {
+        let image = Mutex<CGImage?>(nil)
     }
 
     /// A decoded keyframe scaled to fit `maxSize` (AVAssetImageGenerator

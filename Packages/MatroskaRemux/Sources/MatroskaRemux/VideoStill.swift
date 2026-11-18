@@ -34,6 +34,12 @@ public struct VideoStill: @unchecked Sendable {
     /// The keyframe decoded, for video only the caller's decoder reads.
     public var image: CGImage?
     #endif
+    /// The MP4 video sample entry and the keyframe's bytes, for a caller that
+    /// decodes the frame itself (VideoToolbox) where AVFoundation won't open
+    /// the MP4: visionOS reads VP9 from HLS but finds no track in a VP9 MP4
+    /// file (AVErrorNoSourceTrack). Empty with `image`.
+    public var sampleEntry = Data()
+    public var keyframe = Data()
     /// Where the frame is, in seconds from the video's start.
     public var seconds: Double
     /// The picture size players show.
@@ -120,7 +126,8 @@ public struct VideoStill: @unchecked Sendable {
             TrackRun(trackID: 1, fragment: Fragment(baseDecodeTime: 0, samples: [sample]), compositionOffsets: true),
         ]))
         let counts = counting.counts
-        return VideoStill(mp4: mp4, seconds: Double(keyframe.blockTimestamp - start) / ticksPerSecond,
+        return VideoStill(mp4: mp4, sampleEntry: Data(video.sampleEntry), keyframe: Data(keyframe.data),
+                          seconds: Double(keyframe.blockTimestamp - start) / ticksPerSecond,
                           width: video.displayWidth, height: video.displayHeight, bytesRead: counts.bytes,
                           reads: counts.reads)
     }

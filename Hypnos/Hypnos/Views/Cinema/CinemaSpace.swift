@@ -234,6 +234,9 @@ final class CinemaSpace {
             Task { await sphere.setFormat(format) }
             AppLogger.videoWindow.info("Cinema: VR \(format?.projection.label ?? "none", privacy: .public), \(format?.layout.map { $0.arrangement.rawValue } ?? "mono", privacy: .public)")
         }
+        if cinema.screenPlayer == nil {
+            AppLogger.videoWindow.error("Cinema: VR has no player to draw from")
+        }
         vrSphere.show(player: cinema.screenPlayer)
         cinema.noteScreenAttached(cinema.screenPlayer != nil && cinema.vrPose != nil)
     }
