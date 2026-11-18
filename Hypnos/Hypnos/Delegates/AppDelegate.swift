@@ -82,6 +82,9 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         if connectingSceneSession.role == .windowApplication {
             configuration.delegateClass = SceneDelegate.self
         }
+        #if os(iOS)
+        RAVEExternalDisplay.configure(configuration)
+        #endif
         return configuration
     }
 }

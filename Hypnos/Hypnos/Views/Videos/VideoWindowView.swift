@@ -676,6 +676,16 @@ struct VideoWindowView: View {
             windowModel.stackStateChanged(isPushedOver: pushedOver)
         }
         #endif
+        #if os(iOS)
+        .background(alignment: .topLeading) {
+            if windowModel.playbackRenderer == .nativeMetal {
+                RAVEExternalDisplayHost {
+                    ExternalVideoView(model: windowModel)
+                }
+                .frame(width: 0, height: 0)
+            }
+        }
+        #endif
         .onAppear {
             // Wall-snapped pop-outs restored by visionOS after a reboot come
             // back with the same windowValue UUID. Repeat appearances of the
