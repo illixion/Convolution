@@ -1,5 +1,5 @@
 /*
- FFmpegDecoders - DTS and TrueHD/MLP to PCM, for the sideload edition
+ FFmpegDecoders - DTS, TrueHD/MLP and Vorbis to PCM, for the sideload edition
 
  The decoders are in HypnosFFmpeg.framework (Shim/ and
  scripts/build-ffmpeg-decoders.sh), which nothing links against: it is
@@ -19,7 +19,7 @@ import Foundation
 
 public enum FFmpegAudioCodec: Int32, Sendable {
     // The shim's hyp_ff_codec values.
-    case dts = 1, trueHD = 2, mlp = 3
+    case dts = 1, trueHD = 2, mlp = 3, vorbis = 4
 
     /// The codec for a Matroska CodecID, when this package decodes it.
     public init?(matroskaCodecID id: String) {
@@ -27,6 +27,8 @@ public enum FFmpegAudioCodec: Int32, Sendable {
         case "A_DTS", "A_DTS/EXPRESS", "A_DTS/LOSSLESS": self = .dts
         case "A_TRUEHD": self = .trueHD
         case "A_MLP": self = .mlp
+        // CodecPrivate (the three Xiph-laced headers) is the extradata.
+        case "A_VORBIS": self = .vorbis
         default: return nil
         }
     }

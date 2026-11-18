@@ -12,9 +12,12 @@
  while it plays). `--still` writes the one-keyframe MP4 the app makes
  thumbnails from (`VideoStill`).
 
- DTS and TrueHD tracks are decoded to ALAC renditions when the FFmpeg
- decoders are built (`scripts/build-ffmpeg-decoders.sh`); without them they
- are dropped, as in the App Store app. With MKVREMUX_STABLE=1 in the
+ DTS, TrueHD and Vorbis tracks are decoded to ALAC renditions, and VP8
+ video is decoded and re-encoded to HEVC (`VideoTranscode.swift`; each
+ re-encoded video segment's time is printed), when the FFmpeg decoders are
+ built (`scripts/build-ffmpeg-decoders.sh`); without them the tracks are
+ dropped and a VP8 file declined, as in the App Store app. `--still` of a
+ VP8 file writes a PNG of the decoded keyframe instead of an MP4. With MKVREMUX_STABLE=1 in the
  environment, each also gets its Stable Audio rendition (`StableAudio.swift`).
  Dolby Vision profile 7 plays as 8.1 with the same framework
  (`DolbyVisionConversion.swift`; MKVREMUX_DOVI=0 keeps the base layer only).
@@ -26,7 +29,9 @@
  */
 
 import Foundation
+import ImageIO
 import MatroskaRemux
+import UniformTypeIdentifiers
 
 /// A file over HTTP, read with range requests, counting them.
 final class HTTPByteSource: ByteSource, @unchecked Sendable {
@@ -73,8 +78,18 @@ if arguments.count == 4, arguments[1] == "--still" {
     do {
         let bytes = try source(arguments[2])
         let started = Date()
-        let still = try await VideoStill.make(source: bytes)
-        try still.mp4.write(to: URL(fileURLWithPath: arguments[3]))
+        let still = try await VideoStill.make(source: bytes, videoDecoding: FFmpegRemuxVideoDecoder.decoding)
+        if let image = still.image {
+            guard let destination = CGImageDestinationCreateWithURL(URL(fileURLWithPath: arguments[3]) as CFURL,
+                                                                    UTType.png.identifier as CFString, 1, nil) else {
+                print("can't write \(arguments[3])")
+                exit(1)
+            }
+            CGImageDestinationAddImage(destination, image, nil)
+            CGImageDestinationFinalize(destination)
+        } else {
+            try still.mp4.write(to: URL(fileURLWithPath: arguments[3]))
+        }
         print(String(format: "still at %.3f s, %dx%d, %d bytes, made in %.3f s from %d reads, %lld bytes",
                      still.seconds, still.width, still.height, still.mp4.count, Date().timeIntervalSince(started),
                      still.reads, still.bytesRead))
@@ -116,6 +131,7 @@ do {
     let started = Date()
     var options = RemuxOptions()
     options.audioDecoding = FFmpegRemuxDecoder.decoding
+    options.videoDecoding = FFmpegRemuxVideoDecoder.decoding
     if ProcessInfo.processInfo.environment["MKVREMUX_DOVI"] != "0" {
         options.dolbyVisionConversion = FFmpegDolbyVisionConversion.conversion
     }
@@ -146,7 +162,10 @@ do {
         paths += ["audio-\(track.number).m3u8", "audio-\(track.number)/init.mp4"]
         paths += segments.map { "audio-\(track.number)/\($0).m4s" }
     }
+    let reencoded = summary.video.codec.contains(" as ")
+    var encodeSeconds = 0.0, encodedSeconds = 0.0
     for path in paths {
+        let requested = Date()
         guard let (data, _) = try await session.data(at: path) else {
             print("missing \(path)")
             exit(1)
@@ -154,6 +173,18 @@ do {
         let file = output.appendingPathComponent(path)
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: file)
+        if reencoded, path.hasPrefix("video/"), let k = Int(path.dropFirst(6).prefix { $0.isNumber }) {
+            let took = Date().timeIntervalSince(requested)
+            let seconds = session.segmentSeconds(k)
+            encodeSeconds += took
+            encodedSeconds += seconds
+            print(String(format: "  video %d: %.0f ms for %.2f s (%.0f ms per second of video), %d bytes",
+                         k, took * 1000, seconds, took * 1000 / max(0.001, seconds), data.count))
+        }
+    }
+    if reencoded, encodedSeconds > 0 {
+        print(String(format: "re-encoded %.2f s of video in %.3f s: %.0f ms per second", encodedSeconds, encodeSeconds,
+                     encodeSeconds * 1000 / encodedSeconds))
     }
     print("wrote \(paths.count) files in \(String(format: "%.3f", Date().timeIntervalSince(started))) s, read \(await session.bytesRead) bytes for segments")
 } catch {

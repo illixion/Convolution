@@ -1,8 +1,8 @@
 /*
  MatroskaRemux - audio MP4 can't carry, decoded and offered as ALAC
 
- DTS and TrueHD have no MP4 sample entry AVFoundation plays and no decoder
- on Apple platforms. When the caller supplies a decoder for a codec
+ DTS, TrueHD and Vorbis have no MP4 sample entry AVFoundation plays and no
+ decoder on Apple platforms. When the caller supplies a decoder for a codec
  (`RemuxOptions.audioDecoding`; the app's sideload edition passes FFmpeg's),
  such a track becomes a rendition like any other, as lossless 24-bit ALAC.
  Nothing else changes: the track keeps its own timeline, segment boundaries
@@ -73,6 +73,9 @@ struct AudioTranscode: Sendable {
         /// `input_timing` (a 16-bit sample counter) places it exactly,
         /// counted from the first one's (`timingOrigin`).
         case accessUnits(samplesPerUnit: Int, timingOrigin: UInt16?)
+        /// Vorbis: short or long blocks, by each packet's mode
+        /// (`Vorbis.swift`); timed by block times, not a grid.
+        case vorbis(VorbisSetup)
     }
 
     let decoding: RemuxAudioDecoding
@@ -96,6 +99,7 @@ struct AudioTranscode: Sendable {
         switch source {
         case .constant(let n): return n
         case .accessUnits(let perUnit, _): return max(1, Self.accessUnits(in: frame)) * perUnit
+        case .vorbis(let setup): return max(1, setup.samples(in: frame))
         }
     }
 

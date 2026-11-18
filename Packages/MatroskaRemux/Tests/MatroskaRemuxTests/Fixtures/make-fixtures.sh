@@ -87,11 +87,16 @@ mkvmerge -q --engage lacing_ebml -o laced-ebml-aac.mkv "$tmp/v.mkv" "$tmp/a1.mka
 ffmpeg -nostdin -loglevel error -f lavfi -i "$(src 320x180 25 7)" -f lavfi -i "sine=frequency=440:duration=7" \
    -c:v libvpx-vp9 -b:v 80k -g 25 -deadline realtime -cpu-used 8 -c:a libopus -b:a 24k -f webm - > live.webm
 
-# Declines: VP8 video; VP9 whose only audio is Vorbis.
+# Declined without the caller's decoders (VideoTranscode.swift,
+# AudioTranscode.swift): VP8 video; VP9 whose only audio is Vorbis.
 ff -f lavfi -i "$(src 160x90 25 2)" -f lavfi -i "sine=frequency=440:duration=2" \
    -c:v libvpx -b:v 50k -c:a libopus -b:a 24k vp8-opus.webm
 ff -f lavfi -i "$(src 160x90 25 2)" -f lavfi -i "sine=frequency=440:duration=2" \
    -c:v libvpx-vp9 -b:v 50k -deadline realtime -cpu-used 8 -c:a vorbis -strict -2 -ac 2 vp9-vorbis.webm
+# VP8 with alt-ref (invisible) frames and Vorbis, over segments: decoded,
+# re-encoded and offered as ALAC with them.
+ff -f lavfi -i "$(src 320x180 25 6)" -f lavfi -i "sine=frequency=440:duration=6" \
+   -c:v libvpx -b:v 200k -g 50 -auto-alt-ref 1 -lag-in-frames 16 -c:a vorbis -strict -2 -ac 2 vp8-vorbis.webm
 
 # AV1 + Opus.
 ff -f lavfi -i "$(src 320x176 24 4)" -f lavfi -i "sine=frequency=440:duration=4" \

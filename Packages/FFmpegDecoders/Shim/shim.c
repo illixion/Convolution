@@ -1,5 +1,7 @@
 // The C surface of HypnosFFmpeg.framework (see CFFmpegShim.h), compiled and
 // linked with FFmpeg's static libraries by scripts/build-ffmpeg-decoders.sh.
+// A framework built before a codec was added (Vorbis, VP8) fails to open
+// it, so a caller always falls back cleanly.
 // Only the hyp_ff_* functions are exported. The Dolby Vision part calls
 // FFmpeg's internal RPU reader and writer, linked in from the same static
 // libraries (their headers come from the FFmpeg source tree).
@@ -35,8 +37,11 @@ hyp_ff_decoder *hyp_ff_open(hyp_ff_codec codec, const uint8_t *extradata, int ex
     case HYP_FF_DTS: id = AV_CODEC_ID_DTS; break;
     case HYP_FF_TRUEHD: id = AV_CODEC_ID_TRUEHD; break;
     case HYP_FF_MLP: id = AV_CODEC_ID_MLP; break;
+    case HYP_FF_VORBIS: id = AV_CODEC_ID_VORBIS; break;
     default: return NULL;
     }
+    // A Vorbis block is one whole packet: no parser.
+    int parsed = codec != HYP_FF_VORBIS;
     av_log_set_level(AV_LOG_QUIET);
     const AVCodec *decoder = avcodec_find_decoder(id);
     if (!decoder) return NULL;
@@ -44,10 +49,10 @@ hyp_ff_decoder *hyp_ff_open(hyp_ff_codec codec, const uint8_t *extradata, int ex
     hyp_ff_decoder *d = calloc(1, sizeof(*d));
     if (!d) return NULL;
     d->context = avcodec_alloc_context3(decoder);
-    d->parser = av_parser_init(id);
+    d->parser = parsed ? av_parser_init(id) : NULL;
     d->packet = av_packet_alloc();
     d->frame = av_frame_alloc();
-    if (!d->context || !d->parser || !d->packet || !d->frame) goto fail;
+    if (!d->context || (parsed && !d->parser) || !d->packet || !d->frame) goto fail;
     if (extradata && extradata_size > 0) {
         d->context->extradata = av_mallocz(extradata_size + AV_INPUT_BUFFER_PADDING_SIZE);
         if (!d->context->extradata) goto fail;
@@ -133,6 +138,16 @@ static void decode(hyp_ff_decoder *d, AVPacket *packet) {
 int hyp_ff_feed(hyp_ff_decoder *d, const uint8_t *data, int size) {
     if (!d) return AVERROR(EINVAL);
     int draining = data == NULL || size == 0;
+    if (!d->parser) {
+        // Whole packets (Vorbis): each one decoded as it is.
+        if (draining) { decode(d, NULL); return 0; }
+        AVPacket *packet = av_packet_alloc();
+        if (!packet || av_new_packet(packet, size) < 0) { av_packet_free(&packet); return AVERROR(ENOMEM); }
+        memcpy(packet->data, data, (size_t)size);
+        decode(d, packet);
+        av_packet_free(&packet);
+        return 0;
+    }
     // The parser reads a padded buffer.
     uint8_t *padded = NULL;
     if (!draining) {
@@ -180,6 +195,123 @@ void hyp_ff_close(hyp_ff_decoder *d) {
     av_frame_free(&d->frame);
     free(d->samples);
     free(d);
+}
+
+// MARK: - Video (see CFFmpegShim.h)
+
+#include <libavutil/pixfmt.h>
+
+struct hyp_ff_video_decoder {
+    AVCodecContext *context;
+    AVPacket *packet;
+    AVFrame *frame;
+    int drained;
+    int errors;
+};
+
+hyp_ff_video_decoder *hyp_ff_video_open(hyp_ff_video_codec codec, const uint8_t *extradata, int extradata_size,
+                                        int threads) {
+    enum AVCodecID id;
+    switch (codec) {
+    case HYP_FF_VIDEO_VP8: id = AV_CODEC_ID_VP8; break;
+    default: return NULL;
+    }
+    av_log_set_level(AV_LOG_QUIET);
+    const AVCodec *decoder = avcodec_find_decoder(id);
+    if (!decoder) return NULL;
+    hyp_ff_video_decoder *d = calloc(1, sizeof(*d));
+    if (!d) return NULL;
+    d->context = avcodec_alloc_context3(decoder);
+    d->packet = av_packet_alloc();
+    d->frame = av_frame_alloc();
+    if (!d->context || !d->packet || !d->frame) goto fail;
+    if (extradata && extradata_size > 0) {
+        d->context->extradata = av_mallocz(extradata_size + AV_INPUT_BUFFER_PADDING_SIZE);
+        if (!d->context->extradata) goto fail;
+        memcpy(d->context->extradata, extradata, extradata_size);
+        d->context->extradata_size = extradata_size;
+    }
+    d->context->thread_count = threads;
+    d->context->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+    if (avcodec_open2(d->context, decoder, NULL) < 0) goto fail;
+    return d;
+fail:
+    hyp_ff_video_close(d);
+    return NULL;
+}
+
+int hyp_ff_video_send(hyp_ff_video_decoder *d, const uint8_t *data, int size, int64_t tag) {
+    if (!d) return AVERROR(EINVAL);
+    if (data == NULL || size == 0) {
+        if (d->drained) return 0;
+        d->drained = 1;
+        return avcodec_send_packet(d->context, NULL);
+    }
+    av_packet_unref(d->packet);
+    int status = av_new_packet(d->packet, size);
+    if (status < 0) return status;
+    memcpy(d->packet->data, data, (size_t)size);
+    d->packet->pts = tag;
+    d->packet->dts = tag;
+    status = avcodec_send_packet(d->context, d->packet);
+    // EAGAIN: pictures have to be received first, then the frame resent.
+    if (status < 0 && status != AVERROR(EAGAIN)) d->errors++;
+    return status;
+}
+
+int hyp_ff_video_receive(hyp_ff_video_decoder *d, hyp_ff_picture *out) {
+    if (!d || !out) return AVERROR(EINVAL);
+    for (;;) {
+        av_frame_unref(d->frame);
+        int status = avcodec_receive_frame(d->context, d->frame);
+        if (status == AVERROR(EAGAIN)) return 0;
+        if (status < 0) {
+            if (status != AVERROR_EOF) d->errors++;
+            return status;
+        }
+        const AVFrame *f = d->frame;
+        if (f->format != AV_PIX_FMT_YUV420P && f->format != AV_PIX_FMT_YUVJ420P && f->format != AV_PIX_FMT_YUVA420P) {
+            d->errors++;
+            continue;
+        }
+        out->width = f->width;
+        out->height = f->height;
+        for (int i = 0; i < 3; i++) {
+            out->planes[i] = f->data[i];
+            out->strides[i] = f->linesize[i];
+        }
+        out->tag = f->pts != AV_NOPTS_VALUE ? f->pts : f->best_effort_timestamp;
+        out->full_range = f->color_range == AVCOL_RANGE_JPEG || f->format == AV_PIX_FMT_YUVJ420P;
+        out->key_frame = (f->flags & AV_FRAME_FLAG_KEY) != 0;
+        return 1;
+    }
+}
+
+int hyp_ff_video_errors(const hyp_ff_video_decoder *d) { return d ? d->errors : 0; }
+
+void hyp_ff_video_close(hyp_ff_video_decoder *d) {
+    if (!d) return;
+    avcodec_free_context(&d->context);
+    av_packet_free(&d->packet);
+    av_frame_free(&d->frame);
+    free(d);
+}
+
+void hyp_ff_picture_copy_nv12(const hyp_ff_picture *p, uint8_t *y, int y_stride, uint8_t *cbcr, int cbcr_stride) {
+    if (!p || !y || !cbcr) return;
+    int w = p->width, h = p->height;
+    for (int row = 0; row < h; row++)
+        memcpy(y + (size_t)row * y_stride, p->planes[0] + (size_t)row * p->strides[0], (size_t)w);
+    int cw = (w + 1) / 2, ch = (h + 1) / 2;
+    for (int row = 0; row < ch; row++) {
+        const uint8_t *cb = p->planes[1] + (size_t)row * p->strides[1];
+        const uint8_t *cr = p->planes[2] + (size_t)row * p->strides[2];
+        uint8_t *dst = cbcr + (size_t)row * cbcr_stride;
+        for (int i = 0; i < cw; i++) {
+            dst[2 * i] = cb[i];
+            dst[2 * i + 1] = cr[i];
+        }
+    }
 }
 
 // MARK: - Dolby Vision RPUs (see CFFmpegShim.h)

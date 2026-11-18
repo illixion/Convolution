@@ -84,7 +84,8 @@ actor ThumbnailGenerator {
     /// Generate a thumbnail from a video file using AVAssetImageGenerator.
     /// AVFoundation can't open WebM, so a WebM gets a still from the file
     /// (`MatroskaThumbnails`: one keyframe remuxed to MP4, decoded natively)
-    /// and only when the remux declines it (VP8) WebKit's offscreen capture.
+    /// and only when the remux declines it (VP8 in the App Store edition; the
+    /// sideload edition decodes VP8 with FFmpeg) WebKit's offscreen capture.
     /// MKV that AVAssetImageGenerator refuses gets the same still; anything
     /// else AVFoundation can't open returns nil and the UI shows a generic
     /// video icon placeholder.

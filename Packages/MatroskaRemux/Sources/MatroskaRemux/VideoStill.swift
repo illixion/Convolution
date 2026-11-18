@@ -14,13 +14,26 @@
  a server's file is read in ranges: the head (and Cues), a 256 KB probe
  without them, the start of one cluster and the keyframe: a few hundred KB
  for 1080p, a few MB for UHD.
+
+ Video MP4 can't carry (VP8) has no MP4 to make. With the caller's decoder
+ for it (`RemuxVideoDecoding`, the one the remux re-encodes with) the
+ keyframe is decoded to an image instead (`image`, and `mp4` is empty);
+ without one the file is declined as before.
  */
 
 import Foundation
+#if canImport(VideoToolbox)
+import CoreGraphics
+#endif
 
-public struct VideoStill: Sendable {
+public struct VideoStill: @unchecked Sendable {
     /// An MP4 file: the init segment and one fragment with the keyframe.
+    /// Empty when the keyframe was decoded to `image` instead.
     public var mp4: Data
+    #if canImport(VideoToolbox)
+    /// The keyframe decoded, for video only the caller's decoder reads.
+    public var image: CGImage?
+    #endif
     /// Where the frame is, in seconds from the video's start.
     public var seconds: Double
     /// The picture size players show.
@@ -33,14 +46,17 @@ public struct VideoStill: Sendable {
     /// The keyframe at or before `fraction` of the video (by time with
     /// Cues, by bytes without), but no later than `maximumSeconds` in.
     public static func make(source: any ByteSource, fraction: Double = 0.1,
-                            maximumSeconds: Double = 600) async throws -> VideoStill {
+                            maximumSeconds: Double = 600,
+                            videoDecoding: RemuxVideoDecoding? = nil) async throws -> VideoStill {
         let counting = CountedSource(base: source)
         let header = try await MatroskaHeaderReader.read(counting)
         guard let firstCluster = header.firstClusterPosition else { throw RemuxError.malformed("no Cluster") }
         guard let track = header.tracks.first(where: { $0.kind == .video && $0.isEnabled }) else {
             throw RemuxError.declined("no video track")
         }
-        guard SupportedCodecs.video.contains(track.codecID) else { throw RemuxError.declined("video codec \(track.codecID)") }
+        guard SupportedCodecs.isVideoPlayable(track.codecID, decoding: videoDecoding) else {
+            throw RemuxError.declined("video codec \(track.codecID)")
+        }
         if let encoding = track.unreadableEncoding { throw RemuxError.declined("video track is \(encoding)") }
         let contentEnd = header.contentEnd ?? Int64.max
         let scale = header.timestampScale
@@ -81,6 +97,18 @@ public struct VideoStill: Sendable {
             if reader.bytesFetched > 32 << 20 { break }
         }
         guard let keyframe else { throw RemuxError.declined("no video keyframe where the still was looked for") }
+        let start = cues.first?.time ?? 0
+
+        #if canImport(VideoToolbox)
+        if !SupportedCodecs.video.contains(track.codecID), let videoDecoding {
+            guard let image = decodedImage(keyframe.data, track: track, decoding: videoDecoding) else {
+                throw RemuxError.declined("\(track.codecID) keyframe didn't decode")
+            }
+            let counts = counting.counts
+            return VideoStill(mp4: Data(), image: image, seconds: Double(keyframe.blockTimestamp - start) / ticksPerSecond,
+                              width: image.width, height: image.height, bytesRead: counts.bytes, reads: counts.reads)
+        }
+        #endif
 
         let video = try VideoPlan.make(track: track, firstKeyframe: keyframe.data, firstKeyframeTicks: keyframe.blockTimestamp,
                                        timestampScale: scale, offsetNanoseconds: -keyframe.blockTimestamp * scale)
@@ -91,12 +119,32 @@ public struct VideoStill: Sendable {
         mp4.append(FragmentWriter.mediaSegment(sequenceNumber: 1, runs: [
             TrackRun(trackID: 1, fragment: Fragment(baseDecodeTime: 0, samples: [sample]), compositionOffsets: true),
         ]))
-        let start = cues.first?.time ?? 0
         let counts = counting.counts
         return VideoStill(mp4: mp4, seconds: Double(keyframe.blockTimestamp - start) / ticksPerSecond,
                           width: video.displayWidth, height: video.displayHeight, bytesRead: counts.bytes,
                           reads: counts.reads)
     }
+
+    #if canImport(VideoToolbox)
+    /// A keyframe through the caller's decoder, as an image in the track's
+    /// colours (BT.601 without any, as `VideoTranscode` encodes it).
+    static func decodedImage(_ keyframe: [UInt8], track: MatroskaTrack, decoding: RemuxVideoDecoding) -> CGImage? {
+        guard let decoder = decoding.make(track.codecID, track.codecPrivate) else { return nil }
+        var image: CGImage?
+        let element = track.video?.colour
+        let output: (RemuxPicture) -> Void = { picture in
+            guard image == nil else { return }
+            let colour = ColourDescription(primaries: element?.primaries ?? 6,
+                                           transfer: element?.transferCharacteristics ?? 6,
+                                           matrix: element?.matrixCoefficients ?? 6,
+                                           fullRange: element?.range.map { $0 == 2 } ?? picture.isFullRange)
+            image = PictureImage.make(picture, colour: colour)
+        }
+        decoder.decode(keyframe, tag: 0, output: output)
+        decoder.finish(output: output)
+        return image
+    }
+    #endif
 
     /// A cluster starting with a video keyframe at or after `offset`: a probe
     /// read finds a Cluster, then hops find one whose first video block is a

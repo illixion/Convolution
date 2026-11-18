@@ -63,3 +63,33 @@ enum FFmpegDolbyVisionConversion {
         return .init(rpu: converted.rpu, sourceEnhancementLayer: layer)
     }
 }
+
+/// FFmpeg's VP8 decoder as the remux's (re-encoded to HEVC or H.264).
+final class FFmpegRemuxVideoDecoder: RemuxVideoDecoder {
+    static let decoding = RemuxVideoDecoding(
+        decodes: { FFmpegRemuxDecoder.loaded && FFmpegVideoDecoder.isAvailable && FFmpegVideoCodec(matroskaCodecID: $0) != nil },
+        make: { id, codecPrivate in
+            guard let codec = FFmpegVideoCodec(matroskaCodecID: id),
+                  let decoder = FFmpegVideoDecoder(codec: codec, extradata: codecPrivate,
+                                                   threads: min(4, ProcessInfo.processInfo.activeProcessorCount))
+            else { return nil }
+            return FFmpegRemuxVideoDecoder(decoder)
+        })
+
+    private let decoder: FFmpegVideoDecoder
+    init(_ decoder: FFmpegVideoDecoder) { self.decoder = decoder }
+
+    func decode(_ frame: [UInt8], tag: Int64, output: (RemuxPicture) -> Void) -> Bool {
+        decoder.decode(frame, tag: tag) { output(Self.picture($0)) }
+    }
+
+    func finish(output: (RemuxPicture) -> Void) {
+        decoder.finish { output(Self.picture($0)) }
+    }
+
+    static func picture(_ p: FFmpegVideoDecoder.Picture) -> RemuxPicture {
+        RemuxPicture(width: p.width, height: p.height, tag: p.tag, isFullRange: p.isFullRange) {
+            p.copyNV12(luma: $0, lumaStride: $1, chroma: $2, chromaStride: $3)
+        }
+    }
+}

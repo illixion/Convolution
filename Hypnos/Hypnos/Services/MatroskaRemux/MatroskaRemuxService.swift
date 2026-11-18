@@ -8,7 +8,8 @@
  fMP4 HLS play. So a file the native player refuses is offered to
  `MatroskaRemux`: the file's own clusters cut at its keyframes and muxed to
  fragmented-MP4 HLS segment by segment, served from `LoopbackHTTPServer`.
- Lossless and instant: no re-encoding, nothing written to disk, a seek
+ Lossless and instant: no re-encoding (but for VP8, which the sideload
+ edition re-encodes a segment at a time), nothing written to disk, a seek
  fetches one segment's bytes. Ahead of WebKit (which loses HDR, spatial audio
  and the native player's features) and of Stash's server transcode.
 
@@ -16,10 +17,11 @@
  nil to keep the caller's existing fallback. Nil when:
  - the file isn't Matroska (a cheap guess from the name, then the EBML
    magic in its first bytes);
- - the remuxer declines it (VP8, Vorbis-only audio, an encrypted track, a
-   server file without Cues whose clusters have no sizes…, see
-   `RemuxError`; DTS- or TrueHD-only audio, except in the sideload edition,
-   which decodes those to ALAC: `FFmpegRemuxDecoding.swift`);
+ - the remuxer declines it (an encrypted track, a server file without
+   Cues whose clusters have no sizes…, see `RemuxError`; VP8 video and
+   DTS-, TrueHD- or Vorbis-only audio, except in the sideload edition, which
+   re-encodes VP8 to HEVC and decodes those to ALAC:
+   `FFmpegRemuxDecoding.swift`);
  - the device has no decoder for the video (`canDecode`, which asks
    VideoToolbox with the remux's own sample entry: AV1 on a chip without
    it, VP9 before the supplemental decoder is registered);
@@ -229,6 +231,7 @@ final class MatroskaRemuxService: Sendable {
             options.audioDecoding = Self.audioDecoding
             options.stableAudio = stableAudio
             options.dolbyVisionConversion = Self.dolbyVisionConversion
+            options.videoDecoding = Self.videoDecoding
             session = try await RemuxSession.open(source: bytes, options: options)
         } catch let error as RemuxError {
             if error != .notMatroska {

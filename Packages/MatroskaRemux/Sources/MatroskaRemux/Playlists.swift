@@ -207,6 +207,11 @@ enum Playlists {
            let start = index.boundaries.first?.clusterPosition, end > start {
             average = max(average, Double(end - start) * 8 / (Double(duration) / 1e9))
         }
+        // Re-encoded video runs at the encoder's rate, not the file's.
+        if let transcode = video.transcode {
+            average = max(average, Double(transcode.bitRate))
+            peak = max(peak, Double(transcode.bitRate) * 1.5)
+        }
         peak = max(peak, average)
 
         var codecs = [video.codecs]

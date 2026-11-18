@@ -17,7 +17,9 @@
  (local files) and `ImageLoader.loadMatroskaThumbnail` (a server's video
  without a preview). Stash makes its own thumbnails and is never asked.
  At most two run at once: a grid asks for a screenful together. A file the
- remux declines (VP8, say) isn't read again for the rest of the launch.
+ remux declines (VP8 in the App Store edition, say) isn't read again for the
+ rest of the launch. The sideload edition decodes a VP8 keyframe with FFmpeg
+ (`MatroskaRemuxService.videoDecoding`), straight to the image, no MP4.
  */
 
 import AVFoundation
@@ -46,7 +48,7 @@ enum MatroskaThumbnails {
         let still: VideoStill
         do {
             let source: any ByteSource = url.isFileURL ? try FileByteSource(url: url) : RemoteByteSource(url: url)
-            still = try await VideoStill.make(source: source)
+            still = try await VideoStill.make(source: source, videoDecoding: MatroskaRemuxService.videoDecoding)
         } catch let error as RemuxError {
             AppLogger.imageLoader.debug("No Matroska still: \(error.description, privacy: .public)")
             _ = declined.withLock { $0.insert(url.absoluteString) }
@@ -54,6 +56,13 @@ enum MatroskaThumbnails {
         } catch {
             AppLogger.imageLoader.warning("Matroska still failed: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             return nil
+        }
+        if let image = still.image {
+            AppLogger.imageLoader.debug("""
+                Matroska thumbnail decoded at \(still.seconds, format: .fixed(precision: 1), privacy: .public) s: \
+                \(still.reads, privacy: .public) reads, \(still.bytesRead, privacy: .public) bytes
+                """)
+            return fitted(image, maxSize: maxSize)
         }
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("still-\(UUID().uuidString).mp4")
         defer { try? FileManager.default.removeItem(at: file) }
@@ -75,6 +84,22 @@ enum MatroskaThumbnails {
             AppLogger.imageLoader.warning("Matroska still didn't decode: \(error.localizedDescription) (\(error.logCode, privacy: .public))")
             return nil
         }
+    }
+
+    /// A decoded keyframe scaled to fit `maxSize` (AVAssetImageGenerator
+    /// does that for the MP4 stills).
+    private static func fitted(_ image: CGImage, maxSize: CGFloat) -> CGImage {
+        let scale = min(1, maxSize / CGFloat(max(image.width, image.height)))
+        guard scale < 1 else { return image }
+        let width = max(1, Int((CGFloat(image.width) * scale).rounded()))
+        let height = max(1, Int((CGFloat(image.height) * scale).rounded()))
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
+                                          | CGBitmapInfo.byteOrder32Little.rawValue) else { return image }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage() ?? image
     }
 
     private static let gate = Gate(permits: 2)

@@ -2,10 +2,11 @@
 #
 # build-ffmpeg-decoders.sh
 #
-# Builds the sideload edition's audio decoders: FFmpeg's DTS (core and DTS-HD
-# MA lossless) and TrueHD/MLP decoders, plus its Dolby Vision RPU reader and
-# writer (for HYPNOS_DOVI's profile 7 to 8.1 conversion; pulled in by the
-# dovi_rpu bitstream filter, whose CBS parts the linker drops), nothing else,
+# Builds the sideload edition's decoders: FFmpeg's DTS (core and DTS-HD MA
+# lossless), TrueHD/MLP and Vorbis audio decoders, its VP8 video decoder (its
+# own, not libvpx), plus its Dolby Vision RPU reader and writer (for
+# HYPNOS_DOVI's profile 7 to 8.1 conversion; pulled in by the dovi_rpu
+# bitstream filter, whose CBS parts the linker drops), nothing else,
 # linked with the small C surface in Packages/FFmpegDecoders/Shim into one
 # dynamic framework per Apple platform, packed into
 #
@@ -25,7 +26,8 @@
 # Usage: scripts/build-ffmpeg-decoders.sh [--force]
 # --force rebuilds FFmpeg itself (seven configure + make runs, about five
 # minutes); without it a previous build's static libraries are reused and
-# only the frameworks are relinked.
+# only the frameworks are relinked, unless they were configured with other
+# components than COMPONENTS below (then they are rebuilt).
 
 set -euo pipefail
 
@@ -33,6 +35,13 @@ FFMPEG_VERSION=9.0.2
 FFMPEG_SHA256=8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
 MIN_OS=26.0
 MIN_MACOS=14.0
+
+# What of FFmpeg goes in. A change here rebuilds the static libraries.
+COMPONENTS=(
+    --enable-decoder=dca,truehd,mlp,vorbis,vp8
+    --enable-parser=dca,mlp
+    --enable-bsf=dovi_rpu
+)
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$ROOT/build/ffmpeg-decoders"
@@ -75,7 +84,9 @@ SLICES=(
 build_ffmpeg() { # sdk triple
     local sdk=$1 triple=$2
     local prefix="$WORK/out/$triple"
-    [[ -f "$prefix/lib/libavcodec.a" ]] && return 0
+    if [[ -f "$prefix/lib/libavcodec.a" ]] && [[ "$(cat "$prefix/components" 2>/dev/null)" == "${COMPONENTS[*]}" ]]; then
+        return 0
+    fi
     local arch=${triple%%-*}
     local sysroot cc build="$WORK/obj/$triple"
     sysroot="$(xcrun --sdk "$sdk" --show-sdk-path)"
@@ -97,13 +108,12 @@ build_ffmpeg() { # sdk triple
             --disable-avdevice --disable-avformat --disable-avfilter \
             --disable-swscale --disable-swresample \
             --disable-x86asm \
-            --enable-decoder=dca,truehd,mlp \
-            --enable-parser=dca,mlp \
-            --enable-bsf=dovi_rpu \
+            "${COMPONENTS[@]}" \
             > configure.log 2>&1 || { tail -30 configure.log; exit 1; }
         make -j"$(sysctl -n hw.ncpu)" > make.log 2>&1 || { tail -40 make.log; exit 1; }
         make install > install.log 2>&1
     )
+    echo "${COMPONENTS[*]}" > "$prefix/components"
 }
 
 # The framework's binary for one triple: the shim and FFmpeg in one dylib,

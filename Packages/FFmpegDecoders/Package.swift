@@ -1,8 +1,8 @@
 // swift-tools-version: 6.2
 import PackageDescription
 
-// FFmpeg's DTS and TrueHD/MLP audio decoders and Dolby Vision RPU reader and
-// writer, for the sideload edition.
+// FFmpeg's DTS, TrueHD/MLP and Vorbis audio decoders, VP8 video decoder and
+// Dolby Vision RPU reader and writer, for the sideload edition.
 //
 // The decoders live in HypnosFFmpeg.framework, built by
 // `scripts/build-ffmpeg-decoders.sh` into `HypnosFFmpeg.xcframework` beside

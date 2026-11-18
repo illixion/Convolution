@@ -293,6 +293,18 @@
    "type": "audio"
   }
  ],
+ "vp8-vorbis.webm": [
+  {
+   "codec": "vp8",
+   "packets": 150,
+   "type": "video"
+  },
+  {
+   "codec": "vorbis",
+   "packets": 260,
+   "type": "audio"
+  }
+ ],
  "vp9-opus.webm": [
   {
    "codec": "vp9",

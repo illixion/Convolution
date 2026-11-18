@@ -2,13 +2,14 @@
  MatroskaRemux - which tracks go into the HLS, and how each is timed
 
  The first enabled video track is the variant's video; it has to be a codec
- MP4 carries (H.264, HEVC, VP9, AV1) or the file is declined. Every audio
- track whose codec MP4 carries becomes an audio rendition; so does one the
- caller can decode (DTS, TrueHD: `AudioTranscode.swift`), as ALAC. The
- others (Vorbis, PCM, DTS and TrueHD without a decoder, anything encrypted
- or compressed) are dropped, and a file whose audio is all dropped is
- declined, since playing it silent would be worse than the caller's
- fallback.
+ MP4 carries (H.264, HEVC, VP9, AV1), or one the caller can decode (VP8:
+ `VideoTranscode.swift`, re-encoded to HEVC or H.264), or the file is
+ declined. Every audio track whose codec MP4 carries becomes an audio
+ rendition; so does one the caller can decode (DTS, TrueHD, Vorbis:
+ `AudioTranscode.swift`), as ALAC. The others (PCM, those three without a
+ decoder, anything encrypted or compressed) are dropped, and a file whose
+ audio is all dropped is declined, since playing it silent would be worse
+ than the caller's fallback.
 
  Timing. Matroska block timestamps are presentation times, in ticks of the
  file's TimestampScale (a millisecond, usually). Both renditions keep the
@@ -59,6 +60,9 @@ struct VideoPlan: Sendable {
     /// Set while a profile 7 track is converted to 8.1: what every sample
     /// goes through.
     var dolbyVisionRewrite: DolbyVisionRewrite? = nil
+    /// Set for a track decoded and re-encoded (VP8: `VideoTranscode.swift`):
+    /// the sample entry describes the encoder's output.
+    var transcode: VideoTranscode? = nil
 
     /// A stored frame as it goes into the output.
     func sampleData(_ data: [UInt8]) -> [UInt8] {
@@ -90,7 +94,8 @@ struct VideoPlan: Sendable {
 
     static func make(track: MatroskaTrack, firstKeyframe: [UInt8], firstKeyframeTicks: Int64,
                      timestampScale: Int64, offsetNanoseconds: Int64,
-                     dolbyVisionConversion: RemuxDolbyVisionConversion? = nil) throws -> VideoPlan {
+                     dolbyVisionConversion: RemuxDolbyVisionConversion? = nil,
+                     videoDecoding: RemuxVideoDecoding? = nil) throws -> VideoPlan {
         if let encoding = track.unreadableEncoding { throw RemuxError.declined("video track is \(encoding)") }
         let video = track.video ?? MatroskaTrack.Video()
         let width = video.pixelWidth, height = video.pixelHeight
@@ -129,6 +134,7 @@ struct VideoPlan: Sendable {
         var dolbyPlayed: Int?
         var dolbyLayer: DolbyVisionEnhancementLayer?
         var rewrite: DolbyVisionRewrite?
+        var transcode: VideoTranscode?
         switch track.codecID {
         case "V_MPEG4/ISO/AVC":
             guard let config = AVCConfiguration(record: track.codecPrivate) else {
@@ -226,6 +232,34 @@ struct VideoPlan: Sendable {
                 w.box("av1C", payload: config.record)
                 SampleEntries.colourBoxes(&w, colour: config.colour, track: track)
             }
+        case let id where videoDecoding?.decodes(id) == true:
+            // Decoded and re-encoded (VP8). Without colour in the track,
+            // BT.601 (SMPTE 170M), what VP8 decoders show it as.
+            let made = try VideoTranscode.make(track: track, firstKeyframe: firstKeyframe, decoding: videoDecoding!,
+                                               framesPerSecond: framesPerSecond, colour: merged(nil))
+            transcode = made
+            colour = made.colour
+            codecName = "\(id == "V_VP8" ? "VP8" : id) as \(made.codec.name)"
+            switch made.codec {
+            case .hevc:
+                guard let config = HEVCConfiguration(record: made.record) else {
+                    throw RemuxError.declined("the HEVC encoder's configuration didn't read")
+                }
+                codecs = config.codecString(sampleEntry: "hvc1")
+                sampleEntry = SampleEntries.visual("hvc1", width: made.width, height: made.height) { w in
+                    w.box("hvcC", payload: made.record)
+                    SampleEntries.colourBoxes(&w, colour: made.colour, track: track)
+                }
+            case .h264:
+                guard let config = AVCConfiguration(record: made.record) else {
+                    throw RemuxError.declined("the H.264 encoder's configuration didn't read")
+                }
+                codecs = config.codecString
+                sampleEntry = SampleEntries.visual("avc1", width: made.width, height: made.height) { w in
+                    w.box("avcC", payload: made.record)
+                    SampleEntries.colourBoxes(&w, colour: made.colour, track: track)
+                }
+            }
         default:
             throw RemuxError.declined("video codec \(track.codecID)")
         }
@@ -258,6 +292,7 @@ struct VideoPlan: Sendable {
         plan.dolbyVisionPlayedProfile = dolbyPlayed
         plan.dolbyVisionEnhancementLayer = dolbyLayer
         plan.dolbyVisionRewrite = rewrite
+        plan.transcode = transcode
         return plan
     }
 }
@@ -489,10 +524,15 @@ extension AudioPlan {
                                sourceFrame: (samples: Int, rate: Int)? = nil) -> Result<AudioPlan, RemuxError> {
         if let encoding = track.unreadableEncoding { return .failure(.declined("\(track.codecID) is \(encoding)")) }
         let id = track.codecID
+        let vorbis = id == "A_VORBIS" ? VorbisSetup(codecPrivate: track.codecPrivate) : nil
+        if id == "A_VORBIS", vorbis == nil { return .failure(.declined("Vorbis track without readable headers")) }
         guard let decoder = decoding.make(id, track.codecPrivate) else {
             return .failure(.declined("no decoder for \(id)"))
         }
         decoder.feed(firstFrame)
+        // A Vorbis decoder puts out nothing for its first packet (it only
+        // primes the overlap); the same packet again gives the format.
+        if vorbis != nil { decoder.feed(firstFrame) }
         decoder.finish()
         let decoded = decoder.frameCount, sampleRate = decoder.sampleRate
         guard decoded > 0, sampleRate > 0 else { return .failure(.declined("\(id) first frame didn't decode")) }
@@ -502,7 +542,9 @@ extension AudioPlan {
         }
         let isTrueHD = id == "A_TRUEHD" || id == "A_MLP"
         let source: AudioTranscode.Source
-        if isTrueHD {
+        if let vorbis {
+            source = .vorbis(vorbis)
+        } else if isTrueHD {
             let units = AudioTranscode.accessUnits(in: firstFrame)
             guard units > 0, decoded % units == 0 else {
                 return .failure(.declined("\(id) first block's access units don't match its samples"))
@@ -527,7 +569,7 @@ extension AudioPlan {
         }
         let firstNanoseconds = firstTicks * timestampScale - Int64(clamping: track.codecDelay) + offsetNanoseconds
         let rawOrigin = Double(firstNanoseconds) * Double(sampleRate) / 1e9
-        return .success(AudioPlan(track: track, codec: .alac(config), codecName: codecName ?? (isTrueHD ? "TrueHD" : "DTS"),
+        return .success(AudioPlan(track: track, codec: .alac(config), codecName: codecName ?? (isTrueHD ? "TrueHD" : vorbis != nil ? "Vorbis" : "DTS"),
                                   sampleRate: sampleRate, channels: speakers.count, sampleEntry: entry,
                                   codecs: "alac", averageBitrate: speakers.count * 24 * sampleRate,
                                   originSamples: Int64(rawOrigin.rounded()),
@@ -540,6 +582,17 @@ extension AudioPlan {
 /// Codec ids MP4 carries, for deciding which tracks a file needs probed.
 enum SupportedCodecs {
     static let video: Set<String> = ["V_MPEG4/ISO/AVC", "V_MPEGH/ISO/HEVC", "V_VP9", "V_AV1"]
+
+    /// Whether a video track plays: as it is, or decoded and re-encoded
+    /// (`VideoTranscode.swift`, where VideoToolbox is).
+    static func isVideoPlayable(_ id: String, decoding: RemuxVideoDecoding?) -> Bool {
+        if video.contains(id) { return true }
+        #if canImport(VideoToolbox)
+        return decoding?.decodes(id) == true
+        #else
+        return false
+        #endif
+    }
 
     static func isAudioSupported(_ id: String) -> Bool {
         id == "A_AAC" || id.hasPrefix("A_AAC/") || id == "A_AC3" || id.hasPrefix("A_AC3/") || id == "A_EAC3"

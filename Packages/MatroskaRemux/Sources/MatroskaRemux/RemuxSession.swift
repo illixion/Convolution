@@ -30,7 +30,9 @@
 
  Output is deterministic, so a segment the player re-requests (after a
  seek, or a decoder reset when visionOS backgrounds the window) is
- byte-identical to the first.
+ byte-identical to the first. The exception is re-encoded video (VP8,
+ `VideoTranscode.swift`): equivalent each time, and the same bytes while the
+ last few are kept (`videoFrames`).
 
  Subtitle tracks are handed to the app as blocks rather than muxed
  (`Subtitles.swift`): read alone through the Cues, and kept from every
@@ -72,6 +74,12 @@ public struct RemuxOptions: Sendable {
     /// An RPU converter: with one, Dolby Vision profile 7 plays as profile
     /// 8.1 instead of as its HDR10 base layer (`DolbyVisionConversion.swift`).
     public var dolbyVisionConversion: RemuxDolbyVisionConversion?
+    /// Decoders for video MP4 can't carry (VP8): a track one of them
+    /// decodes is re-encoded segment by segment instead of declined
+    /// (`VideoTranscode.swift`).
+    public var videoDecoding: RemuxVideoDecoding?
+    /// Re-encoded segments kept for a re-request.
+    public var cachedTranscodedSegments = 3
 
     public init() {}
 }
@@ -181,6 +189,9 @@ public actor RemuxSession {
     private var parsedAudio: [Int: ParsedSegment] = [:]
     private var parsedAudioOrder: [Int] = []
     private var parsedAudioBytes: [Int: Int] = [:]
+    /// Re-encoded video of recent segments (`videoFrames`).
+    private var transcodedVideo: [Int: Task<[MatroskaFrame], Error>] = [:]
+    private var transcodedOrder: [Int] = []
 
     /// Bytes read from the source while serving segments (for the caller's
     /// logs).
@@ -300,7 +311,7 @@ public actor RemuxSession {
         guard let videoTrack = header.tracks.first(where: { $0.kind == .video && $0.isEnabled }) else {
             throw RemuxError.declined("no video track")
         }
-        guard SupportedCodecs.video.contains(videoTrack.codecID) else {
+        guard SupportedCodecs.isVideoPlayable(videoTrack.codecID, decoding: options.videoDecoding) else {
             throw RemuxError.declined("video codec \(videoTrack.codecID)")
         }
         if let encoding = videoTrack.unreadableEncoding { throw RemuxError.declined("video track is \(encoding)") }
@@ -349,7 +360,8 @@ public actor RemuxSession {
         let video = try VideoPlan.make(track: videoTrack, firstKeyframe: keyframe.data,
                                        firstKeyframeTicks: keyframe.blockTimestamp,
                                        timestampScale: header.timestampScale, offsetNanoseconds: offsetNanoseconds,
-                                       dolbyVisionConversion: options.dolbyVisionConversion)
+                                       dolbyVisionConversion: options.dolbyVisionConversion,
+                                       videoDecoding: options.videoDecoding)
         var audio: [AudioPlan] = []
         for track in candidates {
             guard let first = firsts.audio[track.number] else {
@@ -644,6 +656,13 @@ public actor RemuxSession {
     /// Segments listed (so far, while the index grows).
     public nonisolated var segmentCount: Int { index.count }
 
+    /// How long segment `k` plays, in seconds.
+    public nonisolated func segmentSeconds(_ k: Int) -> Double {
+        let index = self.index
+        guard k >= 0, k < index.count else { return 0 }
+        return Double(index.endTime(k) - index.startTime(k)) * Double(header.timestampScale) / 1e9
+    }
+
     /// A media playlist: fixed for an index complete at `open`, else made
     /// from the index as it stands.
     nonisolated func mediaPlaylist(_ prefix: String) -> String {
@@ -720,7 +739,7 @@ public actor RemuxSession {
     private static func sequenceNumber(_ k: Int) -> UInt32 { UInt32(k) + 1 }
 
     public func videoSegment(_ k: Int) async throws -> Data {
-        let fragment = try videoFragment(k, from: try await parsedSegment(k))
+        let fragment = try videoFragment(k, from: try await videoFrames(k, of: try await parsedSegment(k)))
         return FragmentWriter.mediaSegment(sequenceNumber: Self.sequenceNumber(k),
                                            runs: [TrackRun(trackID: 1, fragment: fragment, compositionOffsets: true)])
     }
@@ -737,7 +756,8 @@ public actor RemuxSession {
         // One parse for both: a second lookup could find it already let go
         // (a UHD segment is over the byte budget on its own) and read it again.
         let segment = try await parsedSegment(k)
-        var runs = [TrackRun(trackID: 1, fragment: try videoFragment(k, from: segment), compositionOffsets: true)]
+        let frames = try await videoFrames(k, of: segment)
+        var runs = [TrackRun(trackID: 1, fragment: try videoFragment(k, from: frames), compositionOffsets: true)]
         if let plan = muxedAudio {
             runs += try await audioFragments(plan, k, from: segment).filter { !$0.samples.isEmpty }
                 .map { TrackRun(trackID: 2, fragment: $0, compositionOffsets: false) }
@@ -745,9 +765,39 @@ public actor RemuxSession {
         return FragmentWriter.mediaSegment(sequenceNumber: Self.sequenceNumber(k), runs: runs)
     }
 
-    private func videoFragment(_ k: Int, from segment: ParsedSegment) throws -> Fragment {
-        let index = self.index
+    /// A segment's video frames as they go into the output: the stored ones,
+    /// or for a re-encoded track the encoder's, made off the actor and kept
+    /// for the last few segments.
+    private func videoFrames(_ k: Int, of segment: ParsedSegment) async throws -> [MatroskaFrame] {
+        guard let transcode = video.transcode else { return segment.video }
+        if let task = transcodedVideo[k] {
+            transcodedOrder.removeAll { $0 == k }
+            transcodedOrder.append(k)
+            return try await task.value
+        }
         let frames = segment.video
+        let plan = video
+        let task = Task.detached(priority: .userInitiated) {
+            try transcode.encode(frames, timescale: Int32(plan.timescale)) {
+                plan.time(ticks: $0.blockTimestamp, laceIndex: $0.laceIndex)
+            }
+        }
+        transcodedVideo[k] = task
+        transcodedOrder.append(k)
+        while transcodedOrder.count > max(1, options.cachedTranscodedSegments) {
+            transcodedVideo[transcodedOrder.removeFirst()] = nil
+        }
+        do {
+            return try await task.value
+        } catch {
+            transcodedVideo[k] = nil
+            transcodedOrder.removeAll { $0 == k }
+            throw error
+        }
+    }
+
+    private func videoFragment(_ k: Int, from frames: [MatroskaFrame]) throws -> Fragment {
+        let index = self.index
         guard !frames.isEmpty else { throw RemuxError.malformed("segment \(k) has no video") }
         let presentation = frames.map { video.time(ticks: $0.blockTimestamp, laceIndex: $0.laceIndex) }
         // Decode times are the presentation times in order (CMAF's
@@ -1015,6 +1065,8 @@ public actor RemuxSession {
 
     /// Lets go of every parsed segment (a session nobody is playing).
     public func dropCache() {
+        transcodedVideo.removeAll()
+        transcodedOrder.removeAll()
         parsed.removeAll()
         parsedOrder.removeAll()
         parsedBytes.removeAll()

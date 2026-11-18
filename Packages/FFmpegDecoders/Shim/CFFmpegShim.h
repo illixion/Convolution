@@ -1,9 +1,12 @@
-// The C surface of HypnosFFmpeg.framework: FFmpeg's DTS and TrueHD/MLP
-// decoders, and nothing else of FFmpeg exported.
+// The C surface of HypnosFFmpeg.framework: FFmpeg's DTS, TrueHD/MLP and
+// Vorbis audio decoders, its VP8 video decoder and its Dolby Vision RPU
+// reader and writer, and nothing else of FFmpeg exported.
 //
-// Bytes go in as stored (a Matroska block's frame, one or several access
-// units: a parser splits them), PCM comes out as one interleaved run of
-// 32-bit integers holding 24-bit samples, in the decoder's channel order
+// Audio: bytes go in as stored (a Matroska block's frame: for DTS and
+// TrueHD one or several access units, which a parser splits; for Vorbis one
+// packet, with the three Xiph-laced headers as extradata, Matroska's
+// CodecPrivate as it is), PCM comes out as one interleaved run of 32-bit
+// integers holding 24-bit samples, in the decoder's channel order
 // (`hyp_ff_channel` names each).
 //
 // Nothing links against this: the FFmpegDecoders Swift package looks each
@@ -25,6 +28,7 @@ typedef enum {
     HYP_FF_DTS = 1,
     HYP_FF_TRUEHD = 2,
     HYP_FF_MLP = 3,
+    HYP_FF_VORBIS = 4,
 } hyp_ff_codec;
 
 typedef struct hyp_ff_decoder hyp_ff_decoder;
@@ -55,6 +59,56 @@ const int32_t *hyp_ff_samples(const hyp_ff_decoder *decoder);
 int hyp_ff_errors(const hyp_ff_decoder *decoder);
 
 void hyp_ff_close(hyp_ff_decoder *decoder);
+
+// MARK: - Video (VP8)
+//
+// A frame goes in as stored (one Matroska block), tagged with a number the
+// caller picks; pictures come out in presentation order, each with the tag
+// of the frame it was decoded from. A frame that shows nothing (VP8's
+// invisible alt-ref frames) gives no picture. Pictures are 8-bit 4:2:0,
+// three planes, valid until the next call on the decoder.
+
+typedef enum {
+    HYP_FF_VIDEO_VP8 = 1,
+} hyp_ff_video_codec;
+
+typedef struct hyp_ff_video_decoder hyp_ff_video_decoder;
+
+typedef struct {
+    int32_t width, height;
+    const uint8_t *planes[3]; // Y, Cb, Cr; chroma is (width + 1) / 2 by (height + 1) / 2
+    int32_t strides[3];
+    int64_t tag;
+    int32_t full_range; // 1 for full-range (JPEG) levels, else video range
+    int32_t key_frame;
+} hyp_ff_picture;
+
+/// A decoder, or NULL (unavailable, or the codec failed to open). `threads`
+/// 0 lets FFmpeg pick; frame threading holds that many frames in flight.
+hyp_ff_video_decoder *hyp_ff_video_open(hyp_ff_video_codec codec, const uint8_t *extradata, int extradata_size,
+                                        int threads);
+
+/// Sends one stored frame; NULL/0 drains (then every remaining picture
+/// comes out of hyp_ff_video_receive). Returns 0; AVERROR(EAGAIN) when the
+/// pictures ready have to be received first (then send the frame again); or
+/// another negative AVERROR (the frame was refused; later frames still
+/// decode).
+int hyp_ff_video_send(hyp_ff_video_decoder *decoder, const uint8_t *data, int size, int64_t tag);
+
+/// 1 with the next picture in `out`, 0 when none is ready (send more), or a
+/// negative AVERROR (AVERROR_EOF once drained).
+int hyp_ff_video_receive(hyp_ff_video_decoder *decoder, hyp_ff_picture *out);
+
+/// Frames that failed to decode, and pictures in a format other than 8-bit
+/// 4:2:0 (skipped).
+int hyp_ff_video_errors(const hyp_ff_video_decoder *decoder);
+
+void hyp_ff_video_close(hyp_ff_video_decoder *decoder);
+
+/// Copies a picture into NV12 planes (Y, then Cb and Cr interleaved), as a
+/// CVPixelBuffer of kCVPixelFormatType_420YpCbCr8BiPlanar* holds them.
+void hyp_ff_picture_copy_nv12(const hyp_ff_picture *picture, uint8_t *y, int y_stride, uint8_t *cbcr,
+                              int cbcr_stride);
 
 // MARK: - Dolby Vision RPUs (HYPNOS_DOVI, sideload edition only)
 //
