@@ -15,9 +15,12 @@
  ahead or the reader falls behind. Five frames a second of it are read
  (`OnScreenTextRecognizer`) and become cues (`OnScreenCueBuilder`).
 
- Like AI Captions (`RAVEGeneratedCaptions`), the host's transport is held
- while too little is read ahead (after a seek: until two seconds are), and a
- seek starts reading again from the new playhead.
+ Unlike AI Captions, the host's transport is never held for this reader
+ (device, 2026-11-18: a reader stuck behind a hung model call froze the
+ video for 45 s). Lines the reader is late with are spoken late or skipped;
+ a reader that makes no progress restarts itself at the playhead, trying
+ again for as long as the narration is on, and a seek starts reading again
+ from the new playhead.
 
  A progressive file is decoded at its own size, there being only one;
  a device remux (one variant) reads the source a second time near the
@@ -51,7 +54,7 @@ public final class OnScreenTextReader {
     /// The recognizer is loaded (or gave up loading). Heavy model loads that
     /// compete with it for the Neural Engine wait for this.
     public var onRecognizerReady: (() -> Void)?
-    /// The host holds sound and picture together while true.
+    /// Not used any more: the reader never holds the host's playback.
     public var onBuffering: ((Bool) -> Void)?
     /// Code-defined diagnostics; never URLs or the text read.
     public var onDiagnostic: ((String) -> Void)?
@@ -133,7 +136,7 @@ public final class OnScreenTextReader {
         await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             let once = OnceFlag()
             Task.detached {
-                await OnScreenCoreMLTurn.shared.run { recognizer.warmUpFast() }
+                try? await OnScreenCoreMLTurn.shared.run(patience: 60) { recognizer.warmUpFast() }
                 if once.take() { continuation.resume(returning: true) }
             }
             Task.detached {
@@ -166,7 +169,7 @@ public final class OnScreenTextReader {
         var nextSample = playhead
         var samplesSinceForced = 0
         inFlight = false
-        var holdingSince: Date?
+        lastProgress = .now; lastReadThrough = readThrough
         reportedFrames = false
         stallRecoveries = 0
         startScout(asset: item.asset, at: playhead)
@@ -235,7 +238,7 @@ public final class OnScreenTextReader {
                     let result = await analysis.read(frame, at: time, force: force)
                     guard let self, self.generation == token else { return }
                     self.inFlight = false
-                    if !self.reportedFrames { self.reportedFrames = true; self.onDiagnostic?("On-screen text: reading frames") }
+                    if !self.reportedFrames, result.failure == nil { self.reportedFrames = true; self.onDiagnostic?("On-screen text: reading frames") }
                     if let failure = result.failure { self.onDiagnostic?("On-screen text: a frame failed (\(failure))") }
                     if result.cues != self.cues {
                         self.cues = result.cues
@@ -258,43 +261,46 @@ public final class OnScreenTextReader {
             else { desired = playing ? Float(speed) : 0 }
             if scout.rate != desired { scout.rate = desired }
 
-            // Hold the viewer's playback while too little is read ahead.
+            // The viewer's video is never held for the reader: a reader that
+            // can't keep up costs narration (lines come late or are skipped),
+            // not picture. `isBuffering` only tells the menu it is catching up.
             readAheadSeconds = max(0, readThrough - now)
             let policy = OnScreenTextBufferPolicy()
             lookaheadProgress = min(1, readAheadSeconds / (policy.resumeSeconds * max(0.25, speed)))
             let duration = item.duration.seconds
-            let needsHold = policy.needsHold(playhead: now, readThrough: readThrough, duration: duration,
-                                             rate: speed, alreadyHolding: isBuffering)
-            if needsHold {
-                holdingSince = holdingSince ?? .now
-                if Date.now.timeIntervalSince(holdingSince!) > Self.holdLimit {
-                    // The reader stalled (a frame that never came back, a scout
-                    // that stopped). Say what state it was in, then start it
-                    // again at the playhead; only a second stall in a row fails.
-                    onDiagnostic?(String(format: "On-screen text: stalled %.0f s: scout %.1f, playhead %.1f, read through %.1f, in flight %d, seeking %d, rate %.1f, item %d",
-                                         Self.holdLimit, scoutTime, now, readThrough, inFlight ? 1 : 0,
-                                         scoutSeeking ? 1 : 0, scout.rate, scoutItem.status.rawValue))
+            let behind = policy.needsHold(playhead: now, readThrough: readThrough, duration: duration,
+                                          rate: speed, alreadyHolding: isBuffering)
+            // Progress: a frame came back or the scout moved on.
+            if readThrough != lastReadThrough { lastReadThrough = readThrough; lastProgress = .now }
+            if behind {
+                // Not reading, for too long: the reader stalled (a frame that
+                // never came back, a scout that stopped). Say what state it
+                // was in, then start it again at the playhead. It never gives
+                // up: each failed try waits longer (6, 12, 24, 30 s).
+                let patience = min(30.0, Self.stallLimit * pow(2, Double(stallRecoveries)))
+                if Date.now.timeIntervalSince(lastProgress) > patience {
+                    onDiagnostic?(String(format: "On-screen text: stalled %.0f s: scout %.1f, playhead %.1f, read through %.1f, in flight %d, seeking %d, rate %.1f, item %d, try %d",
+                                         patience, scoutTime, now, readThrough, inFlight ? 1 : 0,
+                                         scoutSeeking ? 1 : 0, scout.rate, scoutItem.status.rawValue, stallRecoveries + 1))
                     stallRecoveries += 1
-                    if stallRecoveries > 2 {
-                        fail("On-screen text couldn't be read quickly enough to keep up with the video.", code: 0)
-                        return
-                    }
-                    holdingSince = nil
+                    lastProgress = .now
                     inFlight = false
                     nextSample = now + 1
                     await analysis.restart(at: now + 1)
                     seekScout(to: now + 1)
                     continue
                 }
-            } else { holdingSince = nil; stallRecoveries = 0 }
-            setBuffering(needsHold)
-            status = needsHold ? "Reading ahead…" : "On-Screen Text"
+            } else { stallRecoveries = 0; lastProgress = .now }
+            setBuffering(behind)
+            status = behind ? "Reading ahead…" : "On-Screen Text"
             try? await Task.sleep(for: .milliseconds(50))
         }
     }
 
-    /// How long the viewer's video may be held for reading before the reader is restarted.
-    private static let holdLimit = 15.0
+    /// How long the reader may make no progress, while behind, before it is restarted.
+    private static let stallLimit = 6.0
+    private var lastProgress = Date.now
+    private var lastReadThrough = 0.0
     private var stallRecoveries = 0
     private var readThrough = 0.0
     private var inFlight = false
@@ -314,7 +320,6 @@ public final class OnScreenTextReader {
     private func setBuffering(_ value: Bool) {
         guard isBuffering != value else { return }
         isBuffering = value
-        onBuffering?(value)
     }
 
     // MARK: The scout
@@ -443,10 +448,16 @@ actor OnScreenTextAnalysis {
         do {
             // Never beside a Kokoro line (`OnScreenCoreMLTurn`).
             let recognizer = recognizer, region = region
-            let lines = try await OnScreenCoreMLTurn.shared.run {
+            // A frame waits 4 s for the turn, then is skipped: the reader
+            // goes on to the next one rather than sit behind a hung call.
+            let lines = try await OnScreenCoreMLTurn.shared.run(timeout: 4, patience: 15) {
                 try recognizer.read(frame.buffer, region: region, force: force)
             }
             builder.add(OnScreenTextFrame(time: time, lines: lines))
+        } catch is OnScreenCoreMLTurn.TimedOut {
+            // Not read at all (the turn stayed busy): not an empty reading,
+            // which would close the cues open on screen.
+            failure = -1
         } catch {
             failure = (error as NSError).code
             builder.add(OnScreenTextFrame(time: time, lines: []))

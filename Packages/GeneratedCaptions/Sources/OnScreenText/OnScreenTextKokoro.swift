@@ -123,7 +123,10 @@ public actor OnScreenTextKokoro {
     public func synthesize(_ text: String, voice: String, speed: Float) async throws -> sending AVAudioPCMBuffer {
         let manager = try await loaded()
         let speed = min(1.5, max(0.5, speed))
-        let result = try await OnScreenCoreMLTurn.shared.run {
+        // A line is under a second on a headset: one that has run 20 s is
+        // hung, and a waiter may take the turn from it (narration then falls
+        // back to the system voice, and Vision reads on).
+        let result = try await OnScreenCoreMLTurn.shared.run(timeout: 20, patience: 20) {
             try await manager.synthesizeDetailed(text: text, voice: voice, speed: speed)
         }
         guard !result.samples.isEmpty,
@@ -146,7 +149,7 @@ public actor OnScreenTextKokoro {
         manager = nil
         loadGeneration += 1
         let loadedMeanwhile = try? await pending?.value
-        await OnScreenCoreMLTurn.shared.run {
+        try? await OnScreenCoreMLTurn.shared.run(patience: 60) {
             if let current { await current.cleanup() }
             if let loadedMeanwhile, loadedMeanwhile !== current { await loadedMeanwhile.cleanup() }
         }
@@ -170,7 +173,7 @@ public actor OnScreenTextKokoro {
             values.isExcludedFromBackup = true
             try? excluded.setResourceValues(values)
             let manager = KokoroAneManager(directory: Self.directory)
-            try await OnScreenCoreMLTurn.shared.run { try await manager.initialize() }
+            try await OnScreenCoreMLTurn.shared.run(patience: 300) { try await manager.initialize() }
             FileManager.default.createFile(atPath: Self.readyMarker.path, contents: Data())
             return manager
         }

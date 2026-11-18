@@ -61,4 +61,33 @@ import Testing
         let ran = await turn.run { true }
         #expect(ran)
     }
+
+    /// A waiter gives up after its timeout while the holder is within its patience.
+    @Test func aWaiterTimesOutWithoutTakingTheTurn() async {
+        let turn = OnScreenCoreMLTurn()
+        let ticket = await turn.acquire(patience: 60)
+        var timedOut = false
+        do { try await turn.run(timeout: 0.1, patience: 60) {} } catch is OnScreenCoreMLTurn.TimedOut { timedOut = true } catch {}
+        #expect(timedOut)
+        #expect(turn.abandoned == 0)
+        turn.release(ticket!)
+        #expect(await turn.run { true })
+    }
+
+    /// A holder past its patience is abandoned by the waiter that timed out;
+    /// the next waiter in line runs, and the late release is ignored.
+    @Test func aHungHolderIsAbandoned() async throws {
+        let turn = OnScreenCoreMLTurn()
+        let hung = await turn.acquire(patience: 0.05)
+        try await Task.sleep(for: .milliseconds(100))
+        let second = Task { try await turn.run(timeout: 5, patience: 5) { "ran" } }
+        try await Task.sleep(for: .milliseconds(20))
+        var timedOut = false
+        do { try await turn.run(timeout: 0.1, patience: 5) {} } catch is OnScreenCoreMLTurn.TimedOut { timedOut = true } catch {}
+        #expect(timedOut)
+        #expect(try await second.value == "ran")
+        #expect(turn.abandoned == 1)
+        turn.release(hung!)
+        #expect(await turn.run { true })
+    }
 }
