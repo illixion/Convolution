@@ -246,6 +246,11 @@ final class MetalImageRenderer: Sendable {
             colorSpace: colorSpace
         )
 
+        // Probe a few pixels of a big texture once it is rendered: CoreImage can
+        // run out of room on a huge deep-colour render and leave it empty
+        // without any command-buffer error.
+        let probe = width * height > 16_000_000 ? makeProbe(stagingTexture, in: cmdBuf) : nil
+
         // Explicit lossy texture compression requires newer Apple GPU
         // families and is only supported for standard 8-bit color formats.
         // Setting compressionType on older devices (for example the A13 in
@@ -290,7 +295,8 @@ final class MetalImageRenderer: Sendable {
 
             cmdBuf.commit()
             cmdBuf.waitUntilCompleted()
-            guard Self.completed(cmdBuf, width: width, height: height) else { return nil }
+            guard Self.completed(cmdBuf, width: width, height: height),
+                  Self.probeHasContent(probe, width: width, height: height) else { return nil }
             return lossyTexture
         }
 
@@ -299,9 +305,48 @@ final class MetalImageRenderer: Sendable {
         // A render the GPU refused (a very large deep-colour texture can run out
         // of memory or time) leaves an empty texture: transparent on screen and
         // silent. Say so, so the caller can ask for a smaller one.
-        guard Self.completed(cmdBuf, width: width, height: height) else { return nil }
+        guard Self.completed(cmdBuf, width: width, height: height),
+              Self.probeHasContent(probe, width: width, height: height) else { return nil }
         if let hdr { Self.setHeadroom(hdr.headroom, of: stagingTexture) }
         return stagingTexture
+    }
+
+    private struct Probe {
+        let buffer: MTLBuffer
+        let bytesPerPixel: Int
+        let points: Int
+    }
+
+    /// Copies five pixels (centre and four inner corners) of `texture` into a
+    /// small shared buffer, encoded after the render in the same command buffer.
+    private func makeProbe(_ texture: MTLTexture, in commandBuffer: MTLCommandBuffer) -> Probe? {
+        let bpp = texture.pixelFormat == .rgba16Float ? 8 : 4
+        let spots = [(texture.width / 2, texture.height / 2),
+                     (texture.width / 4, texture.height / 4), (texture.width * 3 / 4, texture.height / 4),
+                     (texture.width / 4, texture.height * 3 / 4), (texture.width * 3 / 4, texture.height * 3 / 4)]
+        guard let buffer = device.makeBuffer(length: bpp * spots.count, options: .storageModeShared),
+              let blit = commandBuffer.makeBlitCommandEncoder() else { return nil }
+        for (i, spot) in spots.enumerated() {
+            blit.copy(from: texture, sourceSlice: 0, sourceLevel: 0,
+                      sourceOrigin: MTLOrigin(x: spot.0, y: spot.1, z: 0), sourceSize: MTLSize(width: 1, height: 1, depth: 1),
+                      to: buffer, destinationOffset: i * bpp, destinationBytesPerRow: bpp, destinationBytesPerImage: bpp)
+        }
+        blit.endEncoding()
+        return Probe(buffer: buffer, bytesPerPixel: bpp, points: spots.count)
+    }
+
+    /// True unless every probed pixel is fully transparent black (an empty render).
+    private static func probeHasContent(_ probe: Probe?, width: Int, height: Int) -> Bool {
+        guard let probe else { return true }
+        let bytes = probe.buffer.contents().assumingMemoryBound(to: UInt8.self)
+        for point in 0..<probe.points {
+            let base = point * probe.bytesPerPixel
+            // Alpha is the last component: a half (2 bytes) or a byte.
+            let alphaBytes = probe.bytesPerPixel == 8 ? (bytes[base + 6], bytes[base + 7]) : (bytes[base + 3], UInt8(0))
+            if alphaBytes.0 != 0 || alphaBytes.1 != 0 { return true }
+        }
+        AppLogger.windowState.error("[Metal] texture rendered empty \(width, privacy: .public)x\(height, privacy: .public)")
+        return false
     }
 
     private static func completed(_ buffer: MTLCommandBuffer, width: Int, height: Int) -> Bool {
