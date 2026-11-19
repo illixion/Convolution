@@ -810,6 +810,7 @@ struct NativeMetalVideoPlayerView {
                               observed.timeControlStatus == .paused {
                         // Still paused, and not by a hold: see the same check
                         // in RAVEMedia's Pseudo3DStereoEngine.
+                        if self.intendsToPlay { self.logSystemPause() }
                         self.intendsToPlay = false
                     }
                 }
@@ -835,6 +836,26 @@ struct NativeMetalVideoPlayerView {
             if held { player?.pause() }
             else if intendsToPlay, isRoomActive { player?.play() }
             reportPlaybackState()
+        }
+
+        /// A pause nobody asked for, taken as the user's (this window doesn't
+        /// resume after interruptions). It used to leave no trace, so what the
+        /// system did around it is logged: the player's own view of why, the
+        /// audio session and every scene's activation (a pause on leaving a
+        /// room with other windows open, 2026-11-19).
+        private func logSystemPause() {
+            #if os(visionOS) || os(iOS) || os(tvOS)
+            let session = AVAudioSession.sharedInstance()
+            let route = session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.map {
+                "\($0.activationState.rawValue)"
+            }.joined(separator: ",")
+            AppLogger.videoWindow.info(
+                "System paused the native player: rate \(self.player?.rate ?? -1, privacy: .public), waiting reason \(self.player?.reasonForWaitingToPlay?.rawValue ?? "none", privacy: .public), roomActive \(self.isRoomActive, privacy: .public), other audio \(session.isOtherAudioPlaying, privacy: .public), route [\(route, privacy: .public)], scene states (0 unattached, 1 inactive, 2 active, 3 background) [\(scenes, privacy: .public)]"
+            )
+            #else
+            AppLogger.videoWindow.info("System paused the native player")
+            #endif
         }
 
         func play() {
