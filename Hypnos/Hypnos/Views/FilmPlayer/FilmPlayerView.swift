@@ -784,7 +784,7 @@ struct FilmPlayerView: View {
     /// the title's details and the playback info): they keep the gaze with
     /// the picture still tappable.
     private static let popoverHolds: Set<String> = [
-        "More", "Cinema", detailsHold, playbackInfoHold, "View Mode", "Picture Quality", "Audio", "Audio Quality", "Subtitles", "Speed", "Equalizer",
+        "More", "Cinema", "Sound & Cinema", detailsHold, playbackInfoHold, "View Mode", "Picture Quality", "Audio", "Audio Quality", "Subtitles", "Speed", "Equalizer",
     ]
 
     /// A menu, popover or sheet is open over the picture, which dims for it.

@@ -712,7 +712,7 @@ final class VideoWindowModel {
     /// The ornament "menus" that are popovers: the control strip's More,
     /// Cinema, the title's Details and the bar's choices (view mode,
     /// quality, subtitles, speed, equalizer).
-    static let popoverMenuNames: Set<String> = ["More", "Cinema", "Details", "Playback Info", "View Mode", "Quality", "Subtitles", "Audio", "Speed", "Equalizer"]
+    static let popoverMenuNames: Set<String> = ["More", "Cinema", "Sound & Cinema", "Details", "Playback Info", "View Mode", "Quality", "Subtitles", "Audio", "Speed", "Equalizer"]
 
     /// Only popovers are open: they keep the gaze even with the stereo
     /// picture tappable, so a tap on the picture can close them. A real menu
