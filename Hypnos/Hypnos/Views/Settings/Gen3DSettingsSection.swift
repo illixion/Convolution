@@ -18,6 +18,7 @@ struct Gen3DSettingsSection: View {
     @State private var engines: [String] = []
     @State private var message: String?
     @State private var checking = false
+    @OpenWindowProxy private var openWindow
 
     var body: some View {
         Section {
@@ -43,7 +44,15 @@ struct Gen3DSettingsSection: View {
             Toggle("Hide Controls in the Volume", isOn: $decor)
             Button(checking ? "Checking…" : "Check Connection") { check() }
                 .disabled(checking || address.isEmpty)
-            Button("Clear Generated Models", role: .destructive) { Gen3DAssetCache.shared.clear() }
+            #if os(visionOS)
+            Button("Open the Model Library") { openWindow(id: HypnosSceneID.gen3dLibrary) }
+            #endif
+            Button("Clear Generated Models", role: .destructive) {
+                Gen3DAssetCache.shared.clear()
+                #if os(visionOS)
+                Gen3DLibrary.shared.refresh()
+                #endif
+            }
             if let message {
                 Text(message).font(.footnote).foregroundStyle(.secondary)
             }

@@ -33,6 +33,8 @@ final class Gen3DGenerator {
     }
 
     private(set) var phase: Phase = .idle
+    /// The cache key of the model that is ready (what the library files its adjustments under).
+    private(set) var modelKey: String?
 
     /// A job is in flight (not idle, finished or failed).
     var isWorking: Bool {
@@ -48,12 +50,27 @@ final class Gen3DGenerator {
     /// Runs to completion (or failure); cancel the calling task to stop polling.
     /// A job already on the server is not cancelled with it — it finishes there
     /// and is picked up on the next open.
-    func run(for image: GalleryImage, engine requested: String? = nil) async {
+    /// `cacheKey` opens a model straight from the cache (the library, a restored
+    /// volume), whatever engine and options are set now; without the file, or
+    /// without a key, the picture is generated as usual.
+    func run(for image: GalleryImage?, cacheKey: String? = nil, engine requested: String? = nil) async {
+        if let cacheKey, let cached = Gen3DAssetCache.shared.cached(forKey: cacheKey) {
+            modelKey = cacheKey
+            phase = .ready(cached)
+            noteOpened(key: cacheKey, image: image, engine: requested ?? Gen3DConfig.engine)
+            return
+        }
+        guard let image else {
+            phase = .failed("This model is no longer cached, and the picture it came from wasn't kept.")
+            return
+        }
         let engine = requested ?? Gen3DConfig.engine
         let options = Gen3DConfig.optionsJSON
         let key = Gen3DAssetCache.key(source: image.fullSizeURL, engine: engine, optionsJSON: options)
         if let cached = Gen3DAssetCache.shared.cached(forKey: key) {
+            modelKey = key
             phase = .ready(cached)
+            noteOpened(key: key, image: image, engine: engine)
             return
         }
         do {
@@ -76,13 +93,21 @@ final class Gen3DGenerator {
             let stored = try Gen3DAssetCache.shared.store(usdz, forKey: key)
             forget(key)
             log.info("Generated 3D ready (\(finished.result?.timings?.values.reduce(0, +) ?? 0, privacy: .public) s on the server)")
+            modelKey = key
             phase = .ready(stored)
+            noteOpened(key: key, image: image, engine: engine)
         } catch is CancellationError {
             phase = .idle
         } catch {
             log.error("Generated 3D failed: \(error.logCode, privacy: .public)")
             phase = .failed(error.localizedDescription)
         }
+    }
+
+    private func noteOpened(key: String, image: GalleryImage?, engine: String) {
+        #if os(visionOS)
+        Gen3DLibrary.shared.noteOpened(key: key, image: image, engine: engine)
+        #endif
     }
 
     // MARK: - Steps

@@ -34,5 +34,6 @@ enum HypnosSceneID {
     static let remoteViewer = id("remote-viewer")
     #if HYPNOS_GEN3D
     static let gen3d = id("gen3d")
+    static let gen3dLibrary = id("gen3d-library")
     #endif
 }

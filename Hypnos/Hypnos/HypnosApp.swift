@@ -144,6 +144,15 @@ struct HypnosApp: App {
         .windowStyle(.volumetric)
         .defaultSize(width: 0.6, height: 0.6, depth: 0.6, in: .meters)
         .handlesExternalEvents(matching: [])
+
+        // Every model the cache still holds, to browse and open.
+        WindowGroup("Generated 3D Library", id: HypnosSceneID.gen3dLibrary) {
+            Gen3DLibraryView()
+                .environment(appModel)
+        }
+        .defaultSize(width: 900, height: 700)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
         #endif
 
         // Every immersive space leaves a system environment (Mount Hood and

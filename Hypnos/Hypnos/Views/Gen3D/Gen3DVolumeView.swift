@@ -19,11 +19,24 @@ import SwiftUI
 /// so each is its own window.
 struct Gen3DWindowValue: Identifiable, Codable, Hashable {
     let id: UUID
-    var image: GalleryImage
+    /// The picture to make a model of. Nil for a model opened from the library
+    /// that was cached before the library kept pictures.
+    var image: GalleryImage?
+    /// Opens this cached model as it is, instead of looking one up by picture
+    /// and the engine set now (the library, a volume brought back at launch).
+    var cacheKey: String?
+    var engine: String?
 
     init(image: GalleryImage) {
         self.id = UUID()
         self.image = image
+    }
+
+    init(item: Gen3DLibraryItem) {
+        self.id = UUID()
+        self.image = item.record.image
+        self.cacheKey = item.id
+        self.engine = item.record.engine
     }
 
     static func == (a: Gen3DWindowValue, b: Gen3DWindowValue) -> Bool { a.id == b.id }
@@ -39,11 +52,13 @@ struct Gen3DVolumeView: View {
     @State private var generator = Gen3DGenerator()
     @State private var size = Gen3DSize.life
     @State private var fit: Gen3DFit?
-    @State private var engine = Gen3DConfig.engine
+    @State private var engine: String
     @State private var engines: [String] = []
     @State private var loadedURL: URL?
     @State private var lightEntity: Entity?
-    @AppStorage(Gen3DConfig.lightingKey, store: HypnosDefaults.store) private var lightingRaw = Gen3DLighting.natural.rawValue
+    /// This model's light, then whatever its saved adjustments say (`Gen3DLibrary`).
+    @State private var lightingRaw = Gen3DLighting.natural.rawValue
+    @Environment(\.scenePhase) private var scenePhase
     private var lighting: Gen3DLighting { Gen3DLighting(rawValue: lightingRaw) ?? .natural }
     @State private var model: Entity?
     @State private var loadFailure: String?
@@ -51,6 +66,11 @@ struct Gen3DVolumeView: View {
     /// Decor mode: no control panel, baseplate or system overlays. Double-tap the
     /// model to bring them back (or switch them on again in Settings).
     @AppStorage(Gen3DConfig.decorKey, store: HypnosDefaults.store) private var decor = false
+
+    init(value: Gen3DWindowValue) {
+        self.value = value
+        _engine = State(initialValue: value.engine ?? Gen3DConfig.engine)
+    }
 
     var body: some View {
         // Read here, not only in `update`, so a model that `make` loaded causes
@@ -90,6 +110,10 @@ struct Gen3DVolumeView: View {
                     PlayerHomeButton(title: "Gallery", help: "Show the app's home screen") {
                         appModel.showMainWindow(openWindow: openWindow)
                     }
+                    Button { openWindow(id: HypnosSceneID.gen3dLibrary) } label: {
+                        Label("Library", systemImage: "square.grid.2x2")
+                    }
+                    .help("Every model that is cached")
                     if model != nil {
                         Divider().frame(height: 28)
                         controls
@@ -99,7 +123,20 @@ struct Gen3DVolumeView: View {
                 .glassBackgroundEffect()
             }
         }
-        .task(id: engine) { await generator.run(for: value.image, engine: engine) }
+        .onAppear { Gen3DOpenWindows.opened(value) }
+        .onDisappear {
+            // A volume the wearer closes is forgotten; one the system took away
+            // (a room change, memory) comes back at the next launch.
+            if scenePhase == .background { Gen3DOpenWindows.suspended(value) } else { Gen3DOpenWindows.closed(value) }
+        }
+        .onChange(of: size) { saveAdjustments() }
+        .onChange(of: yaw) { saveAdjustments() }
+        .onChange(of: lightingRaw) { saveAdjustments() }
+        .task(id: engine) {
+            // A key opens its model as saved, unless the engine was changed on purpose.
+            let key = engine == (value.engine ?? Gen3DConfig.engine) ? value.cacheKey : nil
+            await generator.run(for: value.image, cacheKey: key, engine: engine)
+        }
         .task { engines = (try? await Gen3DClient().engines()) ?? [] }
         .task(id: generator.phase) {
             guard case .ready(let url) = generator.phase, url != loadedURL else { return }
@@ -110,6 +147,7 @@ struct Gen3DVolumeView: View {
                 model?.removeFromParent()
                 model = entity
                 loadedURL = url
+                restoreAdjustments()
                 loadFailure = nil
             } catch is CancellationError {
                 // The phase changed under it; the next run of this task loads it.
@@ -118,6 +156,19 @@ struct Gen3DVolumeView: View {
                 loadFailure = error.localizedDescription
             }
         }
+    }
+
+    /// The size, turn and light this model was left with.
+    private func restoreAdjustments() {
+        guard let key = generator.modelKey, let record = Gen3DLibrary.shared.record(for: key) else { return }
+        size = Gen3DSize(rawValue: record.size) ?? .life
+        yaw = record.yaw
+        if let light = record.lighting { lightingRaw = light }
+    }
+
+    private func saveAdjustments() {
+        guard model != nil, let key = generator.modelKey else { return }
+        Gen3DLibrary.shared.noteAdjusted(key: key, size: size, yaw: yaw, lighting: lighting)
     }
 
     @ViewBuilder private var controls: some View {
@@ -157,7 +208,7 @@ struct Gen3DVolumeView: View {
                 } description: {
                     Text(message)
                 } actions: {
-                    Button("Try Again") { Task { await generator.run(for: value.image) } }
+                    Button("Try Again") { Task { await generator.run(for: value.image, cacheKey: value.cacheKey, engine: engine) } }
                 }
             case .generating(let stage, let fraction):
                 VStack(spacing: 10) {

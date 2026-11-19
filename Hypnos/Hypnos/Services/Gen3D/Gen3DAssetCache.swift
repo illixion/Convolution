@@ -54,6 +54,25 @@ final class Gen3DAssetCache: @unchecked Sendable {
     }
 
     func clear() { engine.clear() }
+
+    /// Every model on disk: its key, file, size and when it was last used.
+    func allModels() -> [(key: String, url: URL, bytes: Int64, used: Date)] {
+        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: engine.directory, includingPropertiesForKeys: keys)) ?? []
+        return files.filter { $0.pathExtension == "usdz" }.map { url in
+            let values = try? url.resourceValues(forKeys: Set(keys))
+            return (url.deletingPathExtension().lastPathComponent, url,
+                    Int64(values?.fileSize ?? 0), values?.contentModificationDate ?? .distantPast)
+        }
+    }
+
+    func remove(key: String) {
+        let url = url(forKey: key)
+        let bytes = engine.sizeOnDisk(of: url)
+        guard (try? FileManager.default.removeItem(at: url)) != nil else { return }
+        engine.noteRemoval(bytes: bytes)
+    }
 }
 
 #endif

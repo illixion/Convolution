@@ -33,6 +33,9 @@ struct HypnosWindows: Scene {
                 .handleIncomingMediaURLs(appModel: appModel)
                 .raveSupportWelcome(RAVESupportConfig(appName: "Convolution", appID: "com.illixion.hypnos"))
                 .debugApprovalPrompts()
+                #if HYPNOS_GEN3D
+                .restoreGen3DModels()
+                #endif
         } defaultValue: {
             UUID()
     }
