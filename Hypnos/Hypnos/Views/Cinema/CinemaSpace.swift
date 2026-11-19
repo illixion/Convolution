@@ -348,9 +348,8 @@ final class CinemaSpace {
             if let player = cinema.screenPlayer { cinema.applyHUDSound(to: player) }
             vrSphere.setPresentation(.sphere)
             let follow = CinemaHUDFollow.shared
-            follow.attach(to: sceneRoot, keeping: sphereEntity)
-            let parent = follow.hasPose ? follow.head : headAnchor
-            if sphereEntity.parent !== parent { parent.addChild(sphereEntity) }
+            follow.attach(to: headAnchor, keeping: sphereEntity)
+            if sphereEntity.parent !== follow.head { follow.head.addChild(sphereEntity) }
             if sphereEntity.transform != .identity { sphereEntity.transform = .identity }
             cinema.noteScreenAttached(cinema.screenPlayer != nil)
         default:
@@ -452,11 +451,9 @@ final class CinemaSpace {
             // Re-asserted every tick: the window's own policy (applied when its
             // player was made or its scene changed) overwrites the HUD's sound.
             if let player = cinema.screenPlayer ?? cinema.hudVideoModel?.nativePlayer { cinema.applyHUDSound(to: player) }
-            // Until the follow has its first pose, the head anchor holds the screen.
             let follow = CinemaHUDFollow.shared
-            follow.attach(to: sceneRoot, keeping: screen)
-            let parent = follow.hasPose ? follow.head : headAnchor
-            if screen.parent !== parent { parent.addChild(screen) }
+            follow.attach(to: headAnchor, keeping: screen)
+            if screen.parent !== follow.head { follow.head.addChild(screen) }
             let direction = simd_normalize(-cinema.hudOffset)
             screen.transform = Transform(rotation: simd_quatf(from: SIMD3<Float>(0, 0, 1), to: direction), translation: cinema.hudOffset)
             if hudHandle.parent !== screen { screen.addChild(hudHandle) }

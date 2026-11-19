@@ -17,7 +17,9 @@
 import DebugTrace
 import Foundation
 import Observation
+import RAVEUI
 import SwiftUI
+import UIKit
 
 #if canImport(QuickLookThumbnailing)
 import QuickLookThumbnailing
@@ -216,16 +218,40 @@ enum Gen3DOpenWindows {
         live.remove(value.id)
     }
 
+    /// Includes off-room volumes and sessions that never laid out their content.
+    static var sessions: Set<UISceneSession> {
+        UIApplication.shared.openSessions.filter { RAVEWindowScenes.sceneID(of: $0) == HypnosSceneID.gen3d }
+    }
+
+    @discardableResult
+    static func closeAll() -> Int {
+        let open = sessions
+        // Cancel pending restoration and forget these volumes across launches.
+        // Their models and adjustments stay in the library.
+        if !saved.isEmpty { saved = [] }
+        for session in open {
+            UIApplication.shared.requestSceneSessionDestruction(session, options: nil) { error in
+                AppLogger.gen3d.error("Could not close generated model volume: \(error.logCode, privacy: .public)")
+            }
+        }
+        return open.count
+    }
+
     /// Opens what was open at the last launch and isn't showing, once per launch.
     static func restoreIfNeeded(open: (Gen3DWindowValue) -> Void) async {
         guard !restoredThisLaunch else { return }
         restoredThisLaunch = true
         // Give the system its own restoration first.
         try? await Task.sleep(for: .seconds(2))
+        // UIKit has sessions SwiftUI hasn't mounted, including room-pinned
+        // volumes. Their values are unknown here, so reopening could duplicate
+        // an invisible session and pin yet another copy in the room.
+        guard sessions.count <= live.count else { return }
         let missing = saved.filter { !live.contains($0.id) }
         guard !missing.isEmpty else { return }
         AppLogger.gen3d.info("Reopening \(missing.count, privacy: .public) generated model volume(s) from the last session")
         for value in missing {
+            guard !Task.isCancelled, saved.contains(value), !live.contains(value.id) else { continue }
             open(value)
             try? await Task.sleep(for: .milliseconds(500))
         }

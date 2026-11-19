@@ -140,18 +140,21 @@ struct HypnosApp: App {
             if let value {
                 Gen3DVolumeView(value: value)
                     .environment(appModel)
+                    .manageWindow(ManagedWindows.generatedModel(value))
             } else {
                 Color.clear
             }
         }
         .windowStyle(.volumetric)
         .defaultSize(width: 0.6, height: 0.6, depth: 0.6, in: .meters)
+        .defaultLaunchBehavior(.suppressed)
         .handlesExternalEvents(matching: [])
 
         // Every model the cache still holds, to browse and open.
         WindowGroup("Generated 3D Library", id: HypnosSceneID.gen3dLibrary) {
             Gen3DLibraryView()
                 .environment(appModel)
+                .manageWindow(ManagedWindows.generatedModelLibrary())
         }
         .defaultSize(width: 900, height: 700)
         .defaultLaunchBehavior(.suppressed)

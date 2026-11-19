@@ -155,6 +155,26 @@ enum ManagedWindows {
             label: RAVEWindowLabel(title: "Adjustments", systemImage: "slider.horizontal.3")
         )
     }
+
+    #if HYPNOS_GEN3D
+    @MainActor
+    static func generatedModel(_ value: Gen3DWindowValue) -> RAVEManagedWindow {
+        .value(
+            id: HypnosSceneID.gen3d,
+            value,
+            label: RAVEWindowLabel(title: "Generated 3D", subtitle: value.image?.title, systemImage: "cube"),
+            recreate: {
+                Gen3DOpenWindows.closed($0)
+                return $0.recreated()
+            }
+        )
+    }
+
+    @MainActor
+    static func generatedModelLibrary() -> RAVEManagedWindow {
+        .singleton(id: HypnosSceneID.gen3dLibrary, label: RAVEWindowLabel(title: "Generated 3D Library", systemImage: "cube"))
+    }
+    #endif
 }
 
 #endif

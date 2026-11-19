@@ -29,6 +29,19 @@ struct WindowsTabView: View {
         RAVEWindowManagerView(
             emptyMessage: "Photo, video, slideshow and tool windows you open will be listed here, so you can bring them back to you or close them."
         ) {
+            #if HYPNOS_GEN3D
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                let count = Gen3DOpenWindows.sessions.count
+                if count > 0 {
+                    Button(role: .destructive) {
+                        Gen3DOpenWindows.closeAll()
+                    } label: {
+                        Label("Close All Model Windows (\(count))", systemImage: "cube")
+                    }
+                    .help("Closes Generated 3D volumes, including invisible ones and volumes in another room.")
+                }
+            }
+            #endif
             Section {
                 Button(appModel.allWindowsHidden ? "Unhide All Windows" : "Hide All Windows") {
                     appModel.allWindowsHidden.toggle()
@@ -36,7 +49,10 @@ struct WindowsTabView: View {
                 .disabled(!hasSecondaryWindows && !appModel.allWindowsHidden)
 
                 Button("Close All Windows", role: .destructive) {
-                    let closed = RAVEWindowScenes.destroyAll(except: currentScene?.session)
+                    var closed = RAVEWindowScenes.destroyAll(except: currentScene?.session)
+                    #if HYPNOS_GEN3D
+                    closed += Gen3DOpenWindows.closeAll()
+                    #endif
                     appModel.allWindowsHidden = false
                     AppLogger.settings.info("Closed \(closed, privacy: .public) secondary windows")
                 }
@@ -61,7 +77,10 @@ struct WindowsTabView: View {
     /// got a layout pass never registered, and those are exactly the ones the
     /// bulk controls need to reach.
     private var hasSecondaryWindows: Bool {
-        RAVEWindowScenes.hasWindows(besides: currentScene?.session)
+        #if HYPNOS_GEN3D
+        if !Gen3DOpenWindows.sessions.isEmpty { return true }
+        #endif
+        return RAVEWindowScenes.hasWindows(besides: currentScene?.session)
     }
     #endif
 }

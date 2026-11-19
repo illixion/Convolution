@@ -138,6 +138,11 @@ final class ForearmSleeve {
         self.remote = remote
         spaceHeadPose = headPose
         let wearer = wearers[remote.kind] ?? RAVESleeveWearer(layout: remote.layout)
+        // Tile poses are expressed relative to the tracked wrist. RealityKit
+        // places the wrist even when a room change rebases ARKit's world origin.
+        // Keep the sleeve's smoothing, including when the arm is at rest.
+        wearer.steadier.tuning.offAnchorAbove = 1
+        wearer.steadier.tuning.onAnchorBelow = 1
         wearers[remote.kind] = wearer
         self.wearer = wearer
         if isEnabled { startHands() }
@@ -166,6 +171,14 @@ final class ForearmSleeve {
     /// The space closed.
     func spaceClosed() {
         closeCurrent()
+    }
+
+    /// Old-world samples would be treated as arm motion after an origin jump.
+    func resetPoseHistory() {
+        guard let wearer else { return }
+        wearer.gate.reset()
+        wearer.steadier.reset()
+        wearer.sleeve.follower.reset()
     }
 
     private func closeCurrent() {

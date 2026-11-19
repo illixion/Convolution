@@ -39,6 +39,17 @@ struct Gen3DWindowValue: Identifiable, Codable, Hashable {
         self.engine = item.record.engine
     }
 
+    func recreated() -> Self {
+        Self(id: UUID(), image: image, cacheKey: cacheKey, engine: engine)
+    }
+
+    private init(id: UUID, image: GalleryImage?, cacheKey: String?, engine: String?) {
+        self.id = id
+        self.image = image
+        self.cacheKey = cacheKey
+        self.engine = engine
+    }
+
     static func == (a: Gen3DWindowValue, b: Gen3DWindowValue) -> Bool { a.id == b.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }

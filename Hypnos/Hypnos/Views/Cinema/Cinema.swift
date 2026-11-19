@@ -880,6 +880,7 @@ final class Cinema {
         }
         if let last = lastTrackedHead, simd_distance(last, head) > 0.75 {
             logger.notice("Cinema: head pose jumped \(String(format: "%.2f", simd_distance(last, head)), privacy: .public) m (world origin moved?), mode \(self.mode.rawValue, privacy: .public)")
+            ForearmSleeve.shared.resetPoseHistory()
         }
         lastTrackedHead = head
     }
@@ -1136,12 +1137,10 @@ extension SIMD4 where Scalar == Float {
 
 // MARK: - HUD follow
 
-/// The HUD hangs from a smoothed copy of the head, placed in the world every
-/// frame, rather than from `AnchorEntity(.head)`: rigidly head-locked content
-/// shakes with every step, and the lag lets the picture settle instead. The lag
-/// is bounded (`HUDFraming.lagLimits`): however fast the wearer turns or moves,
-/// the smoothed head stays close enough to the real one for the picture to
-/// stay in view.
+/// RealityKit places the HUD at the live head anchor. Only the bounded lag
+/// between ARKit's current and smoothed head poses is applied underneath it.
+/// Both poses share the same origin, even when a room change gives the process
+/// an origin that differs from the one the existing RealityView renders in.
 @MainActor
 final class CinemaHUDFollow {
     static let shared = CinemaHUDFollow()
@@ -1153,21 +1152,22 @@ final class CinemaHUDFollow {
     var verticalSeconds: Float = 0.2
     var horizontalSeconds: Float = 0.08
 
-    /// The smoothed head; the screen hangs from it at `hudOffset`.
+    /// The local stabilization offset beneath RealityKit's head anchor.
     let head = Entity()
     private var subscription: (any Cancellable)?
     private weak var subscribedScene: RealityKit.Scene?
     private var position: SIMD3<Float>?
     private var rotation: simd_quatf?
 
-    var hasPose: Bool { position != nil }
-
     init() { head.name = "cinema-hud-follow" }
 
     /// Parents the smoothed head and steps it on every scene update. Screens
     /// a previous space left on the shared head go, so only `screen` shows.
     func attach(to root: Entity, keeping screen: Entity) {
-        if head.parent !== root { root.addChild(head) }
+        if head.parent !== root {
+            root.addChild(head)
+            reset()
+        }
         for child in Array(head.children) where child !== screen { child.removeFromParent() }
         guard let scene = root.scene, scene !== subscribedScene else { return }
         subscription?.cancel()
@@ -1179,18 +1179,19 @@ final class CinemaHUDFollow {
 
     func step(dt: Float) {
         let cinema = Cinema.shared
-        guard cinema.mode == .hud else {
-            position = nil
-            rotation = nil
+        guard cinema.mode == .hud, let pose = cinema.hudDevicePose() else {
+            reset()
             return
         }
-        guard let pose = cinema.hudDevicePose() else { return }
         let targetPosition = pose.columns.3.xyz
         let targetRotation = simd_quatf(pose)
-        guard var smoothedPosition = position, var smoothedRotation = rotation else {
+        let limits = cinema.hudLagLimits
+        guard var smoothedPosition = position, var smoothedRotation = rotation,
+              simd_distance(smoothedPosition, targetPosition) < 0.75,
+              abs(simd_dot(smoothedRotation.vector, targetRotation.vector)) > cos((limits.rotation + .pi / 9) / 2) else {
             position = targetPosition
             rotation = targetRotation
-            head.transform = Transform(rotation: targetRotation, translation: targetPosition)
+            head.transform = .identity
             return
         }
         func blend(_ seconds: Float) -> Float {
@@ -1203,12 +1204,20 @@ final class CinemaHUDFollow {
         smoothedRotation = simd_slerp(smoothedRotation, targetRotation, blend(rotationSeconds))
         // The smoothing may soften a movement but never leave the picture
         // behind it: the lag is held to what the picture leaves free of the view.
-        let limits = cinema.hudLagLimits
         smoothedPosition = HUDFraming.limit(smoothedPosition, near: targetPosition, by: limits.position)
         smoothedRotation = HUDFraming.limit(smoothedRotation, toward: targetRotation, by: limits.rotation)
         position = smoothedPosition
         rotation = smoothedRotation
-        head.transform = Transform(rotation: smoothedRotation, translation: smoothedPosition)
+        head.transform = Transform(
+            rotation: targetRotation.inverse * smoothedRotation,
+            translation: targetRotation.inverse.act(smoothedPosition - targetPosition)
+        )
+    }
+
+    private func reset() {
+        position = nil
+        rotation = nil
+        if head.transform != .identity { head.transform = .identity }
     }
 }
 
