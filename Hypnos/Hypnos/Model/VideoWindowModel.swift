@@ -846,6 +846,7 @@ final class VideoWindowModel {
            DepthCacheStore.entry(videoIdentity: video.identity) != nil {
             pseudo3DDepthMode = .cached(videoIdentity: video.identity)
         }
+        restorePlaybackIfNeeded()
         #if HYPNOS_YOUTUBE
         if !prepareYouTubeStream() { resolvePlaybackRenderer() }
         #else
@@ -855,43 +856,36 @@ final class VideoWindowModel {
         armStartupQualityWatch()
         subtitles.load(SubtitleSource.forVideo(video))
         loadSharedFields()
-        restorePlaybackIfNeeded()
     }
 
     // MARK: - Restart restore
 
-    /// Set while a window reopened after an app restart still owes its saved
-    /// playhead and play/pause state; reports are not recorded meanwhile, or
-    /// the new player's 0 would overwrite what is being restored.
-    @ObservationIgnored private(set) var restoredPlayback: VideoPlaybackRestore.Entry?
+    /// Keeps the Library fallback from replacing a local checkpoint after its seek lands.
+    @ObservationIgnored private(set) var restoredInitialPlayback = false
     @ObservationIgnored private var restoreAwaitingPause = false
 
     private func restorePlaybackIfNeeded() {
-        guard isRestoredPopOut, let id = popOutWindowValue?.id,
-              let saved = VideoPlaybackRestore.entry(for: id), saved.identity == video.identity else { return }
-        restoredPlayback = saved
+        guard let saved = VideoPlaybackRestore.entry(for: windowValueId), saved.identity == video.identity else { return }
+        restoredInitialPlayback = true
         restoreAwaitingPause = saved.paused
-        if saved.seconds > 1 { resumeAtLibraryPosition(saved.seconds) }
+        if saved.seconds > 0 { resumeAtLibraryPosition(saved.seconds) }
         AppLogger.videoWindow.info("Restoring the playhead at \(saved.seconds, format: .fixed(precision: 2))s, \(saved.paused ? "paused" : "playing", privacy: .public)")
     }
 
     /// Called with each applied state report: finishes a pending paused
     /// restore, else records the state for the next restart.
     private func noteStateForRestore(paused: Bool) {
-        guard let id = popOutWindowValue?.id else { return }
         if restoreAwaitingPause {
-            if paused { restoreAwaitingPause = false } else if duration > 0, let pauseCommand {
-                restoreAwaitingPause = false
-                pauseCommand()
+            guard paused else {
+                if duration > 0 { pauseCommand?() }
+                return
             }
+            restoreAwaitingPause = false
         }
-        if restoredPlayback != nil {
-            // Done once the player is at the saved place (or there was none to reach).
-            guard !restoreAwaitingPause, carriedPosition == nil else { return }
-            restoredPlayback = nil
-        }
-        VideoPlaybackRestore.record(windowID: id, identity: video.identity, seconds: currentTime,
-                                    paused: restoreAwaitingPause ? true : paused)
+        // A renderer can report an initial zero before the Library lookup.
+        // Only record zero once this window has a checkpoint for this item.
+        guard currentTime > 0 || VideoPlaybackRestore.entry(for: windowValueId)?.identity == video.identity else { return }
+        VideoPlaybackRestore.record(windowID: windowValueId, identity: video.identity, seconds: currentTime, paused: paused)
     }
 
     /// Looks for the analysis track of a 3D Library title: by its Jellyfin
@@ -2425,15 +2419,18 @@ final class VideoWindowModel {
         // different video cancels the carry itself.
         // Keep shielding progress reports until the asynchronous seek lands.
         // Clearing on dispatch lets the next zero-time report erase the target.
-        if abs(reportedTime - carried.time) <= 2 {
-            if carried.requested { carriedPosition = nil }
+        guard duration.isFinite, duration > 0 else { return true }
+        let target = min(carried.time, max(0, duration - 0.5))
+        let tolerance = carried.requested ? 2.0 : 0.1
+        if abs(reportedTime - target) <= tolerance {
+            carriedPosition = nil
             return false
         }
-        guard duration > 0, let seekCommand else { return true }
+        guard let seekCommand else { return true }
         guard !carried.requested else { return true }
         carriedPosition?.requested = true
         AppLogger.videoWindow.info("Resuming new renderer at \(carried.time, format: .fixed(precision: 2))s (it reported \(reportedTime, format: .fixed(precision: 2))s)")
-        seekCommand(min(carried.time, max(0, duration - 0.5)))
+        seekCommand(target)
         return true
     }
 

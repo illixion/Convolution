@@ -730,6 +730,7 @@ struct VideoWindowView: View {
         .task(id: video.identity) {
             let reported = video
             await applyStartPositionIfNeeded()
+            guard !Task.isCancelled else { return }
             await LibraryPlaybackCoordinator.reportGenericPlaybackProgress(
                 video: reported,
                 // Nil once the window has moved on to another video (the
@@ -831,14 +832,8 @@ struct VideoWindowView: View {
     }
     #endif
 
-    /// Resumes at `windowValue.startSeconds` (the Library's Resume), for the
-    /// video the window opened with only. The model holds the position until
-    /// a player reports in, so a player rebuilt meanwhile (live 3D) starts
-    /// there too.
-    ///
-    /// The value is a snapshot from when Play was pressed, and a restored
-    /// window replays it long after: a Library title resumes from where the
-    /// server says it was left instead, when it says.
+    /// Use the Library's latest position for an archived window with no local
+    /// playhead. For a fresh open, a nil start preserves Play from Beginning.
     private func applyStartPositionIfNeeded() async {
         if windowModel.consumeHandoffResumeSuppression() {
             appliedStartPosition = true
@@ -849,7 +844,7 @@ struct VideoWindowView: View {
         // snapshot in the window value: a window restored after a relaunch or
         // reinstall replays the position from when it was first opened (or
         // none), long behind where the last 10 s reports left the video.
-        if !appliedStartPosition, windowModel.restoredPlayback == nil,
+        if !appliedStartPosition, !windowModel.restoredInitialPlayback,
            video.identity == windowValue.video.identity,
            let id = YouTubeVideoID(videoIdentity: video.identity) {
             appliedStartPosition = true
@@ -860,22 +855,21 @@ struct VideoWindowView: View {
             return
         }
         #endif
-        guard !appliedStartPosition, windowModel.restoredPlayback == nil,
-              let snapshot = windowValue.startSeconds, snapshot > 0,
+        guard !appliedStartPosition, !windowModel.restoredInitialPlayback,
               video.identity == windowValue.video.identity
         else { return }
-        appliedStartPosition = true
-        var start = snapshot
+        var start = windowValue.startSeconds ?? 0
+        guard start > 0 || !windowValue.wasOpenedThisLaunch else { return }
         if let itemId = windowModel.libraryItemId, let library = LibraryService.current() {
             await LibraryWatchState.shared.settled(itemId: itemId)
             if let fresh = try? await library.item(id: itemId) {
                 // Played since (or never resumable): start over.
                 start = fresh.userData.resumeSeconds ?? 0
             }
-            guard !Task.isCancelled, start > 0 else { return }
         }
-        guard windowModel.video.identity == windowValue.video.identity else { return }
-        windowModel.resumeAtLibraryPosition(start)
+        guard !Task.isCancelled, windowModel.video.identity == windowValue.video.identity else { return }
+        appliedStartPosition = true
+        if start > 0 { windowModel.resumeAtLibraryPosition(start) }
     }
 
     // MARK: - Playback info

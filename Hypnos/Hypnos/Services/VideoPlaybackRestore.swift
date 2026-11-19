@@ -1,7 +1,7 @@
 /*
  Hypnos - Video Playback Restore
 
- Where each pop-out video window was and whether it was playing, keyed by its
+ Where each video window was and whether it was playing, keyed by its
  window value's UUID, so a window visionOS reopens after the app restarts (an
  update, a crash) comes back at its playhead and in its play/pause state
  instead of playing from 0.
@@ -59,6 +59,7 @@ enum VideoPlaybackRestore {
     private nonisolated static func write(_ snapshot: [String: Entry]) {
         var url = fileURL
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url, options: .atomic)
         var values = URLResourceValues()
         values.isExcludedFromBackup = true

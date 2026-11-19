@@ -11,6 +11,8 @@ import RAVEMedia
 import RAVEUI
 
 struct VideoWindowValue: Identifiable, Codable, Hashable {
+    private static let launchID = UUID()
+
     /// Unique per window instance — ensures visionOS treats each opening as a new window
     let id: UUID
     var video: GalleryVideo
@@ -47,6 +49,11 @@ struct VideoWindowValue: Identifiable, Codable, Hashable {
     /// once, to `video` only (not to siblings navigated to afterwards).
     var startSeconds: Double?
 
+    /// Old scene archives have no launch ID. A restored Library window gets
+    /// a fresh resume point even if it was originally opened from the beginning.
+    private var openingLaunchID: UUID?
+    var wasOpenedThisLaunch: Bool { openingLaunchID == Self.launchID }
+
     /// In-process token for moving an active pushed player to a pop-out scene.
     /// A restored value has no matching registry entry and follows normal load.
     var playbackHandoffID: UUID?
@@ -62,6 +69,7 @@ struct VideoWindowValue: Identifiable, Codable, Hashable {
         playbackHandoffID: UUID? = nil
     ) {
         self.id = UUID()
+        self.openingLaunchID = Self.launchID
         self.video = video
         self.galleryVideos = galleryVideos
         self.stereoscopicOverride = stereoscopicOverride
