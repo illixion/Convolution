@@ -5,17 +5,18 @@ import PackageDescription
 // GLB -> USDZ for Generated 3D (HYPNOS_GEN3D), behind one small seam.
 //
 // AnythingUSDZKit is a sibling checkout (~/Projects/AnythingUSDZ) that is still work in
-// progress and unpublished, so a clone of this repo has no such folder. The kit is a
-// dependency of this package only when that folder is there; without it the package
-// still builds and `Gen3DConverter.isAvailable` is false (Generated 3D then reports that
-// it can't convert). Set HYPNOS_WITHOUT_ANYTHINGUSDZ=1 to leave it out on a machine that
-// has it (a submission build). SwiftPM re-evaluates this manifest when it changes or the
-// package is re-resolved, so after adding or removing the checkout, reset package caches.
+// progress and unpublished, so it is only linked in a Generated 3D build: the one with
+// GEN3D_CONDITION=HYPNOS_GEN3D, the same flag that compiles the feature in. A manifest
+// cannot see Xcode build settings, only the environment, so the sideload build exports
+// the flag (scripts/build-signing.conf) as well as passing it to xcodebuild. CI and a clean
+// clone have neither: the package builds without the kit and `Gen3DConverter.isAvailable`
+// is false. SwiftPM re-evaluates this manifest when it changes or the package is
+// re-resolved, so after flipping the flag, reset package caches.
 let kitPath = "../../../AnythingUSDZ/Packages/AnythingUSDZKit"
 let manifestDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
 let kitExists = FileManager.default.fileExists(
     atPath: manifestDirectory.appendingPathComponent(kitPath + "/Package.swift").path)
-let withKit = kitExists && ProcessInfo.processInfo.environment["HYPNOS_WITHOUT_ANYTHINGUSDZ"] == nil
+let withKit = kitExists && ProcessInfo.processInfo.environment["GEN3D_CONDITION"] == "HYPNOS_GEN3D"
 
 let package = Package(
     name: "Gen3DConversion",
