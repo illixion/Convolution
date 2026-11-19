@@ -601,6 +601,7 @@ struct NativeMetalVideoPlayerView {
         private var timeObserver: Any?
         private var endObserver: NSObjectProtocol?
         private var failureObserver: NSObjectProtocol?
+        private var audioSessionObservers: [NSObjectProtocol] = []
         private var statusObservation: NSKeyValueObservation?
         private var timeControlObservation: NSKeyValueObservation?
         private var lastReportedSize: CGSize?
@@ -766,6 +767,8 @@ struct NativeMetalVideoPlayerView {
                 }
             }
 
+            observeAudioSessionForLogs()
+
             // Any copy of a looping item can fail mid-play.
             failureObserver = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemFailedToPlayToEndTime,
@@ -862,15 +865,38 @@ struct NativeMetalVideoPlayerView {
         /// system did around it is logged: the player's own view of why, the
         /// audio session and every scene's activation (a pause on leaving a
         /// room with other windows open, 2026-11-19).
+        /// What the audio session did around a pause the system caused: an interruption (and who began it) or a
+        /// route change. Logged as it happens, since the pause line alone only shows the state afterwards.
+        private func observeAudioSessionForLogs() {
+            #if os(visionOS) || os(iOS) || os(tvOS)
+            guard audioSessionObservers.isEmpty else { return }
+            let center = NotificationCenter.default
+            audioSessionObservers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { note in
+                let type = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) ?? 99
+                let reason = (note.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt).map(String.init) ?? "none"
+                let options = (note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt).map(String.init) ?? "none"
+                AppLogger.videoWindow.info("Audio session interruption: type \(type == 1 ? "began" : type == 0 ? "ended" : "?", privacy: .public), reason \(reason, privacy: .public), options \(options, privacy: .public)")
+            })
+            audioSessionObservers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { note in
+                let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt) ?? 99
+                AppLogger.videoWindow.info("Audio route change: reason \(reason, privacy: .public)")
+            })
+            audioSessionObservers.append(center.addObserver(forName: AVAudioSession.silenceSecondaryAudioHintNotification, object: nil, queue: .main) { note in
+                let type = (note.userInfo?[AVAudioSessionSilenceSecondaryAudioHintTypeKey] as? UInt) ?? 99
+                AppLogger.videoWindow.info("Audio session secondary-audio hint: \(type == 1 ? "begin silencing" : "end", privacy: .public)")
+            })
+            #endif
+        }
+
         private func logSystemPause() {
             #if os(visionOS) || os(iOS) || os(tvOS)
             let session = AVAudioSession.sharedInstance()
             let route = session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")
             let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.map {
-                "\($0.activationState.rawValue)"
+                "\($0.activationState.logName)"
             }.joined(separator: ",")
             AppLogger.videoWindow.info(
-                "System paused the native player: rate \(self.player?.rate ?? -1, privacy: .public), waiting reason \(self.player?.reasonForWaitingToPlay?.rawValue ?? "none", privacy: .public), roomActive \(self.isRoomActive, privacy: .public), other audio \(session.isOtherAudioPlaying, privacy: .public), route [\(route, privacy: .public)], scene states (0 unattached, 1 inactive, 2 active, 3 background) [\(scenes, privacy: .public)]"
+                "System paused the native player: rate \(self.player?.rate ?? -1, privacy: .public), waiting reason \(self.player?.reasonForWaitingToPlay?.rawValue ?? "none", privacy: .public), roomActive \(self.isRoomActive, privacy: .public), other audio \(session.isOtherAudioPlaying, privacy: .public), route [\(route, privacy: .public)], scene states [\(scenes, privacy: .public)]"
             )
             #else
             AppLogger.videoWindow.info("System paused the native player")
@@ -1182,6 +1208,8 @@ struct NativeMetalVideoPlayerView {
             if let failureObserver {
                 NotificationCenter.default.removeObserver(failureObserver)
             }
+            audioSessionObservers.forEach(NotificationCenter.default.removeObserver)
+            audioSessionObservers = []
             frameRateTask?.cancel()
             frameRateTask = nil
             measuredFrameRate = nil
@@ -1957,3 +1985,18 @@ struct NativeMetalVideoPlayerView {
         }
     }
 }
+
+
+#if os(visionOS) || os(iOS) || os(tvOS)
+private extension UIScene.ActivationState {
+    var logName: String {
+        switch self {
+        case .unattached: "unattached"
+        case .foregroundActive: "active"
+        case .foregroundInactive: "inactive"
+        case .background: "background"
+        @unknown default: "?"
+        }
+    }
+}
+#endif
