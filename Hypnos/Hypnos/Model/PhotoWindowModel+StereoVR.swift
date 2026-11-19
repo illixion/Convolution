@@ -21,6 +21,7 @@ import CoreGraphics
 import DebugTrace
 import Foundation
 import ImageIO
+import RAVEUI
 import RAVEMedia
 import RealityKit
 
@@ -120,6 +121,9 @@ extension PhotoWindowModel {
             }
         }
         isShowingVRPhoto = true
+        // VR owns the photo session now; don't leave a hidden window acting
+        // as its remote or as an accidental second presentation.
+        RAVEWindowScenes.destroyAll(except: nil)
     }
 
     func leaveVR(dismiss: DismissImmersiveSpaceAction) async {

@@ -123,6 +123,7 @@ struct PhotoSettingsPage: View {
                     }
                     if PlatformCapabilities.supportsImmersiveSpaces {
                         Toggle("Fully Immersive 3D Mode", isOn: $appModel.fullyImmersive3DMode)
+                            .help("Open 3D photos in a dedicated immersive space. Entering closes open app windows; leaving returns to the photo window.")
                     }
                 }
             }

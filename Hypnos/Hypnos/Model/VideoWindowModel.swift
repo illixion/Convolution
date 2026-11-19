@@ -36,7 +36,7 @@ final class VideoWindowModel {
 
     /// Whether this window was opened via pushWindow (back button dismisses)
     /// vs openWindow (standalone pop-out with gallery button).
-    let wasPushed: Bool
+    var wasPushed: Bool
 
     /// Whether this window is on a stack right now: it was pushed over a
     /// window that is still hidden behind it. `wasPushed` is how it was
@@ -59,12 +59,12 @@ final class VideoWindowModel {
     }
 
     /// The originating window value's UUID (used for RestoredWindowTracker).
-    let windowValueId: UUID
+    var windowValueId: UUID
 
     /// This window's originating value, for standalone (non-pushed) windows only.
     /// Registered with AppModel so saved window groups can capture open video
     /// windows; nil for pushed windows, which aren't independently restorable.
-    let popOutWindowValue: VideoWindowValue?
+    var popOutWindowValue: VideoWindowValue?
 
     /// Shared app state (browse list, global settings, API client).
     let appModel: AppModel
@@ -422,6 +422,10 @@ final class VideoWindowModel {
     /// `NativeMetalVideoPlayerView` as it loads and tears down; observe
     /// `nativePlayerGeneration` for changes.
     @ObservationIgnored private(set) weak var nativePlayer: AVPlayer?
+    /// Retains the native renderer so it can move with this model to a new scene.
+    @ObservationIgnored var nativeCoordinatorForHandoff: NativeMetalVideoPlayerView.Coordinator?
+    @ObservationIgnored private var windowHandoffPending = false
+    @ObservationIgnored private var suppressResumeAfterHandoff = false
     private(set) var nativePlayerGeneration = 0
 
     /// The cinema's big screen shows this window's picture: a new episode
@@ -454,6 +458,42 @@ final class VideoWindowModel {
         // A restored window can be disconnected before its player exists.
         if sceneDisconnected { Self.silence(player) }
         refreshAudioTracks()
+    }
+
+    /// Keep the live model and coordinator through a pushed-to-pop-out move.
+    /// This preserves YouTube's active HLS item and buffer as well as its
+    /// current playhead and rendition state.
+    func prepareForWindowHandoff() -> Bool {
+        guard !windowHandoffPending, playbackRenderer == .nativeMetal,
+              let coordinator = nativeCoordinatorForHandoff else { return false }
+        windowHandoffPending = true
+        coordinator.prepareForWindowHandoff()
+        return true
+    }
+
+    func cancelWindowHandoff() {
+        guard windowHandoffPending else { return }
+        windowHandoffPending = false
+        nativeCoordinatorForHandoff?.cancelWindowHandoff()
+        cleanup()
+    }
+
+    func adoptPopOutValue(_ value: VideoWindowValue) {
+        guard windowHandoffPending, value.video.identity == video.identity else { return }
+        if let old = popOutWindowValue {
+            appModel.unregisterVideoWindow(video: video, windowValueId: old.id)
+        }
+        wasPushed = false
+        isStacked = false
+        windowValueId = value.id
+        popOutWindowValue = value
+        suppressResumeAfterHandoff = true
+        appModel.registerVideoWindow(video: video, windowValue: value)
+    }
+
+    func consumeHandoffResumeSuppression() -> Bool {
+        defer { suppressResumeAfterHandoff = false }
+        return suppressResumeAfterHandoff
     }
 
     /// What the equalizer found on the playing item's audio: a tap, the stream path (HLS), or why
@@ -493,6 +533,7 @@ final class VideoWindowModel {
     /// The window's scene is gone, whether or not SwiftUI says so: nothing
     /// of it may play on (see `SceneDelegate.onDisconnect`).
     func sceneDidDisconnect() {
+        guard !windowHandoffPending else { return }
         guard !sceneDisconnected else { return }
         sceneDisconnected = true
         Self.silence(nativePlayer)
@@ -1225,6 +1266,9 @@ final class VideoWindowModel {
 
     /// Call from onDisappear.
     func cleanup() {
+        // The source scene disappears during a successful handoff. The new
+        // scene continues with this model and its existing renderer.
+        guard !windowHandoffPending else { return }
         SleepTimer.shared.unregister(self)
         #if os(iOS) || os(tvOS)
         IdleTimerHold.set(false, for: self)

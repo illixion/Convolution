@@ -441,61 +441,12 @@ struct PhotoDisplayView: View {
         #endif
         #if os(visionOS)
         .onChange(of: windowModel.hostFullyImmersiveSpace) { _, isOpen in
-            // The photo window stays open and doubles as the controls
-            // anchor — its RealityView content is hidden by an opacity
-            // gate so the user only sees the ornament + immersive scene.
-            Task {
-                if isOpen {
-                    // Loan the windowed IPC entity to the immersive scene
-                    // so RealityKit reuses the already-generated
-                    // Spatial3DImage instead of regenerating + double-
-                    // allocating GPU resources.
-                    appModel.immersiveLoanEntity = windowModel.contentEntity
-                    appModel.immersiveLoanOwner = windowModel
-                    let value = Spatial3DImmersiveValue(imageURL: windowModel.imageURL)
-                    _ = await openImmersiveSpace(value: value)
-                    windowModel.cancelAutoHideTimer()
-                    windowModel.isUIHidden = false
-                } else {
-                    await dismissImmersiveSpace()
-                    // Flip the IPC back to windowed spatial3D so the
-                    // photo window's RealityView re-adopts the entity at
-                    // the correct viewing mode (the update closure's
-                    // `parent == nil` guard handles the re-attach).
-                    if var ipc = windowModel.contentEntity.components[ImagePresentationComponent.self] {
-                        ipc.desiredViewingMode = .spatial3D
-                        windowModel.desiredViewingMode = .spatial3D
-                        windowModel.contentEntity.components.set(ipc)
-                    }
-                    // Reset the transform — it was carrying the
-                    // immersive world pose (eye-height Y, ~2m -Z) which,
-                    // applied as window-local on re-adoption, slid the
-                    // entity up and out of the window's visible bounds.
-                    // The windowed update closure recomputes scale +
-                    // position correctly on its next pass.
-                    windowModel.contentEntity.transform = Transform()
-                    appModel.immersiveLoanEntity = nil
-                    if appModel.immersiveLoanOwner === windowModel {
-                        appModel.immersiveLoanOwner = nil
-                    }
-                    windowModel.startAutoHideTimer()
-                }
-            }
+            Task { await updateFullyImmersiveSpace(isOpen) }
         }
         #endif
         .onDisappear {
             immersiveResizeVerifyTask?.cancel()
             immersiveResizeVerifyTask = nil
-            #if os(visionOS)
-            if windowModel.hostFullyImmersiveSpace {
-                windowModel.hostFullyImmersiveSpace = false
-                appModel.immersiveLoanEntity = nil
-                if appModel.immersiveLoanOwner === windowModel {
-                    appModel.immersiveLoanOwner = nil
-                }
-                Task { await dismissImmersiveSpace() }
-            }
-            #endif
         }
         // MARK: - Scene Phase Idle Downscale
         .onChange(of: scenePhase) { oldPhase, newPhase in
@@ -508,6 +459,61 @@ struct PhotoDisplayView: View {
             }
         }
     }
+
+    #if os(visionOS)
+    @MainActor
+    private func updateFullyImmersiveSpace(_ isOpen: Bool) async {
+        if isOpen {
+            // Keep the already-generated RealityKit image alive while the
+            // immersive scene adopts the entity, avoiding a second GPU copy.
+            appModel.immersiveLoanEntity = windowModel.contentEntity
+            appModel.immersiveLoanOwner = windowModel
+            let value = Spatial3DImmersiveValue(imageURL: windowModel.imageURL)
+            let result = await openImmersiveSpace(value: value)
+            switch result {
+            case .opened:
+                windowModel.cancelAutoHideTimer()
+                windowModel.isUIHidden = false
+                RAVEWindowScenes.destroyAll(except: nil)
+            case .userCancelled:
+                restoreAfterImmersiveOpenFailure()
+                AppLogger.photoWindow.info("Fully immersive photo space was cancelled")
+            case .error:
+                restoreAfterImmersiveOpenFailure()
+                AppLogger.photoWindow.error("Fully immersive photo space failed to open")
+            @unknown default:
+                restoreAfterImmersiveOpenFailure()
+            }
+        } else {
+            await dismissImmersiveSpace()
+            if var ipc = windowModel.contentEntity.components[ImagePresentationComponent.self] {
+                ipc.desiredViewingMode = .spatial3D
+                windowModel.desiredViewingMode = .spatial3D
+                windowModel.contentEntity.components.set(ipc)
+            }
+            windowModel.contentEntity.transform = Transform()
+            appModel.immersiveLoanEntity = nil
+            if appModel.immersiveLoanOwner === windowModel {
+                appModel.immersiveLoanOwner = nil
+            }
+            windowModel.startAutoHideTimer()
+        }
+    }
+
+    @MainActor
+    private func restoreAfterImmersiveOpenFailure() {
+        windowModel.hostFullyImmersiveSpace = false
+        appModel.immersiveLoanEntity = nil
+        if appModel.immersiveLoanOwner === windowModel {
+            appModel.immersiveLoanOwner = nil
+        }
+        windowModel.desiredViewingMode = .spatial3D
+        if var ipc = windowModel.contentEntity.components[ImagePresentationComponent.self] {
+            ipc.desiredViewingMode = .spatial3D
+            windowModel.contentEntity.components.set(ipc)
+        }
+    }
+    #endif
 
     // MARK: - Image Content
 

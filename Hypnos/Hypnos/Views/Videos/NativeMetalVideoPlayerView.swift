@@ -174,7 +174,9 @@ extension NativeMetalVideoPlayerView: NSViewRepresentable {
 
     func updateNSView(_ view: NativeVideoHostView, context: Context) { update(coordinator: context.coordinator) }
 
-    static func dismantleNSView(_ view: NativeVideoHostView, coordinator: Coordinator) { coordinator.cleanup() }
+    static func dismantleNSView(_ view: NativeVideoHostView, coordinator: Coordinator) {
+        coordinator.cleanup(ifAttachedTo: view)
+    }
 }
 #else
 extension NativeMetalVideoPlayerView: UIViewRepresentable {
@@ -182,7 +184,9 @@ extension NativeMetalVideoPlayerView: UIViewRepresentable {
 
     func updateUIView(_ view: NativeVideoHostView, context: Context) { update(coordinator: context.coordinator) }
 
-    static func dismantleUIView(_ view: NativeVideoHostView, coordinator: Coordinator) { coordinator.cleanup() }
+    static func dismantleUIView(_ view: NativeVideoHostView, coordinator: Coordinator) {
+        coordinator.cleanup(ifAttachedTo: view)
+    }
 }
 #endif
 
@@ -221,7 +225,10 @@ struct NativeMetalVideoPlayerView {
     var onPlaybackError: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
-        Coordinator()
+        if let coordinator = playbackModel?.nativeCoordinatorForHandoff { return coordinator }
+        let coordinator = Coordinator()
+        playbackModel?.nativeCoordinatorForHandoff = coordinator
+        return coordinator
     }
 
     func makeHost(coordinator: Coordinator) -> NativeVideoHostView {
@@ -251,6 +258,7 @@ struct NativeMetalVideoPlayerView {
     }
 
     func update(coordinator: Coordinator) {
+        coordinator.playbackModel = playbackModel
 #if HYPNOS_YOUTUBE
         coordinator.flashbackModel = playbackModel
 #endif
@@ -380,6 +388,8 @@ struct NativeMetalVideoPlayerView {
 
         weak var mtkView: MTKView?
         weak var host: NativeVideoHostView?
+        weak var playbackModel: VideoWindowModel?
+        private var handoffPending = false
 #if HYPNOS_YOUTUBE
         weak var flashbackModel: VideoWindowModel?
 #endif
@@ -622,12 +632,21 @@ struct NativeMetalVideoPlayerView {
         func attach(to host: NativeVideoHostView) {
             self.host = host
             mtkView = host.metalView
+            handoffPending = false
             #if os(iOS) || os(macOS)
             pictureInPicture.attach(to: host.pipView.playerLayer)
             #endif
             if let device = renderer?.device {
+                textureCache = nil
                 CVMetalTextureCacheCreate(nil, nil, device, nil, &textureCache)
             }
+        }
+
+        func prepareForWindowHandoff() { handoffPending = true }
+
+        func cancelWindowHandoff() {
+            handoffPending = false
+            cleanup()
         }
 
         func load(url: URL, identity: String, startPaused: Bool = false) {
@@ -1058,13 +1077,28 @@ struct NativeMetalVideoPlayerView {
             cleanup()
         }
 
+        func cleanup(ifAttachedTo oldHost: NativeVideoHostView) {
+            // The old representable may dismantle after this coordinator has
+            // already moved to the destination scene.
+            guard host === oldHost else { return }
+            cleanup()
+        }
+
         func cleanup() {
+            if handoffPending {
+                mtkView?.isPaused = true
+                mtkView?.delegate = nil
+                return
+            }
             #if os(iOS) || os(macOS)
             pictureInPicture.stop()
             pictureInPicture.onChange(false, false)
             pictureInPicture.onChange = { _, _ in }
             #endif
             cleanupPlayer()
+            if let playbackModel, playbackModel.nativeCoordinatorForHandoff === self {
+                playbackModel.nativeCoordinatorForHandoff = nil
+            }
             host = nil
             intermediate = nil
             textureCache = nil

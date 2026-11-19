@@ -38,6 +38,7 @@ enum PhotoViewerContext {
 
 struct PhotoOrnamentView<ExtraMenuItems: View>: View {
     @Bindable var windowModel: PhotoWindowModel
+    @Environment(AppModel.self) private var appModel
     let context: PhotoViewerContext
     var onGalleryButtonTap: () -> Void
     @ViewBuilder var extraMenuItems: () -> ExtraMenuItems
@@ -257,7 +258,9 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
                 }
 
                 nativeMenuButton(
-                    title: "RealityKit 3D (Immersive)",
+                    title: appModel.fullyImmersive3DMode
+                        ? "RealityKit 3D (Immersive Space)"
+                        : "RealityKit 3D (Window)",
                     icon: "inset.filled.pano",
                     isChecked: windowModel.desiredViewingMode == .spatial3DImmersive && !windowModel.isRawSplatMode,
                     isDisabled: windowModel.spatial3DImageState == .generating && windowModel.desiredViewingMode != .spatial3D
@@ -279,7 +282,9 @@ struct PhotoOrnamentView<ExtraMenuItems: View>: View {
                     }
 
                     nativeMenuButton(
-                        title: "Raw Splat 3D (Immersive)",
+                        title: appModel.fullyImmersive3DMode
+                            ? "Raw Splat 3D (Immersive Space)"
+                            : "Raw Splat 3D (Window)",
                         icon: "circle.grid.3x3",
                         isChecked: windowModel.isRawSplatMode && windowModel.desiredViewingMode == .spatial3DImmersive,
                         isDisabled: windowModel.spatial3DImageState == .generating

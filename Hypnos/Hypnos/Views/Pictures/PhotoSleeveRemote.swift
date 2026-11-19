@@ -2,11 +2,9 @@
 //  PhotoSleeveRemote.swift
 //  Hypnos
 //
-//  What the forearm remote (`ForearmSleeve`) shows while a photo is in the viewer HUD: the
-//  picture's name and place, previous / next, the chrome and Return to Window, the 3D modes, and a
-//  second page of adjustments. The HUD lives in an immersive space, where visionOS presents no
-//  popovers, so the window's Adjustments popover can't open there (device, 2026-11-14); the
-//  sleeve is the HUD's way to them.
+//  What the forearm remote (`ForearmSleeve`) shows while a photo is in the viewer HUD or a
+//  dedicated 3D immersive space: picture name, navigation, modes, return-to-window and
+//  adjustments. Immersive spaces have no popovers, so the sleeve carries the controls there.
 //
 //  Every press makes the same model call the window's own controls make (the 3D menu's
 //  `toggleRealityKit3D` / `showFlat` / `toggleAIDepth`, the Adjustments popover's slider curve and
@@ -37,8 +35,10 @@ final class PhotoSleeveRemote: SleeveRemote {
         static let contrast = "photo.contrast"
         static let saturation = "photo.saturation"
         static let opacity = "photo.opacity"
+        static let distance = "photo.distance"
         static let reset = "photo.reset"
         static let back = "photo.back"
+        static let recenter = "photo.recenter"
     }
 
     private enum Action {
@@ -52,6 +52,7 @@ final class PhotoSleeveRemote: SleeveRemote {
         static let aiDepth = "photo.mode.ai"
         static let adjustment = "photo.adjustment"
         static let reset = "photo.reset"
+        static let recenter = "photo.recenter"
     }
 
     /// An adjustment slider: what it sets, over the popover's range and default.
@@ -70,6 +71,7 @@ final class PhotoSleeveRemote: SleeveRemote {
         Slider(tile: Tile.contrast, label: "Contrast", range: 0.2...5.0, defaultValue: 1, linear: false, keyPath: \.contrast),
         Slider(tile: Tile.saturation, label: "Saturation", range: 0.0...5.0, defaultValue: 1, linear: false, keyPath: \.saturation),
         Slider(tile: Tile.opacity, label: "Opacity", range: 0.01...1.0, defaultValue: 1, linear: true, keyPath: \.opacity),
+        Slider(tile: Tile.distance, label: "Distance", range: 0.25...4.0, defaultValue: 1, linear: false, keyPath: \.immersiveScale),
     ]
 
     static let layout = RAVESleeveLayout(outer: [
@@ -87,6 +89,7 @@ final class PhotoSleeveRemote: SleeveRemote {
                 RAVESleeveTile(Tile.immersive, .button(RAVESleeveAction(Action.immersive)), label: "Immersive", icon: "inset.filled.pano"),
                 RAVESleeveTile(Tile.aiDepth, .button(RAVESleeveAction(Action.aiDepth)), label: "AI 3D", icon: "wand.and.sparkles"),
             ],
+            [RAVESleeveTile(Tile.recenter, .button(RAVESleeveAction(Action.recenter)), label: "Recenter", icon: "scope", span: 4)],
             [RAVESleeveTile(Tile.adjust, .page("photo.adjust"), label: "Adjust", icon: "slider.horizontal.3", span: 4)],
         ]),
         RAVESleevePage("photo.adjust", title: "Adjust", rows: sliders.map { slider in
@@ -103,12 +106,21 @@ final class PhotoSleeveRemote: SleeveRemote {
 
     private weak var model: PhotoWindowModel?
     private let returnToWindow: @MainActor () -> Void
+    private let immersiveSession: Bool
+    private let recenter: @MainActor () -> Void
     /// A slider being dragged: committed (tracked, and the 3D picture re-baked)
     /// once it is let go, as the popover does after its sliders settle.
     private var pendingAdjustment: (tile: String, seen: TimeInterval)?
 
-    init(model: PhotoWindowModel, returnToWindow: @escaping @MainActor () -> Void) {
+    init(
+        model: PhotoWindowModel,
+        immersiveSession: Bool = false,
+        recenter: @escaping @MainActor () -> Void = {},
+        returnToWindow: @escaping @MainActor () -> Void
+    ) {
         self.model = model
+        self.immersiveSession = immersiveSession
+        self.recenter = recenter
         self.returnToWindow = returnToWindow
     }
 
@@ -120,7 +132,7 @@ final class PhotoSleeveRemote: SleeveRemote {
         let count = model.galleryImages.count
         let name = model.image.title ?? model.image.fileName ?? "Photo"
         let place = count > 1 ? "\(model.currentGalleryIndex + 1) of \(count) · " : ""
-        set(wearer, Tile.title, RAVESleeveTileState(text: place + name))
+        set(wearer, Tile.title, RAVESleeveTileState(text: (immersiveSession ? "Immersive Space · " : "") + place + name))
         set(wearer, Tile.previous, RAVESleeveTileState(disabled: locked || !model.hasPreviousGalleryImage))
         set(wearer, Tile.next, RAVESleeveTileState(disabled: locked || !model.hasNextGalleryImage))
         set(wearer, Tile.chrome, RAVESleeveTileState(isOn: !model.isUIHidden))
@@ -157,19 +169,37 @@ final class PhotoSleeveRemote: SleeveRemote {
             if model.isUIHidden == show { model.toggleUIVisibility() }
         case (Action.window, .fired):
             returnToWindow()
+        case (Action.recenter, .fired):
+            recenter()
         case (Action.flat, .fired):
-            Task { await model.showFlat() }
+            Task {
+                await model.showFlat()
+                if immersiveSession { returnToWindow() }
+            }
         case (Action.realityKit, .fired):
-            Task { await model.toggleRealityKit3D(immersive: false) }
+            Task {
+                await model.toggleRealityKit3D(immersive: false)
+                if immersiveSession { returnToWindow() }
+            }
         case (Action.immersive, .fired):
-            Task { await model.toggleRealityKit3D(immersive: true) }
+            Task {
+                await model.toggleRealityKit3D(immersive: true)
+                if immersiveSession { returnToWindow() }
+            }
         case (Action.aiDepth, .fired):
-            Task { await model.toggleAIDepth() }
+            Task {
+                await model.toggleAIDepth()
+                if immersiveSession { returnToWindow() }
+            }
         case (Action.adjustment, .value(let fraction)):
             guard let tile = action.argument, let slider = Self.sliders.first(where: { $0.tile == tile }) else { return }
             // Live, as the popover's sliders are: the flat picture follows at once.
             model.currentAdjustments[keyPath: slider.keyPath] = Self.value(at: Double(fraction), slider)
             pendingAdjustment = (tile, CACurrentMediaTime())
+            if tile == Tile.distance, let entity = model.appModel.immersiveLoanEntity {
+                let scale = Float(model.currentAdjustments.immersiveScale)
+                entity.scale = SIMD3<Float>(scale, scale, model.spatial3DDepthScale(userScale: scale))
+            }
         case (Action.reset, .fired):
             // The popover's Reset (auto-enhance is its own toggle and stays).
             model.currentAdjustments.brightness = 0
@@ -190,19 +220,21 @@ final class PhotoSleeveRemote: SleeveRemote {
         let held = wearer.snapshot?.tiles.first { $0.tile.id == pending.tile }?.isPressed ?? false
         guard !held, CACurrentMediaTime() - pending.seen > 0.12 else { return }
         pendingAdjustment = nil
-        commitAdjustments(model)
+        commitAdjustments(model, reload: pending.tile != Tile.distance)
     }
 
     func released() {
-        if let model, pendingAdjustment != nil { commitAdjustments(model) }
+        if let model, let pendingAdjustment {
+            commitAdjustments(model, reload: pendingAdjustment.tile != Tile.distance)
+        }
         pendingAdjustment = nil
     }
 
     /// What the popover does when its values change: remember them for the
     /// picture, and re-bake a 3D picture (which waits for the values to settle).
-    private func commitAdjustments(_ model: PhotoWindowModel) {
+    private func commitAdjustments(_ model: PhotoWindowModel, reload: Bool = true) {
         Task { await model.trackAdjustments() }
-        model.reloadImagePresentationWithAdjustments()
+        if reload { model.reloadImagePresentationWithAdjustments() }
     }
 
     private static func position(of value: Double, _ slider: Slider) -> Double {

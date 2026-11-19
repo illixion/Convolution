@@ -190,7 +190,13 @@ struct VideoWindowView: View {
         // where the sandbox container UUID has changed since the window was saved.
         let resolved = windowValue.resolvingLocalFileURLs()
         self.windowValue = resolved
-        _windowModel = State(initialValue: VideoWindowModel(windowValue: resolved, appModel: appModel))
+        if let handoffID = resolved.playbackHandoffID,
+           let transferred = VideoWindowHandoff.claim(handoffID) {
+            transferred.adoptPopOutValue(resolved)
+            _windowModel = State(initialValue: transferred)
+        } else {
+            _windowModel = State(initialValue: VideoWindowModel(windowValue: resolved, appModel: appModel))
+        }
     }
 
     private var video: GalleryVideo { windowModel.video }
@@ -831,6 +837,10 @@ struct VideoWindowView: View {
     /// window replays it long after: a Library title resumes from where the
     /// server says it was left instead, when it says.
     private func applyStartPositionIfNeeded() async {
+        if windowModel.consumeHandoffResumeSuppression() {
+            appliedStartPosition = true
+            return
+        }
         #if HYPNOS_YOUTUBE
         // A YouTube video resumes from the watch history, never from the
         // snapshot in the window value: a window restored after a relaunch or
@@ -941,6 +951,7 @@ struct VideoWindowView: View {
                 appModel.showMainWindow(openWindow: openWindow)
             },
             onPopOut: windowModel.isStacked ? {
+                let handoffID = VideoWindowHandoff.deposit(windowModel)
                 let newValue = VideoWindowValue(
                     video: windowModel.video,
                     // Preserve a static (Local) navigation list across pop-out.
@@ -956,7 +967,8 @@ struct VideoWindowView: View {
                     // counting as modified and shadow the global. nil keeps the
                     // window following the global, which is what it was doing.
                     pseudo3DSettings: windowModel.pseudo3DSettings.isModified
-                        ? windowModel.pseudo3DSettings : nil
+                        ? windowModel.pseudo3DSettings : nil,
+                    playbackHandoffID: handoffID
                 )
                 openWindow(id: HypnosSceneID.videoDetail, value: newValue)
                 dismissWindow()

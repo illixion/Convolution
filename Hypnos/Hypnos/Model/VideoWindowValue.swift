@@ -47,6 +47,10 @@ struct VideoWindowValue: Identifiable, Codable, Hashable {
     /// once, to `video` only (not to siblings navigated to afterwards).
     var startSeconds: Double?
 
+    /// In-process token for moving an active pushed player to a pop-out scene.
+    /// A restored value has no matching registry entry and follows normal load.
+    var playbackHandoffID: UUID?
+
     init(
         video: GalleryVideo,
         galleryVideos: [GalleryVideo]? = nil,
@@ -54,7 +58,8 @@ struct VideoWindowValue: Identifiable, Codable, Hashable {
         video3DSettings: Video3DSettings? = nil,
         pseudo3DEnabled: Bool = false,
         pseudo3DSettings: Pseudo3DSettings? = nil,
-        wasPushed: Bool = false
+        wasPushed: Bool = false,
+        playbackHandoffID: UUID? = nil
     ) {
         self.id = UUID()
         self.video = video
@@ -65,6 +70,7 @@ struct VideoWindowValue: Identifiable, Codable, Hashable {
         self.pseudo3DSettings = pseudo3DSettings
         self.wasPushed = wasPushed
         self.restoredSize = nil
+        self.playbackHandoffID = playbackHandoffID
     }
 
     /// Identity is the window id alone — see the note on `PhotoWindowValue`: a

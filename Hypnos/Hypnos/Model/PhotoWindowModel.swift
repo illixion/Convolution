@@ -1496,6 +1496,13 @@ class PhotoWindowModel {
     /// Ensures GPU textures and image data are freed promptly rather than
     /// waiting for ARC/deinit which may be delayed by SwiftUI state retention.
     func cleanup() {
+        // The immersive session owns this model after its source window is
+        // closed. Its in-space controls return the model to a new photo window
+        // before the session releases it.
+        if appModel.immersiveLoanOwner === self, hostFullyImmersiveSpace { return }
+        #if os(visionOS)
+        if VRPhotoPresenter.shared.owner === self, VRPhotoPresenter.shared.picture != nil { return }
+        #endif
         AI3DWarmup.shared.clearIntent(self)
         #if os(visionOS)
         // Its VR photo goes with it (the empty space closes with the next one opened).

@@ -274,7 +274,7 @@ class AppModel {
     /// space disappears without PhotoDisplayView noticing) and so other
     /// photo windows can refuse a second Immersive 3D entry while one is
     /// already in flight.
-    weak var immersiveLoanOwner: PhotoWindowModel?
+    var immersiveLoanOwner: PhotoWindowModel?
 
     // MARK: - Video Source (stored, always Stash server)
 

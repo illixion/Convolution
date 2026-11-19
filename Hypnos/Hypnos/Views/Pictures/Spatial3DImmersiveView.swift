@@ -6,11 +6,10 @@
  `AppModel.fullyImmersive3DMode` is on and the user enters Immersive 3D;
  dismissed when they leave it.
 
- The space owns its own IPC entity so the windowed photo viewer can stay in
- a smaller windowed presentation (or mono) while the immersive presentation
- runs alongside. The image source is identified by `imageURL` — the disk
- cache resolves it to a local file before handing it to
- `ImagePresentationComponent.Spatial3DImage`.
+ The photo model and its generated RealityKit image stay alive while the source
+ window closes. The sleeve is the in-space remote; on exit, the image is handed
+ back to a fresh photo window without generating it again. The image source is
+ identified by `imageURL` for fallback loading.
 
  Placement piggybacks on `SpatialTrackingSession` + `AnchorEntity(.head)`
  with `.once` tracking — same data class as the surface-snapping path
@@ -27,6 +26,7 @@
  */
 
 import DebugTrace
+import RAVEUI
 import RealityKit
 import SwiftUI
 
@@ -47,18 +47,18 @@ struct Spatial3DImmersiveValue: Codable, Hashable {
 struct Spatial3DImmersiveView: View {
     let value: Spatial3DImmersiveValue
     @Environment(AppModel.self) private var appModel
+    @OpenWindowProxy private var openWindow
+    @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     /// Republished by the system whenever the immersive coordinate
     /// origin shifts (recenter, SharePlay re-anchor). We watch this for
     /// recenter detection so we don't have to spin up an ARKitSession
     /// just to listen for world-anchor updates.
     @Environment(\.immersiveSpaceDisplacement) private var immersiveSpaceDisplacement
 
-    /// Snapshot of the photo viewer's contentEntity transferred into the
-    /// immersive scene's RealityView. Captured once on appear so the
-    /// `update` closure has a stable handle even if AppModel's reference
-    /// is cleared mid-lifecycle. On disappear the entity is detached and
-    /// AppModel's reference is left to the photo viewer to re-adopt.
+    /// Snapshot of the photo model's contentEntity adopted by this scene.
+    /// The model remains retained by AppModel while the source window is closed.
     @State private var hostedEntity: Entity?
+    @State private var immersiveRoot = Entity()
     /// Anchored to the user's head pose at the moment the space (or a
     /// post-recenter rebuild) starts. `.once` tracking freezes it after
     /// the initial snap so the image stays put in world space as the
@@ -73,6 +73,7 @@ struct Spatial3DImmersiveView: View {
     /// to the RealityViewContent it can't grab from a plain `.onChange`).
     @State private var recenterTrigger: Int = 0
     @State private var lastAppliedRecenter: Int = 0
+    @State private var returningToWindow = false
 
     /// Distance in metres the IPC sits in front of the user along their
     /// initial forward axis. Larger than the typical photo-window
@@ -84,6 +85,7 @@ struct Spatial3DImmersiveView: View {
     var body: some View {
         RealityView { content in
             await ensureTrackingAuthorized()
+            content.add(immersiveRoot)
 
             // Adopt the photo viewer's IPC entity if it was handed off,
             // otherwise build a fresh one from disk as a fallback (e.g.
@@ -102,6 +104,19 @@ struct Spatial3DImmersiveView: View {
                 entity.transform.translation = SIMD3<Float>(0, 0, -Self.placementDistance)
                 hostedEntity = entity
                 installHeadAnchor(in: content)
+                if let owner = appModel.immersiveLoanOwner {
+                    let remote = PhotoSleeveRemote(
+                        model: owner,
+                        immersiveSession: true,
+                        recenter: { recenterTrigger &+= 1 },
+                        returnToWindow: { [weak owner] in
+                            guard let owner else { return }
+                            Task { await returnToPhotoWindow(owner) }
+                        }
+                    )
+                    ForearmSleeve.shared.spaceOpened(remote)
+                    ForearmSleeve.shared.attach(to: immersiveRoot)
+                }
             }
         } update: { content in
             // Recenter reconcile: when the trigger advances, drop the
@@ -117,7 +132,7 @@ struct Spatial3DImmersiveView: View {
             headAnchor?.removeFromParent()
             let anchor = AnchorEntity(.head, trackingMode: .once)
             anchor.addChild(entity)
-            content.add(anchor)
+            immersiveRoot.addChild(anchor)
             headAnchor = anchor
         }
         .onChange(of: immersiveSpaceDisplacement) { _, _ in
@@ -131,21 +146,39 @@ struct Spatial3DImmersiveView: View {
             if let entity = hostedEntity { applyUserScale(to: entity) }
         }
         .onDisappear {
-            // Detach the loaned entity here so the photo viewer's
-            // RealityView `update` re-adopts it via its existing
-            // "if parent == nil { content.add(...) }" guard.
+            ForearmSleeve.shared.spaceClosed()
             hostedEntity?.removeFromParent()
             headAnchor?.removeFromParent()
             headAnchor = nil
             trackingSession = nil
-            // Tell the owning photo window the space went away. Covers
-            // the Digital Crown dismissal path: PhotoDisplayView's
-            // onChange(hostFullyImmersiveSpace) handler then runs its
-            // normal cleanup (restore IPC mode, clear loan).
-            if let owner = appModel.immersiveLoanOwner {
-                owner.hostFullyImmersiveSpace = false
+            // The source window was deliberately closed on entry. Reopen one
+            // on any exit (including Crown dismissal) so the wearer lands in
+            // a useful windowed state instead of an empty app.
+            if !returningToWindow, let owner = appModel.immersiveLoanOwner {
+                Task { await returnToPhotoWindow(owner) }
             }
         }
+    }
+
+    @MainActor
+    private func returnToPhotoWindow(_ owner: PhotoWindowModel) async {
+        guard !returningToWindow else { return }
+        returningToWindow = true
+        owner.hostFullyImmersiveSpace = false
+        if var ipc = owner.contentEntity.components[ImagePresentationComponent.self] {
+            if owner.desiredViewingMode == .spatial3DImmersive {
+                owner.desiredViewingMode = .spatial3D
+            }
+            ipc.desiredViewingMode = owner.desiredViewingMode
+            owner.contentEntity.components.set(ipc)
+        }
+        owner.contentEntity.transform = Transform()
+        _ = await owner.depositSpatial3DForHandoff()
+        openWindow(id: HypnosSceneID.photoDetail, value: PhotoWindowValue(image: owner.image))
+        await dismissImmersiveSpace()
+        appModel.immersiveLoanEntity = nil
+        appModel.immersiveLoanOwner = nil
+        owner.cleanup()
     }
 
     /// Apply the owning photo window's "Distance" (Adjustments) to the immersive
@@ -189,7 +222,7 @@ struct Spatial3DImmersiveView: View {
         guard let entity = hostedEntity else { return }
         let anchor = AnchorEntity(.head, trackingMode: .once)
         anchor.addChild(entity)
-        content.add(anchor)
+        immersiveRoot.addChild(anchor)
         headAnchor = anchor
     }
 
