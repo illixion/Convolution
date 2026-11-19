@@ -1193,6 +1193,9 @@ class PhotoWindowModel {
             return
         }
 
+        // The full size is on the device now: On This Device lists it later.
+        OfflineCatalog.shared.notePicture(image)
+
         // Read native dimensions from file metadata (no decode)
         if nativeImageDimensions == nil {
             nativeImageDimensions = ThumbnailGenerator.shared.getImageDimensions(for: sourceURL)

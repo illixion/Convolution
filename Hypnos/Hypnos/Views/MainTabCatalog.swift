@@ -30,10 +30,9 @@ enum MainTabCatalog {
             case .console:
                 return appModel.showDebugConsole
             case .filters:
-                // Nothing to filter by in a file-tree library — no tags,
-                // albums or galleries. See ContentView for the redirect if
-                // this tab was already open when the library changed.
-                return appModel.effectiveLibrarySource.offersFilters
+                // Always there: in a file-tree library (no tags, albums or
+                // galleries to filter by) it is only the On This Device browser.
+                return true
             case .albums:
                 return appModel.effectiveLibrarySource.offersAlbums
             case .windows:

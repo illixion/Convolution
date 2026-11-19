@@ -72,8 +72,7 @@ struct ContentView: View {
         // screen with no way back to it. Redirected here, in one place,
         // regardless of which of several controls changed the library.
         .onChange(of: appModel.effectiveLibrarySource) { _, newSource in
-            let stranded = (windowModel.selectedTab == .filters && !newSource.offersFilters)
-                || (windowModel.selectedTab == .albums && !newSource.offersAlbums)
+            let stranded = windowModel.selectedTab == .albums && !newSource.offersAlbums
             if stranded {
                 windowModel.selectedTab = windowModel.lastContentTab
             }

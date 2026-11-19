@@ -38,7 +38,39 @@ struct FiltersTabView: View {
         appModel.effectiveLibrarySource == .photos
     }
 
+    /// Which half of the tab shows: the filters for the grids, or what the
+    /// device holds that opens offline (`OfflineBrowserView`).
+    private enum Mode: String, CaseIterable, Identifiable {
+        case filters = "Filters"
+        case device = "On This Device"
+        var id: String { rawValue }
+    }
+
+    @AppStorage("filters.mode") private var modeRaw = Mode.filters.rawValue
+
     var body: some View {
+        // A file-tree library (Local, Nextcloud) has nothing to filter by, so
+        // there the tab is only the on-device browser.
+        let offersFilters = appModel.effectiveLibrarySource.offersFilters
+        let showsDevice = !offersFilters || modeRaw == Mode.device.rawValue
+        VStack(spacing: 0) {
+            if offersFilters {
+                Picker("Mode", selection: $modeRaw) {
+                    ForEach(Mode.allCases) { Text($0.rawValue).tag($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 20).padding(.vertical, 10)
+            }
+            if showsDevice {
+                OfflineBrowserView()
+            } else {
+                filtersBody
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var filtersBody: some View {
         @Bindable var appModel = appModel
 
         NavigationStack {
