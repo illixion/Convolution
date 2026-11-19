@@ -148,6 +148,8 @@ final class JellyfinMusicSession {
     /// Songs whose original file the device couldn't read: fetched as a server FLAC instead.
     @ObservationIgnored private var transcodeIDs: Set<String> = []
     @ObservationIgnored private var lastFailureSkip = Date.distantPast
+    /// How often a song whose download failed has been asked for again, by item. Cleared once a song plays.
+    @ObservationIgnored private var downloadRetries: [String: Int] = [:]
     @ObservationIgnored private var resumesAfterInterruption = false
     @ObservationIgnored private var interruptionObserver: NSObjectProtocol?
     private var playSessionId = UUID().uuidString
@@ -614,6 +616,7 @@ final class JellyfinMusicSession {
     private func engineProgress(_ token: UUID, seconds: Double, exact: Double?) {
         guard token == currentToken else { return }
         if let exact, exact > 0 { duration = exact }
+        if seconds > 1, !downloadRetries.isEmpty { downloadRetries = [:] }
         currentTime = max(0, duration > 0 ? min(seconds, duration) : seconds)
         reportProgress()
     }
@@ -635,6 +638,19 @@ final class JellyfinMusicSession {
         if !transcodeIDs.contains(item.Id), MusicSongFiles.shared.downloadFailure(of: item.Id) == nil {
             transcodeIDs.insert(item.Id)
             start(at: index, base: base, token: apiToken, from: resumeAt)
+            return
+        }
+        // The download itself failed (Jellyfin answering 5xx when songs are started in quick succession, a dropped
+        // connection): ask for the same song again before giving up on it, instead of jumping to the next one.
+        if token == currentToken, MusicSongFiles.shared.hasDownloadFailure(of: item.Id), downloadRetries[item.Id, default: 0] < 2 {
+            let attempt = downloadRetries[item.Id, default: 0] + 1
+            downloadRetries[item.Id] = attempt
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(Double(attempt)))
+                guard let self, self.currentToken == token, self.currentIndex == index,
+                      let (base, apiToken) = self.connection() else { return }
+                self.start(at: index, base: base, token: apiToken, from: resumeAt)
+            }
             return
         }
         error = message

@@ -221,6 +221,11 @@ final class MusicSongFiles {
         files.values.first { $0.itemID == itemID && $0.source == .original }?.progress.failure
     }
 
+    /// Whether any file of `itemID` (original or transcode) stopped downloading.
+    func hasDownloadFailure(of itemID: String) -> Bool {
+        files.values.contains { $0.itemID == itemID && $0.progress.failure != nil && $0.progress.failure != "cancelled" }
+    }
+
     /// Drops every file but those of `itemIDs`.
     func keep(_ itemIDs: Set<String>) {
         for (key, file) in files where !itemIDs.contains(file.itemID) {
