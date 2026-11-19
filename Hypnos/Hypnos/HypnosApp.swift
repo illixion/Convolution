@@ -45,6 +45,9 @@ struct HypnosApp: App {
         OnScreenTextDebugEndpoints.register()
         PhotoStereoDebugEndpoints.register()
         InterpolationDebugEndpoints.register()
+        #if os(visionOS) || os(iOS)
+        AudioSessionWatch.start()
+        #endif
         #if DEBUG
         UITestingConfiguration.applyIfNeeded()
         DevJellyfinSignIn.performIfRequested()
