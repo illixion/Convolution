@@ -6,8 +6,8 @@
  else, so it read as another app's doing. It was the app's own windows: the
  three generated-model volumes in one room went to the background as the
  wearer walked to the room with the video, and the session was interrupted
- ~170 ms later, both times it was caught. The system log had the clue
- (RealityKit's scenes tearing down) but nothing tied it to the interruption.
+ ~170 ms later, every time (five times on the AVP). The system log had the
+ clue (RealityKit's scenes tearing down) but nothing tied it to the interruption.
 
  This watches every scene's activation (by its SwiftUI scene id, which is
  code-defined), which window is key, and the session's interruptions, route
@@ -15,11 +15,10 @@
  what our own scenes did in the two seconds before it, and the debug query
  `audioSession` returns the session, the scenes and the recent events.
 
- It also holds the session's spatial anchor (visionOS). Left `.automatic`, the
- system picks the scene the app's audio belongs to; the suspicion is that it
- picks whichever window is key when the session activates, which may be a
- volume in another room, and that the session is interrupted when that scene
- leaves. `anchor(to:)` names the window that is playing instead.
+ Such an interruption is undone (`recoverFromOwnInterruption`): the system
+ never ends it while the app stays in front. Anchoring the session's spatial
+ audio to the playing window (`.scene(identifier:)` instead of `.automatic`)
+ was tried first and changed nothing: the session was interrupted all the same.
  */
 
 #if os(visionOS) || os(iOS)
@@ -34,10 +33,6 @@ enum AudioSessionWatch {
     private static var observers: [NSObjectProtocol] = []
     private static var events: [(time: Date, text: String)] = []
     private static var sceneChanges: [(time: Date, scene: String, state: String)] = []
-    /// The scene the session's sound is anchored to (`anchor(to:)`), by persistent id.
-    private(set) static var anchoredScene: String?
-    /// Whether `anchor(to:)` sets the session's anchor; off leaves it `.automatic`.
-    static var anchorsToPlayingScene = true
 
     static func start() {
         guard observers.isEmpty else { return }
@@ -84,44 +79,20 @@ enum AudioSessionWatch {
         ])
     }
 
-    /// Anchors the session's sound to the window that is playing (visionOS), so
-    /// it never belongs to a window in another room. Call when playback starts.
-    static func anchor(to sceneIdentifier: String?) {
-        #if os(visionOS)
-        guard anchorsToPlayingScene, let sceneIdentifier, sceneIdentifier != anchoredScene else { return }
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setIntendedSpatialExperience(.headTracked(soundStageSize: .automatic,
-                                                                  anchoringStrategy: .scene(identifier: sceneIdentifier)))
-            anchoredScene = sceneIdentifier
-            let label = UIApplication.shared.connectedScenes
-                .first { $0.session.persistentIdentifier == sceneIdentifier }.map(sceneLabel) ?? "gone"
-            record("anchored to \(label)")
-            logger.info("Audio session anchored to scene \(label, privacy: .public)")
-        } catch {
-            logger.error("Couldn't anchor the audio session to its scene: \(error.logCode, privacy: .public)")
-        }
-        #endif
-    }
+    /// The video windows, to resume the ones that were playing after an interruption our own scenes caused.
+    private static let videoWindows = NSHashTable<VideoWindowModel>.weakObjects()
 
-    /// Each video window's scene, so its model can anchor the session when it starts playing.
-    private static let windowScenes = NSMapTable<AnyObject, NSString>.weakToStrongObjects()
-
-    static func noteScene(_ sceneIdentifier: String?, for window: AnyObject) {
-        if let sceneIdentifier { windowScenes.setObject(sceneIdentifier as NSString, forKey: window) }
-    }
-
-    /// A video window began playing: its scene becomes the session's anchor.
-    static func playbackStarted(in window: AnyObject) {
-        anchor(to: windowScenes.object(forKey: window) as String?)
-    }
+    static func noteVideoWindow(_ window: VideoWindowModel) { videoWindows.add(window) }
 
     // MARK: - Recording
 
-    /// "gen3d#A926": the SwiftUI scene id and the start of the session's id, both app-defined.
+    /// "gen3d#A926": the SwiftUI scene id and the start of the session's UUID, both app-defined.
     nonisolated private static func sceneLabel(_ scene: UIScene) -> String {
         let id = scene.session.userInfo?["com.apple.SwiftUI.sceneID"] as? String ?? scene.session.role.rawValue
-        return "\(id)#\(scene.session.persistentIdentifier.prefix(4))"
+        // "com.example.app:SFBSystemService-6F753290-A212-…": the UUID follows the first dash.
+        let identifier = scene.session.persistentIdentifier
+        let uuid = identifier.split(separator: "-").dropFirst().first ?? Substring(identifier)
+        return "\(id)#\(uuid.prefix(4))"
     }
 
     private static func noteScene(_ label: String, _ state: String) {
@@ -154,6 +125,35 @@ enum AudioSessionWatch {
             + "anchor \(anchorDescription()), other audio \(session.isOtherAudioPlaying)"
         record(summary)
         logger.notice("Audio session \(summary, privacy: .public)")
+        // Our own: a scene of ours left within a second and one is still in front.
+        let ownScenesLeft = sceneChanges.contains {
+            now.timeIntervalSince($0.time) < 1 && ["background", "disconnected"].contains($0.state)
+        }
+        if ownScenesLeft, !foregroundScenes().isEmpty { recoverFromOwnInterruption() }
+    }
+
+    /// visionOS interrupts the app's session when some of its own windows go to
+    /// the background (generated-model volumes left in another room, 2026-11-19),
+    /// whatever the session's anchor, and never ends that interruption while the
+    /// app stays in front. So the session is made active again and every video
+    /// window that was playing plays on. The players' own pause from the
+    /// interruption lands a few milliseconds after this notification, so which
+    /// windows were playing is read now and they are resumed a moment later.
+    private static func recoverFromOwnInterruption() {
+        let playing = videoWindows.allObjects.filter { !$0.isPaused }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            do {
+                try AVAudioSession.sharedInstance().setActive(true)
+            } catch {
+                record("couldn't reactivate the session after our own interruption: \(error.logCode)")
+                logger.error("Audio session: couldn't reactivate after our own interruption: \(error.logCode, privacy: .public)")
+                return
+            }
+            for window in playing where window.isPaused { window.playCommand?() }
+            record("session reactivated after our own interruption, resumed \(playing.count) video window(s)")
+            logger.notice("Audio session reactivated after an interruption our own scenes caused; resumed \(playing.count, privacy: .public) video window(s)")
+        }
     }
 
     private static func reasonName(_ raw: UInt?) -> String {
@@ -173,14 +173,13 @@ enum AudioSessionWatch {
             .map(sceneLabel).sorted().joined(separator: ", ")
     }
 
+    /// The session's spatial audio experience, e.g. "automatic" for `.headTracked(.automatic)`.
     private static func anchorDescription() -> String {
         #if os(visionOS)
-        let experience = AVAudioSession.sharedInstance().intendedSpatialExperience
-        guard let anchoredScene, String(describing: experience).contains("scene") else {
-            return String(describing: experience).contains("automatic") ? "automatic" : "\(type(of: experience))"
-        }
-        return UIApplication.shared.connectedScenes
-            .first { $0.session.persistentIdentifier == anchoredScene }.map(sceneLabel) ?? "a scene that is gone"
+        let experience = String(describing: AVAudioSession.sharedInstance().intendedSpatialExperience)
+        if experience.contains("automatic") { return "automatic" }
+        if experience.contains("scene") { return "a scene" }
+        return experience.components(separatedBy: "(").first ?? experience
         #else
         return "n/a"
         #endif
@@ -194,7 +193,6 @@ enum AudioSessionWatch {
         let mixesWithOthers: Bool
         let otherAudioPlaying: Bool
         let anchor: String
-        let anchorsToPlayingScene: Bool
         let scenes: [Scene]
         let events: [Event]
     }
@@ -211,7 +209,6 @@ enum AudioSessionWatch {
             mixesWithOthers: session.categoryOptions.contains(.mixWithOthers),
             otherAudioPlaying: session.isOtherAudioPlaying,
             anchor: anchorDescription(),
-            anchorsToPlayingScene: anchorsToPlayingScene,
             scenes: UIApplication.shared.connectedScenes.map { Snapshot.Scene(scene: sceneLabel($0), state: states[$0.activationState] ?? "?") },
             events: events.map { Snapshot.Event(time: formatter.string(from: $0.time), event: $0.text) })
     }

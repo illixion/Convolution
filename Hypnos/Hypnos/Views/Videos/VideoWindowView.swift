@@ -697,7 +697,7 @@ struct VideoWindowView: View {
             windowModel.start()
             sceneDelegate?.onDisconnect { [weak windowModel] in windowModel?.sceneDidDisconnect() }
             #if os(visionOS)
-            AudioSessionWatch.noteScene(sceneDelegate?.spatialAudioSceneIdentifier, for: windowModel)
+            AudioSessionWatch.noteVideoWindow(windowModel)
             #endif
         }
         .onDisappear {

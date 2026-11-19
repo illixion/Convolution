@@ -2453,9 +2453,6 @@ final class VideoWindowModel {
         #if HYPNOS_YOUTUBE
         autoSkipYouTubeSegmentIfNeeded()
         #endif
-        #if os(visionOS)
-        if isPaused, !paused { AudioSessionWatch.playbackStarted(in: self) }
-        #endif
         self.isPaused = paused
         if !paused { pausedSince = nil } else if pausedSince == nil { pausedSince = Date() }
         self.isMuted = muted
