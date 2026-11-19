@@ -10,7 +10,7 @@
 
 #if HYPNOS_GEN3D
 
-import AnythingUSDZKit
+import Gen3DConversion
 import DebugTrace
 import Foundation
 import ImageIO
@@ -88,7 +88,7 @@ final class Gen3DGenerator {
             phase = .converting
             let usdz = FileManager.default.temporaryDirectory.appendingPathComponent("gen3d-\(jobID).usdz")
             try await Task.detached(priority: .userInitiated) {
-                _ = try Converter().convert(fileAt: glb, to: usdz)
+                try Gen3DConverter.convert(glb: glb, to: usdz)
             }.value
             let stored = try Gen3DAssetCache.shared.store(usdz, forKey: key)
             forget(key)
