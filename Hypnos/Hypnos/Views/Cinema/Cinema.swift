@@ -417,6 +417,13 @@ final class Cinema {
     @ObservationIgnored private var arSession: ARKitSession?
     @ObservationIgnored private var worldTracking: WorldTrackingProvider?
     @ObservationIgnored private var loop: Task<Void, Never>?
+    /// Head tracking's health, for the log and for restarting it: a room change
+    /// (ARKit moves the world origin as the headset relocalizes) once left the
+    /// HUD invisible on walking back into the room with its window (2026-11-19).
+    @ObservationIgnored private var trackingEvents: Task<Void, Never>?
+    @ObservationIgnored private var headPoseMissingSince: CFTimeInterval?
+    @ObservationIgnored private var lastTrackedHead: SIMD3<Float>?
+    @ObservationIgnored private var trackingRestarts: [CFTimeInterval] = []
 
     private let logger = DebugLogger(subsystem: "com.illixion.hypnos", category: "Cinema")
     private static let defaultsKey = "filmPlayer.cinema"
@@ -803,18 +810,7 @@ final class Cinema {
         // The space's origin is the floor at the wearer's feet: ear height
         // until the head is tracked.
         roomPose = Self.pose(at: SIMD3(0, 1.5, 0), forward: SIMD3(0, 0, -1), fallback: SIMD3(0, 0, -1))
-        let session = ARKitSession()
-        let tracking = WorldTrackingProvider()
-        arSession = session
-        worldTracking = tracking
-        Task {
-            do {
-                try await session.run([tracking])
-            } catch {
-                logger.error("Cinema: head tracking failed: \(error.localizedDescription, privacy: .public)")
-                status = "No head tracking"
-            }
-        }
+        startHeadTracking()
         loop?.cancel()
         loop = Task { @MainActor [weak self] in
             var last = CACurrentMediaTime()
@@ -827,11 +823,74 @@ final class Cinema {
         }
     }
 
+    /// A fresh ARKit session for the head's pose, with its events logged.
+    private func startHeadTracking() {
+        trackingEvents?.cancel()
+        arSession?.stop()
+        let session = ARKitSession()
+        let tracking = WorldTrackingProvider()
+        arSession = session
+        worldTracking = tracking
+        headPoseMissingSince = nil
+        lastTrackedHead = nil
+        trackingEvents = Task { @MainActor [weak self] in
+            for await event in session.events {
+                guard let self, self.arSession === session else { return }
+                switch event {
+                case .dataProviderStateChanged(_, let newState, let error):
+                    self.logger.notice("Cinema: head tracking \(String(describing: newState), privacy: .public)\(error.map { ", error \($0.logCode)" } ?? "", privacy: .public)")
+                case .authorizationChanged(let type, let status):
+                    self.logger.notice("Cinema: \(String(describing: type), privacy: .public) authorization \(String(describing: status), privacy: .public)")
+                @unknown default:
+                    self.logger.notice("Cinema: head tracking event \(String(describing: event), privacy: .public)")
+                }
+            }
+        }
+        Task {
+            do {
+                try await session.run([tracking])
+            } catch {
+                logger.error("Cinema: head tracking failed: \(error.localizedDescription, privacy: .public)")
+                status = "No head tracking"
+            }
+        }
+    }
+
+    /// Notes when the head's pose goes missing or comes back, and how far it
+    /// jumped (a relocalization moves the origin by metres); restarts tracking
+    /// that stopped while the space is open, at most three times a minute.
+    private func noteHeadPose(_ head: SIMD3<Float>?, state: DataProviderState?, tracked: Bool?) {
+        let now = CACurrentMediaTime()
+        guard let head else {
+            if headPoseMissingSince == nil {
+                headPoseMissingSince = now
+                logger.notice("Cinema: head pose lost (tracking \(state.map { String(describing: $0) } ?? "none", privacy: .public), anchor tracked \(tracked.map(String.init) ?? "none", privacy: .public), mode \(self.mode.rawValue, privacy: .public))")
+            } else if let since = headPoseMissingSince, now - since > 2, state != .running, state != .initialized {
+                trackingRestarts.removeAll { now - $0 > 60 }
+                guard trackingRestarts.count < 3 else { return }
+                trackingRestarts.append(now)
+                logger.notice("Cinema: head tracking \(state.map { String(describing: $0) } ?? "gone", privacy: .public) for 2 s, restarting it")
+                startHeadTracking()
+            }
+            return
+        }
+        if let since = headPoseMissingSince {
+            logger.notice("Cinema: head pose back after \(Int((now - since) * 1000), privacy: .public) ms")
+            headPoseMissingSince = nil
+        }
+        if let last = lastTrackedHead, simd_distance(last, head) > 0.75 {
+            logger.notice("Cinema: head pose jumped \(String(format: "%.2f", simd_distance(last, head)), privacy: .public) m (world origin moved?), mode \(self.mode.rawValue, privacy: .public)")
+        }
+        lastTrackedHead = head
+    }
+
     func spaceDisappeared() {
         viewActions = nil
         logger.info("Cinema: space closed")
         loop?.cancel()
         loop = nil
+        trackingEvents?.cancel()
+        trackingEvents = nil
         arSession?.stop()
         arSession = nil
         worldTracking = nil
@@ -867,10 +926,14 @@ final class Cinema {
     }
 
     private func update(dt: Float) {
-        guard let tracking = worldTracking, tracking.state == .running,
-              let anchor = tracking.queryDeviceAnchor(atTimestamp: CACurrentMediaTime()),
-              anchor.isTracked else { return }
+        let anchor = worldTracking?.state == .running
+            ? worldTracking?.queryDeviceAnchor(atTimestamp: CACurrentMediaTime()) : nil
+        guard let tracking = worldTracking, tracking.state == .running, let anchor, anchor.isTracked else {
+            noteHeadPose(nil, state: worldTracking?.state, tracked: anchor?.isTracked)
+            return
+        }
         let head = anchor.originFromAnchorTransform
+        noteHeadPose(head.columns.3.xyz, state: tracking.state, tracked: true)
         if headPose == nil { status = "Tracking" }
         headPose = head
         if mode == .bigScreen, screenPose == nil { placeScreen(facing: head) }
